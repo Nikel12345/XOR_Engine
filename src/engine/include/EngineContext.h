@@ -45,6 +45,7 @@ public:
 		return object_manager->CreateEntity(scene_name, std::forward<Components>(comps)...);
 	}
 	void DeleteEntity(SceneData* scene, Entity e);
+	void ClearRecordedSwaps();
 
 	FragmentShaderData CreateFragmentShader(const char* hlsl_path);
 	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout);

@@ -59,6 +59,8 @@ public:
 
     bool CheckNewObjects() { return dirty_entity; };
     void NewObjectsCommit() { dirty_entity = false; };
+	void ClearRecordedSwaps(SceneData* scene) { scene->pending_swaps.clear(); }
+
     SceneData* operator[](const std::string& name);
 
 

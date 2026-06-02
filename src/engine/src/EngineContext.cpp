@@ -77,6 +77,17 @@ void EngineContext::DeleteEntity(SceneData* scene, Entity e)
 	object_manager->DeleteEntity(scene, e);
 }
 
+void EngineContext::ClearRecordedSwaps()
+{
+	SceneData* active_scene = object_manager->GetActiveScene();
+	if (active_scene) {
+		object_manager->ClearRecordedSwaps(active_scene);
+	}
+	else {
+		SDL_Log("EngineContext::ClearRecordedSwaps: No active scene to clear swaps for");
+	}
+}
+
 void EngineContext::CreateGraphicsPipelines()
 {
 	if (!shader_manager->IsDirtyGraphicsPipelines()) {

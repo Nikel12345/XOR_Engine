@@ -259,7 +259,7 @@ void Engine::PrepareFunc(uint8_t slot)
 	}
 	batch_builder->BuildComputeBatches(pipe_manager, shader_manager);
 	//batch_builder->BuildComputePrepassBatches(pipe_manager, shader_manager);
-
+	engine_context->ClearRecordedSwaps();
 	PrepareFuncPrepassUndepended(slot);
 	//PrepareFuncPrepassDepended(slot);
 	//auto r1 = PrepareFuncPrepassDepended_Original(slot);

@@ -114,6 +114,107 @@ BatchBuilder::BatchBuilder()
 {
 }
 
+inline void BatchProcessing(Entity e, PipeManager* pm, const MaterialComponent& matComp, const ModelComponent& modelComp, uint32_t entity_global_id) {
+
+    for (SubMeshData& submesh : modelComp.model->submeshes)
+    {
+        if (matComp.materials.size() != modelComp.model->submeshes.size()) {
+            SDL_Log("BulidBatches:: Submash and material sizes missmatch");
+        }
+        Material* material = matComp.materials[submesh.material_index];
+
+        for (ShaderProgram* sp : material->shader_programs)
+        {
+            if (!sp) {
+                SDL_Log("BatchBuilder::Using non existing shader program in material");
+                continue;
+            }
+            RenderPassStep* rp = sp->associated_render_pass;
+            if (!rp) continue;
+
+            auto& shader_map = rp->shader_batches;
+            auto sp_key = HashShaderBatchKey(sp);
+            auto it = shader_map.find(sp_key);
+            if (it == shader_map.end())
+            {
+                ShaderBatchData new_batch{};
+                new_batch.push_func = sp->push_func;
+                new_batch.pipeline = pm->GetGraphicPipeline(sp);
+                new_batch.vertexStorageBuffers = sp->vertex_shader_buffers;
+                new_batch.fragmentStorageBuffers = sp->fragment_shader_buffers;
+                shader_map[sp_key] = std::move(new_batch);
+            }
+
+            ShaderBatchData& sb = shader_map[sp_key];
+
+            AtlasBatchKey atlas_key = sp->required_slots.empty() ? 0 : HashAtlasBatchKey(material);
+
+            auto& atlas_map = sb.atlases_batches;
+            auto atlas_it = atlas_map.find(atlas_key);
+            if (atlas_it == atlas_map.end())
+            {
+                AtlasBatchData new_tex{};
+
+                for (const auto& role : sp->required_slots) {
+                    auto it = material->textures.find(role);
+                    if (it == material->textures.end() || !it->second || !it->second->atlas) {
+                        SDL_Log("BuildBatches:: Material is missing required atlas for shader slot");
+                        assert(false && "Material is missing required texture for shader slot!");
+                        continue;
+                    }
+                    new_tex.texture_binding.push_back(it->second->atlas->texture_binding);
+
+                }
+
+                atlas_map[atlas_key] = std::move(new_tex);
+            }
+
+            AtlasBatchData& atlas_batch = atlas_map[atlas_key];
+
+            TextureBatchKey tex_key = sp->required_slots.empty() ? 0 : HashTextureBatchKey(material);
+
+            auto& tex_map = atlas_batch.texture_batches;
+            auto texb_it = tex_map.find(tex_key);
+            if (texb_it == tex_map.end()) {
+                TextureBatchData new_texb{};
+                new_texb.texture_uvl.reserve(material->textures.size());
+                for (const auto& role : sp->required_slots) {
+                    auto it = material->textures.find(role);
+                    if (it == material->textures.end() || !it->second || !it->second->texture_data) {
+                        SDL_Log("BuildBatches:: Material is missing required texture_data for shader slot");
+                        assert(false && "Material is missing required texture for shader slot!");
+                        continue;
+                    }
+                    new_texb.texture_uvl.push_back(it->second->texture_data);
+                }
+
+                tex_map[tex_key] = std::move(new_texb);
+            }
+
+            TextureBatchData& tex_batch = tex_map[tex_key];
+            ModelBatchKey model_key = HashModelBatchKey(&submesh);
+
+            auto& model_map = tex_batch.model_batches;
+            auto model_it = model_map.find(model_key);
+            if (model_it == model_map.end())
+            {
+                ModelBatchData new_model{};
+                new_model.submesh = &submesh;
+                new_model.instanceCount = 0;
+                new_model.pib_sub_buffer.reserve(16);  // ��������� ������
+                model_map[model_key] = std::move(new_model);
+            }
+
+            ModelBatchData& model_batch = model_map[model_key];
+
+            model_batch.instanceCount++;
+            model_batch.pib_sub_buffer.push_back(entity_global_id);
+
+        }
+    }
+
+}
+
 bool BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene)
 {
     if (!dirty_batches) {
@@ -125,119 +226,19 @@ bool BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
         return false;
     }
 
-    // Сброс накопленных батчей: ребилд должен строить с нуля, иначе при повторном входе
-    // instanceCount/pib_sub_buffer задваиваются поверх старых данных.
     for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses()) {
         rp->shader_batches.clear();
     }
 
-    uint32_t entity_global_id = 0; 
+    uint32_t entity_global_id = 0;
 
     om->ForEach<MaterialComponent, ModelComponent, Positions>(
         scene,
-        [&](const MaterialComponent& matComp, const ModelComponent& modelComp, const Positions&)
+        [&](Entity e, const MaterialComponent& matComp, const ModelComponent& modelComp, const Positions&)
     {
-        for (SubMeshData& submesh : modelComp.model->submeshes)
-        {
-            if (matComp.materials.size() != modelComp.model->submeshes.size()) {
-                SDL_Log("BulidBatches:: Submash and material sizes missmatch");
-            }
-            Material* material = matComp.materials[submesh.material_index];
-
-            for (ShaderProgram* sp : material->shader_programs)
-            {
-                if (!sp) {
-                    SDL_Log("BatchBuilder::Using non existing shader program in material");
-                    continue;
-                }
-                RenderPassStep* rp = sp->associated_render_pass;
-                if (!rp) continue;
-
-                auto& shader_map = rp->shader_batches;
-                auto sp_key = HashShaderBatchKey(sp);
-                auto it = shader_map.find(sp_key);
-                if (it == shader_map.end())
-                {
-                    ShaderBatchData new_batch{};
-					new_batch.push_func = sp->push_func;
-                    new_batch.pipeline = pm->GetGraphicPipeline(sp);
-                    new_batch.vertexStorageBuffers = sp->vertex_shader_buffers;
-                    new_batch.fragmentStorageBuffers = sp->fragment_shader_buffers;
-                    shader_map[sp_key] = std::move(new_batch);
-                }
-
-                ShaderBatchData& sb = shader_map[sp_key];
-
-                // ��� ��������� (�� ���������)
-                AtlasBatchKey atlas_key = sp->required_slots.empty() ? 0 : HashAtlasBatchKey(material);
-
-                // �������� ��� ������ AtlasBatchData
-                auto& atlas_map = sb.atlases_batches;
-                auto atlas_it = atlas_map.find(atlas_key);
-                if (atlas_it == atlas_map.end())
-                {
-                    AtlasBatchData new_tex{};
-
-                    for (const auto& role : sp->required_slots) {
-                        auto it = material->textures.find(role);
-                        if (it == material->textures.end() || !it->second || !it->second->atlas) {
-                            SDL_Log("BuildBatches:: Material is missing required atlas for shader slot");
-                            assert(false && "Material is missing required texture for shader slot!");
-                            continue;
-                        }
-                        new_tex.texture_binding.push_back(it->second->atlas->texture_binding);
-
-                    }
-
-                    atlas_map[atlas_key] = std::move(new_tex);
-                }
-
-                AtlasBatchData& atlas_batch = atlas_map[atlas_key];
-
-                TextureBatchKey tex_key = sp->required_slots.empty() ? 0 : HashTextureBatchKey(material);
-
-                auto& tex_map = atlas_batch.texture_batches;
-                auto texb_it = tex_map.find(tex_key);
-                if (texb_it == tex_map.end()) {
-                    TextureBatchData new_texb{};
-                    new_texb.texture_uvl.reserve(material->textures.size());
-                    for (const auto& role : sp->required_slots) {
-                        auto it = material->textures.find(role);
-                        if (it == material->textures.end() || !it->second || !it->second->texture_data) {
-                            SDL_Log("BuildBatches:: Material is missing required texture_data for shader slot");
-                            assert(false && "Material is missing required texture for shader slot!");
-                            continue;
-                        }
-                        new_texb.texture_uvl.push_back(it->second->texture_data);
-                    }
-
-                    tex_map[tex_key] = std::move(new_texb);
-                }
-
-                TextureBatchData& tex_batch = tex_map[tex_key];
-                // ��� ������
-                ModelBatchKey model_key = HashModelBatchKey(&submesh);
-
-                // �������� ��� ������ ModelBatchData
-                auto& model_map = tex_batch.model_batches;
-                auto model_it = model_map.find(model_key);
-                if (model_it == model_map.end())
-                {
-                    ModelBatchData new_model{};
-                    new_model.submesh = &submesh;
-                    new_model.instanceCount = 0;
-                    new_model.pib_sub_buffer.reserve(16);  // ��������� ������
-                    model_map[model_key] = std::move(new_model);
-                }
-
-                ModelBatchData& model_batch = model_map[model_key];
-
-                model_batch.instanceCount++;
-                model_batch.pib_sub_buffer.push_back(entity_global_id);
-
-            }
-        }
+        BatchProcessing(e, pm, matComp, modelComp, entity_global_id);
         entity_global_id++;
+
     }
     );
 
@@ -246,6 +247,11 @@ bool BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
     need_PIB_upload = true;
     return true;
 }
+
+void BatchBuilder::RecalculateBatches(PipeManager* pm, PassManager* pass_manager, std::vector<Entity>& entites)
+{
+}
+
 void BatchBuilder::FinilizeRenderBatches(PassManager* pass_manager)
 {
     auto UnpackUnorm16x2 = [](uint32_t packed, float& x, float& y) {
@@ -352,7 +358,7 @@ void BatchBuilder::BuildComputeBatches(PipeManager* pm, ShaderManager* sm) {
     auto& compute_programs = sm->GetComputeShaderPrograms();
     for (auto& sp : compute_programs) {
         SDL_GPUComputePipeline* pipe = pm->GetComputePipeline(sp.get());
-        if (!pipe) { /* ��� + assert */ continue; }
+        if (!pipe) continue;
 
         ComputePassStep* cmp = sp->associated_compute_pass;
         if (!cmp) continue;
@@ -388,6 +394,8 @@ void BatchBuilder::BuildComputeBatches(PipeManager* pm, ShaderManager* sm) {
     }
     sm->SetDirtyComputePipelines(false);
 }
+
+
 
 uint32_t BatchBuilder::AskNumCommands()
 {
