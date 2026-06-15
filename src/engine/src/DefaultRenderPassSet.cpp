@@ -107,7 +107,6 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
                 }
                 cameraIndex++;
             }
-
             sphereLayer++;
         });
     },

@@ -44,7 +44,6 @@ float computeShadowPCF(
     Texture2DArray<float>  depthArray,
     SamplerComparisonState shadowSampler,
     float4                 lightSpacePos,
-    float                  compareDepth,
     int                    slot,
     float2                 pixelCoord)
 {
@@ -52,7 +51,7 @@ float computeShadowPCF(
 
     float3 ndc = lightSpacePos.xyz / lightSpacePos.w;
     float2 uv  = float2(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5));
-    float  z   = compareDepth;
+    float  z   = ndc.z;  // hardware projected depth matches shadow map storage
 
     if (any(isnan(ndc)) || any(isinf(ndc)) ||
         uv.x < 0.0 || uv.x > 1.0 ||
@@ -62,7 +61,7 @@ float computeShadowPCF(
 
     float2 rpdBias      = computeReceiverPlaneDepthBias(float3(uv, z));
     float  biasMagnitude = length(rpdBias);
-    if (biasMagnitude > 0.01) rpdBias *= 0.01 / biasMagnitude;
+    rpdBias *= 0.01 / max(biasMagnitude, 0.01);
 
     static const float MIN_BIAS = 0.001;
 
@@ -87,8 +86,8 @@ float computeShadowPCF(
     }
 
     float quick = sum * 0.25;
-    if (quick <= 0.001) return 0.0;
-    if (quick >= 0.999) return 1.0;
+    if (quick <= 0.05) return 0.0;
+    if (quick >= 0.95) return 1.0;
 
     [unroll]
     for (int i = 0; i < 16; ++i)

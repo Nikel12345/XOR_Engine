@@ -1,9 +1,6 @@
-cbuffer CurrentCameraUBO : register(b0, space3) {
-    int   currentCameraIndex;
-    float currentFarRange;
-};
-
-float main(float3 viewPosWS : TEXCOORD0) : SV_Depth
+// No SV_Depth output — hardware projected depth is written automatically.
+// This enables Early-Z: the GPU rejects occluded fragments before running
+// any shader, critical for shadow passes over complex geometry.
+void main(float3 viewPosWS : TEXCOORD0)
 {
-    return length(viewPosWS) / currentFarRange;
 }

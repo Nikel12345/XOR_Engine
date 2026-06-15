@@ -84,14 +84,15 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
         {
             // передаём уже готовые toLight и dist
             intensity = computeSpotLight(input.v_worldPos, n, light, toLight, dist);
-            if (cameraOffset >= 0 && intensity > 0.0)
+            if (intensity > 0.0)
             {
-                float ndotl = max(dot(n, toLight / dist), 0.0);
-                intensity *= smoothstep(0.05, 0.15, ndotl)
-                    * computeShadowPCF(
+                float ndotl     = max(dot(n, toLight / dist), 0.0);
+                float ndotlFade = smoothstep(0.05, 0.15, ndotl);
+                intensity *= ndotlFade;
+                if (cameraOffset >= 0 && intensity > 0.0)
+                    intensity *= computeShadowPCF(
                         u_shadowDepthArray, u_shadowSampler,
                         worldToLightClip(input.v_worldPos, geoN, cameraOffset, NORMAL_BIAS),
-                        dist / maxRange,
                         cameraOffset,
                         input.sv_pos.xy);
             }
@@ -112,7 +113,6 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
                     float pcf = computeShadowPCF(
                         u_shadowDepthArray, u_shadowSampler,
                         worldToLightClip(input.v_worldPos, geoN, slot, NORMAL_BIAS),
-                        dist / maxRange,
                         slot,
                         input.sv_pos.xy);
 

@@ -24,4 +24,5 @@ public:
 private:
 	uint32_t total_size = 0;
 	std::span<const std::byte> size_ptr;
+	std::vector<float> staging_buffer_;
 };

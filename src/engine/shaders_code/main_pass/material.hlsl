@@ -28,8 +28,8 @@ float3 computeNormal(
     float3         worldNormal)
 {
     float3x3 TBN = float3x3(
-        normalize(worldTangent),
-        normalize(worldBitangent),
+        worldTangent,
+        worldBitangent,
         normalize(worldNormal)
     );
     float3 n = sampleAtlas(normalMap, normalSampler, normalTextureData, uv).rgb * 2.0 - 1.0;

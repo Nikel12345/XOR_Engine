@@ -59,24 +59,24 @@ void ThreadController::StartThreads()
         }
         return;
     }
-	running.store(true);
+    running.store(true);
     game_n_prep_iter_thread = std::thread(&ThreadController::SimulationThread, this);
     upload_thread = std::thread(&ThreadController::UploadThread, this);
     render_thread = std::thread(&ThreadController::RenderThread, this);
-	fence_thread = std::thread(&ThreadController::FenceThread, this);
+    fence_thread = std::thread(&ThreadController::FenceThread, this);
 }
 
 ThreadController::~ThreadController()
 {
-	running.store(false);
+    running.store(false);
     if (game_n_prep_iter_thread.joinable())
         game_n_prep_iter_thread.join();
     if (upload_thread.joinable())
         upload_thread.join();
     if (render_thread.joinable())
-		render_thread.join();
+        render_thread.join();
     if (fence_thread.joinable())
-		fence_thread.join();
+        fence_thread.join();
 }
 
 //const double TARGET_UPS = 60.0;
@@ -97,7 +97,7 @@ void ThreadController::SimulationThread()
         if (!UPS_priority and slot == INVALID_SLOT)
         {
             slot = slot_controller->WaitFreeSlotIndex();
-            
+
         }
 
         game_iter_callback();
@@ -109,7 +109,7 @@ void ThreadController::SimulationThread()
         if (UPS_NoLimit)
         {
             continue;
-		}
+        }
         auto frame_end = std::chrono::high_resolution_clock::now();
         double elapsed_ms = std::chrono::duration<double, std::milli>(frame_end - frame_start).count();
 
@@ -125,10 +125,10 @@ void ThreadController::SimulationThread()
 
 void ThreadController::UploadThread()
 {
-	if (!upload_callback) {
+    if (!upload_callback) {
         SDL_Log("ThreadController::UploadThread: no upload callback set");
         return;
-	}
+    }
     while (running.load())
     {
 
@@ -138,9 +138,9 @@ void ThreadController::UploadThread()
         //    std::this_thread::sleep_for(std::chrono::milliseconds(LONG_WAIT));
         //    continue;
         //}
-		slot_controller->SetSlotState(slot, UPLOADING);
-		slot_controller->SetSlotState(slot, UPLOADED);
-		//upload_callback(slot);
+        slot_controller->SetSlotState(slot, UPLOADING);
+        slot_controller->SetSlotState(slot, UPLOADED);
+        //upload_callback(slot);
     }
 }
 
@@ -176,7 +176,7 @@ void ThreadController::RenderThread()
         if (FPS_NoLimit)
         {
             continue;
-		}
+        }
         auto frame_end = std::chrono::high_resolution_clock::now();
         double elapsed_ms = std::chrono::duration<double, std::milli>(
             frame_end - frame_start
@@ -219,4 +219,3 @@ void ThreadController::FenceThread()
         }
     }
 }
-

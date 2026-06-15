@@ -45,6 +45,7 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
     if (!scene) return;
 
     std::vector<uint32_t> combined;
+    combined.reserve(total_elements);
     for (RenderPassStep* rp : rm->GetOrderedRenderPasses())
         for (const auto& [_, sb] : rp->shader_batches)
             for (const auto& [_, ab] : sb.atlases_batches)
