@@ -324,6 +324,7 @@ struct ComponentArray<T, std::enable_if_t<is_soa<T>::value>> : IComponentArray {
 struct Archetype {
     std::vector<Entity> entities;
     std::unordered_map<std::type_index, std::unique_ptr<IComponentArray>> components;
+    uint32_t render_instance_base = 0;
 
     template<typename T>
     ComponentArray<T>* get_array() {

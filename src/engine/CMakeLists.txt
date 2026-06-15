@@ -66,7 +66,7 @@ set(PRESETS_HDR
 set(DATAMODULES_SRC
     src/BoundSphereDataModule.cpp
     src/CountBufferDataModule.cpp
-    src/InderectDataModule.cpp
+    src/IndirectDataModule.cpp
     src/LightDataModule.cpp
     src/PIB_DataModule.cpp
     src/TransformDataModule.cpp
@@ -74,7 +74,7 @@ set(DATAMODULES_SRC
 set(DATAMODULES_HDR
     include/BoundSphereDataModule.h
     include/CountBufferDataModule.h
-    include/InderectDataModule.h
+    include/IndirectDataModule.h
     include/LightDataModule.h
     include/PIB_DataModule.h
     include/TransformDataModule.h

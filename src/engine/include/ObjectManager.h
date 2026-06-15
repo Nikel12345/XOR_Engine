@@ -51,6 +51,7 @@ public:
     SceneData* CreateScene(const SceneName& name);
 	void SetSceneState(const SceneName& scene_name, bool is_active);
     SceneData* GetActiveScene();
+    SceneName GetActiveSceneName();
     SceneData* GetScene(const SceneName& name);
 
     void DeleteEntity(const SceneName& name, Entity e);
@@ -59,22 +60,16 @@ public:
 
     bool CheckNewObjects() { return dirty_entity; };
     void NewObjectsCommit() { dirty_entity = false; };
-	void ClearRecordedSwaps(SceneData* scene) { scene->pending_swaps.clear(); }
 
     SceneData* operator[](const std::string& name);
 
 
 private:
-    void RecordSwap(SceneData* scene, Archetype* arch,
-        uint32_t removed_local, uint32_t source_local);
-
     template<typename... Components>
     void add_components(Archetype& arch, Components&&... comps);
 
     std::unordered_map<SceneName, std::unique_ptr<SceneData>> scenes_data;
 	bool dirty_entity = false;
-	bool diry_batches = false;
-    bool need_PIB_upload = false;
 };
 
 #include "ObjectManager.inl"

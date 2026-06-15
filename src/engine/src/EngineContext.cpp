@@ -64,28 +64,27 @@ ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_p
 	return model_manager->CreateModel(name, model_path, index_path);
 }
 
-void EngineContext::DeleteEntity(SceneData* scene, Entity e)
+void EngineContext::DeleteEntity(const SceneName& scene_name, Entity e)
 {
-	const bool needs_pib = object_manager->Has<ModelComponent>(scene, e)
-		&& object_manager->Has<Positions>(scene, e);
+	SceneData* target_scene = object_manager->GetScene(scene_name);
+	if (!target_scene) return;
 
-	if (needs_pib && scene == object_manager->GetActiveScene()) {
-		batch_builder->SetPIBNeedUpload(true);
-		batch_builder->SetDirtyBatches(true);
+	const bool needs_pib = object_manager->Has<ModelComponent>(target_scene, e)
+		&& object_manager->Has<Positions>(target_scene, e);
+
+	// Only the active scene feeds the batch tree, so only its deletions need an
+	// incremental batch update.
+	if (needs_pib && target_scene == object_manager->GetActiveScene()) {
+		batch_builder->QueueDelete(e);   // incremental remove on next prepare
 	}
 
-	object_manager->DeleteEntity(scene, e);
+	object_manager->DeleteEntity(target_scene, e);
 }
 
-void EngineContext::ClearRecordedSwaps()
+void EngineContext::SetActiveScene(const SceneName& name)
 {
-	SceneData* active_scene = object_manager->GetActiveScene();
-	if (active_scene) {
-		object_manager->ClearRecordedSwaps(active_scene);
-	}
-	else {
-		SDL_Log("EngineContext::ClearRecordedSwaps: No active scene to clear swaps for");
-	}
+	object_manager->SetSceneState(name, true);
+	batch_builder->SetDirtyBatches(true);
 }
 
 void EngineContext::CreateGraphicsPipelines()

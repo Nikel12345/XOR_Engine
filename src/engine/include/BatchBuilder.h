@@ -1,4 +1,9 @@
 #pragma once
+#include <vector>
+#include <unordered_map>
+#include <mutex>
+#include <atomic>
+#include <cstdint>
 
 class ObjectManager;
 class PipeManager;
@@ -6,25 +11,60 @@ class PassManager;
 class TextureManager;
 class ShaderManager;
 struct SceneData;
+struct ModelBatchData;
+struct MaterialComponent;
+struct ModelComponent;
 
 using Entity = uint32_t;
 
 class BatchBuilder {
 public:
 	BatchBuilder();
-	bool BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene);
-	void BuildComputeBatches(PipeManager* pm, ShaderManager* sm);
-	void RecalculateBatches(PipeManager* pm, PassManager* pass_manager, std::vector<Entity>& entites);
+	// Brings the batch tree up to date: full rebuild when dirty, otherwise applies
+	// the queued create/delete delta. Bumps the revision when the tree changed.
+	void UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene);
+	void BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm);
 	void BuildComputePrepassBatches(PipeManager* pm, ShaderManager* sm);
-	bool CheckPIBNeedUpload() { return need_PIB_upload; };
+
+	// Incremental delta (queued from UI thread, drained on prepare thread).
+	void QueueCreate(Entity entity);
+	void QueueDelete(Entity entity);
+
+	// Monotonic version of the batch tree. Any consumer (PIB, indirect, ...) caches
+	// the last revision it processed and re-uploads only when this differs — so the
+	// engine never has to push dirtiness to a specific data module.
+	uint64_t BatchesRevision() const { return batches_revision; }
 	void SetDirtyBatches(bool state) { dirty_batches = state; };
-	void SetPIBNeedUpload(bool state) { need_PIB_upload = state; };
 	uint32_t AskNumCommands();
+
 private:
-	std::vector<Entity> entities_to_create;
-	std::vector<Entity> entities_to_delete;
-	void FinilizeRenderBatches(PassManager* pass_manager);
+	// One place an entity lives inside a ModelBatchData::pib_sub_buffer.
+	struct PibSlot {
+		ModelBatchData* model_batch = nullptr;
+		uint32_t        slot_index = 0; // index into model_batch->pib_sub_buffer
+	};
+
+	void BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene);
+	// Drains the queues and applies them to the batch tree. Returns true if any
+	// delta was applied.
+	bool ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene);
+	void FinalizeOffsets(PassManager* pass_manager);
+
+	// Find-or-create the batch nodes for a single entity and record its slots.
+	// Shared by full rebuild and incremental add.
+	void AddEntityToBatches(Entity entity, PipeManager* pm,
+		const MaterialComponent& material_component, const ModelComponent& model_component);
+	void RemoveEntityFromBatches(Entity entity);
+
+	// Reverse index: entity -> all its slots across model batches. Rebuilt on full
+	// rebuild, mutated incrementally by AddEntityToBatches/RemoveEntityFromBatches.
+	std::unordered_map<Entity, std::vector<PibSlot>> entity_slots;
+
+	std::mutex          delta_mutex;        // guards both delta queues
+	std::vector<Entity> entities_to_create; // protected by delta_mutex
+	std::vector<Entity> entities_to_delete; // protected by delta_mutex
+
 	uint32_t total_commands = 0;
-	bool dirty_batches = true;
-	bool need_PIB_upload = true;	
+	uint64_t batches_revision = 0;
+	std::atomic<bool> dirty_batches{ true };
 };

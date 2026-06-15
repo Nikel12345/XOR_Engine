@@ -4,17 +4,18 @@
 class ObjectManager;
 class BufferManager;
 class PassManager;
+class BatchBuilder;
 struct UploadTask;
 
-class InderectDataModule
+class IndirectDataModule
 {
 public:
-	InderectDataModule();
-	uint32_t CalculateIndirectSize(PassManager* pm);
+	IndirectDataModule();
+	uint32_t CalculateIndirectSize(BatchBuilder* bb, PassManager* pm);
 	void StoreIndirect(BufferManager* bm, PassManager* pm, UploadTask* task);
 	uint32_t AskNumCommands(PassManager* pm);
-	void MarkDirty() { dirty = true; }
 private:
+	// Last batch revision this module uploaded for; re-uploads only when it differs.
+	uint64_t last_batches_revision = ~0ull;
 	uint32_t total_size = 0;
-	bool dirty = true;
 };

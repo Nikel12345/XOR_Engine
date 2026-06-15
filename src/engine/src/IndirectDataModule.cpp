@@ -1,17 +1,19 @@
 #include "PCH.h"
-#include "InderectDataModule.h"
+#include "IndirectDataModule.h"
 #include "ObjectManager.h"
 #include "BufferManager.h"
 #include "RenderManager.h"
 #include "ModelData.h"
+#include "BatchBuilder.h"
 
-InderectDataModule::InderectDataModule()
+IndirectDataModule::IndirectDataModule()
 {
 }
 
-uint32_t InderectDataModule::CalculateIndirectSize(PassManager* pm)
+uint32_t IndirectDataModule::CalculateIndirectSize(BatchBuilder* bb, PassManager* pm)
 {
-	if (!dirty) {
+	uint64_t revision = bb->BatchesRevision();
+	if (revision == last_batches_revision) {
 		return 0;
 	}
 	total_size = 0;
@@ -29,10 +31,11 @@ uint32_t InderectDataModule::CalculateIndirectSize(PassManager* pm)
 		}
 	}
 
+	last_batches_revision = revision;
 	return total_size;
 }
 
-void InderectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, UploadTask* task)
+void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, UploadTask* task)
 {
 	const std::vector<RenderPassStep*>& render_passes = pm->GetOrderedRenderPasses();
 
@@ -54,11 +57,9 @@ void InderectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, Uploa
 			}
 		}
 	}
-	dirty = false;
-
 }
 
-uint32_t InderectDataModule::AskNumCommands(PassManager* pm)
+uint32_t IndirectDataModule::AskNumCommands(PassManager* pm)
 {
 	uint32_t num_model_batches = 0;
 	const std::vector<RenderPassStep*>& render_passes = pm->GetOrderedRenderPasses();

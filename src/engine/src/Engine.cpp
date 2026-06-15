@@ -254,12 +254,8 @@ void Engine::PrepareFunc(uint8_t slot)
 	engine_context->CreateGraphicsPipelines();
 	engine_context->CreateComputePipelines();
 
-	if (batch_builder->BuildRenderBatches(pipe_manager, pass_manager, object_manager, object_manager->GetActiveScene())) {
-		indirect_data_module->MarkDirty();
-	}
-	batch_builder->BuildComputeBatches(pipe_manager, shader_manager);
-	//batch_builder->BuildComputePrepassBatches(pipe_manager, shader_manager);
-	engine_context->ClearRecordedSwaps();
+	batch_builder->UpdateRenderBatches(pipe_manager, pass_manager, object_manager, object_manager->GetActiveScene());
+	batch_builder->BuildComputeBatches(pass_manager, pipe_manager, shader_manager);
 	PrepareFuncPrepassUndepended(slot);
 	//PrepareFuncPrepassDepended(slot);
 	//auto r1 = PrepareFuncPrepassDepended_Original(slot);
@@ -589,7 +585,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	pib_data_module = new PIB_DataModule();
 	transform_data_module = new TransformDataModule();
 	light_data_module = new LightDataModule();
-	indirect_data_module = new InderectDataModule();
+	indirect_data_module = new IndirectDataModule();
 	bound_sphere_data_module = new BoundSphereDataModule();
 	count_data_module = new CountBufferDataModule();
 

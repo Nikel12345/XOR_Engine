@@ -9,7 +9,7 @@ class TransformDataModule;
 class LightDataModule;
 class ModelManager;
 class PassManager;
-class InderectDataModule;
+class IndirectDataModule;
 class BoundSphereDataModule;
 class BatchBuilder;
 class CountBufferDataModule;
@@ -25,7 +25,7 @@ namespace DefaultUpdateSet
 	void SetDefaultVertexUpdater(BufferManager* buffer_manager, ModelManager* mm);
 	void SetDefaultIndexUpdater(BufferManager* buffer_manager, ModelManager* mm);
 	void SetDefaultLightCamerasUpdater(BufferManager* buffer_manager, ObjectManager* om, LightDataModule* ldm);
-	void SetDefaultIndirectUpdater(BufferManager* buffer_manager, PassManager* pm, InderectDataModule* idm);
+	void SetDefaultIndirectUpdater(BufferManager* buffer_manager, PassManager* pm, IndirectDataModule* idm);
 	void SetDefaultBoundSphereUpdater(BufferManager* buffer_manager, PassManager* pm, ModelManager* mm, BoundSphereDataModule* bdm);
 	void SetDefaultCountBufferUpdater(BufferManager* bm, ObjectManager* om, CountBufferDataModule* cdm, LightDataModule* ldm, BatchBuilder* bb);
 	void SetDefaultOffsetBufferUpdater(BufferManager* bm, ObjectManager* om, CountBufferDataModule* cdm, LightDataModule* ldm, BatchBuilder* bb);
@@ -42,7 +42,7 @@ namespace DefaultUpdateSet
 	void SetDefaultVertexUpdater(EngineContext& ctx);
 	void SetDefaultIndexUpdater(EngineContext& ctx);
 	void SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDataModule* ldm);
-	void SetDefaultIndirectUpdater(EngineContext& ctx, InderectDataModule* idm);
+	void SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDataModule* idm);
 	void SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSphereDataModule* bdm);
 	void SetDefaultCountBufferUpdater(EngineContext& ctx, CountBufferDataModule* cdm, LightDataModule* ldm);
 	void SetDefaultOffsetBufferUpdater(EngineContext& ctx, CountBufferDataModule* cdm, LightDataModule* ldm);

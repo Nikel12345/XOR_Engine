@@ -24,7 +24,7 @@
 #include "BatchBuilder.h"
 #include "DefaultUpdateSet.h"
 #include "DefaultRenderPassSet.h"
-#include "InderectDataModule.h"
+#include "IndirectDataModule.h"
 #include "BoundSphereDataModule.h"
 #include "CountBufferDataModule.h"
 #include "config.h"
@@ -112,7 +112,7 @@ private:
 	PIB_DataModule* pib_data_module = nullptr;
 	TransformDataModule* transform_data_module = nullptr;
 	LightDataModule* light_data_module = nullptr;
-	InderectDataModule* indirect_data_module = nullptr;
+	IndirectDataModule* indirect_data_module = nullptr;
     BoundSphereDataModule* bound_sphere_data_module = nullptr;
     CountBufferDataModule* count_data_module = nullptr;
 

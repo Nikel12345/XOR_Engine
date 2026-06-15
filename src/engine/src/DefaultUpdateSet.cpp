@@ -4,7 +4,7 @@
 #include "LightDataModule.h"
 #include "PIB_DataModule.h"
 #include "TransformDataModule.h"
-#include "InderectDataModule.h"
+#include "IndirectDataModule.h"
 #include "BoundSphereDataModule.h"
 #include "CountBufferDataModule.h"
 
@@ -105,9 +105,9 @@ void DefaultUpdateSet::SetDefaultPositionIndexUpdater(EngineContext& ctx, PIB_Da
     auto* om = ctx.GetObjectManager();
     auto* bb = ctx.GetBatchBuilder();
     bm->CreateUpdateInstruction(DEFAULT_POSITION_INDEX_BUFFER,
-        [rm, pib_dm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+        [rm, om, pib_dm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
-        pib_dm->StorePIB(bm, rm, &task);
+        pib_dm->StorePIB(bm, rm, &task, om);
     },
         [om, rm, pib_dm, bb]() -> uint32_t
     {
@@ -183,7 +183,7 @@ void DefaultUpdateSet::SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDa
     light_cameras_update_inited = true;
 }
 
-void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, InderectDataModule* idm)
+void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDataModule* idm)
 {
     if (indirect_update_inited) {
         SDL_Log("Default indirect updater is already initialized.");
@@ -191,14 +191,15 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, InderectDat
     }
     auto* bm = ctx.GetBufferManager();
     auto* pm = ctx.GetRenderManager();
+    auto* bb = ctx.GetBatchBuilder();
     bm->CreateUpdateInstruction(DEFAULT_INDIRECT_BUFFER,
         [pm, idm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
         idm->StoreIndirect(bm, pm, &task);
     },
-        [pm, idm]() -> uint32_t
+        [bb, pm, idm]() -> uint32_t
     {
-        return idm->CalculateIndirectSize(pm);
+        return idm->CalculateIndirectSize(bb, pm);
     }
     );
     indirect_update_inited = true;
@@ -267,7 +268,7 @@ void DefaultUpdateSet::SetDefaultEntityToBatchUpdater(EngineContext& ctx, PIB_Da
     },
         [om, pm, bb, pdm]() -> uint32_t
     {
-        return pdm->CalcuteEntityToBatch(bb, om, pm);
+        return pdm->CalculateEntityToBatch(bb, om, pm);
     }
     );
 }

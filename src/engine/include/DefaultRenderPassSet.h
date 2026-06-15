@@ -3,7 +3,7 @@
 class EngineContext;
 class TransformDataModule;
 class LightDataModule;
-class InderectDataModule;
+class IndirectDataModule;
 namespace DefaultRenderPassNamespace
 {
     inline constexpr const char* DEPTH_PASS = "_DefaultDepthRenderPass";
@@ -40,7 +40,7 @@ namespace DefaultRenderPassNamespace
         uint32_t num_cameras;
         uint32_t cmd_offset;
     };
-    void SetDefaultCullingComputeCountPass(EngineContext* ctx, TransformDataModule* tdm, LightDataModule* ldm, InderectDataModule* idm);
+    void SetDefaultCullingComputeCountPass(EngineContext* ctx, TransformDataModule* tdm, LightDataModule* ldm, IndirectDataModule* idm);
     void SetDefaultCullingOffstPass(EngineContext* ctx);
 
     struct ComputeCullingOutIndirectUniform {
@@ -49,7 +49,7 @@ namespace DefaultRenderPassNamespace
         uint32_t cmd_offset;
     };
     void SetDefaultCullingOutIndirectPass(EngineContext* ctx);
-    void SetDefaultCullingOutTransformPass(EngineContext* ctx, TransformDataModule* tdm, LightDataModule* ldm, InderectDataModule* idm);
+    void SetDefaultCullingOutTransformPass(EngineContext* ctx, TransformDataModule* tdm, LightDataModule* ldm, IndirectDataModule* idm);
 
     inline const std::string SHADOW_MOMENTS_ARRAY = "shadow_moments_array";
     inline const std::string SHADOW_MOMENTS_BLUR_TEMP = "shadow_moments_single_temp";

@@ -7,6 +7,7 @@
 #include "ShaderManager.h"
 #include "ModelData.h"
 #include "TextureData.h"
+#include <unordered_set>
 
 
 using namespace BatchKeys;
@@ -114,14 +115,27 @@ BatchBuilder::BatchBuilder()
 {
 }
 
-inline void BatchProcessing(Entity e, PipeManager* pm, const MaterialComponent& matComp, const ModelComponent& modelComp, uint32_t entity_global_id) {
+void BatchBuilder::QueueCreate(Entity entity)
+{
+    std::lock_guard<std::mutex> lock(delta_mutex);
+    entities_to_create.push_back(entity);
+}
 
-    for (SubMeshData& submesh : modelComp.model->submeshes)
+void BatchBuilder::QueueDelete(Entity entity)
+{
+    std::lock_guard<std::mutex> lock(delta_mutex);
+    entities_to_delete.push_back(entity);
+}
+
+void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
+    const MaterialComponent& material_component, const ModelComponent& model_component) {
+
+    for (SubMeshData& submesh : model_component.model->submeshes)
     {
-        if (matComp.materials.size() != modelComp.model->submeshes.size()) {
-            SDL_Log("BulidBatches:: Submash and material sizes missmatch");
+        if (material_component.materials.size() != model_component.model->submeshes.size()) {
+            SDL_Log("BulidBatches:: Submash and material sizes mismatch");
         }
-        Material* material = matComp.materials[submesh.material_index];
+        Material* material = material_component.materials[submesh.material_index];
 
         for (ShaderProgram* sp : material->shader_programs)
         {
@@ -207,113 +221,159 @@ inline void BatchProcessing(Entity e, PipeManager* pm, const MaterialComponent& 
 
             ModelBatchData& model_batch = model_map[model_key];
 
+            uint32_t slot_index = safe_u32(model_batch.pib_sub_buffer.size());
             model_batch.instanceCount++;
-            model_batch.pib_sub_buffer.push_back(entity_global_id);
+            model_batch.pib_sub_buffer.push_back(entity);  // stable Entity id
+            entity_slots[entity].push_back({ &model_batch, slot_index });
 
         }
     }
 
 }
 
-bool BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene)
+void BatchBuilder::RemoveEntityFromBatches(Entity entity)
 {
-    if (!dirty_batches) {
-        return false;
-    }
+    auto it = entity_slots.find(entity);
+    if (it == entity_slots.end()) return;  // entity was never batched
 
+    for (const PibSlot& slot : it->second) {
+        ModelBatchData* model_batch = slot.model_batch;
+        std::vector<uint32_t>& pib = model_batch->pib_sub_buffer;
+        uint32_t last_index = safe_u32(pib.size()) - 1;
+
+        if (slot.slot_index != last_index) {
+            Entity moved_entity = pib[last_index];
+            pib[slot.slot_index] = moved_entity;
+            // fix the moved entity's cached slot: {model_batch, last_index} -> slot_index
+            for (PibSlot& moved_slot : entity_slots[moved_entity]) {
+                if (moved_slot.model_batch == model_batch && moved_slot.slot_index == last_index) {
+                    moved_slot.slot_index = slot.slot_index;
+                    break;
+                }
+            }
+        }
+        pib.pop_back();
+        model_batch->instanceCount--;
+    }
+    entity_slots.erase(it);
+}
+
+void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene)
+{
     if (!scene) {
-        SDL_Log("BuildBatches called with null scene!");
-        return false;
+        SDL_Log("UpdateRenderBatches called with null scene!");
+        return;
     }
 
+    // Either a full rebuild (scene activation) or an incremental delta — never
+    // both. exchange(false) consumes the rebuild request atomically.
+    bool changed;
+    if (dirty_batches.exchange(false)) {
+        BuildRenderBatches(pm, pass_manager, om, scene);
+        changed = true;
+    }
+    else {
+        changed = ApplyIncremental(pm, pass_manager, om, scene);
+    }
+
+    if (changed) {
+        FinalizeOffsets(pass_manager);
+        ++batches_revision;
+    }
+}
+
+// Assigns render_instance_base on every renderable archetype (prefix sum of entity counts).
+// Must be called after any structural change to keep Entity->row mapping consistent.
+inline void RecalculateInstanceOffsets(SceneData* scene)
+{
+    uint32_t base = 0;
+    for (auto& [sig, arch] : scene->archetypes) {
+        if (arch.get_array<MaterialComponent>() &&
+            arch.get_array<ModelComponent>() &&
+            arch.get_array<Positions>()) {
+            arch.render_instance_base = base;
+            base += safe_u32(arch.entities.size());
+        }
+    }
+}
+
+void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene)
+{
     for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses()) {
         rp->shader_batches.clear();
     }
+    entity_slots.clear();
 
-    uint32_t entity_global_id = 0;
+    // A full rebuild reflects the current ECS state, which already accounts for
+    // any queued create/delete. Discard the delta under the lock so it does not
+    // leak into the next incremental pass.
+    {
+        std::lock_guard<std::mutex> lock(delta_mutex);
+        entities_to_create.clear();
+        entities_to_delete.clear();
+    }
 
     om->ForEach<MaterialComponent, ModelComponent, Positions>(
         scene,
-        [&](Entity e, const MaterialComponent& matComp, const ModelComponent& modelComp, const Positions&)
+        [&](Entity entity, const MaterialComponent& material_component, const ModelComponent& model_component, const Positions&)
     {
-        BatchProcessing(e, pm, matComp, modelComp, entity_global_id);
-        entity_global_id++;
-
+        AddEntityToBatches(entity, pm, material_component, model_component);
     }
     );
 
-    FinilizeRenderBatches(pass_manager);
-    dirty_batches = false;
-    need_PIB_upload = true;
+    RecalculateInstanceOffsets(scene);
+}
+
+bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene)
+{
+    // Atomically take + clear the queues, then work on the local copies outside
+    // the lock so we never hold delta_mutex while mutating the batch tree.
+    std::vector<Entity> creates, deletes;
+    {
+        std::lock_guard<std::mutex> lock(delta_mutex);
+        creates.swap(entities_to_create);
+        deletes.swap(entities_to_delete);
+    }
+    if (creates.empty() && deletes.empty()) return false;
+
+    // An entity created AND deleted in the same frame is dropped from the add
+    // side (its components are already gone from ECS). RemoveEntityFromBatches is
+    // a no-op for it, so it never reaches the batch tree.
+    std::unordered_set<Entity> deleted_set(deletes.begin(), deletes.end());
+
+    for (Entity entity : creates) {
+        if (deleted_set.count(entity)) continue;
+        const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
+        const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
+        AddEntityToBatches(entity, pm, material_component, model_component);
+    }
+    for (Entity entity : deletes) {
+        RemoveEntityFromBatches(entity);
+    }
+
+    RecalculateInstanceOffsets(scene);
     return true;
 }
 
-void BatchBuilder::RecalculateBatches(PipeManager* pm, PassManager* pass_manager, std::vector<Entity>& entites)
+void BatchBuilder::FinalizeOffsets(PassManager* pass_manager)
 {
-}
-
-void BatchBuilder::FinilizeRenderBatches(PassManager* pass_manager)
-{
-    auto UnpackUnorm16x2 = [](uint32_t packed, float& x, float& y) {
-        uint16_t lx = static_cast<uint16_t>(packed & 0xFFFF);
-        uint16_t ly = static_cast<uint16_t>(packed >> 16);
-        x = lx / 65535.0f;
-        y = ly / 65535.0f;
-        };
-
-    int pass_idx = 0;
     uint32_t offset = 0;
     uint32_t command_index = 0;
 
     for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses())
     {
-        SDL_Log("[RenderPassStep %d]", pass_idx++);
-
-        for (auto& [sp_key, sb] : rp->shader_batches)
+        for (auto& [shader_key, shader_batch] : rp->shader_batches)
         {
-            SDL_Log("  [ShaderBatch key=%llu]", sp_key);
-
-            for (auto& [atlas_key, ab] : sb.atlases_batches)
+            for (auto& [atlas_key, atlas_batch] : shader_batch.atlases_batches)
             {
-                SDL_Log("    [AtlasBatch key=%llu, bindings=%zu]", atlas_key, ab.texture_binding.size());
-
-                for (auto& [tex_key, texb] : ab.texture_batches)
+                for (auto& [texture_key, texture_batch] : atlas_batch.texture_batches)
                 {
-                    SDL_Log("      [TextureBatch key=%llu, uvl_count=%zu]", tex_key, texb.texture_uvl.size());
+                    texture_batch.indirect_command_index = command_index;
 
-                    for (size_t i = 0; i < texb.texture_uvl.size(); i++) {
-                        if (texb.texture_uvl[i]) {
-                            float ox, oy, sx, sy;
-                            UnpackUnorm16x2(texb.texture_uvl[i]->uv_packed_offset, ox, oy);
-                            UnpackUnorm16x2(texb.texture_uvl[i]->uv_packed_scale, sx, sy);
-                            SDL_Log("        [TextureData %zu] offset=(%.4f, %.4f) scale=(%.4f, %.4f) layer=%u",
-                                i, ox, oy, sx, sy, texb.texture_uvl[i]->layer);
-                        }
-                        else {
-                            SDL_Log("        [TextureData %zu] nullptr", i);
-                        }
-                    }
-                    texb.indirect_command_index = command_index;
-
-                    for (auto& [model_key, mb] : texb.model_batches)
+                    for (auto& [model_key, model_batch] : texture_batch.model_batches)
                     {
-                        mb.firstInstance = offset;
-                        offset += mb.instanceCount;
-
-                        if (mb.submesh) {
-                            SDL_Log("           [ModelBatch key=%llu] mat_idx=%u vOffset=%u iOffset=%u iCount=%u | instances=%u firstInstance=%u pib=[",
-                                model_key,
-                                mb.submesh->material_index,
-                                mb.submesh->vertexOffset,
-                                mb.submesh->indexOffset,
-                                mb.submesh->indexCount,
-                                mb.instanceCount,
-                                mb.firstInstance);
-                            std::string pib_str;
-                            for (uint32_t id : mb.pib_sub_buffer)
-                                pib_str += std::to_string(id) + " ";
-                            SDL_Log("          pib: %s]", pib_str.c_str());
-                        }
+                        model_batch.firstInstance = offset;
+                        offset += model_batch.instanceCount;
                         command_index++;
                     }
                 }
@@ -323,36 +383,13 @@ void BatchBuilder::FinilizeRenderBatches(PassManager* pass_manager)
     total_commands = command_index;
 }
 
-//void BatchBuilder::FinilizeRenderBatches(PassManager* pass_manager)
-//{
-//    auto UnpackUnorm16x2 = [](uint32_t packed, float& x, float& y) {
-//        uint16_t lx = static_cast<uint16_t>(packed & 0xFFFF);
-//        uint16_t ly = static_cast<uint16_t>(packed >> 16);
-//        x = lx / 65535.0f;
-//        y = ly / 65535.0f;
-//    };
-//
-//    uint32_t offset = 0;
-//    uint32_t command_index = 0;
-//
-//    for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses()) {
-//        for (auto& [sp_key, sb] : rp->shader_batches) {
-//            for (auto& [atlas_key, ab] : sb.atlases_batches) {
-//                for (auto& [tex_key, texb] : ab.texture_batches) {
-//                    texb.indirect_command_index = command_index;
-//                    for (auto& [model_key, mb] : texb.model_batches) {
-//                        mb.firstInstance = offset;
-//                        offset += mb.instanceCount;
-//                        command_index++;
-//                    }
-//                }
-//            }
-//        }
-//    }
-//    total_commands = command_index;
-//}
-
-void BatchBuilder::BuildComputeBatches(PipeManager* pm, ShaderManager* sm) {
+void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm) {
+    for (auto& rp : pass_manager->GetOrderedComputePasses()) {
+        rp->shader_batches.clear();
+    }
+    for (auto& rp : pass_manager->GetOrderedComputePrepasses()) {
+        rp->shader_batches.clear();
+    }
     if (!sm || !sm->IsDirtyComputePipelines()) return;
 
     auto& compute_programs = sm->GetComputeShaderPrograms();

@@ -39,10 +39,6 @@ void ObjectManager::DeleteEntity(SceneData* scene, Entity e) {
     const size_t i = idx_it->second;
     const size_t last = arch->entities.size() - 1;
 
-    // запись перестановки ДО мутации: source = текущий last; i == last => переезда нет
-    RecordSwap(scene, arch, static_cast<uint32_t>(i), static_cast<uint32_t>(last));
-
-    // swap-pop компонентных массивов (AoS/SoA — забота самого массива; должен гасить self-move при i==last)
     arch->swap_remove(i);
 
     // swap-pop вектора сущностей + индекс переехавшего
@@ -57,7 +53,9 @@ void ObjectManager::DeleteEntity(SceneData* scene, Entity e) {
     scene->entity_to_index.erase(e);
     scene->entity_to_archetype.erase(e);
 
-    // НЕ ставим dirty_batches — удаление идёт инкрементально через e_t_d, а не ребилдом
+    // НЕ ставим dirty_batches — удаление идёт инкрементально через e_t_d, а не ребилдом.
+    // Но трансформ-буфер ужался: помечаем, чтобы TransformDataModule пересчитал размер.
+    dirty_entity = true;
 }
 
 void ObjectManager::SetSceneState(const SceneName& scene_name, bool is_active)
@@ -81,6 +79,16 @@ SceneData* ObjectManager::GetActiveScene()
     return nullptr; // не найдено
 }
 
+SceneName ObjectManager::GetActiveSceneName()
+{
+    for (auto& [name, scene] : scenes_data) {
+        if (scene->is_active)
+            return name;
+    }
+    SDL_Log("No active scene found!");
+    return {};
+}
+
 SceneData* ObjectManager::GetScene(const SceneName& name)
 {
     auto it = scenes_data.find(name);
@@ -93,7 +101,3 @@ SceneData* ObjectManager::GetScene(const SceneName& name)
 	}
 }
 
-void ObjectManager::RecordSwap(SceneData* scene, Archetype* arch,
-    uint32_t removed_local, uint32_t source_local) {
-    scene->pending_swaps.push_back(SwapRecord{ arch, removed_local, source_local });
-}

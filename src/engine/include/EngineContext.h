@@ -33,19 +33,21 @@ public:
 		constexpr bool needs_pib = contains_type_v<ModelComponent, Components...>
 			&& contains_type_v<PositionProxy16, Components...>;
 
+		Entity entity = object_manager->CreateEntity(scene_name, std::forward<Components>(comps)...);
+
 		if constexpr (needs_pib) {
 			SceneData* active_scene = object_manager->GetActiveScene();
 			SceneData* target_scene = object_manager->GetScene(scene_name);
 			if (target_scene != nullptr && active_scene == target_scene) {
-				batch_builder->SetPIBNeedUpload(true);
-				batch_builder->SetDirtyBatches(true);
+				batch_builder->QueueCreate(entity);   // incremental add on next prepare
 			}
 		}
 
-		return object_manager->CreateEntity(scene_name, std::forward<Components>(comps)...);
+		return entity;
 	}
-	void DeleteEntity(SceneData* scene, Entity e);
-	void ClearRecordedSwaps();
+	void DeleteEntity(const SceneName& scene_name, Entity e);
+	// Activating a scene swaps the whole entity set; force a full batch rebuild.
+	void SetActiveScene(const SceneName& name);
 
 	FragmentShaderData CreateFragmentShader(const char* hlsl_path);
 	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout);

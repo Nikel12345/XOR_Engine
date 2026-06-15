@@ -37,6 +37,7 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
     if (!ImGui::CollapsingHeader("Objects")) return;
 
     ObjectManager* objectManager = ctx->GetObjectManager();
+    SceneName scene_name = objectManager->GetActiveSceneName();
     SceneData* scene = objectManager->GetActiveScene();
 
     if (ImGui::TreeNode("Mesh Objects"))
@@ -75,7 +76,7 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
             }
         });
 
-        for (Entity e : to_delete) ctx->DeleteEntity(scene, e);
+        for (Entity e : to_delete) ctx->DeleteEntity(scene_name, e);
 
         ImGui::TreePop();
     }
