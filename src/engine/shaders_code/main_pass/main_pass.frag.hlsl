@@ -37,14 +37,28 @@ struct PSInput
     [[vk::location(4)]] float3 v_worldBitangent : TEXCOORD4;
 };
 
-static const float NORMAL_BIAS              = 0.1;
-static const float VOLUME_BOUNDARY_SOFTNESS = 1.1;
+static const float AMBIENT_LIGHT = 0.75;    // пол освещённости (max с засветкой)
 
-float4 worldToLightClip(float3 worldPos, float3 geoNormal, int slot, float normalBias)
+// Bias задаётся как ДОЛЯ расстояния до источника, а не абсолют: тексель карты в
+// мире растёт линейно с дистанцией, поэтому контактная тень близких объектов
+// остаётся плотной (без отрыва / peter-panning), а вдали bias успевает вырасти.
+// Дополнительно растёт на скользящих углах, где глубина быстро меняется.
+static const float SHADOW_BIAS_MIN = 0.002;   // прямой угол
+static const float SHADOW_BIAS_MAX = 0.012;   // скользящий угол
+
+float4 worldToLightClip(float3 worldPos, int slot)
 {
-    float3 p = worldPos + geoNormal * normalBias;
     ShadowCamera cam = ShadowCameras[slot];
-    return mul(cam.proj, mul(cam.view, float4(p, 1.0)));
+    return mul(cam.proj, mul(cam.view, float4(worldPos, 1.0)));
+}
+
+// refDist для distance shadow map: нормированное расстояние источник→фрагмент с bias.
+float shadowRefDist(float dist, float maxRange, float NdotL)
+{
+    float d     = dist / maxRange;                 // [0..1]
+    float slope = saturate(1.0 - NdotL);
+    float bias  = d * lerp(SHADOW_BIAS_MIN, SHADOW_BIAS_MAX, slope);
+    return d - bias;
 }
 
 float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
@@ -54,8 +68,6 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
         input.v_uv, input.v_worldTangent, input.v_worldBitangent, input.v_worldNormal);
 
     if (!isFrontFace) n = -n;
-
-    float3 geoN = normalize(input.v_worldNormal);
 
     float4 albedoSample = sampleAtlas(u_albedo, u_albedoSampler, textures[0].data, input.v_uv);
     float3 baseColor    = albedoSample.rgb;
@@ -78,58 +90,43 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
         float  dist    = length(toLight);
         if (dist >= maxRange) continue;
 
+        float3 L    = toLight / dist;          // от точки к источнику, нормализован
+        float  NdotL = max(dot(n, L), 0.0);
+
         float intensity = 0.0;
+        float shadow    = 1.0;
 
-        if (type == 0)
+        if (type == 0)        // SPOT
         {
-            // передаём уже готовые toLight и dist
-            intensity = computeSpotLight(input.v_worldPos, n, light, toLight, dist);
-            if (intensity > 0.0)
-            {
-                float ndotl     = max(dot(n, toLight / dist), 0.0);
-                float ndotlFade = smoothstep(0.05, 0.15, ndotl);
-                intensity *= ndotlFade;
-                if (cameraOffset >= 0 && intensity > 0.0)
-                    intensity *= computeShadowPCF(
-                        u_shadowDepthArray, u_shadowSampler,
-                        worldToLightClip(input.v_worldPos, geoN, cameraOffset, NORMAL_BIAS),
-                        cameraOffset,
-                        input.sv_pos.xy);
-            }
+            intensity = computeSpotLight(n, light, L, dist, maxRange);
+            if (intensity > 0.0 && cameraOffset >= 0)
+                shadow = computeShadowPCF(
+                    u_shadowDepthArray, u_shadowSampler,
+                    worldToLightClip(input.v_worldPos, cameraOffset),
+                    cameraOffset,
+                    shadowRefDist(dist, maxRange, NdotL));
         }
-        else if (type == 1)
+        else if (type == 1)   // SPHERE / POINT
         {
-            // передаём уже готовые toLight и dist
-            intensity = computeSphereLight(input.v_worldPos, n, light, toLight, dist);
-            if (cameraOffset >= 0 && intensity > 0.0)
+            intensity = computePointLight(n, light, L, dist, maxRange);
+            if (intensity > 0.0 && cameraOffset >= 0)
             {
-                float R = light.position_radius.w;
-                if (dist > R)
-                {
-                    int   face  = getCubeFace(-toLight);
-                    int   slot  = cameraOffset + face;
-                    float ndotl = max(dot(n, toLight / dist), 0.0);
-
-                    float pcf = computeShadowPCF(
-                        u_shadowDepthArray, u_shadowSampler,
-                        worldToLightClip(input.v_worldPos, geoN, slot, NORMAL_BIAS),
-                        slot,
-                        input.sv_pos.xy);
-
-                    float vf = (VOLUME_BOUNDARY_SOFTNESS > 1.0)
-                        ? smoothstep(R, R * VOLUME_BOUNDARY_SOFTNESS, dist) : 1.0;
-
-                    intensity *= lerp(1.0, pcf, vf) * lerp(1.0, smoothstep(0.05, 0.15, ndotl), vf);
-                }
+                int slot = cameraOffset + getCubeFace(-toLight);
+                shadow = computeShadowPCF(
+                    u_shadowDepthArray, u_shadowSampler,
+                    worldToLightClip(input.v_worldPos, slot),
+                    slot,
+                    shadowRefDist(dist, maxRange, NdotL));
             }
         }
         else continue;
 
+        intensity *= shadow;
         if (intensity <= 0.0) continue;
         lightSum += light.color_power.rgb * intensity;
     }
 
-    float3 lighting = max(lightSum, (float3)AMBIENT);
+    float3 lighting = max(lightSum, (float3)AMBIENT_LIGHT);
     float3 color    = baseColor * lighting;
 
     return float4(color, alpha);

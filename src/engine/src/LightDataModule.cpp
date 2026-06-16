@@ -152,8 +152,10 @@ inline void StoreSpotLightCamera(BufferManager* bm, UploadTask* task, Positions&
     glm::mat4 view = glm::lookAt(position, position + dir, up);
 
     float fov = 2.0f * std::atan(light.source_angle);
+    // near маленький: distance shadow map не зависит от точности near-плоскости,
+    // зато близкие к источнику окклюдеры (пол прямо над лампой) не отсекаются.
     glm::mat4 proj = glm::perspectiveZO(
-        fov, 1.0f, 0.3f, light.GetMaxDistance());
+        fov, 1.0f, 0.05f, light.GetMaxDistance());
 
     LightCamera lc{};
     lc.view = view;
@@ -181,7 +183,7 @@ static const glm::vec3 cubeUps[6] = {
 inline void StoreSphereLightCameras(BufferManager* bm, UploadTask* task, Positions& P, size_t i, SphereLightComponent::SphereLightData& light) {
 	glm::vec3 position = glm::vec3(P.w[i], P.d[i], P.h[i]);
     glm::mat4 proj = glm::perspectiveZO(
-		glm::radians(91.0f), 1.0f, 0.2f, light.GetMaxDistance());
+		glm::radians(91.0f), 1.0f, 0.05f, light.GetMaxDistance());
     for (int face = 0; face < 6; ++face)
     {
         glm::mat4 view = glm::lookAt(
