@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "BufferManager.h"
 
-void BufferManager::EnsureBufferCapacity(BufferData* data, Uint32 req_buffer_size, uint8_t li)
+void BufferManager::EnsureBufferCapacity(SDL_GPUCopyPass* cp, BufferData* data, Uint32 req_buffer_size, uint8_t li)
 {
     if (!data) {
         SDL_Log("EnsureBufferCapacity: data is null");
@@ -26,6 +26,17 @@ void BufferManager::EnsureBufferCapacity(BufferData* data, Uint32 req_buffer_siz
 
         SDL_GPUBuffer* new_buffer = CreateBuffer(req_buffer_size, usage);
 
+        // RESIZE_AND_COPY: переносим уже залитые данные в новый буфер до утилизации старого.
+        if (data->resize_behaviour == ResizeBehaviour::RESIZE_AND_COPY) {
+            Uint32 copy_size = data->Static.used_buffer_size;
+            if (copy_size > old_size) copy_size = old_size;
+            if (cp && old_buffer && copy_size > 0) {
+                SDL_GPUBufferLocation src{ old_buffer, 0 };
+                SDL_GPUBufferLocation dst{ new_buffer, 0 };
+                SDL_CopyGPUBufferToBuffer(cp, &src, &dst, copy_size, false);
+            }
+        }
+
         data->Static.buffer = new_buffer;
         data->Static.buffer_size = req_buffer_size;
 
@@ -45,6 +56,16 @@ void BufferManager::EnsureBufferCapacity(BufferData* data, Uint32 req_buffer_siz
             data->debug_name.c_str(), (Uint32)li, old_size, req_buffer_size);
 
         SDL_GPUBuffer* new_buffer = CreateBuffer(req_buffer_size, usage);
+
+        if (data->resize_behaviour == ResizeBehaviour::RESIZE_AND_COPY) {
+            Uint32 copy_size = data->Dynamic.used_buffer_size[li];
+            if (copy_size > old_size) copy_size = old_size;
+            if (cp && old_buffer && copy_size > 0) {
+                SDL_GPUBufferLocation src{ old_buffer, 0 };
+                SDL_GPUBufferLocation dst{ new_buffer, 0 };
+                SDL_CopyGPUBufferToBuffer(cp, &src, &dst, copy_size, false);
+            }
+        }
 
         data->Dynamic.buffers[li] = new_buffer;
         data->Dynamic.buffer_size[li] = req_buffer_size;

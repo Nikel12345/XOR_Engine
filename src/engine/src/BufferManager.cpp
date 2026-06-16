@@ -5,8 +5,8 @@
 
 BufferManager::BufferManager(SDL_GPUDevice* device) : ResourceManager(device) {
     using namespace DefaultBuffersNames;
-	CreateBufferData(DEFAULT_VERTEX_BUFFER, 819060, SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static);
-	CreateBufferData(DEFAULT_INDEX_BUFFER, 819006, SDL_GPU_BUFFERUSAGE_INDEX, BufferDataType::Static);
+	CreateBufferData(DEFAULT_VERTEX_BUFFER, 819060, SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
+	CreateBufferData(DEFAULT_INDEX_BUFFER, 819006, SDL_GPU_BUFFERUSAGE_INDEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 	CreateBufferData(DEFAULT_TRANSFORM_BUFFER, BASE_TB_SIZE / 10, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_LIGHT_BUFFER, sizeof(LightLayout) * 2, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_CAMERA_BUFFER, sizeof(CameraData), SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Static);
@@ -22,7 +22,7 @@ BufferManager::BufferManager(SDL_GPUDevice* device) : ResourceManager(device) {
     CreateBufferData(DEFAULT_OUT_INDIRECT_BUFFER, 1, SDL_GPU_BUFFERUSAGE_INDIRECT | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE, BufferDataType::Static);
 }
 
-BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, SDL_GPUBufferUsageFlags usage, BufferDataType type)
+BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, SDL_GPUBufferUsageFlags usage, BufferDataType type, ResizeBehaviour resize_behaviour)
 {
     auto it = buffers_data.find(name);
     if (it != buffers_data.end()) {
@@ -32,6 +32,7 @@ BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, SD
 
     auto data = std::make_unique<BufferData>();
     data->type = type;
+    data->resize_behaviour = resize_behaviour;
     data->usage = usage;
 	data->debug_name = name;
     switch (type) {

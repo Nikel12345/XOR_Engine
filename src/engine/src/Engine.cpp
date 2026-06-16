@@ -251,6 +251,10 @@ void Engine::PrepareFunc(uint8_t slot)
 	slot_controller->SetSlotState(slot, PREPARING);
 	buffer_manager->logic_index = slot;
 
+	// Дочитываем отложенные модели с диска в staging один раз за prep-проход (no-op без dirty),
+	// до апдейтеров буферов — их size_fn затем просто отдают размер уже готового staging.
+	model_manager->LoadModels();
+
 	engine_context->CreateGraphicsPipelines();
 	engine_context->CreateComputePipelines();
 

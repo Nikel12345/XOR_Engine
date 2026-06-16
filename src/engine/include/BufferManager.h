@@ -37,13 +37,13 @@ class BufferManager : public ResourceManager
 {
 public:
 	BufferManager(SDL_GPUDevice* device);
-	BufferData* CreateBufferData(BufferDataName name, Uint32 size, SDL_GPUBufferUsageFlags usage, BufferDataType type);
+	BufferData* CreateBufferData(BufferDataName name, Uint32 size, SDL_GPUBufferUsageFlags usage, BufferDataType type, ResizeBehaviour resize_behaviour = ResizeBehaviour::RESIZE_ONLY);
 
 	void CreatePrePassUpdateInstruction(BufferData& buffer_data, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
 	void CreatePrePassUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
 
-	void CreateUpdateInstruction(BufferData& buffer_data, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
-	void CreateUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
+	void CreateUpdateInstruction(BufferData& buffer_data, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn, UpdateInstructionOffsetFunc offset_fn = nullptr);
+	void CreateUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn, UpdateInstructionOffsetFunc offset_fn = nullptr);
 
 	void CreateReadBackInstruction(BufferData& buffer_data, ReadBackInstructionReaderFunc fn, ReadBackInstructionSizeFunc size_fn);
 	void CreateReadBackInstruction(BufferDataName name, ReadBackInstructionReaderFunc fn, ReadBackInstructionSizeFunc size_fn);
@@ -112,10 +112,10 @@ public:
 	};
 
 private:
-	void _CreateUpdateInstruction(BufferData* buffer_data, std::vector<UpdateInstruction>& target_vector, UpdateInstructionUpdaterFunc fn = nullptr, UpdateInstructionSizeFunc size_fn = nullptr);
+	void _CreateUpdateInstruction(BufferData* buffer_data, std::vector<UpdateInstruction>& target_vector, UpdateInstructionUpdaterFunc fn = nullptr, UpdateInstructionSizeFunc size_fn = nullptr, UpdateInstructionOffsetFunc offset_fn = nullptr);
 	void _ExecuteUpdateInstructions(SDL_GPUCopyPass* cp, std::vector<UpdateInstruction> target_instr_vector, std::vector<UploadTask>& target_task_vector, uint32_t& current_tb_offset,
 		std::function<void(uint32_t)> ensure_capacity_fn);
-	void _BuildUploadTasks(std::vector<UploadTask>& target_vector, uint32_t& current_tb_offset, std::function<void(uint32_t)> ensure_capacity_fn);
+	void _BuildUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadTask>& target_vector, uint32_t& current_tb_offset, std::function<void(uint32_t)> ensure_capacity_fn);
 	void _BuildDownloadTasks();
 	void _ExecuteUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadTask>& target_vector, SDL_GPUTransferBuffer* target_tb, uint8_t idx);
 
@@ -155,6 +155,6 @@ private:
 	// ALLOWED: One BufferData* within a Depended UI
 	// → prepass_update_instructions → ... → post_readback_instructions
 	// Guaranteed by sequential execution of PrepareFuncPrepassDepended
-	void EnsureBufferCapacity(BufferData* buffer_data, Uint32 size, uint8_t idx);
+	void EnsureBufferCapacity(SDL_GPUCopyPass* cp, BufferData* buffer_data, Uint32 size, uint8_t idx);
 };
 

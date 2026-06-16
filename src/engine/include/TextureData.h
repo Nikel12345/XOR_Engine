@@ -13,11 +13,11 @@ struct TextureData {
 struct TextureAtlas{
 	std::vector<std::unique_ptr<TextureData>> textures_data;
 	SDL_GPUTextureSamplerBinding texture_binding;
-	SDL_GPUTextureFormat format;
+	SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_INVALID;
 	uint32_t width = 0;
 	uint32_t height = 0;
 	uint16_t layers = 0;
-	uint8_t padding = 0;
+	uint8_t padding = 3; // Пространство между текстурами в атласе
 	uint8_t mip_levels = 1;
 };
 

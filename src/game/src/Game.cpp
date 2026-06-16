@@ -123,7 +123,6 @@ SDL_AppResult Game::MainInit()
 
 SDL_AppResult Game::MainIterate()
 {
-    // 1) Дискретные нажатия — словарь игры решает, что они значат.
     input->DrainKeyEvents(key_events_scratch);
     for (const InputManager::KeyEvent& e : key_events_scratch) {
         if (!e.down) continue;
@@ -136,7 +135,6 @@ SDL_AppResult Game::MainIterate()
         }
     }
 
-    // 2) Снапшот мыши -> камера (читается лок-фри, пишется в main-потоке).
     Camera* camera = cameraManager->GetActiveCamera();
     ImGuiIO& io = ImGui::GetIO();
 
@@ -148,7 +146,6 @@ SDL_AppResult Game::MainIterate()
     mouse_y = input->MouseY();
     camera->RotateView(mouse_x, mouse_y, input->IsMouseButtonDown(SDL_BUTTON_LEFT));
 
-    // 3) Удержание клавиш -> непрерывное движение.
     this->MainMenu_Update();
 
     switch (game_state) {
@@ -157,7 +154,6 @@ SDL_AppResult Game::MainIterate()
         break;
     }
 
-    // 4) Интерфейс-команды (например, удаление entity из UI) — исполняются здесь.
     input->ExecuteCommands(ctx);
 
     return SDL_APP_CONTINUE;
@@ -279,36 +275,6 @@ void Game::MainMenu_Update()
 
 void Game::MainMenu_Event(SDL_Event* event)
 {
-    Camera* camera = cameraManager->GetActiveCamera();
-    ImGuiIO& io = ImGui::GetIO();
-
-    if (!io.WantCaptureMouse) {
-        switch (event->type)
-        {
-        case SDL_EVENT_MOUSE_BUTTON_DOWN:
-            if (event->button.button == SDL_BUTTON_RIGHT) rmb_down = true;
-            if (event->button.button == SDL_BUTTON_LEFT)  lmb_down = true;
-            break;
-        case SDL_EVENT_MOUSE_BUTTON_UP:
-            if (event->button.button == SDL_BUTTON_RIGHT) rmb_down = false;
-            if (event->button.button == SDL_BUTTON_LEFT)  lmb_down = false;
-            break;
-        case SDL_EVENT_MOUSE_WHEEL:
-        {
-            float dir = (event->wheel.direction == SDL_MOUSEWHEEL_FLIPPED) ? -1.0f : 1.0f;
-            camera->SpeedChange(dir * event->wheel.y * 0.5f);
-        }
-        break;
-        case SDL_EVENT_KEY_DOWN:
-            if (event->key.scancode == SDL_SCANCODE_ESCAPE)
-            {
-                // Выход
-            }
-            break;
-        default:
-            break;
-        }
-    }
 }
 
 

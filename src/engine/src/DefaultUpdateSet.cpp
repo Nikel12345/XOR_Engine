@@ -133,6 +133,10 @@ void DefaultUpdateSet::SetDefaultVertexUpdater(EngineContext& ctx)
         [mm]() -> uint32_t
     {
         return mm->CalculateModelsVerticesSize();
+    },
+        [mm]() -> uint32_t
+    {
+        return mm->GetVertexBaseOffset();
     }
     );
     vertex_update_inited = true;
@@ -154,8 +158,13 @@ void DefaultUpdateSet::SetDefaultIndexUpdater(EngineContext& ctx)
         [mm]() -> uint32_t
     {
         return mm->CalculateModelsIndicesSize();
+    },
+        [mm]() -> uint32_t
+    {
+        return mm->GetIndexBaseOffset();
     }
     );
+    index_update_inited = true;
 }
 
 void DefaultUpdateSet::SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDataModule* ldm)
