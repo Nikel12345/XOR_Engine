@@ -9,19 +9,15 @@ Game::Game(Engine* engine)
     this->engine = engine;
     this->game_state = GameState::MAIN_MENU;
 
-	bufferManager = engine->GetBufferManager();
 	textureManager = engine->GetTextureManager();
-	shaderManager = engine->GetShaderManager();
 	modelManager = engine->GetModelManager();
-	passManager = engine->GetRenderManager();
 	objectManager = engine->GetObjectManager();
 	cameraManager = engine->GetCameraManager();
-	materialManager = engine->GetMaterialManager();
-    batchBuilder = engine->GetBatchBuilder();
 
 	threadController = engine->GetThreadController();
+	input = engine->GetInputManager();
 
-	light_data_module = engine->GetLightDataModule();
+
 
 	width = engine->GetWidth();
 	height = engine->GetHeight();
@@ -127,9 +123,32 @@ SDL_AppResult Game::MainInit()
 
 SDL_AppResult Game::MainIterate()
 {
-    int mouse_buttons = SDL_GetMouseState(&mouse_x, &mouse_y);
+    // 1) Дискретные нажатия — словарь игры решает, что они значат.
+    input->DrainKeyEvents(key_events_scratch);
+    for (const InputManager::KeyEvent& e : key_events_scratch) {
+        if (!e.down) continue;
+        switch (e.scancode) {
+        case SDL_SCANCODE_ESCAPE:
+            // Выход / меню
+            break;
+        default:
+            break;
+        }
+    }
 
-    cameraManager->GetActiveCamera()->RotateView(mouse_x, mouse_y, lmb_down);
+    // 2) Снапшот мыши -> камера (читается лок-фри, пишется в main-потоке).
+    Camera* camera = cameraManager->GetActiveCamera();
+    ImGuiIO& io = ImGui::GetIO();
+
+    float wheel = input->ConsumeWheelDelta();
+    if (wheel != 0.0f && !io.WantCaptureMouse) {
+        camera->SpeedChange(wheel * 0.5f);
+    }
+    mouse_x = input->MouseX();
+    mouse_y = input->MouseY();
+    camera->RotateView(mouse_x, mouse_y, input->IsMouseButtonDown(SDL_BUTTON_LEFT));
+
+    // 3) Удержание клавиш -> непрерывное движение.
     this->MainMenu_Update();
 
     switch (game_state) {
@@ -137,6 +156,9 @@ SDL_AppResult Game::MainIterate()
         MainMenu_Iterate();
         break;
     }
+
+    // 4) Интерфейс-команды (например, удаление entity из UI) — исполняются здесь.
+    input->ExecuteCommands(ctx);
 
     return SDL_APP_CONTINUE;
 }
@@ -151,11 +173,8 @@ SDL_AppResult Game::SDL_AppEvent(SDL_Event* event)
         engine->OnWindowResized(event->window.data1, event->window.data2);
         return SDL_APP_CONTINUE;
     default:
-        switch (game_state) {
-        case GameState::MAIN_MENU:
-            MainMenu_Event(event);
-            break;
-        }
+        // Игровой ввод больше не обрабатывается на main-потоке: он уходит
+        // в InputManager и дренится в sim-потоке (см. MainIterate).
         return SDL_APP_CONTINUE;
     }
 }
@@ -204,57 +223,57 @@ void Game::MainMenu_Iterate()
 
 void Game::MainMenu_Update()
 {
-    Camera* camera = cameraManager->GetActiveCamera();
-    const bool* keys = SDL_GetKeyboardState(nullptr);
     ImGuiIO& io = ImGui::GetIO();
+    if (io.WantCaptureMouse) return;
 
     const float camSpeed = 0.05f;
     const float lightSpeed = 0.1f;
 
-    if (!io.WantCaptureMouse) {
-        // Камера
-        if (keys[SDL_SCANCODE_LEFT])  camera->Move(glm::vec3(-camSpeed, 0.0f, 0.0f));
-        if (keys[SDL_SCANCODE_RIGHT]) camera->Move(glm::vec3(camSpeed, 0.0f, 0.0f));
-        if (keys[SDL_SCANCODE_UP])    camera->Move(glm::vec3(0.0f, 0.0f, camSpeed));
-        if (keys[SDL_SCANCODE_DOWN])  camera->Move(glm::vec3(0.0f, 0.0f, -camSpeed));
-        if (keys[SDL_SCANCODE_SPACE]) camera->Move(glm::vec3(0.0f, camSpeed, 0.0f));
-        if (keys[SDL_SCANCODE_LSHIFT])camera->Move(glm::vec3(0.0f, -camSpeed, 0.0f));
+    glm::vec3 camMove(0.0f);     // x: лево/право, y: верх/низ, z: вперёд/назад
+    glm::vec3 lightMove(0.0f);   // x: P.w, y: P.h, z: P.d
+    bool camMoved = false;
+    bool lightMoved = false;
 
-        // Спотлайты
-        if (keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D] ||
-            keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_S] ||
-            keys[SDL_SCANCODE_E] || keys[SDL_SCANCODE_Q])
-        {
-            objectManager->ForEach<Positions, SpotLightComponent>(
-                objectManager->GetActiveScene(),
-                [keys, lightSpeed](SoAElement<Positions> pos_el, SpotLightComponent&)
-            {
-                Positions& P = pos_el.container();
-                size_t i = pos_el.i();
+    // Перебираем зажатые клавиши switch'ем, накапливая дельты.
+    input->SnapshotHeldKeys(held_keys_scratch);
+    for (SDL_Scancode sc : held_keys_scratch) {
+        switch (sc) {
+        case SDL_SCANCODE_LEFT:   camMove.x -= camSpeed; camMoved = true; break;
+        case SDL_SCANCODE_RIGHT:  camMove.x += camSpeed; camMoved = true; break;
+        case SDL_SCANCODE_UP:     camMove.z += camSpeed; camMoved = true; break;
+        case SDL_SCANCODE_DOWN:   camMove.z -= camSpeed; camMoved = true; break;
+        case SDL_SCANCODE_SPACE:  camMove.y += camSpeed; camMoved = true; break;
+        case SDL_SCANCODE_LSHIFT: camMove.y -= camSpeed; camMoved = true; break;
 
-                if (keys[SDL_SCANCODE_A]) P.w[i] -= lightSpeed;
-                if (keys[SDL_SCANCODE_D]) P.w[i] += lightSpeed;
-                if (keys[SDL_SCANCODE_W]) P.h[i] += lightSpeed;
-                if (keys[SDL_SCANCODE_S]) P.h[i] -= lightSpeed;
-                if (keys[SDL_SCANCODE_E]) P.d[i] += lightSpeed;
-                if (keys[SDL_SCANCODE_Q]) P.d[i] -= lightSpeed;
-            });
-
-            objectManager->ForEach<Positions, SphereLightComponent>(
-                objectManager->GetActiveScene(),
-                [keys, lightSpeed](SoAElement<Positions> pos_el, SphereLightComponent&)
-            {
-                Positions& P = pos_el.container();
-                size_t i = pos_el.i();
-
-                if (keys[SDL_SCANCODE_A]) P.w[i] -= lightSpeed;
-                if (keys[SDL_SCANCODE_D]) P.w[i] += lightSpeed;
-                if (keys[SDL_SCANCODE_W]) P.h[i] += lightSpeed;
-                if (keys[SDL_SCANCODE_S]) P.h[i] -= lightSpeed;
-                if (keys[SDL_SCANCODE_E]) P.d[i] += lightSpeed;
-                if (keys[SDL_SCANCODE_Q]) P.d[i] -= lightSpeed;
-            });
+        case SDL_SCANCODE_A: lightMove.x -= lightSpeed; lightMoved = true; break;
+        case SDL_SCANCODE_D: lightMove.x += lightSpeed; lightMoved = true; break;
+        case SDL_SCANCODE_W: lightMove.y += lightSpeed; lightMoved = true; break;
+        case SDL_SCANCODE_S: lightMove.y -= lightSpeed; lightMoved = true; break;
+        case SDL_SCANCODE_E: lightMove.z += lightSpeed; lightMoved = true; break;
+        case SDL_SCANCODE_Q: lightMove.z -= lightSpeed; lightMoved = true; break;
+        default: break;
         }
+    }
+
+    // Применяем накопленное по одному разу.
+    if (camMoved) cameraManager->GetActiveCamera()->Move(camMove);
+
+    if (lightMoved) {
+        SceneData* scene = objectManager->GetActiveScene();
+        objectManager->ForEach<Positions, SpotLightComponent>(scene,
+            [lightMove](SoAElement<Positions> pos_el, SpotLightComponent&)
+        {
+            Positions& P = pos_el.container();
+            size_t i = pos_el.i();
+            P.w[i] += lightMove.x; P.h[i] += lightMove.y; P.d[i] += lightMove.z;
+        });
+        objectManager->ForEach<Positions, SphereLightComponent>(scene,
+            [lightMove](SoAElement<Positions> pos_el, SphereLightComponent&)
+        {
+            Positions& P = pos_el.container();
+            size_t i = pos_el.i();
+            P.w[i] += lightMove.x; P.h[i] += lightMove.y; P.d[i] += lightMove.z;
+        });
     }
 }
 

@@ -25,21 +25,18 @@ public:
 private:
 	Engine* engine = nullptr;
 	
-	BufferManager* bufferManager;
 	TextureManager* textureManager;
-	ShaderManager* shaderManager;
 	ModelManager* modelManager;
-	PassManager* passManager;
 	ObjectManager* objectManager;
 	CameraManager* cameraManager;
-	MaterialManager* materialManager;
-	BatchBuilder* batchBuilder;
 
 	ThreadController* threadController;
+	InputManager* input;
 
-	LightDataModule* light_data_module;
 
 	EngineContext* ctx;
+	std::vector<InputManager::KeyEvent> key_events_scratch;
+	std::vector<SDL_Scancode> held_keys_scratch;
 	void ChangeState(GameState newState);
 	void MainMenu_Init();
 	void MainMenu_Iterate();

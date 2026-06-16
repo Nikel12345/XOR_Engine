@@ -11,6 +11,7 @@
 #include "PipeManager.h"
 #include "Aliases.h"
 
+class InputManager;
 
 class EngineContext {
 public:
@@ -78,6 +79,9 @@ public:
 
 	BatchBuilder* GetBatchBuilder() const { return batch_builder; }
 
+	void SetInputManager(InputManager* im) { input_manager = im; }
+	InputManager* GetInputManager() const { return input_manager; }
+
 private:
 	BufferManager* buffer_manager = nullptr;
 	TextureManager* texture_manager = nullptr;
@@ -90,4 +94,6 @@ private:
 	PipeManager* pipe_manager = nullptr;
 
 	BatchBuilder* batch_builder = nullptr;
+
+	InputManager* input_manager = nullptr;
 };

@@ -59,6 +59,8 @@ int main() {
         game->MainIterate();
     });
 
+    InputManager* input = engine->GetInputManager();
+
     threadController->StartThreads();
     bool running = true;
     while (running) {
@@ -66,12 +68,14 @@ int main() {
         while (SDL_PollEvent(&event))
         {
             ImGui_ImplSDL3_ProcessEvent(&event);
+            // Окно (close/resize) обрабатываем здесь же, на main-потоке.
             SDL_AppResult res = game->SDL_AppEvent(&event);
-            switch (res) {
-            case SDL_APP_SUCCESS:
-				running = false;
-				break;
-            };
+            if (res == SDL_APP_SUCCESS) {
+                running = false;
+                break;
+            }
+            // Весь игровой ввод — в очередь IM, дренит sim-поток.
+            input->HandleEvent(event);
         }
         SDL_Delay(16);
     }

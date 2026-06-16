@@ -21,6 +21,7 @@ set(MANAGERS_SRC
     src/TextureManager.cpp
     src/ThreadController.cpp
     src/SlotController.cpp
+    src/InputManager.cpp
 )
 set(MANAGERS_HDR
     include/BufferManager.h
@@ -36,6 +37,7 @@ set(MANAGERS_HDR
     include/TextureManager.h
     include/ThreadController.h
     include/SlotController.h
+    include/InputManager.h
 )
 
 set(STRUCTS_SRC

@@ -30,6 +30,7 @@
 #include "config.h"
 #include "UI_ImGui.h"
 #include "EngineContext.h"
+#include "InputManager.h"
 
 struct PrepassTimingReport;
 static bool UPS_priority = true;
@@ -51,6 +52,8 @@ public:
 	EngineContext* GetEngineContext() { return engine_context; }
 
 	ThreadController* GetThreadController() const { return thread_controller; }
+
+	InputManager* GetInputManager() const { return input_manager; }
 
 	PIB_DataModule* GetPIBDataModule() const { return pib_data_module; }
 	TransformDataModule* GetTransformDataModule() const { return transform_data_module; }
@@ -86,6 +89,7 @@ private:
 
 	void InitDefaultBufferUpdaters();
     void InitPasses();
+    void InitUICommands();
 
     PrepassTimingReport PrepareFuncPrepassDepended_Original(uint8_t slot);
     PrepassTimingReport PrepareFuncPrepassDepended_Optimized(uint8_t slot);
@@ -106,6 +110,7 @@ private:
 	SlotController* slot_controller = nullptr;
     ThreadController* thread_controller = nullptr;
 	MaterialManager* material_manager = nullptr;
+	InputManager* input_manager = nullptr;
 
     BatchBuilder* batch_builder = nullptr;
 

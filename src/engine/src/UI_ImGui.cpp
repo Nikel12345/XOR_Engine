@@ -1,6 +1,7 @@
 ﻿#include "PCH.h"
 #include "UI_ImGui.h"
 #include "EngineContext.h"
+#include "InputManager.h"
 
 void UI_ImGui::Iterate(EngineContext* ctx)
 {
@@ -37,7 +38,6 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
     if (!ImGui::CollapsingHeader("Objects")) return;
 
     ObjectManager* objectManager = ctx->GetObjectManager();
-    SceneName scene_name = objectManager->GetActiveSceneName();
     SceneData* scene = objectManager->GetActiveScene();
 
     if (ImGui::TreeNode("Mesh Objects"))
@@ -76,7 +76,12 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
             }
         });
 
-        for (Entity e : to_delete) ctx->DeleteEntity(scene_name, e);
+        // UI ничего не мутирует сам: кладёт команду "удалить этот entity"
+        // в очередь, sim-поток исполнит её в MainIterate. Данных-структуры нет —
+        // entity пакуем прямо в указатель (никакого копирования/владения).
+        for (Entity e : to_delete)
+            ctx->GetInputManager()->PushCommand(CommandId::DeleteEntity,
+                reinterpret_cast<const void*>(static_cast<uintptr_t>(e)));
 
         ImGui::TreePop();
     }

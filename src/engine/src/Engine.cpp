@@ -579,6 +579,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	slot_controller = new SlotController();
 	thread_controller = new ThreadController(slot_controller);
 	material_manager = new MaterialManager();
+	input_manager = new InputManager();
 
 	batch_builder = new BatchBuilder();
 
@@ -590,6 +591,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	count_data_module = new CountBufferDataModule();
 
 	engine_context = new EngineContext(buffer_manager, texture_manager, pass_manager, material_manager, object_manager, shader_manager, model_manager, camera_manager, pipe_manager, batch_builder);
+	engine_context->SetInputManager(input_manager);
 	InitDefaultBufferUpdaters();
 	InitPasses();
 	pass_manager->FillRenderPasses();
@@ -658,6 +660,16 @@ void Engine::InitPasses()
 	//SetDefaultCullingOutTransformPass(pass_manager, buffer_manager, object_manager, transform_data_module, light_data_module, indirect_data_module);
 }
 
+void Engine::InitUICommands()
+{
+	input_manager->RegisterCommand(CommandId::DeleteEntity,
+		[](EngineContext* ctx, const void* data)
+		{
+			Entity e = static_cast<Entity>(reinterpret_cast<uintptr_t>(data));
+			ctx->DeleteEntity(ctx->GetObjectManager()->GetActiveSceneName(), e);
+		});
+}
+
 
 Engine::~Engine()
 {
@@ -676,6 +688,7 @@ Engine::~Engine()
 	delete slot_controller;
 	delete thread_controller;
 	delete material_manager;
+	delete input_manager;
 	delete pib_data_module;
 	delete transform_data_module;
 	delete light_data_module;
