@@ -1,22 +1,17 @@
 #include "PCH.h"
 #include "IndirectDataModule.h"
-#include "ObjectManager.h"
 #include "BufferManager.h"
 #include "RenderManager.h"
 #include "ModelData.h"
-#include "BatchBuilder.h"
 
 IndirectDataModule::IndirectDataModule()
 {
 	for (uint64_t& r : last_revision) r = ~0ull;
 }
 
-uint32_t IndirectDataModule::CalculateIndirectSize(BatchBuilder* bb, PassManager* pm, uint8_t slot)
+uint32_t IndirectDataModule::CalculateIndirectSize(PassManager* pm, uint64_t revision, uint8_t slot)
 {
-	uint64_t revision = bb->BatchesRevision();
-	if (revision == last_revision[slot]) {
-		return 0;
-	}
+	if (revision == last_revision[slot]) return 0;
 	total_size = 0;
 	const std::vector<RenderPassStep*>& render_passes = pm->GetOrderedRenderPasses();
 

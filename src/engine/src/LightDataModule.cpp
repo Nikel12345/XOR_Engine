@@ -11,9 +11,6 @@ LightDataModule::LightDataModule()
 
 uint32_t LightDataModule::CalculateLightSize(ObjectManager* om, SceneData* scene)
 {
-    if (!true) // ОПРЕДЕЛИТЬ СЕТТЕР!
-        return total_size;
-
     total_size = 0;
 
     om->ForEachArchetype<Positions, SpotLightComponent>(

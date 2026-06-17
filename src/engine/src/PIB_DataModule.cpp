@@ -4,20 +4,15 @@
 #include "BufferManager.h"
 #include "RenderCommandData.h"
 #include "RenderManager.h"
-#include "BatchBuilder.h"
 
 PIB_DataModule::PIB_DataModule()
 {
-    for (uint64_t& r : last_revision) r = ~0ull;
+    for (uint64_t& r : pib_last_revision) r = ~0ull;
+    for (uint64_t& r : e2b_last_revision) r = ~0ull;
 }
 
-uint32_t PIB_DataModule::CalculatePIBSizes(BatchBuilder* bb, ObjectManager* om, PassManager* rm, uint8_t slot)
+uint32_t PIB_DataModule::ComputeElementCount(PassManager* rm) const
 {
-    uint64_t revision = bb->BatchesRevision();
-    if (revision == last_revision[slot]) {
-        return 0;
-    }
-
     uint32_t count = 0;
 
     for (RenderPassStep* rp : rm->GetOrderedRenderPasses())
@@ -36,8 +31,15 @@ uint32_t PIB_DataModule::CalculatePIBSizes(BatchBuilder* bb, ObjectManager* om, 
         }
     }
 
-    total_elements = count;
-    last_revision[slot] = revision;
+    return count;
+}
+
+uint32_t PIB_DataModule::CalculatePIBSizes(PassManager* rm, uint64_t revision, uint8_t slot)
+{
+    if (revision == pib_last_revision[slot]) return 0;
+
+    total_elements = ComputeElementCount(rm);
+    pib_last_revision[slot] = revision;
 
     return total_elements * sizeof(uint32_t);
 }
@@ -68,9 +70,14 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
     bm->UploadToTransferBuffer(task, safe_u32(combined.size()) * sizeof(uint32_t), combined.data());
 }
 
-uint32_t PIB_DataModule::CalculateEntityToBatch(BatchBuilder* bb, ObjectManager* om, PassManager* pm, uint8_t slot)
+uint32_t PIB_DataModule::CalculateEntityToBatch(PassManager* pm, uint64_t revision, uint8_t slot)
 {
-    return CalculatePIBSizes(bb, om, pm, slot);
+    if (revision == e2b_last_revision[slot]) return 0;
+
+    // entity->batch заливает по одному uint32 на инстанс — тот же размер, что и PIB.
+    e2b_last_revision[slot] = revision;
+
+    return ComputeElementCount(pm) * sizeof(uint32_t);
 }
 
 void PIB_DataModule::StoreEntityToBatch(BufferManager* bm, PassManager* pm, UploadTask* task)

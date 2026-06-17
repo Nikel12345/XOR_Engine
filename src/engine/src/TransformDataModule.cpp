@@ -44,11 +44,6 @@ void TransformDataModule::UpdateLocalTransforms(ObjectManager* om, SceneData* sc
 
 uint32_t TransformDataModule::CalculateTransformSize(ObjectManager* om, SceneData* scene)
 {
-    if (!om->CheckNewObjects()) {
-        om->NewObjectsCommit();
-        return total_size;
-    }
-
     total_size = 0;
 
     om->ForEachArchetype<Positions, ModelComponent, MaterialComponent>(

@@ -104,14 +104,18 @@ void DefaultUpdateSet::SetDefaultPositionIndexUpdater(EngineContext& ctx, PIB_Da
     auto* rm = ctx.GetRenderManager();
     auto* om = ctx.GetObjectManager();
     auto* bb = ctx.GetBatchBuilder();
+
+    // Dirty-состояние держит сам модуль; сюда лишь читаем ревизию батчей и отдаём
+    // числом — так модуль не тянет BatchBuilder.h. Если ревизия не менялась,
+    // CalculatePIBSizes вернёт 0 и store пропустится.
     bm->CreateUpdateInstruction(DEFAULT_POSITION_INDEX_BUFFER,
         [rm, om, pib_dm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
         pib_dm->StorePIB(bm, rm, &task, om);
     },
-        [om, rm, pib_dm, bb, bm]() -> uint32_t
+        [rm, pib_dm, bb, bm]() -> uint32_t
     {
-        return pib_dm->CalculatePIBSizes(bb, om, rm, bm->logic_index.load());
+        return pib_dm->CalculatePIBSizes(rm, bb->BatchesRevision(), bm->logic_index.load());
     }
     );
     position_index_update_inited = true;
@@ -201,14 +205,17 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
     auto* bm = ctx.GetBufferManager();
     auto* pm = ctx.GetRenderManager();
     auto* bb = ctx.GetBatchBuilder();
+
+    // Тот же gate-паттерн, что и у PIB: dirty (ревизия батчей) живёт в модуле, сюда
+    // лишь читаем ревизию и отдаём числом. См. SetDefaultPositionIndexUpdater.
     bm->CreateUpdateInstruction(DEFAULT_INDIRECT_BUFFER,
         [pm, idm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
         idm->StoreIndirect(bm, pm, &task);
     },
-        [bb, pm, idm, bm]() -> uint32_t
+        [pm, idm, bb, bm]() -> uint32_t
     {
-        return idm->CalculateIndirectSize(bb, pm, bm->logic_index.load());
+        return idm->CalculateIndirectSize(pm, bb->BatchesRevision(), bm->logic_index.load());
     }
     );
     indirect_update_inited = true;
@@ -267,17 +274,18 @@ void DefaultUpdateSet::SetDefaultOffsetBufferUpdater(EngineContext& ctx, CountBu
 void DefaultUpdateSet::SetDefaultEntityToBatchUpdater(EngineContext& ctx, PIB_DataModule* pdm)
 {
     auto* bm = ctx.GetBufferManager();
-    auto* om = ctx.GetObjectManager();
     auto* pm = ctx.GetRenderManager();
     auto* bb = ctx.GetBatchBuilder();
+
+    // Тот же gate-паттерн, что и у PIB (entity->batch меняется только со структурой батчей).
     bm->CreatePrePassUpdateInstruction(DEFAULT_ENTITY_TO_BATCH_BUFFER,
         [pdm, pm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
         pdm->StoreEntityToBatch(bm, pm, &task);
     },
-        [om, pm, bb, pdm, bm]() -> uint32_t
+        [pm, bb, pdm, bm]() -> uint32_t
     {
-        return pdm->CalculateEntityToBatch(bb, om, pm, bm->logic_index.load());
+        return pdm->CalculateEntityToBatch(pm, bb->BatchesRevision(), bm->logic_index.load());
     }
     );
 }
