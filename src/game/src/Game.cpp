@@ -1,4 +1,5 @@
 ﻿#include "PCH.h"
+#include <cmath>
 #include "Game.h"
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
@@ -88,6 +89,43 @@ SDL_AppResult Game::MainInit()
         i = { 0, 1, 2, 0, 2, 3 };
     });
 
+    // Процедурная модель посложнее: UV-сфера. Вершины считаются параметрической функцией
+    // (широта/долгота), а не записываются руками. Радиус 1 — размер задаётся на инстансе.
+    ModelData* sphere = ctx->CreateModel("sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
+        const uint32_t stacks = 32;   // деления по широте
+        const uint32_t slices = 48;   // деления по долготе
+        const float R = 1.0f;
+        const float PI = 3.14159265358979323846f;
+
+        for (uint32_t i = 0; i <= stacks; ++i) {
+            float phi = PI * (float)i / (float)stacks;              // 0..π (полюс→полюс)
+            float cp = std::cos(phi), sp = std::sin(phi);
+            for (uint32_t j = 0; j <= slices; ++j) {
+                float theta = 2.0f * PI * (float)j / (float)slices; // 0..2π
+                float ct = std::cos(theta), st = std::sin(theta);
+
+                float nx = sp * ct, ny = cp, nz = sp * st;          // нормаль = точка на единичной сфере
+                PosUVNormal vert{};
+                vert.x = R * nx; vert.y = R * ny; vert.z = R * nz;
+                vert.u = (float)j / (float)slices;
+                vert.v = (float)i / (float)stacks;
+                vert.nx = nx; vert.ny = ny; vert.nz = nz;
+                vert.tx = -st; vert.ty = 0.0f; vert.tz = ct;        // касательная = ∂pos/∂θ
+                v.push_back(vert);
+            }
+        }
+
+        const uint32_t row = slices + 1;
+        for (uint32_t i = 0; i < stacks; ++i) {
+            for (uint32_t j = 0; j < slices; ++j) {
+                uint32_t a = i * row + j;
+                uint32_t b = a + row;
+                idx.push_back(a);     idx.push_back(a + 1); idx.push_back(b);
+                idx.push_back(a + 1); idx.push_back(b + 1); idx.push_back(b);
+            }
+        }
+    });
+
     ctx->CreateEntity("main_menu",
         MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
         ModelComponent{ model_car },
@@ -123,17 +161,25 @@ SDL_AppResult Game::MainInit()
 
     // Спрайт: общий единичный квад, размер берётся из пиксельного размера текстуры.
     // ppu — локальный масштаб пиксели→мир (не глобальная константа): мир = пиксели * ppu.
-    const float ppu = 0.01f;
-    //ctx->CreateEntity("main_menu",
-    //    MaterialComponent{ { material_sprite } },
-    //    ModelComponent{ quad },
-    //    PositionProxy16{
-    //        texture_cube->width * ppu, 0, 0, 0.0f,
-    //        0, texture_cube->height * ppu, 0, 0.0f,
-    //        0, 0, 1, 0.0f,
-    //        0, 0, 0, 1.0f
-    //    }
-    //);
+    const float ppu = 0.001f;
+    ctx->CreateEntity("main_menu",
+        MaterialComponent{ { material_sprite } },
+        ModelComponent{ quad },
+        PositionProxy16{
+            texture_cube->width * ppu, 0, 0, 0.0f,
+            0, texture_cube->height * ppu, 0, 0.0f,
+            0, 0, 1, 0.0f,
+            0, 0, 0, 1.0f
+        }
+    );
+
+    // Сфера: тот же путь (generator → staging → append), размер ~1 через диагональ.
+    ctx->CreateEntity("main_menu",
+        MaterialComponent{ { material_sprite } },
+        ModelComponent{ sphere },
+        PositionProxy16{ 1,0,0,-2.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
+        ShadowComponent{}
+    );
     //ctx->CreateEntity("main_menu",
     //    SpotLightComponent{ SpotLightComponent::SpotLightData{ 0, 1.0f, 0.0f, 0.0f, 0.18f, 1, 1, 1, 100 } },
     //    PositionProxy16{ 1,0,0,-2.5f,  0,1,0,0,  0,0, 1,1.25f,  0,0,0,1 },

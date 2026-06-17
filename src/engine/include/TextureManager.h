@@ -1,13 +1,17 @@
 #pragma once
 #include <SDL3/SDL.h>
+#include <vector>
+#include <string>
+#include <cstddef>
 #include "ResourceManager.h"
 #include "TextureData.h"
 
 struct UploadTaskTexture {
 	SDL_GPUTextureRegion dst{};
-	const char* path;
+	std::vector<std::byte> pixels;          // BGRA32, РїР»РѕС‚РЅРѕ СѓРїР°РєРѕРІР°РЅРЅС‹Рµ (РґРµРєРѕРґ РѕРґРёРЅ СЂР°Р· РІ TextureLoader)
+	std::string name;                       // РґР»СЏ РґРёР°РіРЅРѕСЃС‚РёРєРё РїСЂРё СѓРїР°РєРѕРІРєРµ
 	TextureHandle* target_handle;
-	Uint32 offset;                          
+	Uint32 offset;
 	Uint32 size;
 	Uint32 width, height, pitch;
 
@@ -25,24 +29,24 @@ public:
 	TextureManager(SDL_GPUDevice* device);
 
 	TextureAtlas* CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler);
-	// Создание TextureAtlas из уже существующим TextureAtlas
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ TextureAtlas пїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ TextureAtlas
 	// Create TextureAtlas from an already existing TextureAtlas
-	// Используется для создания атласа с другим семплером. НЕ создаёт новую GPU текстуру, использует указатель на текстуру в existing_atlas
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ. пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ GPU пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ existing_atlas
 	TextureAtlas* CreateTextureAtlas(const std::string& name, TextureAtlas* existing_atlas, SDL_GPUSampler* sampler);
-	// Создание TextureData из файла
-	// Create TextureData from a file
-	TextureHandle* CreateTextureFromFile(const std::string& name, const std::string& atlas_name, const char* path);
-	TextureHandle* CreateTextureFromFile(const std::string& name, TextureAtlas* atlas, const char* path);
+	// Р РµРіРёСЃС‚СЂРёСЂСѓРµС‚ С‚РµРєСЃС‚СѓСЂСѓ РёР· СѓР¶Рµ РґРµРєРѕРґРёСЂРѕРІР°РЅРЅС‹С… РїРёРєСЃРµР»РµР№ (BGRA32, width*height*4).
+	// Р—Р°РіСЂСѓР·РєСѓ СЃ РґРёСЃРєР° РґРµР»Р°РµС‚ TextureLoader; РѕСЂРєРµСЃС‚СЂР°С†РёСЏ вЂ” РІ EngineContext.
+	TextureHandle* CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels);
+	TextureHandle* CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels);
 
-	//// Создание пустой TextureData с заданными параметрами, без загрузки данных в текстуру
+	//// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ TextureData пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	//// Create an empty TextureData with specified parameters, without uploading data to the texture
 	//TextureData* CreateTextureData(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler);
 
-	//// Создание TextureData из уже существующим SDL_GPUTexture
+	//// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ TextureData пїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ SDL_GPUTexture
 	//// Create TextureData from an already existing SDL_GPUTexture
 	//TextureData* CreateTextureData(const std::string& name, SDL_GPUTexture* texture, SDL_GPUSampler* sampler);
 
-	// Создание пустой GPU текстуры
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ GPU пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	SDL_GPUTexture* CreateGPU_Texture(SDL_GPUTextureCreateInfo tci);
 
 	void GenerateMipmaps(SDL_GPUCommandBuffer* cb);
@@ -89,7 +93,7 @@ public:
 		}
 	};
 private:
-	void CreateUploadTask(TextureHandle* handle, int w, int h, const char* path);
+	void CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name);
 	void _BuildUploadTasks();
 	std::unordered_map<std::string, std::unique_ptr<TextureAtlas>> atlases_data;
 	std::unordered_map<std::string, std::unique_ptr<TextureHandle>> handles_data;

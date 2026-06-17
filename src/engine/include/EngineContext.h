@@ -9,13 +9,19 @@
 #include "CameraManager.h"
 #include "BatchBuilder.h"
 #include "PipeManager.h"
+#include "GpuTaskContext.h"
 #include "Aliases.h"
 
 class InputManager;
+class TextureLoader;
 
 class EngineContext {
 public:
-	EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* rm, BatchBuilder* bb);
+	EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* rm, BatchBuilder* bb, TextureLoader* tl);
+
+	// Узкий GPU-фасад: им пользуются ShaderSet'ы и модуль физики.
+	GpuTaskContext& Gpu() { return gpu_ctx; }
+	GpuTaskContext* GetGpuContext() { return &gpu_ctx; }
 
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name);
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name);
@@ -97,4 +103,7 @@ private:
 	BatchBuilder* batch_builder = nullptr;
 
 	InputManager* input_manager = nullptr;
+	TextureLoader* texture_loader = nullptr;
+
+	GpuTaskContext gpu_ctx;
 };

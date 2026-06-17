@@ -19,6 +19,7 @@ set(MANAGERS_SRC
     src/ShaderManager_ShadersCreate.cpp
     src/ShaderManager_SPVLoad.cpp
     src/TextureManager.cpp
+    src/TextureLoader.cpp
     src/ThreadController.cpp
     src/SlotController.cpp
     src/InputManager.cpp
@@ -35,6 +36,7 @@ set(MANAGERS_HDR
     include/RenderManager.h
     include/ShaderManager.h
     include/TextureManager.h
+    include/TextureLoader.h
     include/ThreadController.h
     include/SlotController.h
     include/InputManager.h
@@ -101,6 +103,7 @@ set(CORE_SRC
     src/UI_ImGui.cpp
     src/PCH.cpp
     src/EngineContext.cpp
+    src/GpuTaskContext.cpp
 )
 set(CORE_HDR
     include/Engine.h
@@ -109,6 +112,7 @@ set(CORE_HDR
     include/UI_ImGui.h
     include/PCH.h
     include/EngineContext.h
+    include/GpuTaskContext.h
 )
 
 list(TRANSFORM MANAGERS_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)

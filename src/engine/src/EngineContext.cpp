@@ -1,7 +1,9 @@
 #include "PCH.h"
 #include "EngineContext.h"
+#include "TextureLoader.h"
 
-EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager* rm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pm, BatchBuilder* bb)
+EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager* rm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pm, BatchBuilder* bb, TextureLoader* tl)
+	: gpu_ctx(bm, sm, rm, tm)   // GPU-фасад над Buffer/Shader/Pass/Texture
 {
 	this->buffer_manager = bm;
 	this->texture_manager = tm;
@@ -14,6 +16,7 @@ EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager*
 	this->pipe_manager = pm;
 
 	this->batch_builder = bb;
+	this->texture_loader = tl;
 }
 
 TextureAtlas* EngineContext::CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name)
@@ -29,8 +32,32 @@ TextureAtlas* EngineContext::CreateTextureAtlas(const AtlasName& name, const Atl
 	return texture_manager->CreateTextureAtlas(name, existing_atlas, sampler);
 }
 
+// В какой CPU-пиксельформат декодить, чтобы байты совпали с форматом GPU-атласа.
+static SDL_PixelFormat PixelFormatForGpuFormat(SDL_GPUTextureFormat fmt)
+{
+	switch (fmt) {
+	case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM:
+	case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB:
+		return SDL_PIXELFORMAT_BGRA32;
+	case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM:
+	case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB:
+		return SDL_PIXELFORMAT_RGBA32;
+	default:
+		SDL_Log("EngineContext: no CPU pixel format mapping for GPU texture format %d, defaulting to BGRA32", (int)fmt);
+		return SDL_PIXELFORMAT_BGRA32;
+	}
+}
+
 TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path) {
-	return texture_manager->CreateTextureFromFile(name, atlas_name, path);
+	TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
+	if (!atlas) return nullptr;   // GetTextureAtlas уже залогировал отсутствие
+
+	DecodedImage img = texture_loader->LoadFromFile(path, PixelFormatForGpuFormat(atlas->format));
+	if (!img.ok()) {
+		SDL_Log("EngineContext::CreateTextureFromFile failed to load '%s'", path);
+		return nullptr;
+	}
+	return texture_manager->CreateTexture(name, atlas, img.width, img.height, std::move(img.pixels));
 }
 
 
@@ -113,122 +140,37 @@ void EngineContext::CreateComputePipelines()
 	shader_manager->SetDirtyComputePipelines(false);
 }
 
+// GPU-методы — тонкие форвардеры в gpu_ctx (реализация в GpuTaskContext.cpp).
 FragmentShaderData EngineContext::CreateFragmentShader(const char* path) {
-	return shader_manager->CreateFragmentShader(path);
+	return gpu_ctx.CreateFragmentShader(path);
 }
 
 VertexShaderData EngineContext::CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout) {
-	return shader_manager->CreateVertexShader(hlsl_path, vertex_buffer_layout);
+	return gpu_ctx.CreateVertexShader(hlsl_path, vertex_buffer_layout);
 }
 
 ShaderProgramDescription* EngineContext::CreateShaderProgramDescription(const std::string& name) {
-	return shader_manager->CreateShaderProgramDescription(name);
+	return gpu_ctx.CreateShaderProgramDescription(name);
 }
 
 ShaderProgram* EngineContext::CreateShaderProgram(const std::string& name, ShaderProgramDescription* spd, const RenderPassName& associated_pass_name,
 	VertexShaderData vs, std::initializer_list<BufferDataName> vertex_shader_buffers,
 	FragmentShaderData fs, std::initializer_list<BufferDataName> fragment_shader_buffers,
 	std::initializer_list<TextureSlotRole> texture_slots) {
-
-	std::vector<BufferData*> vertex_buffers;
-	vertex_buffers.reserve(vertex_shader_buffers.size());
-	for (const auto& buffer_name : vertex_shader_buffers) {
-		BufferData* bd = buffer_manager->GetBufferData(buffer_name);
-		if (!bd) {
-			SDL_Log("EngineContext::Creating shader program with non existing vertex shader buffer '%s'", buffer_name);
-			continue;
-		}
-		vertex_buffers.push_back(bd);
-	}
-	std::vector<BufferData*> fragment_buffers;
-	fragment_buffers.reserve(fragment_shader_buffers.size());
-	for (const auto& buffer_name : fragment_shader_buffers) {
-		BufferData* bd = buffer_manager->GetBufferData(buffer_name);
-		if (!bd) {
-			SDL_Log("EngineContext::Creating shader program with non existing fragment shader buffer '%s'", buffer_name);
-			continue;
-		}
-		fragment_buffers.push_back(bd);
-	}
-	RenderPassStep* associated_pass = pass_manager->GetRenderPassStep(associated_pass_name);
-	return shader_manager->CreateShaderProgram(name, spd, associated_pass, vs, std::move(vertex_buffers), fs, std::move(fragment_buffers), texture_slots);
+	return gpu_ctx.CreateShaderProgram(name, spd, associated_pass_name, vs, vertex_shader_buffers, fs, fragment_shader_buffers, texture_slots);
 }
 
 ComputeShaderData EngineContext::CreateComputeShader(const char* hlsl_path) {
-	return shader_manager->CreateComputeShader(hlsl_path);
+	return gpu_ctx.CreateComputeShader(hlsl_path);
 }
 
-ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::string& name, ComputeShaderData cs, 
-	std::initializer_list<BufferDataName> rw_storage_buffers, 
-	std::initializer_list<BufferDataName> ro_storage_buffers, 
-	std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures, 
-	std::initializer_list<AtlasName> ro_storage_textures, 
-	std::initializer_list<AtlasName> texture_samplers, 
+ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::string& name, ComputeShaderData cs,
+	std::initializer_list<BufferDataName> rw_storage_buffers,
+	std::initializer_list<BufferDataName> ro_storage_buffers,
+	std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
+	std::initializer_list<AtlasName> ro_storage_textures,
+	std::initializer_list<AtlasName> texture_samplers,
 	const ComputePassName& associated_compute_pass)
 {
-	std::vector<BufferData*> rw_buffers;
-	rw_buffers.reserve(rw_storage_buffers.size());
-	for (const auto& buffer_name : rw_storage_buffers) {
-		BufferData* bd = buffer_manager->GetBufferData(buffer_name);
-		if (!bd) {
-			SDL_Log("EngineContext::Creating compute shader program with non existing RW storage buffer '%s'", buffer_name);
-			continue;
-		}
-		rw_buffers.push_back(bd);
-	}
-	std::vector<BufferData*> ro_buffers;
-	ro_buffers.reserve(ro_storage_buffers.size());
-	for (const auto& buffer_name : ro_storage_buffers) {
-		BufferData* bd = buffer_manager->GetBufferData(buffer_name);
-		if (!bd) {
-			SDL_Log("EngineContext::Creating compute shader program with non existing RO storage buffer '%s'", buffer_name);
-			continue;
-		}
-		ro_buffers.push_back(bd);
-	}
-	std::vector<ComputeShaderProgram::ComputeRWTextureBinding> rw_textures;
-	rw_textures.reserve(rw_storage_textures.size());
-
-	for (const auto& binding : rw_storage_textures) {
-		TextureAtlas* atlas = texture_manager->GetTextureAtlas(binding.texture_atlas);
-		if (!atlas) {
-			SDL_Log("EngineContext::Creating compute shader program with non existing RW storage texture atlas '%s'", binding.texture_atlas.c_str());
-			continue;
-		}
-		rw_textures.push_back({ atlas, binding.mip_level, binding.layer });
-	}
-	std::vector<TextureAtlas*> ro_texture_atlases;
-	ro_texture_atlases.reserve(ro_storage_textures.size());
-	for (const auto& atlas_name : ro_storage_textures) {
-		TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
-		if (!atlas) {
-			SDL_Log("EngineContext::Creating compute shader program with non existing RO storage texture atlas '%s'", atlas_name.c_str());
-			continue;
-		}
-		ro_texture_atlases.push_back(atlas);
-	}
-	std::vector<TextureAtlas*> samplers;
-	samplers.reserve(texture_samplers.size());
-	for (const auto& atlas_name : texture_samplers) {
-		TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
-		if (!atlas) {
-			SDL_Log("EngineContext::Creating compute shader program with non existing texture sampler atlas '%s'", atlas_name.c_str());
-			continue;
-		}
-		samplers.push_back(atlas);
-	}
-
-	ComputePassStep* associated_compute_pass_ptr = nullptr;
-	associated_compute_pass_ptr = pass_manager->GetComputePassStep(associated_compute_pass);
-	if (associated_compute_pass_ptr) {
-		return shader_manager->CreateComputeShaderProgram(name, cs, std::move(rw_buffers), std::move(ro_buffers), std::move(rw_textures), std::move(ro_texture_atlases), std::move(samplers), associated_compute_pass_ptr);
-
-	}
-	associated_compute_pass_ptr = pass_manager->GetComputePrepassStep(associated_compute_pass);
-	if (associated_compute_pass_ptr) {
-		return shader_manager->CreateComputeShaderProgram(name, cs, std::move(rw_buffers), std::move(ro_buffers), std::move(rw_textures), std::move(ro_texture_atlases), std::move(samplers), associated_compute_pass_ptr);
-
-	}
-	SDL_Log("EngineContext::Creating compute shader program with non existing associated compute pass '%s'", associated_compute_pass.c_str());
-	return nullptr;
+	return gpu_ctx.CreateComputeShaderProgram(name, cs, rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers, associated_compute_pass);
 }

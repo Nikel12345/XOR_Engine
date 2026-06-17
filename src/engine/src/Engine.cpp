@@ -251,8 +251,6 @@ void Engine::PrepareFunc(uint8_t slot)
 	slot_controller->SetSlotState(slot, PREPARING);
 	buffer_manager->logic_index = slot;
 
-	// Дочитываем отложенные модели с диска в staging один раз за prep-проход (no-op без dirty),
-	// до апдейтеров буферов — их size_fn затем просто отдают размер уже готового staging.
 	model_manager->LoadModels();
 
 	engine_context->CreateGraphicsPipelines();
@@ -584,6 +582,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	thread_controller = new ThreadController(slot_controller);
 	material_manager = new MaterialManager();
 	input_manager = new InputManager();
+	texture_loader = new TextureLoader();
 
 	batch_builder = new BatchBuilder();
 
@@ -594,7 +593,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	bound_sphere_data_module = new BoundSphereDataModule();
 	count_data_module = new CountBufferDataModule();
 
-	engine_context = new EngineContext(buffer_manager, texture_manager, pass_manager, material_manager, object_manager, shader_manager, model_manager, camera_manager, pipe_manager, batch_builder);
+	engine_context = new EngineContext(buffer_manager, texture_manager, pass_manager, material_manager, object_manager, shader_manager, model_manager, camera_manager, pipe_manager, batch_builder, texture_loader);
 	engine_context->SetInputManager(input_manager);
 	InitDefaultBufferUpdaters();
 	InitPasses();
@@ -694,6 +693,7 @@ Engine::~Engine()
 	delete thread_controller;
 	delete material_manager;
 	delete input_manager;
+	delete texture_loader;
 	delete pib_data_module;
 	delete transform_data_module;
 	delete light_data_module;

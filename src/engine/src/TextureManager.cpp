@@ -64,7 +64,7 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, Textur
 	return ptr;
 }
 
-TextureHandle* TextureManager::CreateTextureFromFile(const std::string& name, const std::string& atlas_name, const char* path)
+TextureHandle* TextureManager::CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels)
 {
 	auto atlas_it = atlases_data.find(atlas_name);
     if (atlas_it == atlases_data.end()) {
@@ -72,10 +72,10 @@ TextureHandle* TextureManager::CreateTextureFromFile(const std::string& name, co
         return nullptr;
 	}
 	TextureAtlas* atlas = atlas_it->second.get();
-	return CreateTextureFromFile(name, atlas, path);
+	return CreateTexture(name, atlas, w, h, std::move(pixels));
 }
 
-TextureHandle* TextureManager::CreateTextureFromFile(const std::string& name, TextureAtlas* atlas, const char* path)
+TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels)
 {
 	if (!atlas) {
         SDL_Log("Invalid atlas provided for texture '%s'", name.c_str());
@@ -87,11 +87,6 @@ TextureHandle* TextureManager::CreateTextureFromFile(const std::string& name, Te
         SDL_Log("Texture '%s' already exists, returning existing texture.", name.c_str());
         return it->second.get();
     }
-    SDL_Surface* surface = IMG_Load(path);
-    if (!surface) {
-        SDL_Log("Failed to load image '%s': %s", path, SDL_GetError());
-        return nullptr;
-    }
 
     auto texture_handle = std::make_unique<TextureHandle>();
     auto td = std::make_unique<TextureData>();
@@ -100,13 +95,12 @@ TextureHandle* TextureManager::CreateTextureFromFile(const std::string& name, Te
 	texture_handle->texture_data = td.get();
 
     TextureHandle* ptr = texture_handle.get();
-    ptr->width = (uint32_t)surface->w;
-    ptr->height = (uint32_t)surface->h;
+    ptr->width = w;
+    ptr->height = h;
     handles_data[name] = std::move(texture_handle);
 	atlas->textures_data.push_back(std::move(td));
 
-	CreateUploadTask(ptr, surface->w, surface->h, path);
-    SDL_DestroySurface(surface);
+	CreateUploadTask(ptr, w, h, std::move(pixels), name);
 
 	return ptr;
 }
@@ -117,12 +111,14 @@ SDL_GPUTexture* TextureManager::CreateGPU_Texture(SDL_GPUTextureCreateInfo tci)
     return tex;
 }
 
-void TextureManager::CreateUploadTask(TextureHandle* handle, int w, int h, const char* path)
+void TextureManager::CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name)
 {
-    uint32_t size = w * h * 4;
+    // Размер берём из самих пикселей — TextureLoader уже упаковал их под формат атласа.
+    uint32_t size = (uint32_t)pixels.size();
 
     UploadTaskTexture task;
-    task.path = path;
+    task.name = name;
+    task.pixels = std::move(pixels);
     task.target_handle = handle;
     task.offset = current_upload_tb_offset;
     task.width = w;
@@ -131,7 +127,7 @@ void TextureManager::CreateUploadTask(TextureHandle* handle, int w, int h, const
 
     current_upload_tb_offset += size;
 
-	upload_tasks.push_back(task);
+	upload_tasks.push_back(std::move(task));
 
 }
 
@@ -170,7 +166,7 @@ void TextureManager::_BuildUploadTasks() {
             state.layer++;
             state.placed_count = 0;
             if (state.layer >= atlas->layers) {
-                SDL_Log("Atlas out of layers for task '%s'", task.path);
+                SDL_Log("Atlas out of layers for task '%s'", task.name.c_str());
                 continue;
             }
             state.spaces = std::make_unique<spaces_t>(rect_wh((int)atlas->width, (int)atlas->height));
@@ -183,7 +179,7 @@ void TextureManager::_BuildUploadTasks() {
         }
 
         if (!result) {
-            SDL_Log("Failed to pack task '%s' even on new layer", task.path);
+            SDL_Log("Failed to pack task '%s' even on new layer", task.name.c_str());
             continue;
         }
 
@@ -223,19 +219,7 @@ void TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
 
 	EnsureUploadTransferBufferCapacity(current_upload_tb_offset);
     for (auto& task : upload_tasks) {
-        SDL_Surface* surface = IMG_Load(task.path);
-        if (!surface) {
-            SDL_Log("Failed to load image '%s': %s", task.path, SDL_GetError());
-            return;
-        }
-
-        SDL_Surface* converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_BGRA32);
-        if (!converted) {
-            SDL_Log("Conversion failed: %s", SDL_GetError());
-            return;
-        }
-        SDL_DestroySurface(surface);
-
+        // Пиксели уже декодированы TextureLoader'ом (BGRA32, плотно) — просто копируем.
         SDL_GPUTextureTransferInfo src{};
         src.transfer_buffer = upload_transfer_buffer;
         src.offset = task.offset;
@@ -243,9 +227,7 @@ void TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
         src.rows_per_layer = task.height;
 
         std::byte* base = static_cast<std::byte*>(mapped_upload_tb);
-        SDL_memcpy(base + task.offset, converted->pixels, task.size);
-
-        SDL_DestroySurface(converted);
+        SDL_memcpy(base + task.offset, task.pixels.data(), task.size);
 
         SDL_UploadToGPUTexture(cp, &src, &task.dst, false);
     };

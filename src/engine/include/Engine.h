@@ -31,6 +31,7 @@
 #include "UI_ImGui.h"
 #include "EngineContext.h"
 #include "InputManager.h"
+#include "TextureLoader.h"
 
 struct PrepassTimingReport;
 static bool UPS_priority = true;
@@ -111,6 +112,7 @@ private:
     ThreadController* thread_controller = nullptr;
 	MaterialManager* material_manager = nullptr;
 	InputManager* input_manager = nullptr;
+	TextureLoader* texture_loader = nullptr;
 
     BatchBuilder* batch_builder = nullptr;
 

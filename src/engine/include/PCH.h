@@ -14,7 +14,8 @@
 #include <variant>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL.h>
-#include <SDL3_image/SDL_image.h>
+// SDL3_image намеренно НЕ в PCH: единственный потребитель — TextureLoader,
+// он подключает его сам. Так движок (и будущие либы вроде физики) не тянут image.
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
