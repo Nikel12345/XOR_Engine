@@ -14,13 +14,10 @@
 #include <variant>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL.h>
-// SDL3_image намеренно НЕ в PCH: единственный потребитель — TextureLoader,
-// он подключает его сам. Так движок (и будущие либы вроде физики) не тянут image.
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "Utils.h"
-#include "imgui.h"
-#include "imgui_impl_sdl3.h"
-#include "imgui_impl_sdlgpu3.h"
+// imgui намеренно НЕ в PCH: им пользуются только Engine.cpp и UI_ImGui.cpp (через UI_ImGui.h).
+// Так GPU-слой (EngineGpu) не тянет imgui-заголовки.
 #include "SDL3_shadercross/SDL_shadercross.h"

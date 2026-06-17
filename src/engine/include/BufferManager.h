@@ -68,8 +68,6 @@ public:
 	void ExecuteReadBackInstructionsReader();
 
 	void ExecutePostReadbackInstructions(SDL_GPUCopyPass* cp);
-	// Требует завершения работы GPU
-	// Requre GPU idle
 	void ExecutePostreadBackUploadTasks(SDL_GPUCopyPass* cp, uint8_t idx);
 
 	void BindGPUIndexBuffer(SDL_GPURenderPass* rp, Uint32 offset);

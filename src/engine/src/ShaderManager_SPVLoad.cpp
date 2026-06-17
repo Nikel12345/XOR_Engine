@@ -1,12 +1,7 @@
 #include "PCH.h"
-#include "spirv_reflect.h"
 #include "ShaderManager.h"
 
-// Прямое создание GPU-шейдера из .spv БЕЗ shadercross-кросс-компиляции —
-// точная копия старого загрузчика под новые структуры.
-// ВНИМАНИЕ: сырой SPIR-V уходит прямо в SDL_CreateGPUShader, поэтому путь
-// рабочий только когда бэкенд SDL_GPU реально потребляет SPIRV (Vulkan).
-// На DXIL/MSL он упадёт — там нужен shadercross-путь.
+
 VertexShaderData ShaderManager::CreateVertexShaderFromSPV(const char* path, std::initializer_list<VertexBufferBinding> bindings)
 {
     size_t n = 0;

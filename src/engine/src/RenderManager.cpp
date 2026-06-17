@@ -1,10 +1,8 @@
 #include "PCH.h"
 #include "RenderManager.h"
-#include "BufferManager.h"
-#include "ModelData.h"
-#include "MaterialManager.h"
-#include "PipeManager.h"
-#include "ObjectManager.h"
+#include "BufferManager.h"   // DefaultBuffersNames + BufferManager (через параметр)
+// MaterialManager/PipeManager/ObjectManager/ModelData здесь не использовались — убраны,
+// чтобы PassManager не тянул render/model/object на уровне линковки (нужно для EngineGpu).
 
 PassManager::PassManager() {}
 

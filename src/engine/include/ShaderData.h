@@ -2,7 +2,9 @@
 #include <vector>
 #include <string>
 #include <cstddef>
+#include <functional>
 #include <SDL3/SDL_gpu.h>
+#include <glm/glm.hpp>   // DispatchSizeBinder РёСЃРїРѕР»СЊР·СѓРµС‚ glm::uvec3 (СЂР°РЅСЊС€Рµ РїСЂРёС…РѕРґРёР» РёР· PCH)
 
 struct BufferData;
 struct RenderPassStep;
@@ -46,11 +48,11 @@ struct PushConstantBinder {
     mutable Uint32 vert_count = 0;
     mutable Uint32 frag_count = 0;
 
-    // compute — как было, явный слот
+    // compute пїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
     template<typename T> void Push(Uint32 slot, const T& d) const {
         SDL_PushGPUComputeUniformData(cb, slot, &d, sizeof(T));
     }
-    // graphics — авто-слот + счёт (mutable, чтобы лямбда осталась const, как в compute)
+    // graphics пїЅ пїЅпїЅпїЅпїЅ-пїЅпїЅпїЅпїЅ + пїЅпїЅпїЅпїЅ (mutable, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ const, пїЅпїЅпїЅ пїЅ compute)
     template<typename T> void PushVertex(const T& d) const {
         SDL_PushGPUVertexUniformData(cb, vert_count++, &d, sizeof(T));
     }
@@ -138,7 +140,7 @@ struct ShaderProgram {
     FragmentShaderData fs;
     std::vector<BufferData*> fragment_shader_buffers;
 
-    // Ожидаемые типы (по назначению) текстур для этого шейдера. Например, если в шейдере есть uniform sampler2D u_albedoTexture, то в required_slots будет TextureSlotRole::Albedo.
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ (пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ) пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ. пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ uniform sampler2D u_albedoTexture, пїЅпїЅ пїЅ required_slots пїЅпїЅпїЅпїЅпїЅ TextureSlotRole::Albedo.
 	// Expected texture types (by role) for this shader. For example, if the shader has a uniform sampler2D u_albedoTexture, then required_slots will contain TextureSlotRole::Albedo.
     std::vector<TextureSlotRole> required_slots;
 

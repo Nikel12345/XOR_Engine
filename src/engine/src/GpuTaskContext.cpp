@@ -129,3 +129,28 @@ ComputeShaderProgram* GpuTaskContext::CreateComputeShaderProgram(const std::stri
 	SDL_Log("GpuTaskContext::Creating compute shader program with non existing associated compute pass '%s'", associated_compute_pass.c_str());
 	return nullptr;
 }
+
+// --- Буферы: форвард в BufferManager ---
+BufferData* GpuTaskContext::CreateBufferData(BufferDataName name, Uint32 size, SDL_GPUBufferUsageFlags usage, BufferDataType type, ResizeBehaviour resize_behaviour) {
+	return buffer_manager->CreateBufferData(name, size, usage, type, resize_behaviour);
+}
+
+BufferData* GpuTaskContext::GetBufferData(BufferDataName name) {
+	return buffer_manager->GetBufferData(name);
+}
+
+void GpuTaskContext::CreateUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn, UpdateInstructionOffsetFunc offset_fn) {
+	buffer_manager->CreateUpdateInstruction(name, std::move(fn), std::move(size_fn), std::move(offset_fn));
+}
+
+void GpuTaskContext::CreatePrePassUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn) {
+	buffer_manager->CreatePrePassUpdateInstruction(name, std::move(fn), std::move(size_fn));
+}
+
+void GpuTaskContext::CreateReadBackInstruction(BufferDataName name, ReadBackInstructionReaderFunc fn, ReadBackInstructionSizeFunc size_fn) {
+	buffer_manager->CreateReadBackInstruction(name, std::move(fn), std::move(size_fn));
+}
+
+void GpuTaskContext::CreatePostReadbackUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn) {
+	buffer_manager->CreatePostReadbackUpdateInstruction(name, std::move(fn), std::move(size_fn));
+}

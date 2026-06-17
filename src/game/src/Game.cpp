@@ -3,6 +3,7 @@
 #include "Game.h"
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
+#include "ContactSystem.h"   // из либы Physics
 
 Game::Game(Engine* engine)
 {
@@ -130,7 +131,8 @@ SDL_AppResult Game::MainInit()
         MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
         ModelComponent{ model_car },
         PositionProxy16{ 1,0,0,3,  0,1,0,0,  0,0,1,0,  0,0,0,1 },
-        ShadowComponent{}
+        ShadowComponent{},
+        ColliderComponent{}
     );
     ctx->CreateEntity("main_menu",
         MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
@@ -140,7 +142,8 @@ SDL_AppResult Game::MainInit()
              0, 1,  0, 0.0,
              0, 0, -1, 0.0,     // Z basis = (0, 0, -1)
              0, 0,  0, 1.0
-        }, ShadowComponent{}
+        }, ShadowComponent{},
+        ColliderComponent{}
     );
     ctx->CreateEntity("main_menu",
         MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
@@ -150,13 +153,15 @@ SDL_AppResult Game::MainInit()
              0, 1,  0, 0.0f,
              0, 0, -1, 2.5f,     // Z basis = (0, 0, -1)
              0, 0,  0, 1.0f
-        }, ShadowComponent{}
+        }, ShadowComponent{},
+        ColliderComponent{}
     );
     Entity parent_id = ctx->CreateEntity("main_menu",
         MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
         ModelComponent{ model_car },
         PositionProxy16{ 1,0,0,3,  0,1,0,0,  0,0,1,2.5f,  0,0,0,1 },
-        ShadowComponent{}
+        ShadowComponent{},
+        ColliderComponent{}
     );
 
     // Спрайт: общий единичный квад, размер берётся из пиксельного размера текстуры.
@@ -170,7 +175,8 @@ SDL_AppResult Game::MainInit()
             0, texture_cube->height * ppu, 0, 0.0f,
             0, 0, 1, 0.0f,
             0, 0, 0, 1.0f
-        }
+        },
+        ColliderComponent{}
     );
 
     // Сфера: тот же путь (generator → staging → append), размер ~1 через диагональ.
@@ -178,7 +184,8 @@ SDL_AppResult Game::MainInit()
         MaterialComponent{ { material_sprite } },
         ModelComponent{ sphere },
         PositionProxy16{ 1,0,0,-2.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
-        ShadowComponent{}
+        ShadowComponent{},
+        ColliderComponent{}
     );
     //ctx->CreateEntity("main_menu",
     //    SpotLightComponent{ SpotLightComponent::SpotLightData{ 0, 1.0f, 0.0f, 0.0f, 0.18f, 1, 1, 1, 100 } },
@@ -188,7 +195,8 @@ SDL_AppResult Game::MainInit()
     ctx->CreateEntity("main_menu",
         SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
         PositionProxy16{ 1,0,0, 0.0f,  0,1,0,0,  0,0, 1,1.25f,  0,0,0,1 },
-        ShadowCasterComponent{}
+        ShadowCasterComponent{},
+        ColliderComponent{}
     );
 
 
@@ -228,6 +236,14 @@ SDL_AppResult Game::MainIterate()
     case GameState::MAIN_MENU:
         MainMenu_Iterate();
         break;
+    }
+
+    // Пример использования физики: контакты по активной сцене (включить при необходимости).
+    // Энтити с ColliderComponent берут явный радиус; остальные с ModelComponent — модельную сферу.
+    if (SceneData* scene = objectManager->GetActiveScene()) {
+        for (const ContactSystem::Contact& c : ContactSystem::DetectContacts(*objectManager, scene)) {
+            SDL_Log("contact %u <-> %u (pen %.3f)", c.a, c.b, c.penetration);
+        }
     }
 
     input->ExecuteCommands(ctx);

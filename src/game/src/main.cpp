@@ -2,6 +2,8 @@
 #include "Engine.h"
 #include "Game.h"
 #include "config.h"
+#include "imgui.h"
+#include "imgui_impl_sdl3.h"
 extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 static SDL_Window* win = NULL;
 static SDL_GPUDevice* dev = NULL;

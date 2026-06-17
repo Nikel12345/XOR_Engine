@@ -3,16 +3,15 @@
 #include <initializer_list>
 #include "ShaderData.h"
 #include "Aliases.h"
+#include "BufferData.h"
+#include "BufferUpdateStruct.h"
 
-class BufferManager;
 class ShaderManager;
 class PassManager;
 class TextureManager;
+class BufferManager;
 
-// Узкий фасад для авторинга GPU-задач (шейдеры, рендер- и compute-программы).
-// Backing-набор: Buffer / Shader / Pass / Texture — БЕЗ PipeManager и BatchBuilder.
-// EngineContext держит его внутри и форвардит сюда; этим же фасадом пользуются
-// ShaderSet'ы и (в перспективе) модуль физики, не таща весь EngineContext.
+
 class GpuTaskContext {
 public:
 	GpuTaskContext(BufferManager* bm, ShaderManager* sm, PassManager* pm, TextureManager* tm);
@@ -34,6 +33,15 @@ public:
 		std::initializer_list<AtlasName> ro_storage_textures,
 		std::initializer_list<AtlasName> texture_samplers,
 		const ComputePassName& associated_compute_pass);
+
+	// --- Буферы: создание и инструкции жизненного цикла (форвард в BufferManager) ---
+	BufferData* CreateBufferData(BufferDataName name, Uint32 size, SDL_GPUBufferUsageFlags usage, BufferDataType type, ResizeBehaviour resize_behaviour);
+	BufferData* GetBufferData(BufferDataName name);
+
+	void CreateUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn, UpdateInstructionOffsetFunc offset_fn = nullptr);
+	void CreatePrePassUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
+	void CreateReadBackInstruction(BufferDataName name, ReadBackInstructionReaderFunc fn, ReadBackInstructionSizeFunc size_fn);
+	void CreatePostReadbackUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
 
 private:
 	BufferManager* buffer_manager = nullptr;

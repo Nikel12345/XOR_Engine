@@ -11,7 +11,7 @@ target_include_directories(Game PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(Game PRIVATE Engine)
+target_link_libraries(Game PRIVATE Engine Physics)
 
 set_target_properties(Game PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src/game"

@@ -1,9 +1,9 @@
 ﻿#include "PCH.h"
 #include "ObjectManager.h"
-#include "RenderManager.h"
-#include "PipeManager.h"
 #include "TextureData.h"
 #include "ModelData.h"
+// RenderManager.h/PipeManager.h не использовались — убраны, чтобы ECS-ядро
+// (EngineEcs) не тянуло GPU-заголовки.
 
 SceneData* ObjectManager::CreateScene(const SceneName& name) {
     auto [it, inserted] = scenes_data.emplace(name, std::make_unique<SceneData>());
