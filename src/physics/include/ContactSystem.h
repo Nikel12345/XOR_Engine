@@ -6,25 +6,40 @@
 class ObjectManager;
 struct SceneData;
 
-// Явный коллайдер на энтити. Если есть — перекрывает модельную сферу.
-// radius и offset — В МИРОВЫХ единицах: центр = мировая трансляция энтити + offset.
-// (Никакого масштабирования матрицей — полный предсказуемый контроль.)
-struct ColliderComponent {
-	float radius = 0.5f;
-	glm::vec3 offset = glm::vec3(0.0f);
+// Форма коллайдера. Задаётся в ЛОКАЛЬНОМ пространстве модели и переводится в мир
+// матрицей энтити (Positions): позиция, поворот и масштаб. Бокс становится OBB.
+enum class ShapeKind : uint8_t { Sphere, Box };
+
+struct Collider {
+	ShapeKind kind   = ShapeKind::Sphere;
+	glm::vec3 offset = glm::vec3(0.0f);   // локальный центр формы
+	float     radius = 0.5f;              // Sphere: радиус (×макс. масштаб энтити)
+	glm::vec3 half   = glm::vec3(0.5f);   // Box: локальные полу-размеры (×масштаб по осям)
+
+	static Collider Sphere(float r, glm::vec3 off = glm::vec3(0.0f)) {
+		return { ShapeKind::Sphere, off, r, glm::vec3(0.0f) };
+	}
+	static Collider Box(glm::vec3 half_extents, glm::vec3 off = glm::vec3(0.0f)) {
+		return { ShapeKind::Box, off, 0.0f, half_extents };
+	}
 };
 
-// «Тупая» проверка факта контакта в моменте: сфера-vs-сфера по bound-сферам
-// моделей (ModelComponent) и мировым трансформам (Positions). Stateless.
+// Составной коллайдер: несколько форм на энтити. Пустой список => fallback на
+// объемлющую сферу модели (ModelComponent).
+struct ColliderComponent {
+	std::vector<Collider> shapes;
+};
+
+// «Тупая» проверка факта контакта в моменте. Stateless. Sphere/Box (OBB) во всех
+// сочетаниях; составные коллайдеры тестируются попарно по формам.
 namespace ContactSystem {
 	using Entity = uint32_t;
 
 	struct Contact {
 		Entity a;
 		Entity b;
-		float penetration;   // глубина пересечения: (rA + rB) - dist, > 0
+		float penetration;   // глубина для sphere-sphere; для пар с боксом = 0 (только факт)
 	};
 
-	// Возвращает все пересекающиеся пары энтити активной сцены (broad-phase O(n^2)).
 	std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene);
 }

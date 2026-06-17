@@ -26,11 +26,11 @@ public:
 	void FillRenderPasses();
 	void ExecutePassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_frame);
 	void ExecutePrepassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_frame);
-	// Начинает и завершает SDL_GPURenderPass
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ SDL_GPURenderPass
 	// Starts and end SDL_GPURenderPass
 	void RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass, BufferManager* bm, uint32_t additional_offset, const void* push_data_raw);
 	void WaitComputePrepass(SDL_GPUDevice* dev);
-	// Начинает и завершает SDL_GPUComputePass
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ SDL_GPUComputePass
 	// Starts and end SDL_GPUComputePass
 	void ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassStep* compute_pass, BufferManager* bm, const void* push_data_raw, const void* dispatch_data_raw, uint8_t pass_frame);
 

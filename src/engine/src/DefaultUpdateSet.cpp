@@ -109,9 +109,9 @@ void DefaultUpdateSet::SetDefaultPositionIndexUpdater(EngineContext& ctx, PIB_Da
     {
         pib_dm->StorePIB(bm, rm, &task, om);
     },
-        [om, rm, pib_dm, bb]() -> uint32_t
+        [om, rm, pib_dm, bb, bm]() -> uint32_t
     {
-        return pib_dm->CalculatePIBSizes(bb, om, rm);
+        return pib_dm->CalculatePIBSizes(bb, om, rm, bm->logic_index.load());
     }
     );
     position_index_update_inited = true;
@@ -206,9 +206,9 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
     {
         idm->StoreIndirect(bm, pm, &task);
     },
-        [bb, pm, idm]() -> uint32_t
+        [bb, pm, idm, bm]() -> uint32_t
     {
-        return idm->CalculateIndirectSize(bb, pm);
+        return idm->CalculateIndirectSize(bb, pm, bm->logic_index.load());
     }
     );
     indirect_update_inited = true;
@@ -275,9 +275,9 @@ void DefaultUpdateSet::SetDefaultEntityToBatchUpdater(EngineContext& ctx, PIB_Da
     {
         pdm->StoreEntityToBatch(bm, pm, &task);
     },
-        [om, pm, bb, pdm]() -> uint32_t
+        [om, pm, bb, pdm, bm]() -> uint32_t
     {
-        return pdm->CalculateEntityToBatch(bb, om, pm);
+        return pdm->CalculateEntityToBatch(bb, om, pm, bm->logic_index.load());
     }
     );
 }

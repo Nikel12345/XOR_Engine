@@ -8,12 +8,13 @@
 
 IndirectDataModule::IndirectDataModule()
 {
+	for (uint64_t& r : last_revision) r = ~0ull;
 }
 
-uint32_t IndirectDataModule::CalculateIndirectSize(BatchBuilder* bb, PassManager* pm)
+uint32_t IndirectDataModule::CalculateIndirectSize(BatchBuilder* bb, PassManager* pm, uint8_t slot)
 {
 	uint64_t revision = bb->BatchesRevision();
-	if (revision == last_batches_revision) {
+	if (revision == last_revision[slot]) {
 		return 0;
 	}
 	total_size = 0;
@@ -31,7 +32,7 @@ uint32_t IndirectDataModule::CalculateIndirectSize(BatchBuilder* bb, PassManager
 		}
 	}
 
-	last_batches_revision = revision;
+	last_revision[slot] = revision;
 	return total_size;
 }
 

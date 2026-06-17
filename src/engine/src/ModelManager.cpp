@@ -32,9 +32,17 @@ static void BuildSubmeshes(const std::vector<PosUVNormal>& staging, ModelData* m
 
         if (e.vertexCount > 0) {
             glm::vec3 center(0.0f);
+            const glm::vec3 first(
+                staging[vbase + e.vertexOffset].x,
+                staging[vbase + e.vertexOffset].y,
+                staging[vbase + e.vertexOffset].z);
+            glm::vec3 mn = first, mx = first;   // AABB по вершинам сабмеша
             for (uint32_t k = 0; k < e.vertexCount; ++k) {
                 const PosUVNormal& v = staging[vbase + e.vertexOffset + k];
-                center += glm::vec3(v.x, v.y, v.z);
+                const glm::vec3 p(v.x, v.y, v.z);
+                center += p;
+                mn = glm::min(mn, p);
+                mx = glm::max(mx, p);
             }
             center /= static_cast<float>(e.vertexCount);
 
@@ -45,6 +53,8 @@ static void BuildSubmeshes(const std::vector<PosUVNormal>& staging, ModelData* m
                 if (d > radius) radius = d;
             }
             sub.sphere = glm::vec4(center, radius);
+            sub.aabb_center = (mn + mx) * 0.5f;
+            sub.aabb_half   = (mx - mn) * 0.5f;
         }
         model->submeshes.push_back(sub);
     }

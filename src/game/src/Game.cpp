@@ -230,6 +230,8 @@ SDL_AppResult Game::MainIterate()
     mouse_y = input->MouseY();
     camera->RotateView(mouse_x, mouse_y, input->IsMouseButtonDown(SDL_BUTTON_LEFT));
 
+    input->ExecuteCommands(ctx);
+
     this->MainMenu_Update();
 
     switch (game_state) {
@@ -246,7 +248,6 @@ SDL_AppResult Game::MainIterate()
         }
     }
 
-    input->ExecuteCommands(ctx);
 
     return SDL_APP_CONTINUE;
 }
