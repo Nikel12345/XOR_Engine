@@ -1,16 +1,18 @@
 #pragma once
 #include <vector>
 #include <unordered_map>
-#include <fstream>
-#include <iostream>
 #include <string>
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_gpu.h>
+#include <functional>
+#include <variant>
 #include "PositionStructure.h"
 #include "ModelData.h"
 
 class BufferManager;
 struct UploadTask;
+
+// Генератор геометрии процедурной модели: заполняет переданные массивы вершин/индексов
+// как угодно — от руками записанного квада до математической поверхности. MM это безразлично.
+using ModelGeneratorFn = std::function<void(std::vector<PosUVNormal>&, std::vector<Uint32>&)>;
 
 class ModelManager
 {
@@ -21,6 +23,10 @@ public:
 	// Registers a model: reads only the header (submeshes/offsets); the heavy
 	// vertex/index data is loaded lazily by LoadModels during the prep phase.
 	ModelData* CreateModel(const std::string& name, const std::string& path, const std::string& path_ind);
+
+	// Процедурная модель: геометрию выдаёт generator. Тоже отложенная — generator
+	// вызывается в LoadModels (prep-фаза), как и чтение с диска.
+	ModelData* CreateModel(const std::string& name, ModelGeneratorFn generator);
 
 	// Дочитывает с диска все отложенные модели во временные CPU-буферы (staging).
 	// Вызывается один раз в общей части prep-фазы (Engine::PrepareFunc), до апдейтеров.
@@ -50,9 +56,15 @@ public:
 
 private:
 	struct PendingModel {
+		struct FileSource {
+			std::string vert_path;
+			std::string ind_path;
+		};
 		ModelData* model = nullptr;   // куда дописать сферы сабмешей после чтения вершин
-		std::string vert_path;
-		std::string ind_path;
+		// Источник геометрии — ровно одно из двух, взаимоисключаемо на уровне типа:
+		//   FileSource       — читаем вершины/индексы с диска
+		//   ModelGeneratorFn — генерируем процедурно
+		std::variant<FileSource, ModelGeneratorFn> source;
 	};
 
 	std::unordered_map<std::string, std::unique_ptr<ModelData>> models_data;

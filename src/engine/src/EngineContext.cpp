@@ -64,6 +64,11 @@ ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_p
 	return model_manager->CreateModel(name, model_path, index_path);
 }
 
+ModelData* EngineContext::CreateModel(const ModelName& name, ModelGeneratorFn generator)
+{
+	return model_manager->CreateModel(name, std::move(generator));
+}
+
 void EngineContext::DeleteEntity(const SceneName& scene_name, Entity e)
 {
 	SceneData* target_scene = object_manager->GetScene(scene_name);

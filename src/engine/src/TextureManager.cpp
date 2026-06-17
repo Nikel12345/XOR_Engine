@@ -100,6 +100,8 @@ TextureHandle* TextureManager::CreateTextureFromFile(const std::string& name, Te
 	texture_handle->texture_data = td.get();
 
     TextureHandle* ptr = texture_handle.get();
+    ptr->width = (uint32_t)surface->w;
+    ptr->height = (uint32_t)surface->h;
     handles_data[name] = std::move(texture_handle);
 	atlas->textures_data.push_back(std::move(td));
 

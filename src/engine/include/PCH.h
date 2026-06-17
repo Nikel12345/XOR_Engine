@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <cstdint>
 #include <span>
+#include <variant>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>

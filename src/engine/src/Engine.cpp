@@ -598,6 +598,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	engine_context->SetInputManager(input_manager);
 	InitDefaultBufferUpdaters();
 	InitPasses();
+	InitUICommands();
 	pass_manager->FillRenderPasses();
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});

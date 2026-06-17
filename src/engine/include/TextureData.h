@@ -31,4 +31,6 @@ struct TextureAtlas{
 struct TextureHandle {
 	TextureAtlas* atlas = nullptr;
 	TextureData* texture_data = nullptr;
+	uint32_t width = 0;   // нативный размер картинки в пикселях, пишется при загрузке
+	uint32_t height = 0;  // (точный исходник, без round-trip через unorm16 uv_packed_scale)
 };

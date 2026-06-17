@@ -69,8 +69,24 @@ SDL_AppResult Game::MainInit()
         {TextureSlotRole::Albedo, "new_car_glass"},
         {TextureSlotRole::Normal, "norm"} },
 		{ "sp", "sp_shadow" });
+    auto material_sprite = ctx->CreateMaterial("sprite", {
+        {TextureSlotRole::Albedo, "albedo_cube"},
+        {TextureSlotRole::Normal, "norm"} },
+        { "sp", "sp_shadow" });
 
     ModelData* model_car = ctx->CreateModel("car", "models/new_car_n_fixed.bin", "models/new_car_n_fixed_i.bin");
+
+    // Псевдомодель — единичный квад в плоскости XY, нормаль +Z, пивот в углу (0..1), UV 0..1.
+    // Геометрия не зависит от размера: размер задаётся на инстансе через диагональ матрицы.
+    ModelData* quad = ctx->CreateModel("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
+        v = {
+            { 0,0,0,  0,1,  0,0,1,  1,0,0 },
+            { 1,0,0,  1,1,  0,0,1,  1,0,0 },
+            { 1,1,0,  1,0,  0,0,1,  1,0,0 },
+            { 0,1,0,  0,0,  0,0,1,  1,0,0 },
+        };
+        i = { 0, 1, 2, 0, 2, 3 };
+    });
 
     ctx->CreateEntity("main_menu",
         MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
@@ -104,6 +120,20 @@ SDL_AppResult Game::MainInit()
         PositionProxy16{ 1,0,0,3,  0,1,0,0,  0,0,1,2.5f,  0,0,0,1 },
         ShadowComponent{}
     );
+
+    // Спрайт: общий единичный квад, размер берётся из пиксельного размера текстуры.
+    // ppu — локальный масштаб пиксели→мир (не глобальная константа): мир = пиксели * ppu.
+    const float ppu = 0.01f;
+    //ctx->CreateEntity("main_menu",
+    //    MaterialComponent{ { material_sprite } },
+    //    ModelComponent{ quad },
+    //    PositionProxy16{
+    //        texture_cube->width * ppu, 0, 0, 0.0f,
+    //        0, texture_cube->height * ppu, 0, 0.0f,
+    //        0, 0, 1, 0.0f,
+    //        0, 0, 0, 1.0f
+    //    }
+    //);
     //ctx->CreateEntity("main_menu",
     //    SpotLightComponent{ SpotLightComponent::SpotLightData{ 0, 1.0f, 0.0f, 0.0f, 0.18f, 1, 1, 1, 100 } },
     //    PositionProxy16{ 1,0,0,-2.5f,  0,1,0,0,  0,0, 1,1.25f,  0,0,0,1 },
