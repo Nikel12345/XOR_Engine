@@ -103,6 +103,7 @@ struct RasterizerStateBiasParams {
 struct ShaderProgramDescription
 {
     SDL_GPUCullMode           cull_mode = SDL_GPU_CULLMODE_NONE;
+    SDL_GPUFillMode           fill_mode = SDL_GPU_FILLMODE_FILL;
     RasterizerStateBiasParams rasterizer_bias;
     bool                      depth_test = true;
     bool                      depth_write = true;
@@ -126,6 +127,8 @@ struct ShaderProgramDescription
     ShaderProgramDescription* CullsFrontFaces() { cull_mode = SDL_GPU_CULLMODE_FRONT; return this; }
     ShaderProgramDescription* DoesNotCull() { cull_mode = SDL_GPU_CULLMODE_NONE;  return this; }
     ShaderProgramDescription* WithDepthBias(RasterizerStateBiasParams b) { rasterizer_bias = b; return this; }
+    ShaderProgramDescription* Wireframe() { fill_mode = SDL_GPU_FILLMODE_LINE; return this; }
+    ShaderProgramDescription* Solid() { fill_mode = SDL_GPU_FILLMODE_FILL; return this; }
 };
 
 enum class TextureSlotRole {

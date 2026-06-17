@@ -12,7 +12,8 @@ namespace DefaultShaderProgramSet
     bool render_main_inited = false;
     bool render_shadow_inited = false;
     bool render_transparent_inited = false;
-    
+    bool debug_collider_inited = false;
+
     // compute
     bool culling_zeros_inited = false;
     bool culling_count_inited = false;
@@ -101,6 +102,40 @@ void DefaultShaderProgramSet::SetTransparentShaderProgram(EngineContext* ctx)
         SDL_Log("Transparent render shader programs already initialized.");
         return;
     }
+}
+
+void DefaultShaderProgramSet::SetDebugColliderProgram(EngineContext* ctx)
+{
+    using namespace DefaultBuffersNames;
+    if (debug_collider_inited) {
+        SDL_Log("Debug collider shader program already initialized.");
+        return;
+    }
+
+    // Тянем только POSITION единичной модели; инстансим матрицей формы. Текстур нет —
+    // required_slots пуст, поэтому atlas/texture-батчи строятся пустыми (голый шейдер).
+    VertexShaderData vs = ctx->CreateVertexShader(
+        "../engine/shaders_code/debug/debug_collider.vert.hlsl",
+        { { DEFAULT_VERTEX_BUFFER, &FMT_PosUVNormal, { POSITION } } });
+    FragmentShaderData fs = ctx->CreateFragmentShader(
+        "../engine/shaders_code/debug/debug_collider.frag.hlsl");
+
+    ShaderProgramDescription* spd =
+        ctx->CreateShaderProgramDescription("spd_debug_collider")
+        ->DoesNotCull()->IgnoresDepth()->Wireframe();
+
+    ShaderProgram* sp = ctx->CreateShaderProgram("sp_debug_collider", spd,
+        DefaultRenderPassNamespace::DEBUG_PASS,
+        vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER },
+        fs, {},
+        {});
+
+    sp->BindPushConstants<DefaultRenderPassNamespace::DebugColliderPushData>(
+        [](const PushConstantBinder& b, DefaultRenderPassNamespace::DebugColliderPushData data) {
+        b.PushFragment(data);   // fragment slot 0 → b0, space3
+    });
+
+    debug_collider_inited = true;
 }
 
 void DefaultShaderProgramSet::SetCullingZerosPrograms(EngineContext* ctx)

@@ -140,6 +140,14 @@ struct ParentComponent {
     Entity parent;
 };
 
+// Локальная (относительно родителя) матрица 4×4 в column-major раскладке glm
+// (m[0..3] = столбец 0 = образ X-оси, m[12..14] = трансляция). Каждый кадр
+// TransformDataModule::UpdateLocalTransforms пишет в Positions = матрица_родителя ×
+// эта_локальная — полная иерархия (поворот+масштаб+сдвиг), в отличие от LocalOffsets.
+struct LocalMatrixComponent {
+    float m[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+};
+
 struct LocalOffsets : SoAProxyAddable<LocalOffsets> {
     using soa_tag = void;
     std::vector<float> ox, oy, oz;
@@ -283,6 +291,12 @@ struct DirectLightComponent {
 struct ShadowCasterComponent{};
 
 struct ShadowComponent {};
+
+// Маркер «энтити участвует в отрисовке». Сборщик батчей и трансформ-модуль отбирают
+// по нему (+Positions), а ModelComponent/MaterialComponent тянут через GetComponent.
+// Это развязывает «рисуемость» от жёсткого триплета и позволяет голый шейдер
+// (материал без текстур). Добавляется ЯВНО — без неявных приписок в CreateEntity.
+struct DrawComponent {};
 
 struct TestComponent {};
 

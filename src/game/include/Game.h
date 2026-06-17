@@ -50,4 +50,11 @@ private:
 	float mouse_y = 0;
 	GameState game_state;
 	MainMenuResources main_menu_resources;
+
+	// --- Отладочная визуализация коллайдеров ---
+	void UpdateDebugColliders();             // вызывается каждый кадр из MainIterate
+	ModelData* debug_box_model = nullptr;    // куб [-1..1]
+	ModelData* debug_sphere_model = nullptr; // сфера r=1
+	Material*  debug_collider_material = nullptr;
+	bool debug_colliders_spawned = false;
 };

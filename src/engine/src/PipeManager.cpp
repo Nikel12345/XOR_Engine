@@ -47,7 +47,7 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp)
     pci.fragment_shader = sp->fs.shader_data.shader;
 
     pci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    pci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pci.rasterizer_state.fill_mode = sp->spd->fill_mode;
     pci.rasterizer_state.cull_mode = sp->spd->cull_mode;
     pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
 

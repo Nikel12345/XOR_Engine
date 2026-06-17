@@ -30,6 +30,10 @@ struct ColliderComponent {
 	std::vector<Collider> shapes;
 };
 
+// Тег визуализации: энтити рисует рамку коллайдера и НЕ участвует в детекции
+// контактов (иначе его debug-модель попала бы в fallback как авто-коллайдер).
+struct DebugColliderTag {};
+
 // «Тупая» проверка факта контакта в моменте. Stateless. Sphere/Box (OBB) во всех
 // сочетаниях; составные коллайдеры тестируются попарно по формам.
 namespace ContactSystem {
@@ -42,4 +46,16 @@ namespace ContactSystem {
 	};
 
 	std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene);
+
+	// Локальные (в пространстве модели владельца) формы коллайдеров для отладочной
+	// отрисовки. local[16] — column-major матрица glm, кладущая единичную модель
+	// (куб [-1..1] для Box, сфера r=1 для Sphere) на форму. Мир считает движок:
+	// debug-энтити становится ребёнком owner с этой локальной матрицей, а
+	// TransformDataModule::UpdateLocalTransforms даёт world = matrix(owner) × local.
+	struct DebugShape {
+		Entity    owner;
+		ShapeKind kind;
+		float     local[16];
+	};
+	std::vector<DebugShape> CollectDebugShapes(ObjectManager& om, SceneData* scene);
 }

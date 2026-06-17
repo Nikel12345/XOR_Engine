@@ -113,12 +113,15 @@ static bool Overlap(const WorldShape& a, const WorldShape& b, float& pen) {
 	return BoxBox(a, b);
 }
 
-std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene) {
-	std::vector<EntityColliders> ents;
-
+// Собирает мировые формы всех энтити сцены в два прохода (общее для детекции и
+// отладочной отрисовки). Debug-визуализаторы (DebugColliderTag) пропускаются.
+static void GatherEntityColliders(ObjectManager& om, SceneData* scene,
+	std::vector<EntityColliders>& ents)
+{
 	// 1) Явные коллайдеры (непустой список форм).
 	om.ForEach<Positions, ColliderComponent>(scene,
 		[&](Entity e, SoAElement<Positions> p, ColliderComponent& col) {
+			if (om.Has<DebugColliderTag>(scene, e)) return;
 			if (col.shapes.empty()) return;   // пустой => fallback в проходе 2
 			EntityColliders ec; ec.e = e;
 			BuildWorldShapes(p.container(), p.i(), col.shapes, ec.shapes);
@@ -130,6 +133,7 @@ std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene) {
 	//    по OBB на каждый сабмеш модели из его локального AABB (min/max вершин).
 	om.ForEach<Positions, ModelComponent>(scene,
 		[&](Entity e, SoAElement<Positions> p, ModelComponent& mc) {
+			if (om.Has<DebugColliderTag>(scene, e)) return;
 			if (om.Has<ColliderComponent>(scene, e) &&
 				!om.GetComponent<ColliderComponent>(scene, e).shapes.empty())
 				return;   // уже учтён явными формами
@@ -145,6 +149,11 @@ std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene) {
 			ComputeBound(ec.shapes, ec.bound_c, ec.bound_r);
 			ents.push_back(std::move(ec));
 		});
+}
+
+std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene) {
+	std::vector<EntityColliders> ents;
+	GatherEntityColliders(om, scene, ents);
 
 	std::vector<Contact> contacts;
 	for (size_t i = 0; i < ents.size(); ++i) {
@@ -166,6 +175,43 @@ std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene) {
 		}
 	}
 	return contacts;
+}
+
+std::vector<DebugShape> CollectDebugShapes(ObjectManager& om, SceneData* scene) {
+	std::vector<DebugShape> out;
+
+	// Локальная матрица формы: column-major glm. Единичная модель ([-1..1] / r=1)
+	// масштабируется полу-размером и сдвигается на offset — всё в пространстве модели
+	// владельца. Поворот/масштаб самого энтити добавит движок через иерархию.
+	auto emit = [&](Entity owner, ShapeKind kind, glm::vec3 half, glm::vec3 offset) {
+		DebugShape d{};
+		d.owner = owner;
+		d.kind = kind;
+
+		out.push_back(d);
+	};
+
+	// 1) Явные коллайдеры.
+	om.ForEach<ColliderComponent>(scene, [&](Entity e, ColliderComponent& col) {
+		if (om.Has<DebugColliderTag>(scene, e)) return;
+		for (const Collider& c : col.shapes) {
+			glm::vec3 half = (c.kind == ShapeKind::Sphere) ? glm::vec3(c.radius) : c.half;
+			emit(e, c.kind, half, c.offset);
+		}
+	});
+
+	// 2) Fallback: авто per-submesh AABB-боксы для энтити без явных форм.
+	om.ForEach<ModelComponent>(scene, [&](Entity e, ModelComponent& mc) {
+		if (om.Has<DebugColliderTag>(scene, e)) return;
+		if (om.Has<ColliderComponent>(scene, e) &&
+			!om.GetComponent<ColliderComponent>(scene, e).shapes.empty())
+			return;
+		if (!mc.model || mc.model->submeshes.empty()) return;
+		for (const auto& sm : mc.model->submeshes)
+			emit(e, ShapeKind::Box, sm.aabb_half, sm.aabb_center);
+	});
+
+	return out;
 }
 
 } // namespace ContactSystem

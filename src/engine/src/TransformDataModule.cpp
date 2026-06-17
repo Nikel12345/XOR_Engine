@@ -2,43 +2,50 @@
 #include "TransformDataModule.h"
 #include "BufferManager.h"
 #include "ObjectManager.h"
+#include <glm/gtc/type_ptr.hpp>   // glm::make_mat4
 #include <unordered_set>
 
 TransformDataModule::TransformDataModule()
 {
 }
 
+// Positions[i] ↔ glm::mat4. Раскладка движка (см. StoreTransforms): GPU-матрица
+// column-major, столбцы = (x,y,z),(a,b,c),(e,f,g),(w,d,h), нижняя строка (i,j,k,l).
+// glm тоже column-major, поэтому отображение прямое (без транспонирования).
+static glm::mat4 LoadPositionMatrix(const Positions& P, size_t i)
+{
+    return glm::mat4(
+        glm::vec4(P.x[i], P.y[i], P.z[i], P.i[i]),
+        glm::vec4(P.a[i], P.b[i], P.c[i], P.j[i]),
+        glm::vec4(P.e[i], P.f[i], P.g[i], P.k[i]),
+        glm::vec4(P.w[i], P.d[i], P.h[i], P.l[i]));
+}
+
+static void StorePositionMatrix(Positions& P, size_t i, const glm::mat4& m)
+{
+    P.x[i] = m[0][0]; P.y[i] = m[0][1]; P.z[i] = m[0][2]; P.i[i] = m[0][3];
+    P.a[i] = m[1][0]; P.b[i] = m[1][1]; P.c[i] = m[1][2]; P.j[i] = m[1][3];
+    P.e[i] = m[2][0]; P.f[i] = m[2][1]; P.g[i] = m[2][2]; P.k[i] = m[2][3];
+    P.w[i] = m[3][0]; P.d[i] = m[3][1]; P.h[i] = m[3][2]; P.l[i] = m[3][3];
+}
+
+// Иерархия трансформов: для энтити с родителем и локальной матрицей пишем в его
+// Positions полную композицию world = parent_world × local. Используется отладочными
+// рамками коллайдеров (статичная локальная матрица — рамка сама следует за владельцем).
 void TransformDataModule::UpdateLocalTransforms(ObjectManager* om, SceneData* scene)
 {
-    om->ForEach<Positions, ParentComponent, LocalOffsets>(scene,
-        [&](SoAElement<Positions> pos_el, ParentComponent& parentComp, SoAElement<LocalOffsets> local_el)
+    om->ForEach<Positions, ParentComponent, LocalMatrixComponent>(scene,
+        [&](SoAElement<Positions> pos_el, ParentComponent& parentComp, LocalMatrixComponent& local)
     {
-        Positions& pos = pos_el.container();
-        LocalOffsets& local = local_el.container();
-        size_t i = pos_el.i();
+        auto arch_it = scene->entity_to_archetype.find(parentComp.parent);
+        if (arch_it == scene->entity_to_archetype.end() || !arch_it->second) return;
+        auto* parentPosArr = arch_it->second->get_array<Positions>();
+        if (!parentPosArr) return;
 
-        Entity parent = parentComp.parent;
-
-        Archetype* parentArch = scene->entity_to_archetype[parent];
-        if (!parentArch) {
-            assert(false && "No parent component");
-            return;
-        }
-
-        auto* parentPosArr = parentArch->get_array<Positions>();
-        if (!parentPosArr)
-            return;
-
-        size_t pIndex = scene->entity_to_index[parent];
-        Positions& parentPos = parentPosArr->data;
-
-        float px = parentPos.w[pIndex];
-        float py = parentPos.d[pIndex];
-        float pz = parentPos.h[pIndex];
-
-        pos.w[i] = px + local.ox[i];
-        pos.d[i] = py + local.oy[i];
-        pos.h[i] = pz + local.oz[i];
+        size_t pIndex = scene->entity_to_index.at(parentComp.parent);
+        glm::mat4 world = LoadPositionMatrix(parentPosArr->data, pIndex)
+                        * glm::make_mat4(local.m);
+        StorePositionMatrix(pos_el.container(), pos_el.i(), world);
     });
 }
 
@@ -46,11 +53,10 @@ uint32_t TransformDataModule::CalculateTransformSize(ObjectManager* om, SceneDat
 {
     total_size = 0;
 
-    om->ForEachArchetype<Positions, ModelComponent, MaterialComponent>(
+    om->ForEachArchetype<Positions, DrawComponent>(
         scene,
         [&](ComponentArray<Positions, void>* posArr,
-            ComponentArray<ModelComponent, void>*,
-            ComponentArray<MaterialComponent, void>*)
+            ComponentArray<DrawComponent, void>*)
     {
         total_size += safe_u32(posArr->size()) * sizeof(PositionProxy16);
     }
@@ -61,7 +67,7 @@ uint32_t TransformDataModule::CalculateTransformSize(ObjectManager* om, SceneDat
 
 void TransformDataModule::StoreTransforms(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene) {
 	this->UpdateLocalTransforms(om, scene);
-    om->ForEach<MaterialComponent, ModelComponent, Positions>(scene, [&](const MaterialComponent& material, const ModelComponent& mod, SoAElement<Positions> pos_el) {
+    om->ForEach<DrawComponent, Positions>(scene, [&](const DrawComponent&, SoAElement<Positions> pos_el) {
         Positions& pos = pos_el.container();
         size_t i = pos_el.i();
         float mat[16]; 
@@ -96,11 +102,10 @@ uint32_t TransformDataModule::AskNumTransform(ObjectManager* om, SceneData* scen
 
     uint32_t num_transform = 0;
 
-    om->ForEachArchetype<Positions, ModelComponent, MaterialComponent>(
+    om->ForEachArchetype<Positions, DrawComponent>(
         scene,
         [&](ComponentArray<Positions, void>* posArr,
-            ComponentArray<ModelComponent, void>*,
-            ComponentArray<MaterialComponent, void>*)
+            ComponentArray<DrawComponent, void>*)
     {
         num_transform += safe_u32(posArr->size());
     }

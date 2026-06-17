@@ -53,6 +53,7 @@ SDL_AppResult Game::MainInit()
         using namespace DefaultShaderProgramSet;
         SetMainShaderProgram(ctx);
         SetDefaultShadowShaderProgram(ctx);
+        SetDebugColliderProgram(ctx);   // голый шейдер рамок коллайдеров (DEBUG_PASS)
     }
     
     auto material_car = ctx->CreateMaterial("car", {
@@ -75,6 +76,9 @@ SDL_AppResult Game::MainInit()
         {TextureSlotRole::Albedo, "albedo_cube"},
         {TextureSlotRole::Normal, "norm"} },
         { "sp", "sp_shadow" });
+
+    // Голый материал рамок коллайдеров: без текстур, только дебаг-программа (DEBUG_PASS).
+    debug_collider_material = ctx->CreateMaterial("debug_collider", {}, { "sp_debug_collider" });
 
     ModelData* model_car = ctx->CreateModel("car", "models/new_car_n_fixed.bin", "models/new_car_n_fixed_i.bin");
 
@@ -127,12 +131,60 @@ SDL_AppResult Game::MainInit()
         }
     });
 
+    // Дебаг-модели рамок: единичный куб [-1..1] и низкополигональная сфера r=1. На них
+    // ложатся матрицы форм из ContactSystem::CollectDebugShapes. UV/нормали/тангенты
+    // не нужны — дебаг-шейдер тянет только POSITION.
+    debug_box_model = ctx->CreateModel("debug_box", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
+        auto P = [](float x, float y, float z) {
+            PosUVNormal vert{}; vert.x = x; vert.y = y; vert.z = z; return vert;
+        };
+        v = {
+            P(-1,-1,-1), P( 1,-1,-1), P( 1, 1,-1), P(-1, 1,-1),   // z = -1
+            P(-1,-1, 1), P( 1,-1, 1), P( 1, 1, 1), P(-1, 1, 1),   // z = +1
+        };
+        i = {
+            0,1,2, 0,2,3,   // back
+            4,6,5, 4,7,6,   // front
+            4,0,3, 4,3,7,   // left
+            1,5,6, 1,6,2,   // right
+            4,5,1, 4,1,0,   // bottom
+            3,2,6, 3,6,7,   // top
+        };
+    });
+
+    debug_sphere_model = ctx->CreateModel("debug_sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
+        const uint32_t stacks = 8;
+        const uint32_t slices = 12;
+        const float PI = 3.14159265358979323846f;
+        for (uint32_t i = 0; i <= stacks; ++i) {
+            float phi = PI * (float)i / (float)stacks;
+            float cp = std::cos(phi), sp = std::sin(phi);
+            for (uint32_t j = 0; j <= slices; ++j) {
+                float theta = 2.0f * PI * (float)j / (float)slices;
+                float ct = std::cos(theta), st = std::sin(theta);
+                PosUVNormal vert{};
+                vert.x = sp * ct; vert.y = cp; vert.z = sp * st;
+                v.push_back(vert);
+            }
+        }
+        const uint32_t row = slices + 1;
+        for (uint32_t i = 0; i < stacks; ++i) {
+            for (uint32_t j = 0; j < slices; ++j) {
+                uint32_t a = i * row + j;
+                uint32_t b = a + row;
+                idx.push_back(a);     idx.push_back(a + 1); idx.push_back(b);
+                idx.push_back(a + 1); idx.push_back(b + 1); idx.push_back(b);
+            }
+        }
+    });
+
     ctx->CreateEntity("main_menu",
         MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
         ModelComponent{ model_car },
         PositionProxy16{ 1,0,0,3,  0,1,0,0,  0,0,1,0,  0,0,0,1 },
         ShadowComponent{},
-        ColliderComponent{}
+        ColliderComponent{},
+        DrawComponent{}
     );
     ctx->CreateEntity("main_menu",
         MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
@@ -143,7 +195,8 @@ SDL_AppResult Game::MainInit()
              0, 0, -1, 0.0,     // Z basis = (0, 0, -1)
              0, 0,  0, 1.0
         }, ShadowComponent{},
-        ColliderComponent{}
+        ColliderComponent{},
+        DrawComponent{}
     );
     ctx->CreateEntity("main_menu",
         MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
@@ -154,14 +207,16 @@ SDL_AppResult Game::MainInit()
              0, 0, -1, 2.5f,     // Z basis = (0, 0, -1)
              0, 0,  0, 1.0f
         }, ShadowComponent{},
-        ColliderComponent{}
+        ColliderComponent{},
+        DrawComponent{}
     );
     Entity parent_id = ctx->CreateEntity("main_menu",
         MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
         ModelComponent{ model_car },
         PositionProxy16{ 1,0,0,3,  0,1,0,0,  0,0,1,2.5f,  0,0,0,1 },
         ShadowComponent{},
-        ColliderComponent{}
+        ColliderComponent{},
+        DrawComponent{}
     );
 
     // Спрайт: общий единичный квад, размер берётся из пиксельного размера текстуры.
@@ -176,7 +231,8 @@ SDL_AppResult Game::MainInit()
             0, 0, 1, 0.0f,
             0, 0, 0, 1.0f
         },
-        ColliderComponent{}
+        ColliderComponent{},
+        DrawComponent{}
     );
 
     // Сфера: тот же путь (generator → staging → append), размер ~1 через диагональ.
@@ -185,7 +241,10 @@ SDL_AppResult Game::MainInit()
         ModelComponent{ sphere },
         PositionProxy16{ 1,0,0,-2.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
         ShadowComponent{},
-        ColliderComponent{}
+        // Явный сферический коллайдер (радиус 1 = радиус UV-сферы) — иначе пустой
+        // ColliderComponent уходит в fallback авто-AABB и рамка становится боксом.
+        ColliderComponent{ { Collider::Sphere(1.0f) } },
+        DrawComponent{}
     );
     //ctx->CreateEntity("main_menu",
     //    SpotLightComponent{ SpotLightComponent::SpotLightData{ 0, 1.0f, 0.0f, 0.0f, 0.18f, 1, 1, 1, 100 } },
@@ -248,8 +307,50 @@ SDL_AppResult Game::MainIterate()
         }
     }
 
+    UpdateDebugColliders();
 
     return SDL_APP_CONTINUE;
+}
+
+void Game::UpdateDebugColliders()
+{
+    // Одноразовый отложенный спавн. Формы появляются только после загрузки моделей
+    // (submeshes заполняются на prep-потоке) — пока пусто, ждём следующий кадр.
+    // Дальше делать нечего: каждая рамка — ребёнок своего владельца со статичной
+    // локальной матрицей, и движок (UpdateLocalTransforms) сам ведёт её за владельцем.
+    if (debug_colliders_spawned) return;
+
+    SceneData* scene = objectManager->GetActiveScene();
+    if (!scene) return;
+    if (!debug_collider_material || !debug_box_model || !debug_sphere_model) return;
+
+    // Ждём, пока ВСЕ модели загружены (submeshes заполняются на prep-потоке). Иначе
+    // явная форма (напр. сфера, известная сразу) сделала бы shapes непустыми до
+    // загрузки моделей машин, и одноразовый спавн создал бы только часть рамок.
+    if (debug_box_model->submeshes.empty() || debug_sphere_model->submeshes.empty()) return;
+    bool models_ready = true;
+    objectManager->ForEach<ModelComponent>(scene, [&](ModelComponent& mc) {
+        if (!mc.model || mc.model->submeshes.empty()) models_ready = false;
+    });
+    if (!models_ready) return;
+
+    std::vector<ContactSystem::DebugShape> shapes = ContactSystem::CollectDebugShapes(*objectManager, scene);
+    if (shapes.empty()) return;
+
+    for (const ContactSystem::DebugShape& s : shapes) {
+        ModelData* model = (s.kind == ShapeKind::Box) ? debug_box_model : debug_sphere_model;
+        LocalMatrixComponent lm{};
+        for (int i = 0; i < 16; ++i) lm.m[i] = s.local[i];
+        ctx->CreateEntity("main_menu",
+            MaterialComponent{ { debug_collider_material } },
+            ModelComponent{ model },
+            PositionProxy16{},          // перезапишется композицией parent × local
+            ParentComponent{ s.owner },
+            lm,
+            DrawComponent{},
+            DebugColliderTag{});
+    }
+    debug_colliders_spawned = true;
 }
 
 SDL_AppResult Game::SDL_AppEvent(SDL_Event* event)

@@ -17,6 +17,9 @@ namespace DefaultShaderProgramSet
     void SetDefaultShadowShaderProgram(EngineContext* ctx);
     void SetTransparentShaderProgram(EngineContext* ctx);
 
+    // Голый шейдер дебаг-рамок коллайдеров (без текстур), привязан к DEBUG_PASS.
+    void SetDebugColliderProgram(EngineContext* ctx);
+
     // Compute shader programs
     void SetCullingZerosPrograms(EngineContext* ctx);
     void SetCullingCountPrograms(EngineContext* ctx, LightDataModule* ldm);

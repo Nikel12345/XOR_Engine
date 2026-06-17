@@ -8,6 +8,7 @@ namespace DefaultRenderPassNamespace
 {
     inline constexpr const char* DEPTH_PASS = "_DefaultDepthRenderPass";
     inline constexpr const char* MAIN_PASS = "_DefaultMainRenderPass";
+    inline constexpr const char* DEBUG_PASS = "_DefaultDebugRenderPass";
     inline constexpr const char* SHADOW_PASS = "_DefaultShadowRenderPass";
     inline constexpr const char* CULLING_PREPASS = "_DefaultCullingComputePass";
     inline constexpr const char* CULLING_ZEROS_PREPASS = "_DefaultCullingZerosComputePass";
@@ -32,6 +33,12 @@ namespace DefaultRenderPassNamespace
     void SetDefaultShadowBlurPass(EngineContext* ctx);
 	void SetDefaultMainRenderPass(EngineContext* ctx);
     void SetDefaultMainRenderPass(EngineContext* ctx, SDL_GPUDevice* dev, SDL_Window* win);
+
+    // Цвет фрагмента дебаг-коллайдеров (push-констант, fragment slot 0).
+    struct alignas(16) DebugColliderPushData { float color[4] = { 0.0f, 1.0f, 0.2f, 1.0f }; };
+    // Пасс поверх свопчейна: рисует батчи дебаг-шейдера (рамки коллайдеров) после MAIN_PASS.
+    // Требует уже инициализированного MAIN_PASS (берёт его depth-текстуру пассивно).
+    void SetDebugColliderPass(EngineContext* ctx);
     void SetDefaultCullingComputeZerosPass(EngineContext* ctx);
 
     struct ComputeCullingCountUniform {

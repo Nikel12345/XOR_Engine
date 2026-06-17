@@ -490,6 +490,9 @@ bool Engine::RenderFunc(uint8_t slot)
 	}
 
 	pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::MAIN_PASS)->renderPassTexsData.SetColorTexture(tex);
+	// Дебаг-пасс рисует поверх того же свопчейна (LOAD). Гард — пасс может быть не создан.
+	if (RenderPassStep* debug_rp = pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::DEBUG_PASS))
+		debug_rp->renderPassTexsData.SetColorTexture(tex);
 	pass_manager->SetRenderFrame(slot);
 	pass_manager->ExecutePassesSteps(cb, slot);
 
@@ -659,6 +662,7 @@ void Engine::InitPasses()
 	SetDefaultShadowPCFRenderPass(engine_context);
 	//SetDefaultMainRenderPass(pass_manager, texture_manager, buffer_manager, dev, win);
 	SetDefaultMainRenderPass(engine_context);
+	SetDebugColliderPass(engine_context);   // рамки коллайдеров поверх свопчейна
 	//SetDefaultShadowVSMRenderPass(pass_manager, texture_manager, buffer_manager, object_manager, batch_builder);
 	//SetDefaultShadowBlurPass(pass_manager, buffer_manager); // ДЛЯ VSM
 	//SetDefaultMainRenderPass(pass_manager, texture_manager, buffer_manager);

@@ -286,10 +286,11 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
 // Must be called after any structural change to keep Entity->row mapping consistent.
 inline void RecalculateInstanceOffsets(SceneData* scene)
 {
+    // Должно отбирать ТЕ ЖЕ архетипы и в том же порядке, что TransformDataModule
+    // (инвариант «строка трансформа = render_instance_base + индекс в архетипе»).
     uint32_t base = 0;
     for (auto& [sig, arch] : scene->archetypes) {
-        if (arch.get_array<MaterialComponent>() &&
-            arch.get_array<ModelComponent>() &&
+        if (arch.get_array<DrawComponent>() &&
             arch.get_array<Positions>()) {
             arch.render_instance_base = base;
             base += safe_u32(arch.entities.size());
@@ -313,10 +314,17 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
         entities_to_delete.clear();
     }
 
-    om->ForEach<MaterialComponent, ModelComponent, Positions>(
+    // Отбор по маркеру DrawComponent (+Positions для матрицы). Геометрия/материал
+    // не часть сигнатуры — тянем через Has/GetComponent. Голый рисуемый энтити без
+    // модели/материала получит лишь трансформ-строку и не батчится.
+    om->ForEach<DrawComponent, Positions>(
         scene,
-        [&](Entity entity, const MaterialComponent& material_component, const ModelComponent& model_component, const Positions&)
+        [&](Entity entity, const DrawComponent&, const Positions&)
     {
+        if (!om->Has<ModelComponent>(scene, entity) || !om->Has<MaterialComponent>(scene, entity))
+            return;
+        const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
+        const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
         AddEntityToBatches(entity, pm, material_component, model_component);
     }
     );
@@ -343,6 +351,9 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
 
     for (Entity entity : creates) {
         if (deleted_set.count(entity)) continue;
+        // Батчим только если есть и модель, и материал (см. BuildRenderBatches).
+        if (!om->Has<ModelComponent>(scene, entity) || !om->Has<MaterialComponent>(scene, entity))
+            continue;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
         const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
         AddEntityToBatches(entity, pm, material_component, model_component);

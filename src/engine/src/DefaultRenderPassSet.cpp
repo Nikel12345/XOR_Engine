@@ -160,6 +160,45 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
     main_pass_inited = true;
 }
 
+void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
+{
+    PassManager* pm = ctx->GetRenderManager();
+    BufferManager* bm = ctx->GetBufferManager();
+    TextureManager* tm = ctx->GetTextureManager();
+
+    if (!main_pass_inited || !tm->main_pass_depth_texture) {
+        SDL_Log("SetDebugColliderPass: MAIN_PASS must be initialized first (depth texture missing).");
+        return;
+    }
+
+    // Рисуем ПОВЕРХ свопчейна: цвет грузим (LOAD), не чистим. Формат INVALID → формат
+    // свопчейна подставит PipeManager (MakeDefaultColorTarget). Глубину переиспользуем
+    // как пассивный аттачмент — дебаг-шейдер идёт с IgnoresDepth, окклюзии нет, рамки
+    // видны поверх всей геометрии.
+    auto depth_tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
+
+    RenderPassTexturesInfo debug_rptd{};
+    debug_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, SDL_GPU_TEXTUREFORMAT_INVALID);
+    debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_DONT_CARE, SDL_GPU_STOREOP_DONT_CARE, depth_tci.format);
+
+    auto debugPass = pm->CreateRenderPass(
+        DEBUG_PASS,
+        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+    {
+        // Цвет (свопчейн) ставится в Engine::RenderFunc каждый кадр; если не задан — пропуск.
+        if (!rp.renderPassTexsData.colorTargetInfo.texture) return;
+        // Цвет рамок прокидываем как push_data_raw — его читает push_func дебаг-шейдера
+        // (fragment slot 0). Другие программы к этому пассу не привязаны.
+        DebugColliderPushData color{};
+        pm->RenderPassStandardBody(cb, &rp, bm, 0, &color);
+    },
+        std::move(debug_rptd),
+        25
+    );
+
+    debugPass->renderPassTexsData.SetDepthTexture(tm->main_pass_depth_texture);
+}
+
 void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx,
     SDL_GPUDevice* dev, SDL_Window* win)
 {
