@@ -278,6 +278,11 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 						if (texture_batch.texture_uvl[i])
 							padded[i] = *texture_batch.texture_uvl[i];
 					}
+					// .x/.y/.z альбедо (offset/scale/layer) уже скопированы выше; здесь
+					// дописываем ТОЛЬКО неиспользуемый .w (_pad) — туда кладём биты
+					// per-material альфы. Шейдер читает её как asfloat(textures[0].data.w).
+					if (count > 0)
+						SDL_memcpy(&padded[0]._pad, &texture_batch.alpha, sizeof(float));
 					SDL_PushGPUFragmentUniformData(cb, uvl_slot, padded, sizeof(padded));
 				}
 				else {

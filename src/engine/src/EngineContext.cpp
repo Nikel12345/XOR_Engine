@@ -101,6 +101,16 @@ void EngineContext::DeleteEntity(const SceneName& scene_name, Entity e)
 	SceneData* target_scene = object_manager->GetScene(scene_name);
 	if (!target_scene) return;
 
+	// Каскад на детей по обратному индексу parent->children. Удаляем через ЭТОТ же
+	// метод (не напрямую ObjectManager), чтобы каждый ребёнок снял и свой рендер-инстанс
+	// (QueueDelete) — иначе его трансформ-строка осталась бы в батче и «переехала» бы на
+	// чужой объект. Список копируем — рекурсия мутирует children. O(1) на потомка.
+	if (auto it = target_scene->children.find(e); it != target_scene->children.end()) {
+		std::vector<Entity> kids = std::move(it->second);
+		target_scene->children.erase(it);
+		for (Entity c : kids) DeleteEntity(scene_name, c);
+	}
+
 	const bool needs_pib = object_manager->Has<ModelComponent>(target_scene, e)
 		&& object_manager->Has<Positions>(target_scene, e);
 

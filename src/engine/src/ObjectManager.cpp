@@ -2,6 +2,7 @@
 #include "ObjectManager.h"
 #include "TextureData.h"
 #include "ModelData.h"
+#include <algorithm>   // std::remove для отцепления ребёнка из обратного индекса
 // RenderManager.h/PipeManager.h не использовались — убраны, чтобы ECS-ядро
 // (EngineEcs) не тянуло GPU-заголовки.
 
@@ -32,8 +33,26 @@ void ObjectManager::DeleteEntity(SceneData* scene, Entity e) {
         SDL_Log("DeleteEntity: entity %u not present", e);
         return;
     }
-    Archetype* arch = arch_it->second;
 
+    // Поддержка обратного индекса иерархии. КАСКАД на детей здесь НЕ делаем — он в
+    // EngineContext::DeleteEntity, который умеет снять и рендер-инстанс ребёнка
+    // (QueueDelete); иначе трансформ-строка рамки осталась бы в батче и «переехала»
+    // бы на чужой объект. Тут — только бухгалтерия одного e.
+    // Отцепить e из списка детей его родителя (если e сам — чей-то ребёнок).
+    if (Has<ParentComponent>(scene, e)) {
+        Entity parent = GetComponent<ParentComponent>(scene, e).parent;
+        if (auto pit = scene->children.find(parent); pit != scene->children.end()) {
+            auto& v = pit->second;
+            v.erase(std::remove(v.begin(), v.end(), e), v.end());
+            if (v.empty()) scene->children.erase(pit);
+        }
+    }
+    // Снять собственную запись детей. Штатно к этому моменту она уже пуста (детей
+    // удалил каскад EngineContext); при ПРЯМОМ вызове этого метода на родителе дети
+    // осиротеют — поэтому штатный путь удаления только через EngineContext::DeleteEntity.
+    scene->children.erase(e);
+
+    Archetype* arch = arch_it->second;
     auto idx_it = scene->entity_to_index.find(e);
     SDL_assert(idx_it != scene->entity_to_index.end());
     const size_t i = idx_it->second;

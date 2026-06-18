@@ -1,4 +1,5 @@
 #include <string>
+#include <cstdint>   // uint64_t (BatchKeys)
 
 using RenderPassName = std::string;
 using ComputePassName = std::string;

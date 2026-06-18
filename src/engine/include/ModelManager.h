@@ -3,7 +3,6 @@
 #include <unordered_map>
 #include <string>
 #include <functional>
-#include <variant>
 #include "PositionStructure.h"
 #include "ModelData.h"
 
@@ -18,23 +17,16 @@ class ModelManager
 {
 public:
 	ModelManager();
-	// Регистрирует модель: читает только заголовок (сабмеши/смещения), а тяжёлые
-	// данные вершин/индексов грузит отложенно — в LoadModels во время prep-фазы.
-	// Registers a model: reads only the header (submeshes/offsets); the heavy
-	// vertex/index data is loaded lazily by LoadModels during the prep phase.
+	// Жадно читает модель с диска: заголовок, вершины/индексы в staging и submeshes —
+	// всё сразу, так что ресурс пригоден уже в init. Отложена только заливка на GPU
+	// (staging копится до батч-апдейтера). CreateModel всегда на prep-потоке.
+	// Reads the model from disk eagerly: header, vertices/indices into staging and
+	// submeshes — all up front, so the resource is usable right away in init. Only the
+	// GPU upload is deferred (staging accumulates until the batch updater).
 	ModelData* CreateModel(const std::string& name, const std::string& path, const std::string& path_ind);
 
-	// Процедурная модель: геометрию выдаёт generator. Тоже отложенная — generator
-	// вызывается в LoadModels (prep-фаза), как и чтение с диска.
+	// Процедурная модель: геометрию выдаёт generator (вызывается жадно, как и чтение с диска).
 	ModelData* CreateModel(const std::string& name, ModelGeneratorFn generator);
-
-	// Дочитывает с диска все отложенные модели во временные CPU-буферы (staging).
-	// Вызывается один раз в общей части prep-фазы (Engine::PrepareFunc), до апдейтеров.
-	// Если dirty == false — ничего не делает.
-	// Reads all pending models from disk into transient CPU staging buffers.
-	// Called once in the common prep phase (Engine::PrepareFunc), before the updaters.
-	// No-op when dirty == false.
-	void LoadModels();
 
 	uint32_t CalculateModelsVerticesSize();
 	uint32_t CalculateModelsIndicesSize();
@@ -55,22 +47,9 @@ public:
 	~ModelManager();
 
 private:
-	struct PendingModel {
-		struct FileSource {
-			std::string vert_path;
-			std::string ind_path;
-		};
-		ModelData* model = nullptr;   // куда дописать сферы сабмешей после чтения вершин
-		// Источник геометрии — ровно одно из двух, взаимоисключаемо на уровне типа:
-		//   FileSource       — читаем вершины/индексы с диска
-		//   ModelGeneratorFn — генерируем процедурно
-		std::variant<FileSource, ModelGeneratorFn> source;
-	};
-
 	std::unordered_map<std::string, std::unique_ptr<ModelData>> models_data;
 
-	// Отложенные на загрузку модели и временные буферы дозагрузки.
-	std::vector<PendingModel>     pending_models;
+	// CPU-буферы накопления: данные моделей, ещё не залитые на GPU. Очищаются после заливки.
 	std::vector<PosUVNormal>      staging_vertices;
 	std::vector<Uint32>           staging_indices;
 

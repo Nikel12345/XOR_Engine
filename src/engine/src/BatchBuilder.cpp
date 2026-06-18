@@ -191,6 +191,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
             auto texb_it = tex_map.find(tex_key);
             if (texb_it == tex_map.end()) {
                 TextureBatchData new_texb{};
+                new_texb.alpha = material->alpha;   // per-material прозрачность → .w UVL альбедо
                 new_texb.texture_uvl.reserve(material->textures.size());
                 for (const auto& role : sp->required_slots) {
                     auto it = material->textures.find(role);

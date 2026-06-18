@@ -4,7 +4,7 @@
 #include "config.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
-extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 0;
 static SDL_Window* win = NULL;
 static SDL_GPUDevice* dev = NULL;
 static constexpr float WIDTH = 800.0f;

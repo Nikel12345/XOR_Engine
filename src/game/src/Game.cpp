@@ -3,7 +3,9 @@
 #include "Game.h"
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
-#include "ContactSystem.h"   // из либы Physics
+#include "Colliders.h"             // из либы Physics: компоненты коллайдеров
+#include "ContactSystem.h"         // детекция контактов
+#include "DebugColliderSystem.h"   // отладочные рамки
 
 Game::Game(Engine* engine)
 {
@@ -53,6 +55,7 @@ SDL_AppResult Game::MainInit()
         using namespace DefaultShaderProgramSet;
         SetMainShaderProgram(ctx);
         SetDefaultShadowShaderProgram(ctx);
+        SetTransparentShaderProgram(ctx);   // прозрачная геометрия с блендингом (TRANSPARENT_PASS)
         SetDebugColliderProgram(ctx);   // голый шейдер рамок коллайдеров (DEBUG_PASS)
     }
     
@@ -68,16 +71,18 @@ SDL_AppResult Game::MainInit()
         {TextureSlotRole::Albedo, "new_car_ground"},
         {TextureSlotRole::Normal, "norm"} },
 		{ "sp", "sp_shadow" });
-    auto material_glass = ctx->CreateMaterial("glass", {
-        {TextureSlotRole::Albedo, "new_car_glass"},
-        {TextureSlotRole::Normal, "norm"} },
-		{ "sp", "sp_shadow" });
+
     auto material_sprite = ctx->CreateMaterial("sprite", {
         {TextureSlotRole::Albedo, "albedo_cube"},
         {TextureSlotRole::Normal, "norm"} },
         { "sp", "sp_shadow" });
 
-    // Голый материал рамок коллайдеров: без текстур, только дебаг-программа (DEBUG_PASS).
+    auto material_glass = ctx->CreateMaterial("transparent", {
+        {TextureSlotRole::Albedo, "new_car_glass"},
+        {TextureSlotRole::Normal, "norm"} },
+        { "sp_transparent" });
+    material_glass->alpha = 0.65f;
+
     debug_collider_material = ctx->CreateMaterial("debug_collider", {}, { "sp_debug_collider" });
 
     ModelData* model_car = ctx->CreateModel("car", "models/new_car_n_fixed.bin", "models/new_car_n_fixed_i.bin");
@@ -94,8 +99,6 @@ SDL_AppResult Game::MainInit()
         i = { 0, 1, 2, 0, 2, 3 };
     });
 
-    // Процедурная модель посложнее: UV-сфера. Вершины считаются параметрической функцией
-    // (широта/долгота), а не записываются руками. Радиус 1 — размер задаётся на инстансе.
     ModelData* sphere = ctx->CreateModel("sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
         const uint32_t stacks = 32;   // деления по широте
         const uint32_t slices = 48;   // деления по долготе
@@ -131,9 +134,6 @@ SDL_AppResult Game::MainInit()
         }
     });
 
-    // Дебаг-модели рамок: единичный куб [-1..1] и низкополигональная сфера r=1. На них
-    // ложатся матрицы форм из ContactSystem::CollectDebugShapes. UV/нормали/тангенты
-    // не нужны — дебаг-шейдер тянет только POSITION.
     debug_box_model = ctx->CreateModel("debug_box", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
         auto P = [](float x, float y, float z) {
             PosUVNormal vert{}; vert.x = x; vert.y = y; vert.z = z; return vert;
@@ -246,6 +246,7 @@ SDL_AppResult Game::MainInit()
         ColliderComponent{ { Collider::Sphere(1.0f) } },
         DrawComponent{}
     );
+
     //ctx->CreateEntity("main_menu",
     //    SpotLightComponent{ SpotLightComponent::SpotLightData{ 0, 1.0f, 0.0f, 0.0f, 0.18f, 1, 1, 1, 100 } },
     //    PositionProxy16{ 1,0,0,-2.5f,  0,1,0,0,  0,0, 1,1.25f,  0,0,0,1 },
@@ -259,8 +260,11 @@ SDL_AppResult Game::MainInit()
     );
 
 
+    // Рамки коллайдеров спавним сразу: модели загружены жадно (submeshes готовы в init).
+    UpdateDebugColliders();
+
     ChangeState(GameState::MAIN_MENU);
-    
+
     return SDL_APP_CONTINUE;
 }
 
@@ -307,37 +311,25 @@ SDL_AppResult Game::MainIterate()
         }
     }
 
-    UpdateDebugColliders();
-
     return SDL_APP_CONTINUE;
 }
 
 void Game::UpdateDebugColliders()
 {
-    // Одноразовый отложенный спавн. Формы появляются только после загрузки моделей
-    // (submeshes заполняются на prep-потоке) — пока пусто, ждём следующий кадр.
-    // Дальше делать нечего: каждая рамка — ребёнок своего владельца со статичной
-    // локальной матрицей, и движок (UpdateLocalTransforms) сам ведёт её за владельцем.
+    // Спавн рамок коллайдеров. Вызывается один раз из MainInit: модели грузятся жадно
+    // в CreateModel (submeshes готовы сразу), ждать загрузки на следующих кадрах не нужно.
+    // Каждая рамка — ребёнок своего владельца со статичной локальной матрицей, и движок
+    // (UpdateLocalTransforms) сам ведёт её за владельцем.
     if (debug_colliders_spawned) return;
 
     SceneData* scene = objectManager->GetActiveScene();
     if (!scene) return;
     if (!debug_collider_material || !debug_box_model || !debug_sphere_model) return;
 
-    // Ждём, пока ВСЕ модели загружены (submeshes заполняются на prep-потоке). Иначе
-    // явная форма (напр. сфера, известная сразу) сделала бы shapes непустыми до
-    // загрузки моделей машин, и одноразовый спавн создал бы только часть рамок.
-    if (debug_box_model->submeshes.empty() || debug_sphere_model->submeshes.empty()) return;
-    bool models_ready = true;
-    objectManager->ForEach<ModelComponent>(scene, [&](ModelComponent& mc) {
-        if (!mc.model || mc.model->submeshes.empty()) models_ready = false;
-    });
-    if (!models_ready) return;
-
-    std::vector<ContactSystem::DebugShape> shapes = ContactSystem::CollectDebugShapes(*objectManager, scene);
+    std::vector<DebugColliderSystem::DebugShape> shapes = DebugColliderSystem::CollectDebugShapes(*objectManager, scene);
     if (shapes.empty()) return;
 
-    for (const ContactSystem::DebugShape& s : shapes) {
+    for (const DebugColliderSystem::DebugShape& s : shapes) {
         ModelData* model = (s.kind == ShapeKind::Box) ? debug_box_model : debug_sphere_model;
         LocalMatrixComponent lm{};
         for (int i = 0; i < 16; ++i) lm.m[i] = s.local[i];
@@ -348,7 +340,8 @@ void Game::UpdateDebugColliders()
             ParentComponent{ s.owner },
             lm,
             DrawComponent{},
-            DebugColliderTag{});
+            DebugColliderTag{},
+            EditorHiddenComponent{});   // движковый тег: не показывать в списке объектов UI
     }
     debug_colliders_spawned = true;
 }

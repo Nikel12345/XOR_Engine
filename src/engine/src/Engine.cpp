@@ -254,8 +254,6 @@ void Engine::PrepareFunc(uint8_t slot)
 	slot_controller->SetSlotState(slot, PREPARING);
 	buffer_manager->logic_index = slot;
 
-	model_manager->LoadModels();
-
 	engine_context->CreateGraphicsPipelines();
 	engine_context->CreateComputePipelines();
 
@@ -493,6 +491,9 @@ bool Engine::RenderFunc(uint8_t slot)
 	// Дебаг-пасс рисует поверх того же свопчейна (LOAD). Гард — пасс может быть не создан.
 	if (RenderPassStep* debug_rp = pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::DEBUG_PASS))
 		debug_rp->renderPassTexsData.SetColorTexture(tex);
+	// Прозрачный пасс рисует в тот же свопчейн (LOAD). Гард — пасс может быть не создан.
+	if (RenderPassStep* transparent_rp = pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::TRANSPARENT_PASS))
+		transparent_rp->renderPassTexsData.SetColorTexture(tex);
 	pass_manager->SetRenderFrame(slot);
 	pass_manager->ExecutePassesSteps(cb, slot);
 
@@ -568,6 +569,9 @@ void Engine::OnWindowResized(Sint32 w, Sint32 h)
 	texture_manager->main_pass_depth_texture = new_depth_texture;
 
 	pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::MAIN_PASS)->renderPassTexsData.SetDepthTexture(texture_manager->main_pass_depth_texture);
+	// Прозрачный пасс тестит ту же depth-текстуру MAIN_PASS — переназначаем после ресайза.
+	if (RenderPassStep* transparent_rp = pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::TRANSPARENT_PASS))
+		transparent_rp->renderPassTexsData.SetDepthTexture(texture_manager->main_pass_depth_texture);
 }
 
 Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height)
@@ -662,6 +666,7 @@ void Engine::InitPasses()
 	SetDefaultShadowPCFRenderPass(engine_context);
 	//SetDefaultMainRenderPass(pass_manager, texture_manager, buffer_manager, dev, win);
 	SetDefaultMainRenderPass(engine_context);
+	SetTransparentPass(engine_context);     // прозрачная геометрия (блендинг) поверх сцены
 	SetDebugColliderPass(engine_context);   // рамки коллайдеров поверх свопчейна
 	//SetDefaultShadowVSMRenderPass(pass_manager, texture_manager, buffer_manager, object_manager, batch_builder);
 	//SetDefaultShadowBlurPass(pass_manager, buffer_manager); // ДЛЯ VSM

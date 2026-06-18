@@ -22,6 +22,24 @@ namespace DefaultShaderProgramSet
     bool culling_write_inited = false;
 
     bool shadow_blur_inited = false;
+
+    // Общий VS для main и transparent пассов: один GPU-шейдер на оба (не плодим дубль).
+    // Создаётся лениво при первом запросе; копия VertexShaderData переиспользует тот же
+    // SDL_GPUShader*, поэтому передача по значению в CreateShaderProgram безопасна.
+    static VertexShaderData main_pass_vs;
+    static bool main_pass_vs_inited = false;
+
+    static VertexShaderData GetMainPassVertexShader(EngineContext* ctx)
+    {
+        using namespace DefaultBuffersNames;
+        if (!main_pass_vs_inited) {
+            main_pass_vs = ctx->CreateVertexShader(
+                "../engine/shaders_code/main_pass/main_pass.vert.hlsl",
+                { { DEFAULT_VERTEX_BUFFER, &FMT_PosUVNormal, {POSITION, UV, NORMAL, TANGENT} } });
+            main_pass_vs_inited = true;
+        }
+        return main_pass_vs;
+    }
 }
 
 void DefaultShaderProgramSet::SetMainShaderProgram(EngineContext* ctx)
@@ -31,7 +49,7 @@ void DefaultShaderProgramSet::SetMainShaderProgram(EngineContext* ctx)
         SDL_Log("Main render shader programs already initialized.");
         return;
     }
-    VertexShaderData vs = ctx->CreateVertexShader("../engine/shaders_code/main_pass/main_pass.vert.hlsl", { { DEFAULT_VERTEX_BUFFER, &FMT_PosUVNormal, {POSITION, UV, NORMAL, TANGENT} } });
+    VertexShaderData vs = GetMainPassVertexShader(ctx);
     FragmentShaderData fs = ctx->CreateFragmentShader("../engine/shaders_code/main_pass/main_pass.frag.hlsl");
 	FragmentShaderData fs_debug = ctx->CreateFragmentShader("../engine/shaders_code/main_pass/debug_pass.frag.hlsl");
     ShaderProgramDescription* spd_main =
@@ -102,6 +120,24 @@ void DefaultShaderProgramSet::SetTransparentShaderProgram(EngineContext* ctx)
         SDL_Log("Transparent render shader programs already initialized.");
         return;
     }
+
+    // VS переиспользуем из main-пасса (общий статик — без дубля GPU-шейдера).
+    VertexShaderData vs = GetMainPassVertexShader(ctx);
+    FragmentShaderData fs = ctx->CreateFragmentShader("../engine/shaders_code/transparent_pass/transparent.frag.hlsl");
+
+    // Блендинг + depth-test без записи (см. BehavesAsTransparentGeometry).
+    ShaderProgramDescription* spd_transparent =
+        ctx->CreateShaderProgramDescription("spd_transparent")
+        ->BehavesAsTransparentGeometry()->DoesNotCull();
+
+    // Без shadow-байндингов: только albedo+normal (2 сэмплера) и буфер света (storage t2).
+    ctx->CreateShaderProgram("sp_transparent", spd_transparent, DefaultRenderPassNamespace::TRANSPARENT_PASS,
+        vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER },
+        fs, { DEFAULT_LIGHT_BUFFER },
+        { TextureSlotRole::Albedo, TextureSlotRole::Normal }
+    );
+
+    render_transparent_inited = true;
 }
 
 void DefaultShaderProgramSet::SetDebugColliderProgram(EngineContext* ctx)
@@ -122,7 +158,7 @@ void DefaultShaderProgramSet::SetDebugColliderProgram(EngineContext* ctx)
 
     ShaderProgramDescription* spd =
         ctx->CreateShaderProgramDescription("spd_debug_collider")
-        ->DoesNotCull()->IgnoresDepth()->Wireframe();
+        ->DoesNotCull()->ReadsDepthOnly()->Wireframe();   // depth-тест вкл, запись выкл — окклюзия рамок
 
     ShaderProgram* sp = ctx->CreateShaderProgram("sp_debug_collider", spd,
         DefaultRenderPassNamespace::DEBUG_PASS,

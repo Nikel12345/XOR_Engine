@@ -25,6 +25,7 @@ struct TextureBatchData {
     std::unordered_map<ModelBatchKey, ModelBatchData> model_batches;
 	std::vector<TextureData*> texture_uvl;
     uint32_t indirect_command_index = 0;
+    float alpha = 1.0f;   // копия Material::alpha — пишется в .w UVL альбедо при пуше
 };
 
 struct AtlasBatchData {

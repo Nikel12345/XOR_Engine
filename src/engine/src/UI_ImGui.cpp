@@ -42,17 +42,20 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
 
     if (ImGui::TreeNode("Mesh Objects"))
     {
-        int index = 0;
         std::vector<Entity> to_delete;
 
         objectManager->ForEach<Positions, MaterialComponent, ModelComponent>(scene,
-            [&index, &to_delete](Entity e, SoAElement<Positions> pos_el, MaterialComponent&, ModelComponent&)
+            [&](Entity e, SoAElement<Positions> pos_el, MaterialComponent&, ModelComponent&)
         {
+            // Вспомогательная визуализация (debug-рамки коллайдеров и т.п.) помечена
+            // движковым тегом EditorHiddenComponent — в список реальных объектов не выводим.
+            if (objectManager->Has<EditorHiddenComponent>(scene, e)) return;
+
             Positions& P = pos_el.container();
             size_t i = pos_el.i();
 
             char label[32];
-            snprintf(label, sizeof(label), "Mesh %d", index++);
+            snprintf(label, sizeof(label), "Entity %u", static_cast<unsigned>(e));
 
             if (ImGui::TreeNode(label))
             {

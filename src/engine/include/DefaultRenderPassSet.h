@@ -8,6 +8,7 @@ namespace DefaultRenderPassNamespace
 {
     inline constexpr const char* DEPTH_PASS = "_DefaultDepthRenderPass";
     inline constexpr const char* MAIN_PASS = "_DefaultMainRenderPass";
+    inline constexpr const char* TRANSPARENT_PASS = "_DefaultTransparentRenderPass";
     inline constexpr const char* DEBUG_PASS = "_DefaultDebugRenderPass";
     inline constexpr const char* SHADOW_PASS = "_DefaultShadowRenderPass";
     inline constexpr const char* CULLING_PREPASS = "_DefaultCullingComputePass";
@@ -39,6 +40,12 @@ namespace DefaultRenderPassNamespace
     // Пасс поверх свопчейна: рисует батчи дебаг-шейдера (рамки коллайдеров) после MAIN_PASS.
     // Требует уже инициализированного MAIN_PASS (берёт его depth-текстуру пассивно).
     void SetDebugColliderPass(EngineContext* ctx);
+
+    // Прозрачный пасс поверх свопчейна: рисует батчи с блендингом после MAIN_PASS.
+    // Грузит depth из MAIN_PASS и только тестит его (без записи) — корректная окклюзия.
+    // Требует уже инициализированного MAIN_PASS (берёт его depth-текстуру).
+    void SetTransparentPass(EngineContext* ctx);
+
     void SetDefaultCullingComputeZerosPass(EngineContext* ctx);
 
     struct ComputeCullingCountUniform {

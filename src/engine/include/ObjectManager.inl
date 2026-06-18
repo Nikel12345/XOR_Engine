@@ -36,12 +36,29 @@ Entity ObjectManager::CreateEntity(const std::string& scene_name, Components&&..
         }()
             ));
 
+    // РЎРЅРёРјР°РµРј parent Р”Рћ add_components (РґР°Р»СЊС€Рµ comps С„РѕСЂРІР°СЂРґСЏС‚СЃСЏ РІ С…СЂР°РЅРёР»РёС‰Рµ).
+    bool has_parent = false;
+    Entity parent_id = 0;
+    (..., (
+        [&] {
+            using T = std::decay_t<decltype(comps)>;
+            if constexpr (std::is_same_v<T, ParentComponent>) {
+                has_parent = true;
+                parent_id = comps.parent;
+            }
+        }()
+            ));
+
     add_components(arch, std::forward<Components>(comps)...);
     scene->entity_to_archetype[e] = &arch;
     scene->entity_to_index[e] = arch.entities.size() - 1;
 
+    // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј СЂРµР±С‘РЅРєР° РІ РѕР±СЂР°С‚РЅРѕРј РёРЅРґРµРєСЃРµ РёРµСЂР°СЂС…РёРё (РґР»СЏ РєР°СЃРєР°РґРЅРѕРіРѕ СѓРґР°Р»РµРЅРёСЏ).
+    if (has_parent)
+        scene->children[parent_id].push_back(e);
+
 	dirty_entity = true;
-	
+
     return e;
 }
 
@@ -54,7 +71,7 @@ void ObjectManager::ForEachArchetype(SceneData* scene, Fn&& fn) {
             return (... && (arr != nullptr));
             }, arrs);
         if (!all_present) continue;
-        // Передаём указатели!
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ!
         std::apply([&](auto*... arr) {
             fn(arr...);
             }, arrs);
@@ -83,12 +100,12 @@ void ObjectManager::ForEach(SceneData* scene, Fn&& fn) {
         return;
     }
 
-    // Важно: fn используется многократно, поэтому НЕ двигаем его (не std::forward в вызовах)
+    // пїЅпїЅпїЅпїЅпїЅ: fn пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ (пїЅпїЅ std::forward пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ)
     auto& f = fn;
 
     constexpr bool all_soa = (is_soa<Ts>::value && ...);
 
-    // Если лямбда принимает Entity первым аргументом — будем передавать Entity
+    // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ Entity пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ Entity
     constexpr bool wants_entity =
         std::is_invocable_v<std::decay_t<Fn>, Entity, foreach_arg_t<Ts>...>;
 
@@ -101,15 +118,15 @@ void ObjectManager::ForEach(SceneData* scene, Fn&& fn) {
         }, arrs);
         if (!all_present) continue;
 
-        // Быстрый путь "батч по контейнерам" оставляем только когда Entity не нужен
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ "пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ" пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ Entity пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
         if constexpr (all_soa && !wants_entity) {
             std::apply([&](auto*... arr) {
                 f((arr->data)...);
             }, arrs);
         }
         else {
-            // Всегда по индексам — чтобы можно было выдать Entity
-            const size_t count = arch.entities.size(); // авторитетный размер
+            // пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ Entity
+            const size_t count = arch.entities.size(); // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 
             for (size_t i = 0; i < count; ++i) {
                 Entity e = arch.entities[i];
@@ -133,13 +150,13 @@ void ObjectManager::add_components(Archetype& arch, Components&&... comps) {
         [&] {
             using T = std::decay_t<decltype(comps)>;
             if constexpr (has_related_soa<T>::value) {
-                // Это прокси, нужен SoA-контейнер:
+                // пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ SoA-пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ:
                 using SoA = typename T::related_soa;
                 if (auto* arr = arch.get_array<SoA>())
                     arr->add(comps);
             }
             else {
-                // Обычный AoS
+                // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ AoS
                 if (auto* arr = arch.get_array<T>())
                     arr->add(std::forward<T>(comps));
             }

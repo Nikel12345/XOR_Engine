@@ -141,7 +141,8 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
 
     RenderPassTexturesInfo main_rptd{};
     main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.1f,0.1f,0.14f,1.0f }, SDL_GPU_TEXTUREFORMAT_INVALID);
-    main_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_DONT_CARE, tci.format);
+    // STORE (был DONT_CARE) — depth сцены нужен DEBUG_PASS для окклюзии рамок коллайдеров.
+    main_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, tci.format);
 
     auto mainPass = pm->CreateRenderPass(
         MAIN_PASS,
@@ -172,14 +173,14 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
     }
 
     // Рисуем ПОВЕРХ свопчейна: цвет грузим (LOAD), не чистим. Формат INVALID → формат
-    // свопчейна подставит PipeManager (MakeDefaultColorTarget). Глубину переиспользуем
-    // как пассивный аттачмент — дебаг-шейдер идёт с IgnoresDepth, окклюзии нет, рамки
-    // видны поверх всей геометрии.
+    // свопчейна подставит PipeManager (MakeDefaultColorTarget). Depth ЗАГРУЖАЕМ из
+    // MAIN_PASS (LOAD) — дебаг-шейдер тестит его (ReadsDepthOnly), поэтому рамки
+    // перекрываются геометрией сцены. depth_write выключен → рамки не портят буфер.
     auto depth_tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
 
     RenderPassTexturesInfo debug_rptd{};
     debug_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, SDL_GPU_TEXTUREFORMAT_INVALID);
-    debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_DONT_CARE, SDL_GPU_STOREOP_DONT_CARE, depth_tci.format);
+    debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, depth_tci.format);
 
     auto debugPass = pm->CreateRenderPass(
         DEBUG_PASS,
@@ -197,6 +198,42 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
     );
 
     debugPass->renderPassTexsData.SetDepthTexture(tm->main_pass_depth_texture);
+}
+
+void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
+{
+    PassManager* pm = ctx->GetRenderManager();
+    BufferManager* bm = ctx->GetBufferManager();
+    TextureManager* tm = ctx->GetTextureManager();
+
+    if (!main_pass_inited || !tm->main_pass_depth_texture) {
+        SDL_Log("SetTransparentPass: MAIN_PASS must be initialized first (depth texture missing).");
+        return;
+    }
+
+    // Цвет грузим (LOAD) — рисуем поверх непрозрачной сцены в свопчейне. Depth ЗАГРУЖАЕМ
+    // из MAIN_PASS и только тестим (depth_write выключен у программы) — прозрачная
+    // геометрия корректно перекрывается непрозрачной, но не портит depth-буфер.
+    // Блендинг включается на стороне программы через BehavesAsTransparentGeometry.
+    auto depth_tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
+
+    RenderPassTexturesInfo transparent_rptd{};
+    transparent_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, SDL_GPU_TEXTUREFORMAT_INVALID);
+    transparent_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, depth_tci.format);
+
+    auto transparentPass = pm->CreateRenderPass(
+        TRANSPARENT_PASS,
+        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+    {
+        // Цвет (свопчейн) ставится в Engine::RenderFunc каждый кадр; если не задан — пропуск.
+        if (!rp.renderPassTexsData.colorTargetInfo.texture) return;
+        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
+    },
+        std::move(transparent_rptd),
+        22   // между MAIN_PASS (20) и DEBUG_PASS (25)
+    );
+
+    transparentPass->renderPassTexsData.SetDepthTexture(tm->main_pass_depth_texture);
 }
 
 void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx,

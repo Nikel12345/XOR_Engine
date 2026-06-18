@@ -16,7 +16,9 @@ void RenderPassTexturesInfo::CreateDepthTextureInfo(SDL_GPULoadOp load_op, SDL_G
 	depthTargetInfo.clear_stencil = 0;
 	depthTargetInfo.load_op = load_op;
 	depthTargetInfo.store_op = store_op;
-	depthTargetInfo.cycle = true;
+	// cycle (ротация субресурса) несовместим с LOAD — при загрузке надо переиспользовать
+	// существующий depth (иначе SDL ассертит). Циклим только когда не грузим.
+	depthTargetInfo.cycle = (load_op != SDL_GPU_LOADOP_LOAD);
 	depthTargetInfo.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
 	depthTargetInfo.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 	depth_format = format;

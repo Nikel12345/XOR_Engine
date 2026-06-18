@@ -1,8 +1,18 @@
 #pragma once
+// Самодостаточные инклуды: заголовок включают и PCH-free либы (Physics), и IDE
+// индексирует его без форс-инклуда PCH — поэтому всё используемое тянем сами, не
+// полагаясь на PCH/транзитив (иначе uint32_t→Entity не виден и IntelliSense метит
+// каждый компонент как неполный тип).
+#include <cstdint>        // uint32_t (Entity)
+#include <cstddef>        // size_t
 #include <vector>
 #include <unordered_map>
 #include <typeindex>
 #include <memory>
+#include <tuple>          // std::tie, std::apply
+#include <utility>        // std::move
+#include <type_traits>    // is_soa/has_related_soa, std::enable_if_t, std::void_t
+#include <cmath>          // std::sqrt, std::tan (Resolve* в лайтах)
 #include <SDL3/SDL.h>
 
 struct ModelData;
@@ -139,6 +149,12 @@ struct ParentProxy {
 struct ParentComponent {
     Entity parent;
 };
+
+// Маркер «скрыть из редактора»: движковое понятие видимости в UI. Энтити с этим
+// тегом не выводятся в списке объектов (вспомогательная визуализация — debug-рамки
+// коллайдеров и т.п.). Верхние либы (Physics/игра) вешают его сами; движок при этом
+// не знает про их типы-теги — он фильтрует по своему.
+struct EditorHiddenComponent {};
 
 // Локальная (относительно родителя) матрица 4×4 в column-major раскладке glm
 // (m[0..3] = столбец 0 = образ X-оси, m[12..14] = трансляция). Каждый кадр

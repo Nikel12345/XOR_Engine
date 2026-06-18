@@ -31,15 +31,12 @@ static void BuildSubmeshes(const std::vector<PosUVNormal>& staging, ModelData* m
         sub.sphere = glm::vec4(0.0f);
 
         if (e.vertexCount > 0) {
+            const PosUVNormal& v0 = staging[vbase + e.vertexOffset];
             glm::vec3 center(0.0f);
-            const glm::vec3 first(
-                staging[vbase + e.vertexOffset].x,
-                staging[vbase + e.vertexOffset].y,
-                staging[vbase + e.vertexOffset].z);
-            glm::vec3 mn = first, mx = first;   // AABB по вершинам сабмеша
+            glm::vec3 mn(v0.x, v0.y, v0.z), mx(v0.x, v0.y, v0.z);
             for (uint32_t k = 0; k < e.vertexCount; ++k) {
                 const PosUVNormal& v = staging[vbase + e.vertexOffset + k];
-                const glm::vec3 p(v.x, v.y, v.z);
+                glm::vec3 p(v.x, v.y, v.z);
                 center += p;
                 mn = glm::min(mn, p);
                 mx = glm::max(mx, p);
@@ -53,8 +50,9 @@ static void BuildSubmeshes(const std::vector<PosUVNormal>& staging, ModelData* m
                 if (d > radius) radius = d;
             }
             sub.sphere = glm::vec4(center, radius);
+            // Локальный AABB сабмеша (для авто-боксов коллайдера в ColliderQuery).
             sub.aabb_center = (mn + mx) * 0.5f;
-            sub.aabb_half   = (mx - mn) * 0.5f;
+            sub.aabb_half = (mx - mn) * 0.5f;
         }
         model->submeshes.push_back(sub);
     }
@@ -68,17 +66,94 @@ ModelData* ModelManager::CreateModel(const std::string& name, const std::string&
         return it->second.get();
     }
 
-    // Никакого чтения с диска: только регистрируем модель. Заголовок, данные, сабмеши,
-    // смещения и сферы — всё в LoadModels (prep-фаза). Возвращаем пока пустой ModelData:
-    // submeshes заполнятся до батч-билдера, который их единственный и читает.
     auto model_data = std::make_unique<ModelData>();
     ModelData* ptr = model_data.get();
     models_data[name] = std::move(model_data);
 
-    PendingModel pm;
-    pm.model = ptr;
-    pm.source = PendingModel::FileSource{ path_vert, path_ind };
-    pending_models.push_back(std::move(pm));
+    // Жадное чтение: submeshes готовы сразу после возврата (CreateModel всегда на prep-потоке,
+    // гонок с общим staging нет). Отложена только заливка на GPU — staging копит данные
+    // моделей до батч-апдейтера, который дозаписывает их в конец GPU-буфера.
+    // Курсоры глобальных смещений = уже залито (total_*) + уже в staging (ещё не залито).
+    const size_t   vbase = staging_vertices.size();
+    const uint32_t voff = total_vertices_count + safe_u32(staging_vertices.size());
+    const uint32_t ioff = total_indices_count + safe_u32(staging_indices.size());
+
+    std::vector<SubMeshFileEntry> entries;
+
+    // --- 1. заголовок вершинного файла + размеры (без роста staging) ---
+    std::ifstream vf(path_vert, std::ios::binary);
+    if (!vf) {
+        SDL_Log("CreateModel: failed to open vertex file: %s", path_vert.c_str());
+        assert(false && "CreateModel: failed to open vertex file");
+        return ptr;
+    }
+    uint32_t submesh_count = 0;
+    vf.read(reinterpret_cast<char*>(&submesh_count), sizeof(uint32_t));
+    if (!vf || submesh_count == 0) {
+        SDL_Log("CreateModel: failed to read submesh count from: %s", path_vert.c_str());
+        assert(false && "CreateModel: bad submesh count");
+        return ptr;
+    }
+    entries.resize(submesh_count);
+    vf.read(reinterpret_cast<char*>(entries.data()), submesh_count * sizeof(SubMeshFileEntry));
+    if (!vf) {
+        SDL_Log("CreateModel: failed to read submesh entries from: %s", path_vert.c_str());
+        assert(false && "CreateModel: bad submesh entries");
+        return ptr;
+    }
+
+    size_t header_size = sizeof(uint32_t) + submesh_count * sizeof(SubMeshFileEntry);
+    vf.seekg(0, std::ios::end);
+    size_t file_size = vf.tellg();
+    size_t vdata_size = file_size - header_size;
+    if (vdata_size == 0 || vdata_size % sizeof(PosUVNormal) != 0) {
+        SDL_Log("CreateModel: invalid vertex data size in: %s", path_vert.c_str());
+        assert(false && "CreateModel: invalid vertex data size");
+        return ptr;
+    }
+    uint32_t vcount = safe_u32(vdata_size / sizeof(PosUVNormal));
+
+    // --- 2. размер индексного файла (без роста staging) ---
+    std::ifstream indf(path_ind, std::ios::binary);
+    if (!indf) {
+        SDL_Log("CreateModel: failed to open index file: %s", path_ind.c_str());
+        assert(false && "CreateModel: failed to open index file");
+        return ptr;
+    }
+    indf.seekg(0, std::ios::end);
+    size_t isize = indf.tellg();
+    indf.seekg(0, std::ios::beg);
+    if (isize == 0 || isize % sizeof(uint32_t) != 0) {
+        SDL_Log("CreateModel: index file empty or invalid: %s", path_ind.c_str());
+        assert(false && "CreateModel: invalid index file");
+        return ptr;
+    }
+    uint32_t icount = safe_u32(isize / sizeof(uint32_t));
+
+    // Все проверки пройдены — растим staging и читаем данные.
+    // --- 3. вершины ---
+    vf.seekg(static_cast<std::streamoff>(header_size), std::ios::beg);
+    staging_vertices.resize(vbase + vcount, PosUVNormal{});
+    vf.read(reinterpret_cast<char*>(staging_vertices.data() + vbase), vdata_size);
+    if (!vf) {
+        SDL_Log("CreateModel: incomplete vertex read (%zu / %zu) from %s",
+            size_t(vf.gcount()), vdata_size, path_vert.c_str());
+        assert(false && "CreateModel: incomplete vertex read");
+    }
+
+    // --- 4. индексы ---
+    size_t ibase = staging_indices.size();
+    staging_indices.resize(ibase + icount, 0);
+    indf.read(reinterpret_cast<char*>(staging_indices.data() + ibase), isize);
+    if (!indf) {
+        SDL_Log("CreateModel: incomplete index read (%zu / %zu) from %s",
+            size_t(indf.gcount()), isize, path_ind.c_str());
+        assert(false && "CreateModel: incomplete index read");
+    }
+
+    // --- 5. сабмеши + bounding sphere ---
+    BuildSubmeshes(staging_vertices, ptr, entries, vbase, voff, ioff);
+
     dirty = true;
     dirty_spheres = true;
     return ptr;
@@ -92,142 +167,40 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
         return it->second.get();
     }
 
-    // Никакой генерации здесь: только регистрируем. generator вызовется в LoadModels.
     auto model_data = std::make_unique<ModelData>();
     ModelData* ptr = model_data.get();
     models_data[name] = std::move(model_data);
 
-    PendingModel pm;
-    pm.model = ptr;
-    pm.source = std::move(generator);
-    pending_models.push_back(std::move(pm));
+    // Жадная генерация: submeshes готовы сразу (как и у дискового пути). Отложена только заливка.
+    const size_t   vbase = staging_vertices.size();
+    const uint32_t voff = total_vertices_count + safe_u32(staging_vertices.size());
+    const uint32_t ioff = total_indices_count + safe_u32(staging_indices.size());
+
+    std::vector<PosUVNormal> verts;
+    std::vector<Uint32>      inds;
+    if (generator) generator(verts, inds);
+    if (verts.empty() || inds.empty()) {
+        SDL_Log("CreateModel: generator produced empty mesh for '%s'", name.c_str());
+        assert(false && "CreateModel: empty procedural mesh");
+        return ptr;
+    }
+    uint32_t vcount = safe_u32(verts.size());
+    uint32_t icount = safe_u32(inds.size());
+    staging_vertices.insert(staging_vertices.end(), verts.begin(), verts.end());
+    staging_indices.insert(staging_indices.end(), inds.begin(), inds.end());
+
+    // Вся геометрия — один сабмеш, материал 0.
+    std::vector<SubMeshFileEntry> entries{ SubMeshFileEntry{ 0, 0, vcount, icount, 0 } };
+    BuildSubmeshes(staging_vertices, ptr, entries, vbase, voff, ioff);
+
     dirty = true;
     dirty_spheres = true;
     return ptr;
 }
 
-void ModelManager::LoadModels()
-{
-    if (!dirty) return;
-
-    staging_vertices.clear();
-    staging_indices.clear();
-
-    // Курсоры-смещения идут от уже залитого на GPU объёма. Постоянные счётчики
-    // (total_*) двигаются только при финализации после реальной заливки — поэтому
-    // повторный LoadModels без финализации идемпотентен (пересчитает те же смещения).
-    uint32_t voff = total_vertices_count;
-    uint32_t ioff = total_indices_count;
-
-    for (const PendingModel& pm : pending_models) {
-        std::vector<SubMeshFileEntry> entries;
-        size_t   vbase = staging_vertices.size();
-        uint32_t vcount = 0;
-        uint32_t icount = 0;
-
-        if (auto* gen = std::get_if<ModelGeneratorFn>(&pm.source)) {
-            // --- Процедурная модель: генератор сам выдаёт вершины/индексы ---
-            std::vector<PosUVNormal> verts;
-            std::vector<Uint32>      inds;
-            (*gen)(verts, inds);
-            if (verts.empty() || inds.empty()) {
-                SDL_Log("LoadModels: generator produced empty mesh");
-                assert(false && "LoadModels: empty procedural mesh");
-                continue;
-            }
-            vcount = safe_u32(verts.size());
-            icount = safe_u32(inds.size());
-            staging_vertices.insert(staging_vertices.end(), verts.begin(), verts.end());
-            staging_indices.insert(staging_indices.end(), inds.begin(), inds.end());
-            // Вся геометрия — один сабмеш, материал 0.
-            entries.push_back(SubMeshFileEntry{ 0, 0, vcount, icount, 0 });
-        }
-        else {
-            const PendingModel::FileSource& fs = std::get<PendingModel::FileSource>(pm.source);
-
-            // --- 1. заголовок вершинного файла + размеры (без роста staging) ---
-            std::ifstream vf(fs.vert_path, std::ios::binary);
-            if (!vf) {
-                SDL_Log("LoadModels: failed to open vertex file: %s", fs.vert_path.c_str());
-                assert(false && "LoadModels: failed to open vertex file");
-                continue;
-            }
-            uint32_t submesh_count = 0;
-            vf.read(reinterpret_cast<char*>(&submesh_count), sizeof(uint32_t));
-            if (!vf || submesh_count == 0) {
-                SDL_Log("LoadModels: failed to read submesh count from: %s", fs.vert_path.c_str());
-                assert(false && "LoadModels: bad submesh count");
-                continue;
-            }
-            entries.resize(submesh_count);
-            vf.read(reinterpret_cast<char*>(entries.data()), submesh_count * sizeof(SubMeshFileEntry));
-            if (!vf) {
-                SDL_Log("LoadModels: failed to read submesh entries from: %s", fs.vert_path.c_str());
-                assert(false && "LoadModels: bad submesh entries");
-                continue;
-            }
-
-            size_t header_size = sizeof(uint32_t) + submesh_count * sizeof(SubMeshFileEntry);
-            vf.seekg(0, std::ios::end);
-            size_t file_size = vf.tellg();
-            size_t vdata_size = file_size - header_size;
-            if (vdata_size == 0 || vdata_size % sizeof(PosUVNormal) != 0) {
-                SDL_Log("LoadModels: invalid vertex data size in: %s", fs.vert_path.c_str());
-                assert(false && "LoadModels: invalid vertex data size");
-                continue;
-            }
-            vcount = safe_u32(vdata_size / sizeof(PosUVNormal));
-
-            // --- 2. размер индексного файла (без роста staging) ---
-            std::ifstream indf(fs.ind_path, std::ios::binary);
-            if (!indf) {
-                SDL_Log("LoadModels: failed to open index file: %s", fs.ind_path.c_str());
-                assert(false && "LoadModels: failed to open index file");
-                continue;
-            }
-            indf.seekg(0, std::ios::end);
-            size_t isize = indf.tellg();
-            indf.seekg(0, std::ios::beg);
-            if (isize == 0 || isize % sizeof(uint32_t) != 0) {
-                SDL_Log("LoadModels: index file empty or invalid: %s", fs.ind_path.c_str());
-                assert(false && "LoadModels: invalid index file");
-                continue;
-            }
-            icount = safe_u32(isize / sizeof(uint32_t));
-
-            // Все проверки пройдены — теперь растим staging и читаем данные.
-            // --- 3. вершины ---
-            vf.seekg(static_cast<std::streamoff>(header_size), std::ios::beg);
-            staging_vertices.resize(vbase + vcount, PosUVNormal{});
-            vf.read(reinterpret_cast<char*>(staging_vertices.data() + vbase), vdata_size);
-            if (!vf) {
-                SDL_Log("LoadModels: incomplete vertex read (%zu / %zu) from %s",
-                    size_t(vf.gcount()), vdata_size, fs.vert_path.c_str());
-                assert(false && "LoadModels: incomplete vertex read");
-            }
-
-            // --- 4. индексы ---
-            size_t ibase = staging_indices.size();
-            staging_indices.resize(ibase + icount, 0);
-            indf.read(reinterpret_cast<char*>(staging_indices.data() + ibase), isize);
-            if (!indf) {
-                SDL_Log("LoadModels: incomplete index read (%zu / %zu) from %s",
-                    size_t(indf.gcount()), isize, fs.ind_path.c_str());
-                assert(false && "LoadModels: incomplete index read");
-            }
-        }
-
-        // --- сабмеши + bounding sphere (общее для диска и генератора) ---
-        BuildSubmeshes(staging_vertices, pm.model, entries, vbase, voff, ioff);
-
-        voff += vcount;
-        ioff += icount;
-    }
-}
-
 uint32_t ModelManager::CalculateModelsVerticesSize()
 {
-    // Чистый геттер: staging уже заполнен LoadModels в общей части prep-фазы.
+    // Чистый геттер: staging заполнен жадно в CreateModel.
     if (!dirty)
         return 0;
     return safe_u32(staging_vertices.size() * sizeof(PosUVNormal));
@@ -254,8 +227,8 @@ void ModelManager::UploadModelIndexBuffer(BufferManager* bm, UploadTask* task)
     bm->UploadToTransferBuffer(task, ibytes, staging_indices.data());
 
     // Индексный апдейтер идёт последним — финализируем цикл дозагрузки.
-    // Счётчики двигаем только здесь, после реальной заливки (см. LoadModels: курсоры
-    // идут от total_*, поэтому повторный LoadModels без финализации идемпотентен).
+    // Счётчики двигаем только здесь, после реальной заливки: пока модели лежат в staging,
+    // CreateModel считает их смещения от total_* + размера staging (см. курсоры там).
     total_vertices_count += safe_u32(staging_vertices.size());
     total_indices_count += safe_u32(staging_indices.size());
     gpu_vertices_bytes += safe_u32(staging_vertices.size() * sizeof(PosUVNormal));
@@ -265,7 +238,6 @@ void ModelManager::UploadModelIndexBuffer(BufferManager* bm, UploadTask* task)
     staging_vertices.shrink_to_fit();
     staging_indices.clear();
     staging_indices.shrink_to_fit();
-    pending_models.clear();
 
     dirty = false;
 }
@@ -283,7 +255,6 @@ ModelData* ModelManager::operator[](const std::string& name)
 ModelManager::~ModelManager()
 {
     models_data.clear();
-    pending_models.clear();
     staging_vertices.clear();
     staging_indices.clear();
 }
