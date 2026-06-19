@@ -34,3 +34,18 @@ struct TextureHandle {
 	uint32_t width = 0;   // нативный размер картинки в пикселях, пишется при загрузке
 	uint32_t height = 0;  // (точный исходник, без round-trip через unorm16 uv_packed_scale)
 };
+
+class TextureManager;
+
+// Depth-таргет, разделяемый несколькими проходами и привязанный к размеру свопчейна.
+// Владелец — TextureManager. Проходы ссылаются на него КОСВЕННО (RenderPassTexturesInfo::shared_depth)
+// и резолвят актуальный texture в момент begin прохода, поэтому ресайз = один вызов Resize(),
+// без поимённого переназначения по проходам. Старая текстура уходит в отложенное удаление
+// (живёт ещё BUFFERING_LEVEL кадров, пока её могут читать кадры in-flight).
+struct SharedDepthTarget {
+	SDL_GPUTexture* texture = nullptr;
+	SDL_GPUTextureCreateInfo tci{};
+	TextureManager* owner = nullptr;
+
+	void Resize(uint32_t w, uint32_t h);
+};

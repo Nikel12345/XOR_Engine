@@ -46,6 +46,13 @@ static const float AMBIENT_LIGHT = 0.75;    // пол освещённости (
 static const float SHADOW_BIAS_MIN = 0.002;   // прямой угол
 static const float SHADOW_BIAS_MAX = 0.012;   // скользящий угол
 
+// Directional CSM: bias в МИРОВЫХ единицах через размер текселя каскада (he и far берём
+// из его proj). Так acne одинаково отсутствует на всех каскадах и любом размере бокса,
+// и нет peter-panning — в отличие от любого bias в нормированной глубине.
+static const float CSM_NORMAL_OFFSET = 2.0;   // сдвиг приёмника вдоль нормали, в текселях
+static const float CSM_DEPTH_MIN     = 0.75;  // глубинный bias (в текселях), прямой угол
+static const float CSM_DEPTH_MAX     = 3.0;   // на скользящем угле
+
 float4 worldToLightClip(float3 worldPos, int slot)
 {
     ShadowCamera cam = ShadowCameras[slot];
@@ -85,6 +92,68 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
         int    cameraOffset = light.light_info.y;
         float  maxRange     = asfloat(light.light_info.z);
         float3 lightPos     = light.position_radius.xyz;
+
+        // DIRECTIONAL: ни позиции, ни затухания — обрабатываем ДО toLight/dist,
+        // иначе ранний `dist >= maxRange` его обрежет. maxRange здесь = far ortho-бокса.
+        if (type == 2)
+        {
+            float3 L_dir     = normalize(-light.direction_angle.xyz);   // к свету
+            float  intensity = computeDirectionalLight(n, light, L_dir);
+
+            if (intensity > 0.0 && cameraOffset >= 0)
+            {
+                // Число каскадов лежит в position_radius.w (source_radius простаивает).
+                // Боксы вложенные мелкий→крупный → берём ПЕРВЫЙ содержащий фрагмент
+                // (самый резкий). Вхождение = ndc.xy в [-1,1] и ndc.z в [0,1].
+                int    cascadeCount = max((int)light.position_radius.w, 1);
+                int    slot       = -1;
+                float4 chosenClip = float4(0.0, 0.0, 0.0, 1.0);
+                for (int c = 0; c < cascadeCount; ++c)
+                {
+                    int    s    = cameraOffset + c;
+                    float4 clip = worldToLightClip(input.v_worldPos, s);
+                    float3 ndc  = clip.xyz / clip.w;
+                    if (all(abs(ndc.xy) <= 1.0) && ndc.z >= 0.0 && ndc.z <= 1.0)
+                    {
+                        slot = s;
+                        chosenClip = clip;
+                        break;
+                    }
+                }
+
+                if (slot >= 0)
+                {
+                    float NdotL_d = max(dot(n, L_dir), 0.0);
+                    float slope   = saturate(1.0 - NdotL_d);
+
+                    // Размер текселя и far этого каскада — из его ortho-proj (диагональ,
+                    // к транспонированию устойчиво): he = 1/proj[0][0], far = -1/proj[2][2].
+                    float he_c       = 1.0 / ShadowCameras[slot].proj[0][0];
+                    float far_c      = -1.0 / ShadowCameras[slot].proj[2][2];
+                    float worldTexel = 2.0 * he_c / 1024.0;
+
+                    // Normal-offset: сдвигаем приёмник вдоль нормали на ~тексель — убирает
+                    // acne геометрически, масштабируется текселем сам, без peter-panning.
+                    float3 sampPos  = input.v_worldPos + n * (worldTexel * CSM_NORMAL_OFFSET);
+                    float4 sampClip = worldToLightClip(sampPos, slot);
+                    float  ndcZ     = sampClip.z / sampClip.w;
+
+                    // Остаточный глубинный bias тоже в МИРОВЫХ единицах (тексель/far_c).
+                    float biasNdc = (worldTexel * lerp(CSM_DEPTH_MIN, CSM_DEPTH_MAX, slope)) / far_c;
+
+                    float shadow_d = computeShadowPCF(
+                        u_shadowDepthArray, u_shadowSampler,
+                        sampClip,
+                        slot,
+                        ndcZ - biasNdc);
+                    intensity *= shadow_d;
+                }
+            }
+
+            if (intensity > 0.0)
+                lightSum += light.color_power.rgb * intensity;
+            continue;
+        }
 
         float3 toLight = lightPos - input.v_worldPos;
         float  dist    = length(toLight);

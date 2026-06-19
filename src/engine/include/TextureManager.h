@@ -3,17 +3,19 @@
 #include <vector>
 #include <string>
 #include <cstddef>
+#include <deque>
+#include <memory>
 #include "ResourceManager.h"
 #include "TextureData.h"
 
 struct UploadTaskTexture {
 	SDL_GPUTextureRegion dst{};
-	std::vector<std::byte> pixels;          // BGRA32, плотно упакованные (декод один раз в TextureLoader)
+	std::vector<std::byte> pixels;
 	std::string name;                       // для диагностики при упаковке
-	TextureHandle* target_handle;
-	Uint32 offset;
-	Uint32 size;
-	Uint32 width, height, pitch;
+	TextureHandle* target_handle = nullptr;
+	Uint32 offset = 0;
+	Uint32 size = 0;
+	Uint32 width = 0, height = 0, pitch = 0;
 
 };
 
@@ -21,6 +23,11 @@ namespace DefaultSamplersNames {
 	inline constexpr const char* DEFAULT_SAMPLER = "_DefaultSampler";
 	inline constexpr const char* DEFAULT_SHADOW_SAMPLER = "_DefaultShadowSampler";
 	inline constexpr const char* VSM_SAMPLER = "_VsmSampler";
+};
+
+struct PendingTextureDestroy {
+	SDL_GPUTexture* tex;
+	uint64_t frame_ready;
 };
 
 class TextureManager:public ResourceManager
@@ -57,21 +64,16 @@ public:
 	
 	void DeleteTexture(const std::string& name);
 	void DeleteTexture(SDL_GPUTexture* texture);
+
+	SharedDepthTarget* CreateSharedDepthTarget(SDL_GPUTextureCreateInfo tci);
+	void QueueDeleteTexture(SDL_GPUTexture* texture);
+	void TrashTextures();
 	~TextureManager();
 
-	SDL_GPUTexture* main_pass_depth_texture = nullptr;
+	// Разделяемый depth основного прохода (MAIN/TRANSPARENT/DEBUG). Ресайзится через ->Resize().
+	SharedDepthTarget* main_pass_depth = nullptr;
 
 public:
-	/*TextureData* GetTextureData(const std::string& name) {
-		auto it = textures_data.find(name);
-		if (it != textures_data.end()) {
-			return it->second.get();
-		}
-		else {
-			SDL_Log("Texture '%s' not found", name.c_str());
-			return nullptr;
-		}
-	};*/
 	TextureHandle* GetTextureHandle(const std::string& name) {
 		auto it = handles_data.find(name);
 		if (it != handles_data.end()) {
@@ -99,6 +101,9 @@ private:
 	std::unordered_map<std::string, std::unique_ptr<TextureHandle>> handles_data;
 	std::unordered_map<std::string, SDL_GPUSampler*> samplers_data;
 	std::vector<UploadTaskTexture> upload_tasks;
+
+	std::vector<std::unique_ptr<SharedDepthTarget>> shared_depth_targets;
+	std::deque<PendingTextureDestroy> texture_trash;
 
 };
 

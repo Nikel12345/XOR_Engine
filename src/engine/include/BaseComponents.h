@@ -296,13 +296,64 @@ struct SphereLightComponent {
 
 struct DirectLightComponent {
     struct DirectLightData {
-        float source_radius;
-        float dir_x, dir_y, dir_z;
-        float source_angle;
-        float r, g, b;
-        float power;
+        // Направление лучей (нормализуется при заливке). Позиции у directional нет.
+        float dir_x = 0, dir_y = -1, dir_z = 0;
+        float r = 1, g = 1, b = 1;
+        float power = 1;
+
+        // Статичные ВЛОЖЕННЫЕ ortho-боксы теней (камера НЕ едет за игроком):
+        //  center      — общий центр всех каскадов в мире;
+        //  half_extent — половина ширины/высоты каскада 0 (самого резкого, поперёк dir);
+        //  half_depth  — половина протяжённости вдоль dir (общая), far = 2*half_depth;
+        //  cascade_ratio — во сколько раз каждый следующий каскад шире предыдущего.
+        // Экстент каскада c = half_extent * cascade_ratio^c. Каскад 0 — самый мелкий/резкий.
+        float center_x = 0, center_y = 0, center_z = 0;
+        float half_extent = 20.0f;
+        float half_depth = 20.0f;
+
+        // Число каскадов = число ortho-камер у источника. Ограничено MAX_CASCADES,
+        // т.к. все каскады всех светов делят 8-слойную теневую карту.
+        static constexpr int MAX_CASCADES = 4;
+        int   cascade_count = 3;
+        float cascade_ratio = 3.0f;
+
+        // Латеральный полупролёт каскада c (вложенные концентрические боксы).
+        float CascadeExtent(int c) const {
+            float e = half_extent;
+            for (int k = 0; k < c; ++k) e *= cascade_ratio;
+            return e;
+        }
+
+        // Полуглубина каскада c вдоль dir. Масштабируется тем же ratio, что и латераль —
+        // иначе пол покрывается только в боковом направлении (рост «только по X»), а по
+        // глубине света остаётся размером с каскад 0.
+        float CascadeDepth(int c) const {
+            float e = half_depth;
+            for (int k = 0; k < c; ++k) e *= cascade_ratio;
+            return e;
+        }
+
+        // far каскада c: им нормируется глубина в его теневой карте (per-cascade).
+        float CascadeFar(int c) const { return 2.0f * CascadeDepth(c); }
+
+        DirectLightData(
+            float dir_x = 0, float dir_y = -1, float dir_z = 0,
+            float r = 1, float g = 1, float b = 1,
+            float power = 1,
+            float center_x = 0, float center_y = 0, float center_z = 0,
+            float half_extent = 20.0f,
+            float half_depth = 20.0f,
+            int cascade_count = 3,
+            float cascade_ratio = 3.0f)
+            : dir_x(dir_x), dir_y(dir_y), dir_z(dir_z),
+            r(r), g(g), b(b),
+            power(power),
+            center_x(center_x), center_y(center_y), center_z(center_z),
+            half_extent(half_extent), half_depth(half_depth),
+            cascade_count(cascade_count), cascade_ratio(cascade_ratio) {
+        }
     } light_data;
-    bool needsUpdate;
+    bool needsUpdate = true;
 };
 struct ShadowCasterComponent{};
 

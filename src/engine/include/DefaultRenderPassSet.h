@@ -24,6 +24,9 @@ namespace DefaultRenderPassNamespace
     {
         Uint32 cameraIndex;
         float  max_range;
+        // 1 — directional (ortho): в карту пишется линейная осевая глубина -viewZ/far.
+        // 0 — spot/sphere (perspective): евклидова дистанция length(viewPos)/far.
+        Uint32 is_ortho;
     };
     void SetDefaultShadowPCFRenderPass(EngineContext* ctx);
     void SetDefaultShadowVSMRenderPass(EngineContext* ctx);
@@ -32,6 +35,11 @@ namespace DefaultRenderPassNamespace
     struct DummyDispatchData {};
 
     void SetDefaultShadowBlurPass(EngineContext* ctx);
+
+    // PassSystem: общие ресурсы дефолтного набора проходов (разделяемый depth-таргет, его формат).
+    // Должна вызываться ПЕРЕД Set*Pass, которые их потребляют (main/transparent/debug).
+    void _SetDefaultCommonResources(EngineContext* ctx);
+
 	void SetDefaultMainRenderPass(EngineContext* ctx);
     void SetDefaultMainRenderPass(EngineContext* ctx, SDL_GPUDevice* dev, SDL_Window* win);
 
