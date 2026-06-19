@@ -320,8 +320,9 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
     // модели/материала получит лишь трансформ-строку и не батчится.
     om->ForEach<DrawComponent, Positions>(
         scene,
-        [&](Entity entity, const DrawComponent&, const Positions&)
+        [&](Entity entity, const DrawComponent& draw, const Positions&)
     {
+        if (!draw.visible) return;  // скрытые (выключенные в UI debug-рамки) в дерево не идут
         if (!om->Has<ModelComponent>(scene, entity) || !om->Has<MaterialComponent>(scene, entity))
             return;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
@@ -352,8 +353,16 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
 
     for (Entity entity : creates) {
         if (deleted_set.count(entity)) continue;
+        // Идемпотентность: видимость тыкают повторно (в отличие от одноразового
+        // создания энтити). Если энтити уже в дереве — повторный AddEntityToBatches
+        // наплодил бы дубликаты слотов в PIB. «Show» уже видимого — просто no-op.
+        if (entity_slots.count(entity)) continue;
         // Батчим только если есть и модель, и материал (см. BuildRenderBatches).
         if (!om->Has<ModelComponent>(scene, entity) || !om->Has<MaterialComponent>(scene, entity))
+            continue;
+        // Скрытый энтити в дерево не добавляем — флаг visible источник истины (тот же
+        // отбор, что в BuildRenderBatches). Нет DrawComponent — тоже не рисуемый.
+        if (!om->Has<DrawComponent>(scene, entity) || !om->GetComponent<DrawComponent>(scene, entity).visible)
             continue;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
         const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);

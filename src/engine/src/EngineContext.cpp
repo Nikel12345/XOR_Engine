@@ -123,6 +123,32 @@ void EngineContext::DeleteEntity(const SceneName& scene_name, Entity e)
 	object_manager->DeleteEntity(target_scene, e);
 }
 
+void EngineContext::HideEntity(const SceneName& scene_name, Entity e, bool visible)
+{
+	SceneData* target_scene = object_manager->GetScene(scene_name);
+	if (!target_scene) return;
+
+	// visible живёт в DrawComponent как источник истины для полной пересборки
+	// (реактивация сцены → BuildRenderBatches перечитает флаг). Сам тоггл — это
+	// «половина DeleteEntity»: только инкрементальное снятие/добавление рендер-инстанса,
+	// без сноса энтити из ECS. Поэтому трансформ-строка остаётся, а render_instance_base
+	// соседей не сдвигается (в отличие от удаления, где swap_remove перетряхивает индексы).
+	if (!object_manager->Has<DrawComponent>(target_scene, e)) return;
+	DrawComponent& draw = object_manager->GetComponent<DrawComponent>(target_scene, e);
+	if (draw.visible == visible) return;   // no-op: не дёргаем очередь и ревизию батчей
+
+	draw.visible = visible;
+
+	// Батч-дерево кормит только активная сцена; инкремент имеет смысл лишь для рисуемого
+	// энтити с моделью и трансформом (та же тройка-условие, что в DeleteEntity).
+	const bool batched = object_manager->Has<ModelComponent>(target_scene, e)
+		&& object_manager->Has<Positions>(target_scene, e);
+	if (!batched || target_scene != object_manager->GetActiveScene()) return;
+
+	if (visible) batch_builder->QueueCreate(e);   // показать: добавить рендер-инстанс
+	else         batch_builder->QueueDelete(e);   // скрыть: снять рендер-инстанс
+}
+
 void EngineContext::SetActiveScene(const SceneName& name)
 {
 	object_manager->SetSceneState(name, true);

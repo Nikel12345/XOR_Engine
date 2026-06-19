@@ -9,7 +9,7 @@ std::vector<DebugShape> CollectDebugShapes(ObjectManager& om, SceneData* scene) 
 
 	// Лёгкое раздутие рамки (на 3%), чтобы рёбра выходили чуть наружу поверхности и не
 	// прятались за геометрией при depth-тесте. Центр формы не меняется.
-	constexpr float kInflate = 1.03f;
+	constexpr float kInflate = 1.01f;
 
 	// Локальная матрица формы: column-major glm. Единичная модель ([-1..1] / r=1)
 	// масштабируется полу-размером и сдвигается на offset — всё в пространстве модели

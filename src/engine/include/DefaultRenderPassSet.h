@@ -30,20 +30,14 @@ namespace DefaultRenderPassNamespace
 
     struct ShadowBlurUniform { uint32_t layerIndex; };
     struct DummyDispatchData {};
-
     void SetDefaultShadowBlurPass(EngineContext* ctx);
+
 	void SetDefaultMainRenderPass(EngineContext* ctx);
     void SetDefaultMainRenderPass(EngineContext* ctx, SDL_GPUDevice* dev, SDL_Window* win);
 
-    // Цвет фрагмента дебаг-коллайдеров (push-констант, fragment slot 0).
     struct alignas(16) DebugColliderPushData { float color[4] = { 0.0f, 1.0f, 0.2f, 1.0f }; };
-    // Пасс поверх свопчейна: рисует батчи дебаг-шейдера (рамки коллайдеров) после MAIN_PASS.
-    // Требует уже инициализированного MAIN_PASS (берёт его depth-текстуру пассивно).
     void SetDebugColliderPass(EngineContext* ctx);
 
-    // Прозрачный пасс поверх свопчейна: рисует батчи с блендингом после MAIN_PASS.
-    // Грузит depth из MAIN_PASS и только тестит его (без записи) — корректная окклюзия.
-    // Требует уже инициализированного MAIN_PASS (берёт его depth-текстуру).
     void SetTransparentPass(EngineContext* ctx);
 
     void SetDefaultCullingComputeZerosPass(EngineContext* ctx);

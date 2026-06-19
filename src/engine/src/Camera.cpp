@@ -46,7 +46,7 @@ void Camera::RotateView(float mouse_x, float mouse_y, bool lmb_down)
     yaw += dx * sensitivity;
     pitch -= dy * sensitivity;
 
-    // Ограничение вертикального угла
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
     if (pitch > 89.0f)  pitch = 89.0f;
     if (pitch < -89.0f) pitch = -89.0f;
 

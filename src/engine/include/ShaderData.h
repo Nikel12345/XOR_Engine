@@ -109,6 +109,7 @@ struct ShaderProgramDescription
     bool                      depth_write = true;
     bool                      stencil_test = false;
     bool                      color_blend = false;
+    SDL_GPUPrimitiveType primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
 
 
     ShaderProgramDescription* BehavesAsShadowCaster();
@@ -129,6 +130,7 @@ struct ShaderProgramDescription
     ShaderProgramDescription* WithDepthBias(RasterizerStateBiasParams b) { rasterizer_bias = b; return this; }
     ShaderProgramDescription* Wireframe() { fill_mode = SDL_GPU_FILLMODE_LINE; return this; }
     ShaderProgramDescription* Solid() { fill_mode = SDL_GPU_FILLMODE_FILL; return this; }
+    ShaderProgramDescription* AsLineList() { primitive_type = SDL_GPU_PRIMITIVETYPE_LINELIST; return this; }
 };
 
 enum class TextureSlotRole {

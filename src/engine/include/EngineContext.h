@@ -57,6 +57,12 @@ public:
 		return entity;
 	}
 	void DeleteEntity(const SceneName& scene_name, Entity e);
+	// Toggles render visibility of a single entity WITHOUT touching ECS: writes
+	// DrawComponent::visible (source of truth for full rebuilds) and queues an
+	// incremental batch add/remove (QueueCreate/QueueDelete). The transform row stays,
+	// neighbours' indices don't shift — it's the "remove from batches" half of
+	// DeleteEntity without the entity teardown. Used for debug colliders (child entities).
+	void HideEntity(const SceneName& scene_name, Entity e, bool visible);
 	// Activating a scene swaps the whole entity set; force a full batch rebuild.
 	void SetActiveScene(const SceneName& name);
 

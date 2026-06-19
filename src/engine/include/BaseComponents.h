@@ -312,7 +312,14 @@ struct ShadowComponent {};
 // по нему (+Positions), а ModelComponent/MaterialComponent тянут через GetComponent.
 // Это развязывает «рисуемость» от жёсткого триплета и позволяет голый шейдер
 // (материал без текстур). Добавляется ЯВНО — без неявных приписок в CreateEntity.
-struct DrawComponent {};
+//
+// visible — источник истины «рисуется ли сейчас». Менять ТОЛЬКО через
+// EngineContext::HideEntity: тот пишет флаг И ставит инкрементальную дельту в батч-дерево
+// (QueueCreate/QueueDelete). Прямая запись поля батчи не перестроит. Полная пересборка
+// (BuildRenderBatches) и инкремент (ApplyIncremental) этот флаг уважают, поэтому он
+// переживает реактивацию сцены. Скрытие НЕ трогает ECS — трансформ-строка остаётся,
+// индексы соседей не едут (в отличие от DeleteEntity).
+struct DrawComponent { bool visible = true; };
 
 struct TestComponent {};
 

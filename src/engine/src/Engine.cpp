@@ -684,6 +684,17 @@ void Engine::InitUICommands()
 			Entity e = static_cast<Entity>(reinterpret_cast<uintptr_t>(data));
 			ctx->DeleteEntity(ctx->GetObjectManager()->GetActiveSceneName(), e);
 		});
+
+	input_manager->RegisterCommand(CommandId::HideEntity,
+		[](EngineContext* ctx, const void* data)
+		{
+			// Данных-структуры нет — Entity и флаг упакованы прямо в указатель:
+			// младшие 32 бита — Entity, бит 32 — visible (см. UI_ImGui::DrawObjectsPanel).
+			const uintptr_t packed = reinterpret_cast<uintptr_t>(data);
+			const Entity e = static_cast<Entity>(packed & 0xFFFFFFFFu);
+			const bool visible = ((packed >> 32) & 0x1u) != 0u;
+			ctx->HideEntity(ctx->GetObjectManager()->GetActiveSceneName(), e, visible);
+		});
 }
 
 

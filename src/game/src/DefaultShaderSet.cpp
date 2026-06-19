@@ -148,17 +148,18 @@ void DefaultShaderProgramSet::SetDebugColliderProgram(EngineContext* ctx)
         return;
     }
 
-    // Тянем только POSITION единичной модели; инстансим матрицей формы. Текстур нет —
-    // required_slots пуст, поэтому atlas/texture-батчи строятся пустыми (голый шейдер).
     VertexShaderData vs = ctx->CreateVertexShader(
         "../engine/shaders_code/debug/debug_collider.vert.hlsl",
         { { DEFAULT_VERTEX_BUFFER, &FMT_PosUVNormal, { POSITION } } });
     FragmentShaderData fs = ctx->CreateFragmentShader(
         "../engine/shaders_code/debug/debug_collider.frag.hlsl");
 
+    // Рамки рисуем ПОВЕРХ геометрии (IgnoresDepth — без depth-теста): debug-коллайдеры
+    // видны целиком, без вендор-зависимого z-fighting. Топология — line-list через spd
+    // (AsLineList); spd сохраняет эту возможность, рамки её используют.
     ShaderProgramDescription* spd =
         ctx->CreateShaderProgramDescription("spd_debug_collider")
-        ->DoesNotCull()->ReadsDepthOnly()->Wireframe();   // depth-тест вкл, запись выкл — окклюзия рамок
+        ->DoesNotCull()->IgnoresDepth()->AsLineList();
 
     ShaderProgram* sp = ctx->CreateShaderProgram("sp_debug_collider", spd,
         DefaultRenderPassNamespace::DEBUG_PASS,

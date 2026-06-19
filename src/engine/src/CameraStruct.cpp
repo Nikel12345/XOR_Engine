@@ -99,7 +99,7 @@ void Camera::LookAt(const glm::vec3& pos, const glm::vec3& tgt)
     right = glm::normalize(glm::cross(forward, glm::vec3(0, 1, 0)));
     up = glm::normalize(glm::cross(right, forward));
 
-    // пересчитать yaw/pitch из forward
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ yaw/pitch пїЅпїЅ forward
     yaw = glm::degrees(atan2(forward.z, forward.x));
     pitch = glm::degrees(asin(forward.y));
 }

@@ -43,6 +43,7 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
     if (ImGui::TreeNode("Mesh Objects"))
     {
         std::vector<Entity> to_delete;
+        std::vector<std::pair<Entity, bool>> to_set_visible;
 
         objectManager->ForEach<Positions, MaterialComponent, ModelComponent>(scene,
             [&](Entity e, SoAElement<Positions> pos_el, MaterialComponent&, ModelComponent&)
@@ -75,6 +76,28 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
 
                 ImGui::PopStyleColor(3);
 
+                // Дети владельца — debug-рамки коллайдеров (DrawComponent + ParentComponent,
+                // помечены EditorHiddenComponent, потому в основной список не попадают).
+                // Галочка visible каждого: снятие прячет рамку из рендера, НЕ удаляя энтити.
+                // UI сам ECS не мутирует — кладёт команду HideEntity в очередь, исполнит
+                // sim-поток (флаг visible там лишь для отображения текущего состояния).
+                auto kids_it = scene->children.find(e);
+                if (kids_it != scene->children.end() && !kids_it->second.empty())
+                {
+                    ImGui::SeparatorText("Debug colliders");
+                    for (Entity c : kids_it->second)
+                    {
+                        if (!objectManager->Has<DrawComponent>(scene, c)) continue;
+                        bool visible = objectManager->GetComponent<DrawComponent>(scene, c).visible;
+
+                        char clabel[40];
+                        snprintf(clabel, sizeof(clabel), "visible (collider %u)",
+                                 static_cast<unsigned>(c));
+                        if (ImGui::Checkbox(clabel, &visible))
+                            to_set_visible.emplace_back(c, visible);
+                    }
+                }
+
                 ImGui::TreePop();
             }
         });
@@ -85,6 +108,16 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
         for (Entity e : to_delete)
             ctx->GetInputManager()->PushCommand(CommandId::DeleteEntity,
                 reinterpret_cast<const void*>(static_cast<uintptr_t>(e)));
+
+        // Те же правила времени жизни, что у Delete: данные не копируются — Entity и
+        // флаг visible пакуем прямо в указатель (Entity в младших 32 битах, visible — бит 32).
+        for (const auto& [c, visible] : to_set_visible)
+        {
+            const uintptr_t packed = static_cast<uintptr_t>(c)
+                | (visible ? (static_cast<uintptr_t>(1) << 32) : static_cast<uintptr_t>(0));
+            ctx->GetInputManager()->PushCommand(CommandId::HideEntity,
+                reinterpret_cast<const void*>(packed));
+        }
 
         ImGui::TreePop();
     }

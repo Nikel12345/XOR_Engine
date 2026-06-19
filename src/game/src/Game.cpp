@@ -55,8 +55,8 @@ SDL_AppResult Game::MainInit()
         using namespace DefaultShaderProgramSet;
         SetMainShaderProgram(ctx);
         SetDefaultShadowShaderProgram(ctx);
-        SetTransparentShaderProgram(ctx);   // прозрачная геометрия с блендингом (TRANSPARENT_PASS)
-        SetDebugColliderProgram(ctx);   // голый шейдер рамок коллайдеров (DEBUG_PASS)
+        SetTransparentShaderProgram(ctx);
+        SetDebugColliderProgram(ctx);
     }
     
     auto material_car = ctx->CreateMaterial("car", {
@@ -139,43 +139,42 @@ SDL_AppResult Game::MainInit()
             PosUVNormal vert{}; vert.x = x; vert.y = y; vert.z = z; return vert;
         };
         v = {
-            P(-1,-1,-1), P( 1,-1,-1), P( 1, 1,-1), P(-1, 1,-1),   // z = -1
-            P(-1,-1, 1), P( 1,-1, 1), P( 1, 1, 1), P(-1, 1, 1),   // z = +1
+            P(-1,-1,-1), P(1,-1,-1), P(1, 1,-1), P(-1, 1,-1),   // 0..3  z=-1
+            P(-1,-1, 1), P(1,-1, 1), P(1, 1, 1), P(-1, 1, 1),   // 4..7  z=+1
         };
         i = {
-            0,1,2, 0,2,3,   // back
-            4,6,5, 4,7,6,   // front
-            4,0,3, 4,3,7,   // left
-            1,5,6, 1,6,2,   // right
-            4,5,1, 4,1,0,   // bottom
-            3,2,6, 3,6,7,   // top
+            0,1, 1,2, 2,3, 3,0,   // рёбра грани z=-1
+            4,5, 5,6, 6,7, 7,4,   // рёбра грани z=+1
+            0,4, 1,5, 2,6, 3,7,   // рёбра вдоль z
         };
     });
 
     debug_sphere_model = ctx->CreateModel("debug_sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
-        const uint32_t stacks = 8;
-        const uint32_t slices = 12;
+        const uint32_t stacks = 8, slices = 12;
         const float PI = 3.14159265358979323846f;
         for (uint32_t i = 0; i <= stacks; ++i) {
             float phi = PI * (float)i / (float)stacks;
             float cp = std::cos(phi), sp = std::sin(phi);
             for (uint32_t j = 0; j <= slices; ++j) {
                 float theta = 2.0f * PI * (float)j / (float)slices;
-                float ct = std::cos(theta), st = std::sin(theta);
                 PosUVNormal vert{};
-                vert.x = sp * ct; vert.y = cp; vert.z = sp * st;
+                vert.x = sp * std::cos(theta); vert.y = cp; vert.z = sp * std::sin(theta);
                 v.push_back(vert);
             }
         }
         const uint32_t row = slices + 1;
-        for (uint32_t i = 0; i < stacks; ++i) {
+        // параллели: ребро a -> a+1 вдоль каждого ряда
+        for (uint32_t i = 0; i <= stacks; ++i)
             for (uint32_t j = 0; j < slices; ++j) {
                 uint32_t a = i * row + j;
-                uint32_t b = a + row;
-                idx.push_back(a);     idx.push_back(a + 1); idx.push_back(b);
-                idx.push_back(a + 1); idx.push_back(b + 1); idx.push_back(b);
+                idx.push_back(a); idx.push_back(a + 1);
             }
-        }
+        // меридианы: ребро a -> a+row между рядами
+        for (uint32_t i = 0; i < stacks; ++i)
+            for (uint32_t j = 0; j <= slices; ++j) {
+                uint32_t a = i * row + j;
+                idx.push_back(a); idx.push_back(a + row);
+            }
     });
 
     ctx->CreateEntity("main_menu",
@@ -260,7 +259,6 @@ SDL_AppResult Game::MainInit()
     );
 
 
-    // Рамки коллайдеров спавним сразу: модели загружены жадно (submeshes готовы в init).
     UpdateDebugColliders();
 
     ChangeState(GameState::MAIN_MENU);
@@ -303,11 +301,10 @@ SDL_AppResult Game::MainIterate()
         break;
     }
 
-    // Пример использования физики: контакты по активной сцене (включить при необходимости).
     // Энтити с ColliderComponent берут явный радиус; остальные с ModelComponent — модельную сферу.
     if (SceneData* scene = objectManager->GetActiveScene()) {
         for (const ContactSystem::Contact& c : ContactSystem::DetectContacts(*objectManager, scene)) {
-            SDL_Log("contact %u <-> %u (pen %.3f)", c.a, c.b, c.penetration);
+            //SDL_Log("contact %u <-> %u (pen %.3f)", c.a, c.b, c.penetration);
         }
     }
 

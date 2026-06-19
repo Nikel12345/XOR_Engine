@@ -13,6 +13,7 @@ class EngineContext;
 // (см. RegisterCommand), а в очередь летит только id + маленький POD-payload.
 enum class CommandId : uint32_t {
     DeleteEntity,
+    HideEntity,   // payload: Entity в младших 32 битах, visible — в бите 32 (см. UI/InitUICommands)
 
     COUNT
 };
