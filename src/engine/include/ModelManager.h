@@ -23,10 +23,10 @@ public:
 	// Reads the model from disk eagerly: header, vertices/indices into staging and
 	// submeshes — all up front, so the resource is usable right away in init. Only the
 	// GPU upload is deferred (staging accumulates until the batch updater).
-	ModelData* CreateModel(const std::string& name, const std::string& path, const std::string& path_ind);
+	ModelData* CreateModel(const std::string& name, const std::string& path, const std::string& path_ind, AnchorShift anchor = AnchorShift::Keep);
 
 	// Процедурная модель: геометрию выдаёт generator (вызывается жадно, как и чтение с диска).
-	ModelData* CreateModel(const std::string& name, ModelGeneratorFn generator);
+	ModelData* CreateModel(const std::string& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep);
 
 	uint32_t CalculateModelsVerticesSize();
 	uint32_t CalculateModelsIndicesSize();

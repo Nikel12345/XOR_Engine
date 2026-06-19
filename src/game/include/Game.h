@@ -17,7 +17,6 @@ public:
 	Game(Engine* engine);
 	SDL_AppResult MainInit();
 	SDL_AppResult MainIterate();
-	SDL_AppResult SDL_AppEvent(SDL_Event* event);
 	void SDL_AppQuit();
 
 	bool lmb_down = false;
@@ -52,9 +51,8 @@ private:
 	MainMenuResources main_menu_resources;
 
 	// --- Отладочная визуализация коллайдеров ---
-	void UpdateDebugColliders();             // вызывается каждый кадр из MainIterate
+	void CreateDebugColliders(); 
 	ModelData* debug_box_model = nullptr;    // куб [-1..1]
 	ModelData* debug_sphere_model = nullptr; // сфера r=1
 	Material*  debug_collider_material = nullptr;
-	bool debug_colliders_spawned = false;
 };

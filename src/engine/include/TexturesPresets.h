@@ -28,6 +28,7 @@ enum class TexturePreset {
     Albedo_Atlas4096_3Layer,
 	Albedo_Atlas2048_1Layer,
     NAOPBR_Atlas2048_1Layer,
+    NAOPBR_Atlas4096_3Layer,
     Custom
 };
 
@@ -296,7 +297,15 @@ namespace TexturePresets {
             info.layer_count_or_depth = 1;
             info.num_levels = 1;
             break;
-
+        case TexturePreset::NAOPBR_Atlas4096_3Layer:
+            info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+            info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+            info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+            info.width = 4096;
+            info.height = 4096;
+            info.layer_count_or_depth = 3;
+            info.num_levels = 1;
+            break;
 
         case TexturePreset::Custom:
             // Для Custom нужно заполнить вручную

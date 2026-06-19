@@ -271,7 +271,7 @@ SDL_AppResult Game::MainInit()
         ShadowCasterComponent{}
     );
 
-    UpdateDebugColliders();
+    CreateDebugColliders();
 
     ChangeState(GameState::MAIN_MENU);
 
@@ -323,14 +323,8 @@ SDL_AppResult Game::MainIterate()
     return SDL_APP_CONTINUE;
 }
 
-void Game::UpdateDebugColliders()
+void Game::CreateDebugColliders()
 {
-    // Спавн рамок коллайдеров. Вызывается один раз из MainInit: модели грузятся жадно
-    // в CreateModel (submeshes готовы сразу), ждать загрузки на следующих кадрах не нужно.
-    // Каждая рамка — ребёнок своего владельца со статичной локальной матрицей, и движок
-    // (UpdateLocalTransforms) сам ведёт её за владельцем.
-    if (debug_colliders_spawned) return;
-
     SceneData* scene = objectManager->GetActiveScene();
     if (!scene) return;
     if (!debug_collider_material || !debug_box_model || !debug_sphere_model) return;
@@ -351,23 +345,6 @@ void Game::UpdateDebugColliders()
             DrawComponent{},
             DebugColliderTag{},
             EditorHiddenComponent{});   // движковый тег: не показывать в списке объектов UI
-    }
-    debug_colliders_spawned = true;
-}
-
-SDL_AppResult Game::SDL_AppEvent(SDL_Event* event)
-{
-    switch (event->type)
-    {
-    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-        return SDL_APP_SUCCESS;
-    case SDL_EVENT_WINDOW_RESIZED:
-        engine->OnWindowResized(event->window.data1, event->window.data2);
-        return SDL_APP_CONTINUE;
-    default:
-        // Игровой ввод больше не обрабатывается на main-потоке: он уходит
-        // в InputManager и дренится в sim-потоке (см. MainIterate).
-        return SDL_APP_CONTINUE;
     }
 }
 

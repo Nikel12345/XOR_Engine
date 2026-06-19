@@ -1,16 +1,6 @@
 #ifndef SHADOW_PCF_HLSL
 #define SHADOW_PCF_HLSL
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Голый PCF поверх distance shadow map (см. shadow_pass.frag.hlsl).
-// Карта хранит нормированное расстояние источник→ближайший окклюдер. Сравниваем
-// нормированное расстояние источник→фрагмент (refDist). Проекция нужна только
-// чтобы выбрать тексель (UV), а НЕ для глубины — поэтому нет швов между гранями
-// куба и тени не пропадают на расстоянии.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Какую грань кубической карты выбрать для направления dir (от источника к точке).
-// Порядок граней совпадает с cubeDirs в LightDataModule: +X,-X,+Y,-Y,+Z,-Z.
 int getCubeFace(float3 dir)
 {
     float3 a = abs(dir);
@@ -21,9 +11,7 @@ int getCubeFace(float3 dir)
 
 static const int PCF_RADIUS = 1;   // 1 => 3x3 выборки
 
-// lightClipPos = proj*view*worldPos — только для выбора текселя (UV).
-// refDist      = нормированное расстояние источник→фрагмент [0..1], уже с bias.
-// Возвращает видимость [0..1]: 1 — освещено, 0 — полностью в тени.
+
 float computeShadowPCF(
     Texture2DArray<float>  depthArray,
     SamplerComparisonState shadowSampler,

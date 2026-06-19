@@ -64,12 +64,13 @@ int main() {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             ImGui_ImplSDL3_ProcessEvent(&event);
-            // Окно (close/resize) обрабатываем здесь же, на main-потоке.
-            SDL_AppResult res = game->SDL_AppEvent(&event);
-            if (res == SDL_APP_SUCCESS) {
-                running = false;
-                break;
-            }
+
+            // События окна/жизненного цикла — здесь, где есть engine и running.
+            if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) { running = false; break; }
+            if (event.type == SDL_EVENT_WINDOW_RESIZED)
+                engine->OnWindowResized(event.window.data1, event.window.data2);
+
+            // Игровой ввод — в транспорт, дренит sim-поток.
             input->HandleEvent(event);
         }
         SDL_Delay(16);

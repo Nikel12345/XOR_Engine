@@ -16,6 +16,15 @@ struct SubMeshData {
     glm::vec3 aabb_half   = glm::vec3(0.0f);  // полу-размеры локального AABB
 };
 
+// Точка отсчёта (пивот) модели. Запекается в вершины один раз при CreateModel:
+// геометрия сдвигается так, чтобы выбранный угол/центр локального AABB попал в origin.
+// Keep — не сдвигать (поведение по умолчанию, обратная совместимость).
+// L/R = X min/max, B/T = Y min/max (Bottom/Top), B/F = Z min/max (Back/Front).
+enum class AnchorShift { Keep, Center, LBB, RBB, LTB, RTB, LBF, RBF, LTF, RTF };
+
 struct ModelData {
     std::vector<SubMeshData> submeshes;
+    // Как сдвинут пивот. Читается только в момент запекания (CreateModel);
+    // дальше — информативная метка, рендер её не использует.
+    AnchorShift anchor = AnchorShift::Keep;
 };

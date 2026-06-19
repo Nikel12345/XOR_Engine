@@ -30,8 +30,8 @@ public:
 
 	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders);
 
-	ModelData* CreateModel(const ModelName& name, const char* model_path, const char* index_path);
-	ModelData* CreateModel(const ModelName& name, ModelGeneratorFn generator);
+	ModelData* CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor = AnchorShift::Keep);
+	ModelData* CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep);
 
 	void CreateGraphicsPipelines();
 	void CreateComputePipelines();

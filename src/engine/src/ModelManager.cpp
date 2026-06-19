@@ -58,7 +58,41 @@ static void BuildSubmeshes(const std::vector<PosUVNormal>& staging, ModelData* m
     }
 }
 
-ModelData* ModelManager::CreateModel(const std::string& name, const std::string& path_vert, const std::string& path_ind)
+// Запекает пивот в вершины: один проход min/max по диапазону [vbase, vbase+vcount),
+// switch выбирает точку q из локального AABB, и геометрия сдвигается на -q. Вызывается
+// ДО BuildSubmeshes — тогда sphere/AABB сабмешей считаются уже от нового origin.
+static void ApplyAnchorShift(std::vector<PosUVNormal>& staging, size_t vbase, uint32_t vcount, AnchorShift anchor)
+{
+    if (anchor == AnchorShift::Keep || vcount == 0) return;
+
+    glm::vec3 mn(staging[vbase].x, staging[vbase].y, staging[vbase].z), mx = mn;
+    for (uint32_t k = 1; k < vcount; ++k) {
+        const PosUVNormal& v = staging[vbase + k];
+        mn = glm::min(mn, glm::vec3(v.x, v.y, v.z));
+        mx = glm::max(mx, glm::vec3(v.x, v.y, v.z));
+    }
+
+    glm::vec3 q;
+    switch (anchor) {
+    case AnchorShift::Center: q = (mn + mx) * 0.5f;  break;
+    case AnchorShift::LBB: q = { mn.x, mn.y, mn.z };  break;
+    case AnchorShift::RBB: q = { mx.x, mn.y, mn.z };  break;
+    case AnchorShift::LTB: q = { mn.x, mx.y, mn.z };  break;
+    case AnchorShift::RTB: q = { mx.x, mx.y, mn.z };  break;
+    case AnchorShift::LBF: q = { mn.x, mn.y, mx.z };  break;
+    case AnchorShift::RBF: q = { mx.x, mn.y, mx.z };  break;
+    case AnchorShift::LTF: q = { mn.x, mx.y, mx.z };  break;
+    case AnchorShift::RTF: q = { mx.x, mx.y, mx.z };  break;
+    default: q = glm::vec3(0.0f);                     break;
+    }
+
+    for (uint32_t k = 0; k < vcount; ++k) {
+        PosUVNormal& v = staging[vbase + k];
+        v.x -= q.x; v.y -= q.y; v.z -= q.z;
+    }
+}
+
+ModelData* ModelManager::CreateModel(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor)
 {
     auto it = models_data.find(name);
     if (it != models_data.end()) {
@@ -151,7 +185,11 @@ ModelData* ModelManager::CreateModel(const std::string& name, const std::string&
         assert(false && "CreateModel: incomplete index read");
     }
 
-    // --- 5. сабмеши + bounding sphere ---
+    // --- 5. пивот (до сабмешей, чтобы sphere/AABB считались от нового origin) ---
+    ptr->anchor = anchor;
+    ApplyAnchorShift(staging_vertices, vbase, vcount, anchor);
+
+    // --- 6. сабмеши + bounding sphere ---
     BuildSubmeshes(staging_vertices, ptr, entries, vbase, voff, ioff);
 
     dirty = true;
@@ -159,7 +197,7 @@ ModelData* ModelManager::CreateModel(const std::string& name, const std::string&
     return ptr;
 }
 
-ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn generator)
+ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn generator, AnchorShift anchor)
 {
     auto it = models_data.find(name);
     if (it != models_data.end()) {
@@ -188,6 +226,10 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
     uint32_t icount = safe_u32(inds.size());
     staging_vertices.insert(staging_vertices.end(), verts.begin(), verts.end());
     staging_indices.insert(staging_indices.end(), inds.begin(), inds.end());
+
+    // Пивот — до сабмешей, чтобы sphere/AABB считались от нового origin.
+    ptr->anchor = anchor;
+    ApplyAnchorShift(staging_vertices, vbase, vcount, anchor);
 
     // Вся геометрия — один сабмеш, материал 0.
     std::vector<SubMeshFileEntry> entries{ SubMeshFileEntry{ 0, 0, vcount, icount, 0 } };

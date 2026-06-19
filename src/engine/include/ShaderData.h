@@ -136,6 +136,8 @@ struct ShaderProgramDescription
 enum class TextureSlotRole {
     Albedo,
     Normal,
+    Emissive,
+	MetallicRoughness,
 };
 
 struct ShaderProgram {

@@ -86,14 +86,14 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 	return material_manager->CreateMaterial(name, texture_handles, shader_programs);
 }
 
-ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_path, const char* index_path)
+ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor)
 {
-	return model_manager->CreateModel(name, model_path, index_path);
+	return model_manager->CreateModel(name, model_path, index_path, anchor);
 }
 
-ModelData* EngineContext::CreateModel(const ModelName& name, ModelGeneratorFn generator)
+ModelData* EngineContext::CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor)
 {
-	return model_manager->CreateModel(name, std::move(generator));
+	return model_manager->CreateModel(name, std::move(generator), anchor);
 }
 
 void EngineContext::DeleteEntity(const SceneName& scene_name, Entity e)

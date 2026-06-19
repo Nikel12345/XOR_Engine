@@ -3,6 +3,7 @@ add_executable(MyGame)
 target_sources(MyGame PRIVATE
     src/main.cpp
     src/MyGame.cpp
+    src/DefaultShaderSet.cpp
 )
 
 target_include_directories(MyGame PRIVATE
@@ -13,11 +14,11 @@ target_include_directories(MyGame PRIVATE
 target_link_libraries(MyGame PRIVATE Engine Physics)
 
 # Рабочая директория при отладке — откуда грузятся ресурсы/шейдеры.
-# Свои ассеты у mygame ещё не заведены, поэтому временно указываем на каталог
-# игры (там лежат textures/models/sounds и движковые шейдеры подтянутся как у Game).
-# Когда появятся свои ассеты — переставь на ${CMAKE_CURRENT_SOURCE_DIR}.
+# Свои ассеты mygame лежат рядом (models/, textures/); движковые шейдеры
+# грузятся по относительному "../engine/shaders_code/..." и из этого каталога
+# тоже резолвятся (../engine = src/engine).
 set_target_properties(MyGame PROPERTIES
-    VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src/game"
+    VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 copy_runtime_dlls(MyGame)

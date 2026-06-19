@@ -24,8 +24,10 @@ Install:
 
 import argparse
 import os
+import re
 import struct
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -183,6 +185,90 @@ def mesh_uvs(mesh: trimesh.Trimesh, nv: int) -> np.ndarray:
     return np.zeros((nv, 2), dtype=np.float32)
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Per-format loading
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _load_trimesh(full_path: str, process: bool):
+    """Generic path: let trimesh pick the parser by extension."""
+    return trimesh.load(full_path, process=process)
+
+
+def _sanitize_dae_text(text: str):
+    """
+    Fix Blender-exported COLLADA tags whose ELEMENT NAME contains spaces, e.g.
+    `<Follow Path_constraint>` (from a constraint named "Follow Path"). Spaces in
+    tag names are invalid XML and crash the parser ("not well-formed").
+
+    Эвристика разделения валидного и битого тега: настоящий тег с атрибутами всегда
+    содержит '=' (attr="value"), а валидный простой тег не имеет пробелов внутри.
+    Поэтому правим только теги, где ЕСТЬ пробел и НЕТ '=', схлопывая пробелы в имени
+    в '_'. Матчатся и открывающий, и закрывающий тег → баланс сохраняется.
+
+    Returns (fixed_text, num_fixes).
+    """
+    tag_re = re.compile(r'<(/?)([^<>!?][^<>]*?)(/?)>')
+    count = [0]
+
+    def repl(m):
+        slash, body, selfclose = m.group(1), m.group(2), m.group(3)
+        if '=' in body or not re.search(r'\s', body):
+            return m.group(0)                      # валидный тег — не трогаем
+        fixed = re.sub(r'\s+', '_', body.strip())  # "Follow Path_constraint" → "Follow_Path_constraint"
+        count[0] += 1
+        return f'<{slash}{fixed}{selfclose}>'
+
+    return tag_re.sub(repl, text), count[0]
+
+
+def load_dae(full_path: str, process: bool):
+    """COLLADA: пред-скан на битые токены (баг экспорта Blender) и их починка
+    до передачи файла в trimesh/pycollada."""
+    with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+        raw = f.read()
+
+    fixed, n = _sanitize_dae_text(raw)
+    if n == 0:
+        return _load_trimesh(full_path, process)   # чинить нечего — обычный путь
+
+    print(f"  [dae] fixed {n} malformed tag(s) with spaces in names (Blender export)")
+    fd, tmp = tempfile.mkstemp(suffix='.dae')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as out:
+            out.write(fixed)
+        return trimesh.load(tmp, process=process)
+    finally:
+        os.remove(tmp)
+
+
+# Остальные форматы — ничего особенного, просто делегируют в trimesh.
+def load_obj(full_path, process):  return _load_trimesh(full_path, process)
+def load_glb(full_path, process):  return _load_trimesh(full_path, process)
+def load_gltf(full_path, process): return _load_trimesh(full_path, process)
+def load_ply(full_path, process):  return _load_trimesh(full_path, process)
+def load_stl(full_path, process):  return _load_trimesh(full_path, process)
+def load_off(full_path, process):  return _load_trimesh(full_path, process)
+def load_3mf(full_path, process):  return _load_trimesh(full_path, process)
+
+
+LOADERS = {
+    '.dae':  load_dae,
+    '.obj':  load_obj,
+    '.glb':  load_glb,
+    '.gltf': load_gltf,
+    '.ply':  load_ply,
+    '.stl':  load_stl,
+    '.off':  load_off,
+    '.3mf':  load_3mf,
+}
+
+
+def load_model(full_path: str, process: bool):
+    """Диспетчер по расширению; неизвестное → общий trimesh."""
+    ext = os.path.splitext(full_path)[1].lower()
+    return LOADERS.get(ext, _load_trimesh)(full_path, process)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Core conversion
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -197,7 +283,7 @@ def convert(input_path: str,
     print(f"Loading: {input_path}")
     full_path = f"raw/{input_path}"
     try:
-        loaded = trimesh.load(full_path, process=fix_normals)
+        loaded = load_model(full_path, fix_normals)
         if fix_normals:
             # Per-mesh: fix winding order so all normals point outward
             for m in extract_meshes(loaded):
