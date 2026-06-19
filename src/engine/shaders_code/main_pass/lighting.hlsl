@@ -50,4 +50,12 @@ float computePointLight(float3 normal, Light light, float3 L, float dist, float 
     return NdotL * atten * light.color_power.a;
 }
 
+// Directional: ни позиции, ни затухания — только Lambert N·L по всей сцене.
+// L уже = направление К свету (= -direction источника), нормализован.
+float computeDirectionalLight(float3 normal, Light light, float3 L)
+{
+    float NdotL = max(dot(normal, L), 0.0);
+    return NdotL * light.color_power.a;
+}
+
 #endif

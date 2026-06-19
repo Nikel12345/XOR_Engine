@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "RenderCommandData.h"
+#include "TextureData.h"   // SharedDepthTarget (полное определение для перегрузки SetDepthTexture)
 
 void RenderPassTexturesInfo::CreateColorTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_FColor color, SDL_GPUTextureFormat format, Uint32 num_color_targets)
 {
@@ -34,6 +35,13 @@ void RenderPassTexturesInfo::SetDepthTexture(SDL_GPUTexture* tex)
 	if (depthTargetInfo.texture) {
 
 	}
+	shared_depth = nullptr;          // сырой указатель — отвязываемся от разделяемого таргета
 	depthTargetInfo.texture = tex;
+}
+
+void RenderPassTexturesInfo::SetDepthTexture(SharedDepthTarget* dt)
+{
+	shared_depth = dt;
+	depthTargetInfo.texture = dt ? dt->texture : nullptr;   // стартовое значение; обновляется лениво
 }
 

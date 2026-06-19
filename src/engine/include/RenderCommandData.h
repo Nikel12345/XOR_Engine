@@ -9,6 +9,7 @@ struct SubMeshData;
 struct BufferData;
 struct TextureData;
 struct TextureAtlas;
+struct SharedDepthTarget;
 
 class PassManager;
 
@@ -47,6 +48,9 @@ struct RenderPassTexturesInfo {
     void CreateDepthTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_GPUTextureFormat format);
     void SetColorTexture(SDL_GPUTexture* tex);
     void SetDepthTexture(SDL_GPUTexture* tex);
+    // Привязка к разделяемому depth-таргету: фактический texture резолвится лениво в
+    // RenderPassStandardBody, поэтому ресайз таргета не требует переназначения по проходам.
+    void SetDepthTexture(SharedDepthTarget* dt);
 
     void SetColorTargetInfoLayer(uint32_t layer) { colorTargetInfo.layer_or_depth_plane = layer; };
     SDL_GPUColorTargetInfo colorTargetInfo{};
@@ -54,6 +58,7 @@ struct RenderPassTexturesInfo {
     SDL_GPUTextureFormat color_format = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUDepthStencilTargetInfo depthTargetInfo{};
+    SharedDepthTarget* shared_depth = nullptr;   // != nullptr → depth берётся отсюда (лениво)
 };
 
 struct RenderPassStep {

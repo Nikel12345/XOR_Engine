@@ -15,6 +15,16 @@ namespace DefaultRenderPassNamespace
     static TextureAtlas* shadow_moments_array = nullptr;
     static TextureAtlas* shadow_depth_flat_array = nullptr;
 
+    // "Псевдокласс" PassSystem: общие ресурсы дефолтного набора проходов. Создаются один раз
+    // в _SetDefaultCommonResources, дальше их ПОТРЕБЛЯЮТ конкретные Set*Pass — свободные функции
+    // ниже концептуально "методы" этого псевдокласса, разделяющие данное состояние. Так формат и
+    // depth-таргет живут в одном месте, а не переоткрываются в каждом проходе.
+    struct PassSystemState {
+        SharedDepthTarget*   main_depth = nullptr;                                 // depth MAIN/TRANSPARENT/DEBUG
+        SDL_GPUTextureFormat main_depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;    // единый формат depth набора
+        bool                 common_inited = false;
+    };
+    static PassSystemState g_pass_system;
 
     bool shadow_pass_inited = false;
 	bool main_pass_inited = false;
@@ -109,6 +119,35 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
             }
             sphereLayer++;
         });
+
+        // Directional: тот же порядок spot→sphere→direct, что в StoreLightCameras —
+        // cameraIndex обязан совпадать. is_ortho=1 → shadow frag пишет линейную осевую глубину.
+        om->ForEach<DirectLightComponent, ShadowCasterComponent>(om->GetActiveScene(),
+            [&](DirectLightComponent& light, ShadowCasterComponent& sc) {
+            for (int c = 0; c < light.light_data.cascade_count; ++c) {
+                if (light.needsUpdate) {
+                    ShadowPushData push_data{};
+                    push_data.cameraIndex = cameraIndex;
+                    push_data.max_range = light.light_data.CascadeFar(c);   // per-cascade far
+                    push_data.is_ortho = 1;
+                    SDL_PushGPUVertexUniformData(cb, 0, &push_data, sizeof(ShadowPushData));
+
+                    pm->RenderPassStandardBody(cb, &rp, bm, 0, &push_data);
+
+                    auto cp = SDL_BeginGPUCopyPass(cb);
+                    SDL_GPUTextureLocation src = {
+                        .texture = rp.renderPassTexsData.depthTargetInfo.texture
+                    };
+                    SDL_GPUTextureLocation dst = {
+                        .texture = flat_array->texture_binding.texture,
+                        .layer = cameraIndex
+                    };
+                    SDL_CopyGPUTextureToTexture(cp, &src, &dst, flat_array->width, flat_array->height, 1, false);
+                    SDL_EndGPUCopyPass(cp);
+                }
+                cameraIndex++;
+            }
+        });
     },
         std::move(shadow_rptd),
         10
@@ -118,6 +157,25 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
     );
 
     shadow_pass_inited = true;
+}
+
+void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx)
+{
+    if (g_pass_system.common_inited) {
+        SDL_Log("PassSystem common resources are already initialized.");
+        return;
+    }
+    TextureManager* tm = ctx->GetTextureManager();
+
+    auto depth_tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
+    depth_tci.width = 800;
+    depth_tci.height = 600;
+
+    g_pass_system.main_depth = tm->CreateSharedDepthTarget(depth_tci);
+    g_pass_system.main_depth_format = depth_tci.format;
+    tm->main_pass_depth = g_pass_system.main_depth;
+
+    g_pass_system.common_inited = true;
 }
 
 void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
@@ -130,19 +188,17 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
         SDL_Log("Default shadow render pass must be initialized before the default main render pass.");
         return;
     }
-    TextureManager* tm = ctx->GetTextureManager();
+    if (!g_pass_system.common_inited) {
+        SDL_Log("SetDefaultMainRenderPass: _SetDefaultCommonResources must be called first.");
+        return;
+    }
     PassManager* pm = ctx->GetRenderManager();
     BufferManager* bm = ctx->GetBufferManager();
-
-    auto tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
-    tci.width = 800;
-    tci.height = 600;
-    tm->main_pass_depth_texture = tm->CreateGPU_Texture(tci);
 
     RenderPassTexturesInfo main_rptd{};
     main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.1f,0.1f,0.14f,1.0f }, SDL_GPU_TEXTUREFORMAT_INVALID);
     // STORE (был DONT_CARE) — depth сцены нужен DEBUG_PASS для окклюзии рамок коллайдеров.
-    main_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, tci.format);
+    main_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, g_pass_system.main_depth_format);
 
     auto mainPass = pm->CreateRenderPass(
         MAIN_PASS,
@@ -156,7 +212,7 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
 
 
     mainPass->global_texture_bindings = { shadow_depth_flat_array->texture_binding };
-    mainPass->renderPassTexsData.SetDepthTexture(tm->main_pass_depth_texture);
+    mainPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 
     main_pass_inited = true;
 }
@@ -165,10 +221,9 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
 {
     PassManager* pm = ctx->GetRenderManager();
     BufferManager* bm = ctx->GetBufferManager();
-    TextureManager* tm = ctx->GetTextureManager();
 
-    if (!main_pass_inited || !tm->main_pass_depth_texture) {
-        SDL_Log("SetDebugColliderPass: MAIN_PASS must be initialized first (depth texture missing).");
+    if (!main_pass_inited || !g_pass_system.common_inited) {
+        SDL_Log("SetDebugColliderPass: MAIN_PASS / common resources must be initialized first.");
         return;
     }
 
@@ -176,11 +231,10 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
     // свопчейна подставит PipeManager (MakeDefaultColorTarget). Depth ЗАГРУЖАЕМ из
     // MAIN_PASS (LOAD) — дебаг-шейдер тестит его (ReadsDepthOnly), поэтому рамки
     // перекрываются геометрией сцены. depth_write выключен → рамки не портят буфер.
-    auto depth_tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
-
+    // Формат depth берём из общего PassSystem — он обязан совпадать с форматом текстуры.
     RenderPassTexturesInfo debug_rptd{};
     debug_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, SDL_GPU_TEXTUREFORMAT_INVALID);
-    debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, depth_tci.format);
+    debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, g_pass_system.main_depth_format);
 
     auto debugPass = pm->CreateRenderPass(
         DEBUG_PASS,
@@ -197,17 +251,16 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
         25
     );
 
-    debugPass->renderPassTexsData.SetDepthTexture(tm->main_pass_depth_texture);
+    debugPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 }
 
 void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
 {
     PassManager* pm = ctx->GetRenderManager();
     BufferManager* bm = ctx->GetBufferManager();
-    TextureManager* tm = ctx->GetTextureManager();
 
-    if (!main_pass_inited || !tm->main_pass_depth_texture) {
-        SDL_Log("SetTransparentPass: MAIN_PASS must be initialized first (depth texture missing).");
+    if (!main_pass_inited || !g_pass_system.common_inited) {
+        SDL_Log("SetTransparentPass: MAIN_PASS / common resources must be initialized first.");
         return;
     }
 
@@ -215,11 +268,10 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
     // из MAIN_PASS и только тестим (depth_write выключен у программы) — прозрачная
     // геометрия корректно перекрывается непрозрачной, но не портит depth-буфер.
     // Блендинг включается на стороне программы через BehavesAsTransparentGeometry.
-    auto depth_tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
-
+    // Формат depth — общий из PassSystem.
     RenderPassTexturesInfo transparent_rptd{};
     transparent_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, SDL_GPU_TEXTUREFORMAT_INVALID);
-    transparent_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, depth_tci.format);
+    transparent_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, g_pass_system.main_depth_format);
 
     auto transparentPass = pm->CreateRenderPass(
         TRANSPARENT_PASS,
@@ -233,7 +285,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
         22   // между MAIN_PASS (20) и DEBUG_PASS (25)
     );
 
-    transparentPass->renderPassTexsData.SetDepthTexture(tm->main_pass_depth_texture);
+    transparentPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 }
 
 void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx,

@@ -111,6 +111,51 @@ SDL_GPUTexture* TextureManager::CreateGPU_Texture(SDL_GPUTextureCreateInfo tci)
     return tex;
 }
 
+SharedDepthTarget* TextureManager::CreateSharedDepthTarget(SDL_GPUTextureCreateInfo tci)
+{
+    auto target = std::make_unique<SharedDepthTarget>();
+    target->tci = tci;
+    target->owner = this;
+    target->texture = CreateGPU_Texture(tci);
+
+    SharedDepthTarget* ptr = target.get();
+    shared_depth_targets.push_back(std::move(target));
+    return ptr;
+}
+
+void TextureManager::QueueDeleteTexture(SDL_GPUTexture* texture)
+{
+    if (!texture) return;
+    texture_trash.push_back({ texture, BUFFERING_LEVEL });
+}
+
+void TextureManager::TrashTextures()
+{
+    auto it = texture_trash.begin();
+    while (it != texture_trash.end()) {
+        if (it->frame_ready <= 0) {
+            SDL_ReleaseGPUTexture(dev, it->tex);
+            it = texture_trash.erase(it);
+        }
+        else {
+            it->frame_ready--;
+            ++it;
+        }
+    }
+}
+
+void SharedDepthTarget::Resize(uint32_t w, uint32_t h)
+{
+    if (!owner || w == 0 || h == 0) return;
+    if (texture && tci.width == w && tci.height == h) return;   // размер не изменился — нечего пересоздавать
+
+    tci.width = w;
+    tci.height = h;
+    SDL_GPUTexture* old_texture = texture;
+    texture = owner->CreateGPU_Texture(tci);
+    owner->QueueDeleteTexture(old_texture);                      // старую — в отложенное удаление
+}
+
 void TextureManager::CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name)
 {
     // Размер берём из самих пикселей — TextureLoader уже упаковал их под формат атласа.
@@ -283,6 +328,15 @@ void TextureManager::DeleteTexture(SDL_GPUTexture* texture)
 
 TextureManager::~TextureManager()
 {
+    // Дочищаем то, что ещё висело в отложенном удалении, и текстуры разделяемых depth-таргетов.
+    for (auto& pending : texture_trash) {
+        if (pending.tex) SDL_ReleaseGPUTexture(dev, pending.tex);
+    }
+    texture_trash.clear();
+    for (auto& target : shared_depth_targets) {
+        if (target && target->texture) SDL_ReleaseGPUTexture(dev, target->texture);
+    }
+    shared_depth_targets.clear();
   //  for (auto& pair : textures_data) {
 		//auto& data = pair.second;
   //      if (data->texture.texture) {

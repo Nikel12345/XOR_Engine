@@ -29,6 +29,14 @@ uint32_t LightDataModule::CalculateLightSize(ObjectManager* om, SceneData* scene
             total_size += safe_u32(posArr->size()) * sizeof(LightLayout);
         }
     );
+    // Directional: позиции нет, считаем по самому компоненту. Один LightLayout на источник.
+    om->ForEachArchetype<DirectLightComponent>(
+        scene,
+        [&](ComponentArray<DirectLightComponent, void>* arr)
+        {
+            total_size += safe_u32(arr->size()) * sizeof(LightLayout);
+        }
+    );
 
     return total_size;
 }
@@ -110,6 +118,47 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
 			};
 			bm->UploadToTransferBuffer(task, sizeof(LightLayout), &light_layout);
         });
+
+    // Directional: третий блок в том же порядке spot→sphere→direct, чтобы сквозной
+    // offset/cameraIndex оставался согласован с StoreLightCameras и теневым проходом.
+    om->ForEach<DirectLightComponent>(scene,
+        [&](Entity e, DirectLightComponent& light) {
+            DirectLightComponent::DirectLightData& d = light.light_data;
+
+            glm::vec3 dir = glm::normalize(glm::vec3(d.dir_x, d.dir_y, d.dir_z));
+
+            LightLayout light_layout{};
+            // Позиции у directional нет — x/y/z не используются шейдером.
+            light_layout.x = 0.0f;
+            light_layout.y = 0.0f;
+            light_layout.z = 0.0f;
+            // w (source_radius) простаивает у directional → переиспользуем под число каскадов.
+            light_layout.w = static_cast<float>(d.cascade_count);
+            light_layout.dir_x = dir.x;
+            light_layout.dir_y = dir.y;
+            light_layout.dir_z = dir.z;
+            light_layout.angle_tan = 0.0f;
+            light_layout.r = d.r;
+            light_layout.g = d.g;
+            light_layout.b = d.b;
+            light_layout.power = d.power;
+            // Глубина у directional нормируется per-cascade (ndc.z каждого каскада),
+            // поэтому общий max_range шейдеру не нужен.
+            light_layout.max_range = 0.0f;
+
+            if (om->Has<ShadowCasterComponent>(scene, e)) {
+                light_layout.type = LightTypes::DIRECT;
+                light_layout.offset = offset;
+                light_layout.padding = 0;
+                offset += d.cascade_count;
+            }
+            else {
+                light_layout.type = LightTypes::DIRECT;
+                light_layout.offset = no_camera;
+                light_layout.padding = 0;
+            };
+            bm->UploadToTransferBuffer(task, sizeof(LightLayout), &light_layout);
+        });
 }
 
 uint32_t LightDataModule::CalculateLightCamerasSize(ObjectManager* om, SceneData* scene)
@@ -132,6 +181,12 @@ uint32_t LightDataModule::CalculateLightCamerasSize(ObjectManager* om, SceneData
             cameraCount += safe_u32(posArr->size()) * 6;
         }
     );
+    // Directional: cascade_count ortho-камер на источник (per-instance, т.к. число каскадов
+    // у разных источников может отличаться).
+    om->ForEach<DirectLightComponent, ShadowCasterComponent>(scene,
+        [&](DirectLightComponent& light, ShadowCasterComponent&) {
+            cameraCount += safe_u32(light.light_data.cascade_count);
+        });
     return cameraCount * sizeof(LightCamera);
 }
 
@@ -192,6 +247,38 @@ inline void StoreSphereLightCameras(BufferManager* bm, UploadTask* task, Positio
 	}
 }
 
+// Ortho-камера(ы) directional. Камера статична (не едет за игроком): бокс строится
+// вокруг center из компонента. eye отодвинут на half_depth в сторону источника, чтобы
+// near=0 не отсёк окклюдеры перед центром. orthoZO — depth [0,1], как perspectiveZO.
+// Сейчас 1 каскад; под CSM здесь будет цикл по слайсам фрустума камеры.
+inline void StoreDirectionalCascades(BufferManager* bm, UploadTask* task,
+    DirectLightComponent::DirectLightData& d) {
+    glm::vec3 dir = glm::normalize(glm::vec3(d.dir_x, d.dir_y, d.dir_z));
+    glm::vec3 center = glm::vec3(d.center_x, d.center_y, d.center_z);
+    glm::vec3 up = (std::abs(dir.y) > 0.99f)
+        ? glm::vec3(1.0f, 0.0f, 0.0f)
+        : glm::vec3(0.0f, 1.0f, 0.0f);
+
+    // Вложенные концентрические боксы, мелкий→крупный (каскад 0 первым — шейдер берёт
+    // первый содержащий). И латераль, и глубина масштабируются ratio^c: иначе пол
+    // покрывается только в боковом направлении. eye отодвигается на per-cascade глубину.
+    for (int c = 0; c < d.cascade_count; ++c) {
+        float he    = d.CascadeExtent(c);
+        float depth = d.CascadeDepth(c);
+        glm::vec3 eye = center - dir * depth;
+        glm::mat4 view = glm::lookAt(eye, eye + dir, up);
+        glm::mat4 proj = glm::orthoZO(
+            -he, he,
+            -he, he,
+            0.0f, 2.0f * depth);
+
+        LightCamera lc{};
+        lc.view = view;
+        lc.proj = proj;
+        bm->UploadToTransferBuffer(task, sizeof(LightCamera), &lc);
+    }
+}
+
 void LightDataModule::StoreLightCameras(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene) {
     om->ForEach<Positions, SpotLightComponent, ShadowCasterComponent>(scene,
         [&](SoAElement<Positions> pos_el, SpotLightComponent& light, ShadowCasterComponent) {
@@ -206,6 +293,10 @@ void LightDataModule::StoreLightCameras(BufferManager* bm, UploadTask* task, Obj
             size_t i = pos_el.i();
             StoreSphereLightCameras(bm, task, P, i, light.light_data);
 	});
+    om->ForEach<DirectLightComponent, ShadowCasterComponent>(scene,
+        [&](DirectLightComponent& light, ShadowCasterComponent) {
+            StoreDirectionalCascades(bm, task, light.light_data);
+        });
 }
 
 uint32_t LightDataModule::AskNumLightCameras(ObjectManager* om, SceneData* scene)
@@ -228,6 +319,10 @@ uint32_t LightDataModule::AskNumLightCameras(ObjectManager* om, SceneData* scene
         num_light_cameras += safe_u32(posArr->size()) * 6;
     }
     );
+    om->ForEach<DirectLightComponent>(scene,
+        [&](DirectLightComponent& light) {
+            num_light_cameras += safe_u32(light.light_data.cascade_count);
+        });
 
     return num_light_cameras;
 }

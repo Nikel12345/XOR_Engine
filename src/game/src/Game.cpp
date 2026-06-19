@@ -235,29 +235,41 @@ SDL_AppResult Game::MainInit()
     );
 
     // Сфера: тот же путь (generator → staging → append), размер ~1 через диагональ.
-    ctx->CreateEntity("main_menu",
-        MaterialComponent{ { material_sprite } },
-        ModelComponent{ sphere },
-        PositionProxy16{ 1,0,0,-2.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
-        ShadowComponent{},
-        // Явный сферический коллайдер (радиус 1 = радиус UV-сферы) — иначе пустой
-        // ColliderComponent уходит в fallback авто-AABB и рамка становится боксом.
-        ColliderComponent{ { Collider::Sphere(1.0f) } },
-        DrawComponent{}
-    );
+    //Collider second_collide = Collider::Sphere(1.0f, { 0, 0.5f, 0 });
+    //ctx->CreateEntity("main_menu",
+    //    MaterialComponent{ { material_sprite } },
+    //    ModelComponent{ sphere },
+    //    PositionProxy16{ 1,0,0,-2.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
+    //    ShadowComponent{},
+    //    // Явный сферический коллайдер (радиус 1 = радиус UV-сферы) — иначе пустой
+    //    // ColliderComponent уходит в fallback авто-AABB и рамка становится боксом.
+    //    ColliderComponent{ { Collider::Sphere(1.0f), second_collide } },
+    //    DrawComponent{}
+    //);
 
     //ctx->CreateEntity("main_menu",
     //    SpotLightComponent{ SpotLightComponent::SpotLightData{ 0, 1.0f, 0.0f, 0.0f, 0.18f, 1, 1, 1, 100 } },
     //    PositionProxy16{ 1,0,0,-2.5f,  0,1,0,0,  0,0, 1,1.25f,  0,0,0,1 },
     //    ShadowCasterComponent{}
     //);
-    ctx->CreateEntity("main_menu",
-        SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
-        PositionProxy16{ 1,0,0, 0.0f,  0,1,0,0,  0,0, 1,1.25f,  0,0,0,1 },
-        ShadowCasterComponent{},
-        ColliderComponent{}
-    );
+    //ctx->CreateEntity("main_menu",
+    //    SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
+    //    PositionProxy16{ 1,0,0, 0.0f,  0,1,0,0,  0,0, 1,1.25f,  0,0,0,1 },
+    //    ShadowCasterComponent{},
+    //    ColliderComponent{}
+    //);
 
+    // Directional: позиции нет. dir — вниз с наклоном; статичный ortho-бокс вокруг сцены
+    // (center 0, half_extent/half_depth = 20). DirectLightData{dir, rgb, power, center, he, hd}.
+    ctx->CreateEntity("main_menu",
+        DirectLightComponent{ DirectLightComponent::DirectLightData{
+            0.0f, -1.0f, -0.70f,   // dir
+            1.0f, 1.0f, 1.0f,      // color
+            5.0f,                  // power
+            -0.5f, 0.0f, 0.0f,      // box center
+            1.0f, 1.0f } },      // half_extent, half_depth
+        ShadowCasterComponent{}
+    );
 
     UpdateDebugColliders();
 

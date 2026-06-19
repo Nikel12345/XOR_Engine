@@ -536,6 +536,7 @@ void Engine::FenceFunc(uint8_t slot) {
 	SDL_ReleaseGPUFence(dev, fence);
 	sd.fence = nullptr;
 	buffer_manager->TrashBuffers();
+	texture_manager->TrashTextures();   // отложенное удаление текстур — та же кадровая точка, что и буферы
 
 	//slot_controller->RemoveSlotFence(slot);
 	slot_controller->SetSlotState(slot, RENDERED);
@@ -559,19 +560,12 @@ void Engine::OnWindowResized(Sint32 w, Sint32 h)
 {
 	width = safe_sint32_f(w);
 	height = safe_sint32_f(h);
-	auto tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
-	tci.width = safe_f_u32(width);
-	tci.height = safe_f_u32(height);
 
-	SDL_GPUTexture* new_depth_texture = texture_manager->CreateGPU_Texture(tci);
-
-	//texture_manager->DeleteTexture(texture_manager->main_pass_depth_texture);
-	texture_manager->main_pass_depth_texture = new_depth_texture;
-
-	pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::MAIN_PASS)->renderPassTexsData.SetDepthTexture(texture_manager->main_pass_depth_texture);
-	// Прозрачный пасс тестит ту же depth-текстуру MAIN_PASS — переназначаем после ресайза.
-	if (RenderPassStep* transparent_rp = pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::TRANSPARENT_PASS))
-		transparent_rp->renderPassTexsData.SetDepthTexture(texture_manager->main_pass_depth_texture);
+	// Один вызов пересоздаёт разделяемый depth и ставит старую текстуру в отложенное
+	// удаление. Все проходы (MAIN/TRANSPARENT/DEBUG) резолвят свежий указатель лениво в
+	// RenderPassStandardBody — переназначать по проходам больше не нужно.
+	if (texture_manager->main_pass_depth)
+		texture_manager->main_pass_depth->Resize(safe_f_u32(width), safe_f_u32(height));
 }
 
 Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height)
@@ -663,11 +657,15 @@ void Engine::InitPasses()
 	//SetDefaultCullingComputeCountPass(pass_manager, buffer_manager, object_manager, transform_data_module, light_data_module, indirect_data_module);
 	//SetDefaultCullingOutIndirectPass(pass_manager, buffer_manager);
 
-	SetDefaultShadowPCFRenderPass(engine_context);
-	//SetDefaultMainRenderPass(pass_manager, texture_manager, buffer_manager, dev, win);
-	SetDefaultMainRenderPass(engine_context);
-	SetTransparentPass(engine_context);     // прозрачная геометрия (блендинг) поверх сцены
-	SetDebugColliderPass(engine_context);   // рамки коллайдеров поверх свопчейна
+	// PassSystem (псевдокласс): дефолтный набор проходов. Общие ресурсы (depth-таргет + формат)
+	// создаёт _SetDefaultCommonResources один раз, дальше Set*Pass их только потребляют.
+	{
+		_SetDefaultCommonResources(engine_context);   // depth-таргет, единый формат depth
+		SetDefaultShadowPCFRenderPass(engine_context);
+		SetDefaultMainRenderPass(engine_context);
+		SetTransparentPass(engine_context);     // прозрачная геометрия (блендинг) поверх сцены
+		SetDebugColliderPass(engine_context);   // рамки коллайдеров поверх свопчейна
+	}
 	//SetDefaultShadowVSMRenderPass(pass_manager, texture_manager, buffer_manager, object_manager, batch_builder);
 	//SetDefaultShadowBlurPass(pass_manager, buffer_manager); // ДЛЯ VSM
 	//SetDefaultMainRenderPass(pass_manager, texture_manager, buffer_manager);

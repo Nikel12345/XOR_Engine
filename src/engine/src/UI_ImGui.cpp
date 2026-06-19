@@ -231,4 +231,56 @@ void UI_ImGui::DrawLightsPanel(ObjectManager* objectManager)
         });
         ImGui::TreePop();
     }
+
+    // ---------- Directional Lights ----------
+    if (ImGui::TreeNode("Directional Lights"))
+    {
+        int index = 0;
+        objectManager->ForEach<DirectLightComponent>(scene,
+            [&index](DirectLightComponent& light)
+        {
+            char label[32];
+            snprintf(label, sizeof(label), "Directional %d", index++);
+            if (!ImGui::TreeNode(label)) return;
+
+            auto& d = light.light_data;
+            bool changed = false;
+
+            // --- Направление (нормализуется при заливке; позиции у directional нет) ---
+            ImGui::SeparatorText("Direction");
+            changed |= ImGui::DragFloat3("Dir", &d.dir_x, 0.01f, -1.0f, 1.0f);
+
+            // --- Цвет / мощность ---
+            ImGui::SeparatorText("Color");
+            changed |= ImGui::ColorEdit3("RGB", &d.r);
+            changed |= ImGui::DragFloat("Power", &d.power, 0.05f, 0.0f, FLT_MAX);
+
+            // --- Статичные вложенные ortho-боксы (каскады) ---
+            ImGui::SeparatorText("Shadow Cascades");
+            changed |= ImGui::DragFloat3("Center", &d.center_x, 0.05f);
+            changed |= ImGui::DragFloat("Half Extent (c0)", &d.half_extent, 0.1f, 0.01f, FLT_MAX);
+            changed |= ImGui::DragFloat("Half Depth (c0)", &d.half_depth, 0.1f, 0.01f, FLT_MAX);
+            changed |= ImGui::DragFloat("Cascade Ratio", &d.cascade_ratio, 0.05f, 1.0f, FLT_MAX);
+            // Меняет число теневых камер → буферы пересчитываются. Степпер +/- с клампом
+            // в [1, MAX_CASCADES] (все каскады всех светов делят 8-слойную карту).
+            if (ImGui::InputInt("Cascade Count", &d.cascade_count)) {
+                if (d.cascade_count < 1) d.cascade_count = 1;
+                if (d.cascade_count > DirectLightComponent::DirectLightData::MAX_CASCADES)
+                    d.cascade_count = DirectLightComponent::DirectLightData::MAX_CASCADES;
+                changed = true;
+            }
+
+            // Per-cascade: латераль x глубина и мир-на-тексель (ширина / 1024).
+            for (int c = 0; c < d.cascade_count; ++c) {
+                float he = d.CascadeExtent(c);
+                float dp = d.CascadeDepth(c);
+                ImGui::Text("  c%d: %.1f x %.1f, depth %.1f, texel %.4f",
+                    c, 2.0f * he, 2.0f * he, 2.0f * dp, (2.0f * he) / 1024.0f);
+            }
+
+            if (changed) light.needsUpdate = true;
+            ImGui::TreePop();
+        });
+        ImGui::TreePop();
+    }
 }
