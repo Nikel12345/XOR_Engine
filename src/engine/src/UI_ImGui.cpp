@@ -91,6 +91,10 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
         ImGui::SameLine();
         if (ImGui::RadioButton("Scale",  g_gizmo_op == ImGuizmo::SCALE))     g_gizmo_op = ImGuizmo::SCALE;
         ImGui::SameLine();
+        // Равномерный масштаб (все оси разом) отдельным режимом — у ImGuizmo это
+        // SCALEU: вместо трёх осевых ручек тянешь одну, объект масштабируется целиком.
+        if (ImGui::RadioButton("Uniform", g_gizmo_op == ImGuizmo::SCALEU))    g_gizmo_op = ImGuizmo::SCALEU;
+        ImGui::SameLine();
         if (ImGui::SmallButton("Deselect")) g_selected = GIZMO_NONE;
 
         objectManager->ForEach<Positions, MaterialComponent, ModelComponent>(scene,
