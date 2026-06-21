@@ -200,6 +200,7 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
     const size_t i = el.i();
 
     glm::mat4 model = ReadPositionsMatrix(P, i);
+    const glm::mat4 model_before = model;   // матрица ДО манипуляции (для разворота поворота)
 
     ImGuiIO& io = ImGui::GetIO();
     ImGuizmo::SetOrthographic(false);
@@ -207,11 +208,20 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
     ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
     ImGuizmo::SetRect(0.0f, 0.0f, io.DisplaySize.x, io.DisplaySize.y);
 
+    float delta[16];   // приращение этого кадра (мировое), нужно для разворота вращения
     if (ImGuizmo::Manipulate(glm::value_ptr(view),
                              glm::value_ptr(proj),
                              g_gizmo_op, g_gizmo_mode,
-                             glm::value_ptr(model)))
+                             glm::value_ptr(model),
+                             delta))
     {
+        // Вращение у ImGuizmo идёт против курсора. «Сменить знак» поворота = применить
+        // к матрице ДО манипуляции ИНВЕРСИЮ кадрового приращения вместо него самого
+        // (delta — чистый поворот в режиме ROTATE, инверсия = поворот в обратную сторону).
+        // Move/Scale/Uniform оставляем как есть.
+        if (g_gizmo_op == ImGuizmo::ROTATE)
+            model = glm::inverse(glm::make_mat4(delta)) * model_before;
+
         // Тащат стрелку — шлём новую мировую матрицу в sim-поток (он пишет в Positions).
         // payload на куче: 16 float не лезут в указатель; функтор команды его удалит.
         SetTransformCmd* cmd = new SetTransformCmd{};
