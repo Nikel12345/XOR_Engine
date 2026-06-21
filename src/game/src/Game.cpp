@@ -267,13 +267,11 @@ SDL_AppResult Game::MainInit()
     //    ColliderComponent{}
     //);
 
-    // Directional: позиции нет. dir — вниз с наклоном; статичный ortho-бокс вокруг сцены
-    // (center 0, half_extent/half_depth = 20). DirectLightData{dir, rgb, power, center, he, hd}.
     ctx->CreateEntity("main_menu",
         DirectLightComponent{ DirectLightComponent::DirectLightData{
             0.0f, -1.0f, -0.70f,   // dir
             1.0f, 1.0f, 1.0f,      // color
-            5.0f,                  // power
+            2.5f,                  // power
             -0.5f, 0.0f, 0.0f,      // box center
             1.0f, 1.0f } },      // half_extent, half_depth
         ShadowCasterComponent{}
@@ -350,7 +348,7 @@ void Game::CreateDebugColliders()
             PositionProxy16{},          // перезапишется композицией parent × local
             ParentComponent{ s.owner },
             lm,
-            DrawComponent{},
+            DrawComponent{ false, 1.0f, 0 },
             DebugColliderTag{},
             EditorHiddenComponent{});   // движковый тег: не показывать в списке объектов UI
     }
