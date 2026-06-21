@@ -3,6 +3,7 @@
 #include <string>
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <SDL3/SDL_gpu.h>
 #include <glm/glm.hpp>   // DispatchSizeBinder использует glm::uvec3 (раньше приходил из PCH)
 
@@ -35,7 +36,10 @@ namespace ShaderBase {
     };
     struct ShaderData
     {
-        SDL_GPUShader* shader = nullptr;
+        // Владеющий хэндл GPU-шейдера. Шарится копированием ShaderData (vs reuse между sp) и
+        // дедупом в ShaderManager → refcount = число владельцев, релиз при 0 (делитер задаёт
+        // ShaderManager и гасит его после своей смерти). Пайплайн берёт сырой через .get().
+        std::shared_ptr<SDL_GPUShader> shader;
         size_t shader_size = 0;
         Uint8* shader_code = nullptr;
     };

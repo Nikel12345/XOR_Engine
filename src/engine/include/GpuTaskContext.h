@@ -17,6 +17,7 @@ public:
 	GpuTaskContext(BufferManager* bm, ShaderManager* sm, PassManager* pm, TextureManager* tm);
 
 	FragmentShaderData CreateFragmentShader(const char* hlsl_path);
+	FragmentShaderData CreateMaterialFragmentShader(const char* base_path, const char* user_path);
 	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout);
 	ShaderProgramDescription* CreateShaderProgramDescription(const std::string& name);
 	ShaderProgram* CreateShaderProgram(const std::string& name, ShaderProgramDescription* spd, const RenderPassName& associated_pass_name,

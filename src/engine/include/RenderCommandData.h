@@ -4,6 +4,7 @@
 #include <SDL3/SDL_gpu.h>
 #include "Aliases.h"
 #include "MaterialData.h"
+#include "TextureData.h"   // TextureData по значению в TextureBatchData::texture_uvl
 
 struct SubMeshData;
 struct BufferData;
@@ -24,9 +25,14 @@ struct ModelBatchData {
 
 struct TextureBatchData {
     std::unordered_map<ModelBatchKey, ModelBatchData> model_batches;
-	std::vector<TextureData*> texture_uvl;
+	// UVL хранится ЗНАЧЕНИЯМИ (не указателями): непрерывный блок → прямой пуш в Execute
+	// без per-draw сбора разбросанных указателей. Инвариант: значения копируются при
+	// сборке батча, поэтому смена UVL ЖИВОЙ текстуры (репак/компактизация атласа) ОБЯЗАНА
+	// триггерить BuildRenderBatches. Добавление/удаление текстур этого не нарушают: чужие
+	// UVL не двигаются, а батч удаляемой текстуры и так пересобирается.
+	std::vector<TextureData> texture_uvl;
     uint32_t indirect_command_index = 0;
-    float alpha = 1.0f;   // копия Material::alpha — пишется в .w UVL альбедо при пуше
+    const std::vector<uint8_t>* params = nullptr;   // → &Material::params (невладеющий; адрес стабилен; alpha и пр. факторы внутри)
 };
 
 struct AtlasBatchData {

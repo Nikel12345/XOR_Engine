@@ -278,21 +278,14 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 			}
 			for (auto& [_, texture_batch] : atlas_batch.texture_batches) {
 				if (!texture_batch.texture_uvl.empty()) {
-					TextureData padded[4] = {};
-					size_t count = std::min(texture_batch.texture_uvl.size(), size_t(4));
-					for (size_t i = 0; i < count; i++) {
-						if (texture_batch.texture_uvl[i])
-							padded[i] = *texture_batch.texture_uvl[i];
-					}
-					// .x/.y/.z альбедо (offset/scale/layer) уже скопированы выше; здесь
-					// дописываем ТОЛЬКО неиспользуемый .w (_pad) — туда кладём биты
-					// per-material альфы. Шейдер читает её как asfloat(textures[0].data.w).
-					if (count > 0)
-						SDL_memcpy(&padded[0]._pad, &texture_batch.alpha, sizeof(float));
-					SDL_PushGPUFragmentUniformData(cb, uvl_slot, padded, sizeof(padded));
+					SDL_PushGPUFragmentUniformData(cb, uvl_slot,
+						texture_batch.texture_uvl.data(),
+						safe_u32(texture_batch.texture_uvl.size() * sizeof(TextureData)));
 				}
-				else {
-					//SDL_Log("Texture batch UVL data does not exist or is empty");
+
+				if (texture_batch.params && !texture_batch.params->empty()) {
+					SDL_PushGPUFragmentUniformData(cb, uvl_slot + 1,
+						texture_batch.params->data(), safe_u32(texture_batch.params->size()));
 				}
 
 				SDL_DrawGPUIndexedPrimitivesIndirect(rp,

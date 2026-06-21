@@ -30,6 +30,10 @@ public:
 
 	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders);
 
+	// Прокси к MaterialManager: упаковать per-material факторы (T = раскладка MaterialBlock) в Material::params.
+	template<class T>
+	void SetMaterialParams(Material* m, const T& p) { material_manager->SetMaterialParams(m, p); }
+
 	ModelData* CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor = AnchorShift::Keep);
 	ModelData* CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep);
 
@@ -67,6 +71,7 @@ public:
 	void SetActiveScene(const SceneName& name);
 
 	FragmentShaderData CreateFragmentShader(const char* hlsl_path);
+	FragmentShaderData CreateMaterialFragmentShader(const char* base_path, const char* user_path);
 	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout);
 	ShaderProgramDescription* CreateShaderProgramDescription(const std::string& name);
 	ShaderProgram* CreateShaderProgram(const std::string& name, ShaderProgramDescription* spd, const RenderPassName& associated_pass_name,

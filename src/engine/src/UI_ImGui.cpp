@@ -2,6 +2,7 @@
 #include "UI_ImGui.h"
 #include "EngineContext.h"
 #include "InputManager.h"
+#include "MaterialParams.h"   // раскладки факторов: разбор params по полям в панели Materials
 
 void UI_ImGui::Iterate(EngineContext* ctx)
 {
@@ -12,6 +13,8 @@ void UI_ImGui::Iterate(EngineContext* ctx)
     DrawCameraPanel(ctx->GetCameraManager());
     ImGui::Separator();
     DrawObjectsPanel(ctx);
+    ImGui::Separator();
+    DrawMaterialsPanel(ctx);
     ImGui::Separator();
     DrawLightsPanel(ctx->GetObjectManager());
     ImGui::End();
@@ -119,6 +122,59 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
                 reinterpret_cast<const void*>(packed));
         }
 
+        ImGui::TreePop();
+    }
+}
+
+void UI_ImGui::DrawMaterialsPanel(EngineContext* ctx)
+{
+    if (!ImGui::CollapsingHeader("Materials")) return;
+
+    MaterialManager* mm = ctx->GetMaterialManager();
+    if (!mm) return;
+
+    for (auto& [name, mat] : mm->GetMaterials())
+    {
+        if (!mat || mat->params.empty()) continue;   // только материалы с факторами
+
+        if (!ImGui::TreeNode(name.c_str())) continue;
+
+        // Правка идёт ПРЯМО в material->params: батч держит на него указатель и пушит каждый
+        // кадр, а ключ батча = идентичность материала → мутация НЕ вызывает пересборку дерева
+        // (живой тюнинг без ребилда). Тег params_kind выбирает рукописный разбор по полям
+        // (C++ рефлексии нет — подписи захардкожены здесь; тег лишь дискриминатор + доступ
+        // к полям по имени через каст к раскладке из MaterialParams.h).
+        switch (mat->params_kind)
+        {
+        case MaterialParamsKind::Opaque:
+        {
+            auto* p = reinterpret_cast<OpaqueMaterialParams*>(mat->params.data());
+            ImGui::ColorEdit3("Base Color", p->baseColor);
+            // По мере раскомментирования полей в OpaqueMaterialParams добавляй виджеты сюда:
+            // ImGui::SliderFloat("Metallic",  &p->metallic,  0.0f, 1.0f);
+            // ImGui::SliderFloat("Roughness", &p->roughness, 0.0f, 1.0f);
+            break;
+        }
+        case MaterialParamsKind::Transparent:
+        {
+            auto* p = reinterpret_cast<TransparentMaterialParams*>(mat->params.data());
+            ImGui::SliderFloat("Alpha", &p->alpha, 0.0f, 1.0f);
+            break;
+        }
+        default:
+        {
+            // Неизвестная раскладка (None) — fallback на сырые float'ы.
+            float* f = reinterpret_cast<float*>(mat->params.data());
+            const size_t n = mat->params.size() / sizeof(float);
+            for (size_t k = 0; k < n; ++k)
+            {
+                char l[16];
+                snprintf(l, sizeof(l), "p%u", static_cast<unsigned>(k));
+                ImGui::SliderFloat(l, &f[k], 0.0f, 1.0f);
+            }
+            break;
+        }
+        }
         ImGui::TreePop();
     }
 }

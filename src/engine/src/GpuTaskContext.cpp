@@ -14,6 +14,10 @@ FragmentShaderData GpuTaskContext::CreateFragmentShader(const char* path) {
 	return shader_manager->CreateFragmentShader(path);
 }
 
+FragmentShaderData GpuTaskContext::CreateMaterialFragmentShader(const char* base_path, const char* user_path) {
+	return shader_manager->CreateMaterialFragmentShader(base_path, user_path);
+}
+
 VertexShaderData GpuTaskContext::CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout) {
 	return shader_manager->CreateVertexShader(hlsl_path, vertex_buffer_layout);
 }

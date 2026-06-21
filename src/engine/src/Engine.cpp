@@ -257,6 +257,8 @@ void Engine::PrepareFunc(uint8_t slot)
 	engine_context->CreateGraphicsPipelines();
 	engine_context->CreateComputePipelines();
 
+	texture_manager->PackAtlases();
+
 	batch_builder->UpdateRenderBatches(pipe_manager, pass_manager, object_manager, object_manager->GetActiveScene());
 	batch_builder->BuildComputeBatches(pass_manager, pipe_manager, shader_manager);
 	PrepareFuncPrepassUndepended(slot);
@@ -592,6 +594,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 
 	pib_data_module = new PIB_DataModule();
 	transform_data_module = new TransformDataModule();
+	instance_data_module = new InstanceDataModule();
 	light_data_module = new LightDataModule();
 	indirect_data_module = new IndirectDataModule();
 	bound_sphere_data_module = new BoundSphereDataModule();
@@ -633,6 +636,7 @@ void Engine::InitDefaultBufferUpdaters()
 
 	SetDefaultCameraUpdater(*engine_context);
 	SetDefaultPositionUpdater(*engine_context, transform_data_module);
+	SetDefaultInstanceDataUpdater(*engine_context, instance_data_module);
 	SetDefaultLightUpdater(*engine_context, light_data_module);
 	SetDefaultPositionIndexUpdater(*engine_context, pib_data_module);
 	SetDefaultVertexUpdater(*engine_context);

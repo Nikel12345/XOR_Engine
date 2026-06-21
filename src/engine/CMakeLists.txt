@@ -174,6 +174,7 @@ set(ENGINE_DATAMODULES_SRC
     src/LightDataModule.cpp
     src/PIB_DataModule.cpp
     src/TransformDataModule.cpp
+    src/InstanceDataModule.cpp
 )
 set(ENGINE_DATAMODULES_HDR
     include/BoundSphereDataModule.h
@@ -182,6 +183,7 @@ set(ENGINE_DATAMODULES_HDR
     include/LightDataModule.h
     include/PIB_DataModule.h
     include/TransformDataModule.h
+    include/InstanceDataModule.h
     include/ModeleDataModule.h
 )
 set(ENGINE_PRESETS_HDR

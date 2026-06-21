@@ -43,8 +43,8 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp)
     SDL_GPUGraphicsPipelineCreateInfo pci;
     SDL_zero(pci);
 
-    pci.vertex_shader = sp->vs.shader_data.shader;
-    pci.fragment_shader = sp->fs.shader_data.shader;
+    pci.vertex_shader = sp->vs.shader_data.shader.get();
+    pci.fragment_shader = sp->fs.shader_data.shader.get();
 
     pci.primitive_type = sp->spd->primitive_type; 
     pci.rasterizer_state.fill_mode = sp->spd->fill_mode;

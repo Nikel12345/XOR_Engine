@@ -29,23 +29,16 @@ ModelBatchKey HashModelBatchKey(SubMeshData* submash) {
     return key;
 }
 
+// Ключ texture-батча = ИДЕНТИЧНОСТЬ материала через &Material::params (стабильный адрес
+// под unique_ptr). Так материалы с одинаковыми текстурами, но разными params не
+// схлопываются в один батч (как раньше молча терялась alpha), а мутация params на месте
+// НЕ меняет ключ → фактор-твики в рантайме не вызывают перестройку дерева батчей.
 TextureBatchKey HashTextureBatchKey(const Material* mat) {
     if (!mat) {
         SDL_Log("HashTextureBatchKey: material is nullptr!");
         return 0xFFFFFFFFFFFFFFFFull;
     }
-    TextureBatchKey key = 0;
-    //if (mat->albedo) {
-    //    key ^= reinterpret_cast<TextureBatchKey>(mat->albedo->texture_data);
-    //}
-    //if (mat->normal_texture) {
-    //    key ^= reinterpret_cast<TextureBatchKey>(mat->normal_texture->texture_data);
-    //}
-    for (const auto& [slot, tex] : mat->textures) {
-        if (tex) {
-            key ^= reinterpret_cast<TextureBatchKey>(tex->texture_data) * (2654435761ull + static_cast<uint64_t>(slot));
-        }
-    }
+    TextureBatchKey key = reinterpret_cast<TextureBatchKey>(&mat->params);
     key ^= key >> 33;
     key *= 0xff51afd7ed558ccd;
     key ^= key >> 33;
@@ -185,13 +178,18 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
 
             AtlasBatchData& atlas_batch = atlas_map[atlas_key];
 
-            TextureBatchKey tex_key = sp->required_slots.empty() ? 0 : HashTextureBatchKey(material);
+            // Ключуем по идентичности материала ВСЕГДА (даже без текстур): материал = свой
+            // батч, чтобы его params/alpha не делились с другим материалом того же шейдера.
+            TextureBatchKey tex_key = HashTextureBatchKey(material);
 
             auto& tex_map = atlas_batch.texture_batches;
             auto texb_it = tex_map.find(tex_key);
             if (texb_it == tex_map.end()) {
                 TextureBatchData new_texb{};
-                new_texb.alpha = material->alpha;   // per-material прозрачность → .w UVL альбедо
+                // Факторы — только шейдерам, потребляющим материал (есть текстурные слоты). Геометрия-
+                // only проходы (shadow: required_slots пуст) их не читают → не пушим, иначе пуш в
+                // необъявленный uniform-слот этого пасса.
+                new_texb.params = sp->required_slots.empty() ? nullptr : &material->params;
                 new_texb.texture_uvl.reserve(material->textures.size());
                 for (const auto& role : sp->required_slots) {
                     auto it = material->textures.find(role);
@@ -200,7 +198,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
                         assert(false && "Material is missing required texture for shader slot!");
                         continue;
                     }
-                    new_texb.texture_uvl.push_back(it->second->texture_data);
+                    new_texb.texture_uvl.push_back(*it->second->texture_data);   // КОПИЯ значения (см. инвариант в TextureBatchData)
                 }
 
                 tex_map[tex_key] = std::move(new_texb);

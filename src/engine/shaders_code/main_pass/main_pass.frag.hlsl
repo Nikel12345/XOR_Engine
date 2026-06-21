@@ -1,5 +1,4 @@
 #include "main_pass/math.hlsl"
-#include "main_pass/material.hlsl"
 #include "main_pass/lighting.hlsl"
 #include "main_pass/shadowPCF.hlsl"
 
@@ -8,34 +7,9 @@ Texture2DArray<float>     u_shadowDepthArray  : register(t0, space2);
 [[vk::combinedImageSampler]]
 SamplerComparisonState    u_shadowSampler     : register(s0, space2);
 
-[[vk::combinedImageSampler]]
-Texture2DArray            u_albedo            : register(t1, space2);
-[[vk::combinedImageSampler]]
-SamplerState              u_albedoSampler     : register(s1, space2);
-
-[[vk::combinedImageSampler]]
-Texture2DArray            u_normal            : register(t2, space2);
-[[vk::combinedImageSampler]]
-SamplerState              u_normalSampler     : register(s2, space2);
-
 StructuredBuffer<Light>       LightBlock    : register(t3, space2);
 struct ShadowCamera { float4x4 view; float4x4 proj; };
 StructuredBuffer<ShadowCamera> ShadowCameras : register(t4, space2);
-
-struct TextureData { uint4 data; };
-cbuffer TextureUVLBlock : register(b0, space3) {
-    TextureData textures[4];
-};
-
-struct PSInput
-{
-    float4 sv_pos                               : SV_Position;
-    [[vk::location(0)]] float2 v_uv             : TEXCOORD0;
-    [[vk::location(1)]] float3 v_worldPos       : TEXCOORD1;
-    [[vk::location(2)]] float3 v_worldNormal    : TEXCOORD2;
-    [[vk::location(3)]] float3 v_worldTangent   : TEXCOORD3;
-    [[vk::location(4)]] float3 v_worldBitangent : TEXCOORD4;
-};
 
 static const float AMBIENT_LIGHT = 0.75;    // пол освещённости (max с засветкой)
 
@@ -70,15 +44,9 @@ float shadowRefDist(float dist, float maxRange, float NdotL)
 
 float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 {
-    float3 n = computeNormal(
-        u_normal, u_normalSampler, textures[1].data,
-        input.v_uv, input.v_worldTangent, input.v_worldBitangent, input.v_worldNormal);
-
-    if (!isFrontFace) n = -n;
-
-    float4 albedoSample = sampleAtlas(u_albedo, u_albedoSampler, textures[0].data, input.v_uv);
-    float3 baseColor    = albedoSample.rgb;
-    float  alpha        = albedoSample.a;
+    // Пользовательская часть: какова поверхность в этом пикселе (до освещения).
+    SurfaceData surface = getSurface(input, isFrontFace);
+    float3 n = surface.normal;
 
     float3 lightSum = float3(0.0, 0.0, 0.0);
 
@@ -93,18 +61,13 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
         float  maxRange     = asfloat(light.light_info.z);
         float3 lightPos     = light.position_radius.xyz;
 
-        // DIRECTIONAL: ни позиции, ни затухания — обрабатываем ДО toLight/dist,
-        // иначе ранний `dist >= maxRange` его обрежет. maxRange здесь = far ortho-бокса.
         if (type == 2)
         {
-            float3 L_dir     = normalize(-light.direction_angle.xyz);   // к свету
+            float3 L_dir     = normalize(-light.direction_angle.xyz);
             float  intensity = computeDirectionalLight(n, light, L_dir);
 
             if (intensity > 0.0 && cameraOffset >= 0)
             {
-                // Число каскадов лежит в position_radius.w (source_radius простаивает).
-                // Боксы вложенные мелкий→крупный → берём ПЕРВЫЙ содержащий фрагмент
-                // (самый резкий). Вхождение = ndc.xy в [-1,1] и ndc.z в [0,1].
                 int    cascadeCount = max((int)light.position_radius.w, 1);
                 int    slot       = -1;
                 float4 chosenClip = float4(0.0, 0.0, 0.0, 1.0);
@@ -126,19 +89,14 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
                     float NdotL_d = max(dot(n, L_dir), 0.0);
                     float slope   = saturate(1.0 - NdotL_d);
 
-                    // Размер текселя и far этого каскада — из его ortho-proj (диагональ,
-                    // к транспонированию устойчиво): he = 1/proj[0][0], far = -1/proj[2][2].
                     float he_c       = 1.0 / ShadowCameras[slot].proj[0][0];
                     float far_c      = -1.0 / ShadowCameras[slot].proj[2][2];
                     float worldTexel = 2.0 * he_c / 1024.0;
 
-                    // Normal-offset: сдвигаем приёмник вдоль нормали на ~тексель — убирает
-                    // acne геометрически, масштабируется текселем сам, без peter-panning.
                     float3 sampPos  = input.v_worldPos + n * (worldTexel * CSM_NORMAL_OFFSET);
                     float4 sampClip = worldToLightClip(sampPos, slot);
                     float  ndcZ     = sampClip.z / sampClip.w;
 
-                    // Остаточный глубинный bias тоже в МИРОВЫХ единицах (тексель/far_c).
                     float biasNdc = (worldTexel * lerp(CSM_DEPTH_MIN, CSM_DEPTH_MAX, slope)) / far_c;
 
                     float shadow_d = computeShadowPCF(
@@ -159,7 +117,7 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
         float  dist    = length(toLight);
         if (dist >= maxRange) continue;
 
-        float3 L    = toLight / dist;          // от точки к источнику, нормализован
+        float3 L    = toLight / dist;
         float  NdotL = max(dot(n, L), 0.0);
 
         float intensity = 0.0;
@@ -196,7 +154,7 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
     }
 
     float3 lighting = max(lightSum, (float3)AMBIENT_LIGHT);
-    float3 color    = baseColor * lighting;
+    float3 color    = surface.baseColor * lighting;
 
-    return float4(color, alpha);
+    return float4(color, surface.alpha);
 }

@@ -118,23 +118,16 @@ ComputeShaderProgram* ShaderManager::GetComputeShaderProgram(const std::string& 
 
 ShaderManager::~ShaderManager()
 {
-	for (auto& pair : shader_programs) {
-		auto& prog = pair.second;
-
-		if (prog->vs.shader_data.shader)
-			SDL_ReleaseGPUShader(dev, prog->vs.shader_data.shader);
-		if (prog->fs.shader_data.shader)
-			SDL_ReleaseGPUShader(dev, prog->fs.shader_data.shader);
-
-		if (!prog->vs.attributes.empty())
-			prog->vs.attributes.clear();
-	}
+	// GPU-шейдеры освобождаются по refcount (shared_ptr в ShaderData) при shader_programs.clear()
+	// ниже — без явного SDL_ReleaseGPUShader, иначе шарящийся vs (main+transparent через один
+	// main_pass_vs) словил бы double-free.
     for (auto& prog : compute_shader_programs) {
         if (prog->cs.spv_code) {
             SDL_free(prog->cs.spv_code);
         }
 	}
-	shader_programs.clear();
+	shader_programs.clear();   // sp умирают → их shared_ptr отпускаются (device ещё жив)
+	shader_alive_.reset();     // токен гасим ПОСЛЕ: поздние релизы (статик vs на выходе) → no-op
 	SDL_ShaderCross_Quit();
 }
 

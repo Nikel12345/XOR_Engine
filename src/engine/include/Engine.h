@@ -19,6 +19,7 @@
 #include "LightStruct.h"
 #include "PIB_DataModule.h"
 #include "TransformDataModule.h"
+#include "InstanceDataModule.h"
 #include "LightDataModule.h"
 #include "MaterialManager.h"
 #include "BatchBuilder.h"
@@ -118,6 +119,7 @@ private:
 
 	PIB_DataModule* pib_data_module = nullptr;
 	TransformDataModule* transform_data_module = nullptr;
+	InstanceDataModule* instance_data_module = nullptr;
 	LightDataModule* light_data_module = nullptr;
 	IndirectDataModule* indirect_data_module = nullptr;
     BoundSphereDataModule* bound_sphere_data_module = nullptr;

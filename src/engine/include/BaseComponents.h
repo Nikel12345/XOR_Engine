@@ -370,7 +370,11 @@ struct ShadowComponent {};
 // (BuildRenderBatches) и инкремент (ApplyIncremental) этот флаг уважают, поэтому он
 // переживает реактивацию сцены. Скрытие НЕ трогает ECS — трансформ-строка остаётся,
 // индексы соседей не едут (в отличие от DeleteEntity).
-struct DrawComponent { bool visible = true; };
+struct DrawComponent {
+	bool     visible = true;
+	float    alpha   = 1.0f;   // per-instance прозрачность (× текстура × материал)
+	uint32_t flags   = 0;      // задел под per-instance биты (tint/dissolve/gpu-visible/...)
+};
 
 struct TestComponent {};
 

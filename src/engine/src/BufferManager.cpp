@@ -11,6 +11,8 @@ BufferManager::BufferManager(SDL_GPUDevice* device) : ResourceManager(device) {
 	CreateBufferData(DEFAULT_LIGHT_BUFFER, sizeof(LightLayout) * 2, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_CAMERA_BUFFER, sizeof(CameraData), SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Static);
 	CreateBufferData(DEFAULT_POSITION_INDEX_BUFFER, BASE_TB_SIZE / 16/ 10, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
+	// Per-instance данные (8 байт/строку). Dynamic — возможны удаления; авторесайз как у трансформов.
+	CreateBufferData(DEFAULT_INSTANCE_BUFFER, BASE_TB_SIZE / 80, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_LIGHT_CAMERA_BUFFER, sizeof(CameraData) * 6, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
 	
     CreateBufferData(DEFAULT_INDIRECT_BUFFER, sizeof(SDL_GPUIndexedIndirectDrawCommand) * 10, SDL_GPU_BUFFERUSAGE_INDIRECT | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, BufferDataType::Dynamic);

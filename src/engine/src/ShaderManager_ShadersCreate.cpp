@@ -138,6 +138,80 @@ FragmentShaderData ShaderManager::CreateFragmentShader(const char* hlsl_path)
     return fs;
 }
 
+// Компиляция из готовой source-СТРОКИ (а не файла) с дисковым .spv-кэшем по переданному
+// хэшу. Используется склейкой база+юзер: hash считается по контенту ОБЕИХ частей.
+Uint8* ShaderManager::CompileSPIRVFromSource(const char* source, uint64_t hash,
+    const char* dbg_name, SDL_ShaderCross_ShaderStage stage, size_t& out_size)
+{
+    const SDL_GPUShaderFormat supported = SDL_GetGPUShaderFormats(dev);
+    hash ^= (uint64_t)supported;
+    hash *= 1099511628211ULL;
+
+    std::string cache_path = BuildCachePath(dbg_name, hash);
+    Uint8* spv = (Uint8*)SDL_LoadFile(cache_path.c_str(), &out_size);
+    if (spv) { SDL_Log("[Shader] Cache hit: %s", cache_path.c_str()); return spv; }
+
+    SDL_ShaderCross_HLSL_Info hlsl_info{};
+    hlsl_info.source = source;
+    hlsl_info.entrypoint = "main";
+    hlsl_info.shader_stage = stage;
+    hlsl_info.include_dir = "../engine/shaders_code";
+    hlsl_info.defines = nullptr;
+    hlsl_info.props = 0;
+
+    size_t compiled_size = 0;
+    void* compiled = SDL_ShaderCross_CompileSPIRVFromHLSL(&hlsl_info, &compiled_size);
+    if (!compiled) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "ShaderCross compile failed (material): %s\n%s", dbg_name, SDL_GetError());
+        return nullptr;
+    }
+    SDL_IOStream* f = SDL_IOFromFile(cache_path.c_str(), "wb");
+    if (f) {
+        SDL_WriteIO(f, compiled, compiled_size);
+        SDL_CloseIO(f);
+        SDL_Log("[Shader] Compiled and cached: %s", cache_path.c_str());
+    }
+    out_size = compiled_size;
+    return (Uint8*)compiled;
+}
+
+// Фрагментный шейдер из движковой БАЗЫ + пользовательской части (getSurface). Пути —
+// относительно include_dir ("../engine/shaders_code"). Порядок склейки: сперва user
+// (определяет PSInput/SurfaceData/getSurface), затем base (его main их использует).
+FragmentShaderData ShaderManager::CreateMaterialFragmentShader(const char* base_path, const char* user_path)
+{
+    const std::string root = "../engine/shaders_code/";
+    size_t bn = 0, un = 0;
+    char* base_src = (char*)SDL_LoadFile((root + base_path).c_str(), &bn);
+    char* user_src = (char*)SDL_LoadFile((root + user_path).c_str(), &un);
+    if (!base_src || !user_src) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "CreateMaterialFragmentShader: failed to load base '%s' or user '%s'", base_path, user_path);
+        if (base_src) SDL_free(base_src);
+        if (user_src) SDL_free(user_src);
+        return {};
+    }
+    // Хэш по контенту ОБЕИХ частей: правка любой инвалидирует кэш; разные пары различаются.
+    uint64_t hash = HashBytes((const uint8_t*)user_src, un);
+    hash ^= HashBytes((const uint8_t*)base_src, bn) * 1099511628211ULL;
+    SDL_free(base_src);
+    SDL_free(user_src);
+
+    // Порядок: user первым (PSInput/SurfaceData/getSurface), затем база (её main их использует).
+    std::string combined =
+        "#include \"" + std::string(user_path) + "\"\n" +
+        "#include \"" + std::string(base_path) + "\"\n";
+
+    size_t n = 0;
+    Uint8* spv = CompileSPIRVFromSource(combined.c_str(), hash, user_path,
+        SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT, n);
+    if (!spv) return {};
+    FragmentShaderData fs = BuildFragmentShader(spv, n, user_path);
+    SDL_free(spv);
+    return fs;
+}
+
 ComputeShaderData ShaderManager::CreateComputeShader(const char* hlsl_path)
 {
     size_t n = 0;
@@ -146,12 +220,37 @@ ComputeShaderData ShaderManager::CreateComputeShader(const char* hlsl_path)
     return BuildComputeShader(spv, n, hlsl_path);   // владение spv уходит в cs
 }
 
+std::shared_ptr<SDL_GPUShader> ShaderManager::LookupGpuShader(uint64_t key) const
+{
+    auto it = gpu_shaders.find(key);
+    if (it != gpu_shaders.end())
+        if (auto live = it->second.lock()) return live;   // живой дубль → переиспользуем
+    return nullptr;
+}
+
+std::shared_ptr<SDL_GPUShader> ShaderManager::RegisterGpuShader(uint64_t key, SDL_GPUShader* raw)
+{
+    // Делитер освобождает GPU-шейдер при refcount→0, но ТОЛЬКО пока жив токен менеджера (а с
+    // ним device). Поздний релиз (статик-копия vs на выходе из программы) → no-op, ресурс
+    // добьёт уничтожение device. Так избегаем SDL_ReleaseGPUShader по мёртвому device.
+    std::shared_ptr<SDL_GPUShader> sh(raw,
+        [dev = dev, token = std::weak_ptr<int>(shader_alive_)](SDL_GPUShader* s) {
+            if (s && !token.expired()) SDL_ReleaseGPUShader(dev, s);
+        });
+    gpu_shaders[key] = sh;   // weak-индекс для дедупа
+    return sh;
+}
+
 VertexShaderData ShaderManager::BuildVertexShader(
     const Uint8* spv, size_t spv_size, const char* dbg_name,
     std::initializer_list<VertexBufferBinding> bindings)
 {
     VertexShaderData vs{};
     ReadVertexAttributes(bindings, vs);   // раскладка из VertexFormat, рефлексия не нужна
+
+    // Дедуп: одинаковый SPIR-V → один GPU-шейдер на всех владельцев (refcount через shared_ptr).
+    const uint64_t key = HashBytes(spv, spv_size) ^ (uint64_t)SDL_SHADERCROSS_SHADERSTAGE_VERTEX;
+    if (auto cached = LookupGpuShader(key)) { vs.shader_data.shader = cached; return vs; }
 
     SDL_ShaderCross_GraphicsShaderMetadata* metadata =
         SDL_ShaderCross_ReflectGraphicsSPIRV(spv, spv_size, 0);
@@ -165,8 +264,6 @@ VertexShaderData ShaderManager::BuildVertexShader(
         bool ok = false;
         for (const auto& a : vs.attributes) if (a.location == in.location) { ok = true; break; }
         if (!ok) {
-            /*SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                "VS '%s': вход location %u не запитан (pull / [[vk::location]])", dbg_name, in.location);*/
             SDL_Log("Warning: VS '%s': input location %u not provided by vertex buffer bindings (pull / [[vk::location]]), this attribute will be missing in the shader.",
 				dbg_name, in.location);
             SDL_assert(false);
@@ -176,11 +273,14 @@ VertexShaderData ShaderManager::BuildVertexShader(
     SDL_ShaderCross_SPIRV_Info info{};
     info.bytecode = spv; info.bytecode_size = spv_size;
     info.entrypoint = "main"; info.shader_stage = SDL_SHADERCROSS_SHADERSTAGE_VERTEX; info.props = 0;
-    vs.shader_data.shader = SDL_ShaderCross_CompileGraphicsShaderFromSPIRV(dev, &info, &metadata->resource_info, 0);
+    SDL_GPUShader* raw = SDL_ShaderCross_CompileGraphicsShaderFromSPIRV(dev, &info, &metadata->resource_info, 0);
 
     SDL_free(metadata);
-    if (!vs.shader_data.shader)
+    if (!raw) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create GPU vertex shader: %s", dbg_name);
+        return {};
+    }
+    vs.shader_data.shader = RegisterGpuShader(key, raw);
     return vs;
 }
 
@@ -188,6 +288,10 @@ FragmentShaderData ShaderManager::BuildFragmentShader(
     const Uint8* spv, size_t spv_size, const char* dbg_name)
 {
     FragmentShaderData fs{};
+
+    const uint64_t key = HashBytes(spv, spv_size) ^ (uint64_t)SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT;
+    if (auto cached = LookupGpuShader(key)) { fs.shader_data.shader = cached; return fs; }
+
     SDL_ShaderCross_GraphicsShaderMetadata* metadata =
         SDL_ShaderCross_ReflectGraphicsSPIRV(spv, spv_size, 0);
     if (!metadata) {
@@ -198,11 +302,14 @@ FragmentShaderData ShaderManager::BuildFragmentShader(
     SDL_ShaderCross_SPIRV_Info info{};
     info.bytecode = spv; info.bytecode_size = spv_size;
     info.entrypoint = "main"; info.shader_stage = SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT; info.props = 0;
-    fs.shader_data.shader = SDL_ShaderCross_CompileGraphicsShaderFromSPIRV(dev, &info, &metadata->resource_info, 0);
+    SDL_GPUShader* raw = SDL_ShaderCross_CompileGraphicsShaderFromSPIRV(dev, &info, &metadata->resource_info, 0);
 
     SDL_free(metadata);
-    if (!fs.shader_data.shader)
+    if (!raw) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create GPU fragment shader: %s", dbg_name);
+        return {};
+    }
+    fs.shader_data.shader = RegisterGpuShader(key, raw);
     return fs;
 }
 

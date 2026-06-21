@@ -3,6 +3,7 @@
 #include "imgui.h"
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
+#include "MaterialParams.h"        // OpaqueMaterialParams + раскладки факторов
 
 // ===================== MyGame: хост приложения ==============================
 
@@ -171,6 +172,12 @@ void MainMenuMode::Enter()
     {TextureSlotRole::Albedo, "albedo_cube"},
     {TextureSlotRole::Normal, "norm"} },
         { "sp", "sp_shadow" });
+
+    // Opaque-материалы несут params (дефолт-белый baseColorFactor = без тинта): иначе их
+    // MaterialBlock @ b1 остался бы несвязанным. metallic/roughness/emission — задел.
+    ctx->SetMaterialParams(material_player, OpaqueMaterialParams{});
+    ctx->SetMaterialParams(material_enemy,  OpaqueMaterialParams{});
+    ctx->SetMaterialParams(material_sprite, OpaqueMaterialParams{});
 
     Camera* cam = s_.cameraManager->GetActiveCamera();
     const glm::vec3 camPos = cam->GetPosition();

@@ -4,6 +4,7 @@
 #include "LightDataModule.h"
 #include "PIB_DataModule.h"
 #include "TransformDataModule.h"
+#include "InstanceDataModule.h"
 #include "IndirectDataModule.h"
 #include "BoundSphereDataModule.h"
 #include "CountBufferDataModule.h"
@@ -67,6 +68,33 @@ void DefaultUpdateSet::SetDefaultPositionUpdater(EngineContext& ctx, TransformDa
     }
     );
     position_update_inited = true;
+}
+
+void DefaultUpdateSet::SetDefaultInstanceDataUpdater(EngineContext& ctx, InstanceDataModule* idm)
+{
+    static bool instance_update_inited = false;
+    if (instance_update_inited) {
+        SDL_Log("Default instance data updater is already initialized.");
+        return;
+    }
+    auto* bm = ctx.GetBufferManager();
+    auto* om = ctx.GetObjectManager();
+    // Каждый кадр (без dirty): тот же порядок строк, что у трансформов (см. InstanceDataModule).
+    bm->CreateUpdateInstruction(DEFAULT_INSTANCE_BUFFER,
+        [om, idm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+    {
+        SceneData* scene = om->GetActiveScene();
+        if (!scene) return;
+        idm->StoreInstanceData(bm, &task, om, scene);
+    },
+        [om, idm]() -> uint32_t
+    {
+        SceneData* scene = om->GetActiveScene();
+        if (!scene) return 0;
+        return idm->CalculateInstanceSize(om, scene);
+    }
+    );
+    instance_update_inited = true;
 }
 
 void DefaultUpdateSet::SetDefaultLightUpdater(EngineContext& ctx, LightDataModule* ldm)

@@ -59,6 +59,12 @@ public:
 	void GenerateMipmaps(SDL_GPUCommandBuffer* cb);
 
 	void ExecuteUploadTasks(SDL_GPUCopyPass* cp);
+	// CPU-упаковка атласов (rectpack) → присваивает текстурам UVL. ДОЛЖНА вызываться ДО
+	// сборки батчей: батч копирует UVL ЗНАЧЕНИЯМИ (см. TextureBatchData), не указателями,
+	// поэтому к моменту BuildRenderBatches UVL уже обязан быть посчитан. Детерминирована и
+	// идемпотентна (тот же набор задач → те же UVL). GPU-загрузка пикселей — отдельно, в
+	// ExecuteUploadTasks (ей нужен copy-pass), упаковке же GPU не нужен.
+	void PackAtlases() { _BuildUploadTasks(); }
 	SDL_GPUSampler* CreateSampler(const std::string& name, SDL_GPUSamplerCreateInfo sci);
 	SDL_GPUSampler* GetSampler(const std::string& name);
 	

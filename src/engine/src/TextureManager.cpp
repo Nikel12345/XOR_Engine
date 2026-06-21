@@ -260,8 +260,7 @@ void TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
         SDL_Log("UploadToTransferBuffer called without mapping the upload transfer buffer");
         return;
     }
-    _BuildUploadTasks();
-
+    // Упаковка (UVL + task.dst) сделана заранее в PackAtlases() — до сборки батчей.
 	EnsureUploadTransferBufferCapacity(current_upload_tb_offset);
     for (auto& task : upload_tasks) {
         // Пиксели уже декодированы TextureLoader'ом (BGRA32, плотно) — просто копируем.

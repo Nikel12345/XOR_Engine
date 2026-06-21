@@ -1,6 +1,7 @@
 #pragma once
 #include <unordered_map>
 #include <vector>
+#include <cstring>
 #include "ShaderData.h"
 #include "MaterialData.h"
 
@@ -8,11 +9,24 @@
 class MaterialManager {
 public:
 	MaterialManager();
-	// Число пар TextureSlotRole, TextureHandle* должно совпадать с числом required_slots в каждом ShaderProgram* из shader_programs. Порядок не важен, но все роли из required_slots должны быть представлены в textures.
+	// пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ TextureSlotRole, TextureHandle* пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ required_slots пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ ShaderProgram* пїЅпїЅ shader_programs. пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ, пїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅ required_slots пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ textures.
 	// TextureSlotRole, TextureHandle* count must match the number of required_slots in each ShaderProgram* in shader_programs. The order does not matter, but all roles from required_slots must be represented in textures.
 	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, TextureHandle*>>& textures, std::vector<ShaderProgram*>& shader_programs);
 	std::vector<Material*> GetAllMaterials();
 	Material* GetMaterial(const std::string& name);
+	// РРјСЏв†’РјР°С‚РµСЂРёР°Р» (РґР»СЏ UI/РёРЅСЃРїРµРєС‚РѕСЂР°). Pointee РЅРµ const вЂ” params РјРѕР¶РЅРѕ РєСЂСѓС‚РёС‚СЊ РЅР° Р»РµС‚Сѓ.
+	const std::unordered_map<std::string, std::unique_ptr<Material>>& GetMaterials() const { return materials; }
+
+	// РўРёРї-Р±РµР·РѕРїР°СЃРЅР°СЏ СѓРїР°РєРѕРІРєР° per-material С„Р°РєС‚РѕСЂРѕРІ РІ Material::params (РЅРµРїСЂРѕР·СЂР°С‡РЅС‹Р№ Р±Р»РѕР±).
+	// T РґРѕР»Р¶РµРЅ СЃРѕРІРїР°РґР°С‚СЊ РїРѕ СЂР°Р·РјРµСЂСѓ/СЂР°СЃРєР»Р°РґРєРµ СЃ cbuffer MaterialBlock РІ С€РµР№РґРµСЂРµ.
+	template<class T>
+	void SetMaterialParams(Material* m, const T& p) {
+		if (!m) return;
+		m->params.resize(sizeof(T));
+		std::memcpy(m->params.data(), &p, sizeof(T));
+		m->params_kind = T::kind;   // С‚РµРі РґР»СЏ UI-СЂР°Р·Р±РѕСЂР° (СЂРµРЅРґРµСЂ РµРіРѕ РЅРµ С‡РёС‚Р°РµС‚)
+	}
+
 	~MaterialManager();
 private:
 	std::unordered_map<std::string, std::unique_ptr<Material>> materials;

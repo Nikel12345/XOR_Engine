@@ -3,6 +3,7 @@
 #include "Game.h"
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
+#include "MaterialParams.h"        // SetMaterialParams + раскладки факторов материалов
 #include "Colliders.h"             // из либы Physics: компоненты коллайдеров
 #include "ContactSystem.h"         // детекция контактов
 #include "DebugColliderSystem.h"   // отладочные рамки
@@ -49,7 +50,7 @@ SDL_AppResult Game::MainInit()
 
     TextureHandle* texture_car = ctx->CreateTextureFromFile("new_car", "albedo_atlas", "textures/assets/new_car.png");
 	TextureHandle* ground = ctx->CreateTextureFromFile("new_car_ground", "albedo_atlas", "textures/assets/new_car_ground.png");
-	TextureHandle* glass = ctx->CreateTextureFromFile("new_car_glass", "albedo_atlas", "textures/assets/new_car_glass.png");
+	TextureHandle* glass = ctx->CreateTextureFromFile("new_car_glass", "albedo_atlas", "textures/assets/Tex_Glass.jpg");
 
     {
         using namespace DefaultShaderProgramSet;
@@ -81,7 +82,14 @@ SDL_AppResult Game::MainInit()
         {TextureSlotRole::Albedo, "new_car_glass"},
         {TextureSlotRole::Normal, "norm"} },
         { "sp_transparent" });
-    material_glass->alpha = 0.65f;
+    ctx->SetMaterialParams(material_glass, TransparentMaterialParams{ 0.35f });
+
+    // Opaque-материалы тоже несут params (дефолт-белый baseColorFactor = без тинта): иначе их
+    // MaterialBlock @ b1 остался бы несвязанным. metallic/roughness/emission — задел (закомм.).
+    ctx->SetMaterialParams(material_car,    OpaqueMaterialParams{});
+    ctx->SetMaterialParams(material_car2,   OpaqueMaterialParams{});
+    ctx->SetMaterialParams(material_ground, OpaqueMaterialParams{});
+    ctx->SetMaterialParams(material_sprite, OpaqueMaterialParams{});
 
     debug_collider_material = ctx->CreateMaterial("debug_collider", {}, { "sp_debug_collider" });
 

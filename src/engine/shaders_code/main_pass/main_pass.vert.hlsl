@@ -15,6 +15,7 @@ struct VSOutput
     float3 v_worldNormal    : TEXCOORD2;
     float3 v_worldTangent   : TEXCOORD3;
     float3 v_worldBitangent : TEXCOORD4;
+    float  v_alpha          : TEXCOORD5;
 };
 
 // GLSL std430 buffer → HLSL StructuredBuffer
@@ -29,6 +30,11 @@ struct CameraData
 };
 StructuredBuffer<CameraData> Camera : register(t2, space0);
 
+// Per-instance данные (alpha/flags). Индексируются ТЕМ ЖЕ row, что и матрица
+// (PositionIndexBuffer[instanceID]). Дублирует struct InstanceData в BaseComponents.h.
+struct InstanceData { float alpha; uint flags; };
+StructuredBuffer<InstanceData> InstanceDataBlock : register(t3, space0);
+
 VSOutput main(VSInput input)
 {
     VSOutput output;
@@ -36,7 +42,8 @@ VSOutput main(VSInput input)
     float4x4 view = Camera[0].view;
     float4x4 proj = Camera[0].proj;
 
-    float4x4 modelMatrix = ModelMatrixBlock[PositionIndexBuffer[input.instanceID]];
+    int row = PositionIndexBuffer[input.instanceID];   // строка трансформа = строка инстанс-данных
+    float4x4 modelMatrix = ModelMatrixBlock[row];
     float4 worldPos = mul(modelMatrix, float4(input.a_pos, 1.0));
 
     // В HLSL mul(M, v) — столбцовое умножение
@@ -51,6 +58,7 @@ VSOutput main(VSInput input)
     output.v_uv             = input.a_uv;
     output.v_worldTangent   = worldTangent;
     output.v_worldBitangent = worldBitangent;
+    output.v_alpha          = InstanceDataBlock[row].alpha;
 
     return output;
 }

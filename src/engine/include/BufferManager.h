@@ -17,6 +17,7 @@ namespace DefaultBuffersNames {
 	inline constexpr const char* DEFAULT_CAMERA_BUFFER = "_cameraBuffer";
 	inline constexpr const char* DEFAULT_LIGHT_BUFFER = "_lightBuffer";
 	inline constexpr const char* DEFAULT_POSITION_INDEX_BUFFER = "_DefaultPositionIndexBuffer";
+	inline constexpr const char* DEFAULT_INSTANCE_BUFFER = "_DefaultInstanceBuffer";
 	inline constexpr const char* DEFAULT_LIGHT_CAMERA_BUFFER = "DefaultLightCameraBuffer";
 
 	inline constexpr const char* DEFAULT_INDIRECT_BUFFER = "DefaultIndirectBuffer";
