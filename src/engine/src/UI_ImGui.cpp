@@ -17,12 +17,6 @@ namespace {
     ImGuizmo::OPERATION g_gizmo_op   = ImGuizmo::TRANSLATE;
     ImGuizmo::MODE      g_gizmo_mode = ImGuizmo::WORLD;
 
-    // Гипотеза про обратное вращение: ImGuizmo получает «GL»-проекцию (glm::perspective,
-    // Y вверх), а сцена на SDL GPU перевёрнута по Y → знак экранного угла инвертируется.
-    // Тумблер отдаёт гизмо проекцию с инвертированным Y. Рантайм-переключатель = лёгкий
-    // откат, если причина окажется в другом (тогда просто снять галку / revert коммита).
-    bool g_gizmo_flip_proj_y = true;
-
     // Positions хранит матрицу row-major (трансляция в w/d/h = индексы 3,7,11), а glm/
     // ImGuizmo ждут column-major — поэтому собираем glm::mat4 транспонируя поэлементно.
     glm::mat4 ReadPositionsMatrix(const Positions& P, size_t i)
@@ -102,8 +96,6 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
         if (ImGui::RadioButton("Uniform", g_gizmo_op == ImGuizmo::SCALEU))    g_gizmo_op = ImGuizmo::SCALEU;
         ImGui::SameLine();
         if (ImGui::SmallButton("Deselect")) g_selected = GIZMO_NONE;
-        // Направление вращения (см. g_gizmo_flip_proj_y). Снять галку = мгновенный откат.
-        ImGui::Checkbox("Flip proj Y (gizmo)", &g_gizmo_flip_proj_y);
 
         objectManager->ForEach<Positions, MaterialComponent, ModelComponent>(scene,
             [&](Entity e, SoAElement<Positions> pos_el, MaterialComponent&, ModelComponent&)
@@ -202,8 +194,6 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
     // GetView/GetProj отдают по значению — кладём в локали, чтобы взять value_ptr.
     glm::mat4 view = cam->GetView();
     glm::mat4 proj = cam->GetProj();
-    // Инвертируем Y проекции под растеризацию SDL GPU (см. g_gizmo_flip_proj_y).
-    if (g_gizmo_flip_proj_y) proj[1][1] = -proj[1][1];
 
     SoAElement<Positions> el = om->GetComponent<Positions>(scene, g_selected);
     Positions& P = el.container();
