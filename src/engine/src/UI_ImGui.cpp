@@ -3,9 +3,38 @@
 #include "EngineContext.h"
 #include "InputManager.h"
 #include "MaterialParams.h"   // раскладки факторов: разбор params по полям в панели Materials
+#include "ImGuizmo.h"
+#include <glm/gtc/type_ptr.hpp>
+#include <cstring>            // memcpy матрицы в payload команды
+
+namespace {
+    // «Выделение» для гизмо — это просто текущая сущность. Пикинга по сцене нет:
+    // выбор делается кликом в списке объектов (radio «Gizmo»). Сентинел = нет выбора.
+    constexpr Entity GIZMO_NONE = static_cast<Entity>(-1);
+    Entity g_selected = GIZMO_NONE;
+
+    // Текущий режим стрелок. Переключается радиокнопками в панели Objects.
+    ImGuizmo::OPERATION g_gizmo_op   = ImGuizmo::TRANSLATE;
+    ImGuizmo::MODE      g_gizmo_mode = ImGuizmo::WORLD;
+
+    // Positions хранит матрицу row-major (трансляция в w/d/h = индексы 3,7,11), а glm/
+    // ImGuizmo ждут column-major — поэтому собираем glm::mat4 транспонируя поэлементно.
+    glm::mat4 ReadPositionsMatrix(const Positions& P, size_t i)
+    {
+        glm::mat4 m;                                 // m[col][row]
+        m[0][0] = P.x[i]; m[1][0] = P.y[i]; m[2][0] = P.z[i]; m[3][0] = P.w[i];
+        m[0][1] = P.a[i]; m[1][1] = P.b[i]; m[2][1] = P.c[i]; m[3][1] = P.d[i];
+        m[0][2] = P.e[i]; m[1][2] = P.f[i]; m[2][2] = P.g[i]; m[3][2] = P.h[i];
+        m[0][3] = P.i[i]; m[1][3] = P.j[i]; m[2][3] = P.k[i]; m[3][3] = P.l[i];
+        return m;
+    }
+}
 
 void UI_ImGui::Iterate(EngineContext* ctx)
 {
+    // Должен идти раз за кадр после ImGui::NewFrame (его зовёт Engine::BeginImGuiFrame).
+    ImGuizmo::BeginFrame();
+
     ImGui::Begin("Debug");
     ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
     ImGui::Separator();
@@ -18,6 +47,10 @@ void UI_ImGui::Iterate(EngineContext* ctx)
     ImGui::Separator();
     DrawLightsPanel(ctx->GetObjectManager());
     ImGui::End();
+
+    // Гизмо рисуем ПОСЛЕ End() — оно живёт не в окне-панели, а поверх сцены
+    // (собственный draw-list), иначе бы клипалось границами «Debug».
+    DrawGizmo(ctx);
 }
 
 void UI_ImGui::DrawCameraPanel(CameraManager* cameraManager)
@@ -48,6 +81,18 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
         std::vector<Entity> to_delete;
         std::vector<std::pair<Entity, bool>> to_set_visible;
 
+        // Режим стрелок трансформации + сброс выбора. Сам выбор сущности — radio
+        // «Gizmo» внутри узла каждого объекта ниже (пикинга по сцене пока нет).
+        ImGui::TextUnformatted("Gizmo:");
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Move",   g_gizmo_op == ImGuizmo::TRANSLATE)) g_gizmo_op = ImGuizmo::TRANSLATE;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Rotate", g_gizmo_op == ImGuizmo::ROTATE))    g_gizmo_op = ImGuizmo::ROTATE;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Scale",  g_gizmo_op == ImGuizmo::SCALE))     g_gizmo_op = ImGuizmo::SCALE;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Deselect")) g_selected = GIZMO_NONE;
+
         objectManager->ForEach<Positions, MaterialComponent, ModelComponent>(scene,
             [&](Entity e, SoAElement<Positions> pos_el, MaterialComponent&, ModelComponent&)
         {
@@ -63,6 +108,9 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
 
             if (ImGui::TreeNode(label))
             {
+                // Выбор этой сущности для гизмо (radio = текущее выделение).
+                if (ImGui::RadioButton("Gizmo", g_selected == e)) g_selected = e;
+
                 float pos[3] = { P.w[i], P.d[i], P.h[i] };
                 if (ImGui::DragFloat3("Offset", pos, 0.05f))
                 {
@@ -123,6 +171,49 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
         }
 
         ImGui::TreePop();
+    }
+}
+
+void UI_ImGui::DrawGizmo(EngineContext* ctx)
+{
+    if (g_selected == GIZMO_NONE) return;
+
+    ObjectManager* om = ctx->GetObjectManager();
+    SceneData* scene = om->GetActiveScene();
+    if (!scene) return;
+
+    // Сущность могли удалить через очередь команд — снимаем выбор и выходим.
+    if (!om->Has<Positions>(scene, g_selected)) { g_selected = GIZMO_NONE; return; }
+
+    Camera* cam = ctx->GetCameraManager()->GetActiveCamera();
+    if (!cam) return;
+    // GetView/GetProj отдают по значению — кладём в локали, чтобы взять value_ptr.
+    glm::mat4 view = cam->GetView();
+    glm::mat4 proj = cam->GetProj();
+
+    SoAElement<Positions> el = om->GetComponent<Positions>(scene, g_selected);
+    Positions& P = el.container();
+    const size_t i = el.i();
+
+    glm::mat4 model = ReadPositionsMatrix(P, i);
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImGuizmo::SetOrthographic(false);
+    // Фон-лист: стрелки поверх 3D-сцены, но под окнами ImGui.
+    ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
+    ImGuizmo::SetRect(0.0f, 0.0f, io.DisplaySize.x, io.DisplaySize.y);
+
+    if (ImGuizmo::Manipulate(glm::value_ptr(view),
+                             glm::value_ptr(proj),
+                             g_gizmo_op, g_gizmo_mode,
+                             glm::value_ptr(model)))
+    {
+        // Тащат стрелку — шлём новую мировую матрицу в sim-поток (он пишет в Positions).
+        // payload на куче: 16 float не лезут в указатель; функтор команды его удалит.
+        SetTransformCmd* cmd = new SetTransformCmd{};
+        cmd->entity = g_selected;
+        std::memcpy(cmd->matrix, glm::value_ptr(model), sizeof(cmd->matrix));
+        ctx->GetInputManager()->PushCommand(CommandId::SetTransform, cmd);
     }
 }
 

@@ -697,6 +697,31 @@ void Engine::InitUICommands()
 			const bool visible = ((packed >> 32) & 0x1u) != 0u;
 			ctx->HideEntity(ctx->GetObjectManager()->GetActiveSceneName(), e, visible);
 		});
+
+	// Правка трансформа гизмой. Продьюсер (UI) выделил SetTransformCmd на куче — здесь
+	// пишем матрицу в Positions выбранной сущности и освобождаем payload. Источник —
+	// мировая матрица (column-major glm от ImGuizmo); Positions хранит её row-major,
+	// поэтому раскладываем поэлементно: трансляция уходит в w/d/h (как в остальном UI).
+	input_manager->RegisterCommand(CommandId::SetTransform,
+		[](EngineContext* ctx, const void* data)
+		{
+			const SetTransformCmd* c = static_cast<const SetTransformCmd*>(data);
+			ObjectManager* om = ctx->GetObjectManager();
+			SceneData* scene = om->GetActiveScene();
+			// Сущность могла быть удалена между push и исполнением — Has это отсекает.
+			if (scene && om->Has<Positions>(scene, c->entity))
+			{
+				SoAElement<Positions> el = om->GetComponent<Positions>(scene, c->entity);
+				Positions& P = el.container();
+				const size_t i = el.i();
+				const float* m = c->matrix;   // column-major: m[col*4 + row]
+				P.x[i] = m[0]; P.y[i] = m[4]; P.z[i] = m[8];  P.w[i] = m[12];
+				P.a[i] = m[1]; P.b[i] = m[5]; P.c[i] = m[9];  P.d[i] = m[13];
+				P.e[i] = m[2]; P.f[i] = m[6]; P.g[i] = m[10]; P.h[i] = m[14];
+				P.i[i] = m[3]; P.j[i] = m[7]; P.k[i] = m[11]; P.l[i] = m[15];
+			}
+			delete c;
+		});
 }
 
 

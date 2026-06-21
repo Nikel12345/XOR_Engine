@@ -14,8 +14,19 @@ class EngineContext;
 enum class CommandId : uint32_t {
     DeleteEntity,
     HideEntity,   // payload: Entity в младших 32 битах, visible — в бите 32 (см. UI/InitUICommands)
+    SetTransform, // payload: SetTransformCmd* на куче (16-float матрица не лезет в указатель),
+                  // освобождается функтором после применения (см. InitUICommands)
 
     COUNT
+};
+
+// Полезная нагрузка SetTransform. В отличие от Delete/Hide данные не упаковать в
+// указатель (16 float), поэтому продьюсер (гизмо в UI) выделяет это на куче, а
+// консьюмер (sim-поток) применяет и сам удаляет. matrix — мировой трансформ в
+// column-major раскладке glm (то, что отдаёт/принимает ImGuizmo).
+struct SetTransformCmd {
+    uint32_t entity;
+    float    matrix[16];
 };
 
 // Транспорт ввода между потоками. Producer — main-поток (HandleEvent),

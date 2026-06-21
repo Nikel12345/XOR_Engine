@@ -10,9 +10,12 @@ add_library(ImGui STATIC
     "${CMAKE_SOURCE_DIR}/external/ImGui/src/imgui_widgets.cpp"
     "${CMAKE_SOURCE_DIR}/external/ImGui/src/imgui_impl_sdl3.cpp"
     "${CMAKE_SOURCE_DIR}/external/ImGui/src/imgui_impl_sdlgpu3.cpp"
+    # ImGuizmo — гизмо трансформации поверх ImGui (один cpp, тянет imgui_internal.h)
+    "${CMAKE_SOURCE_DIR}/external/ImGuizmo/ImGuizmo.cpp"
 )
 target_include_directories(ImGui PUBLIC
     "${CMAKE_SOURCE_DIR}/external/ImGui/include"
+    "${CMAKE_SOURCE_DIR}/external/ImGuizmo"
     "${CMAKE_SOURCE_DIR}/external/SDL3/include"
 )
 target_link_libraries(ImGui PUBLIC
