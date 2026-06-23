@@ -5,6 +5,7 @@
 #include "ComponentSerializer.h"
 #include <algorithm>   // std::remove для отцепления ребёнка из обратного индекса
 #include <sstream>     // разбор текста сцены построчно
+#include <cstdlib>     // strtoul — разбор id сущности/родителя
 // RenderManager.h/PipeManager.h не использовались — убраны, чтобы ECS-ядро
 // (EngineEcs) не тянуло GPU-заголовки.
 
@@ -148,9 +149,10 @@ std::string ObjectManager::SaveScene(SceneData* scene)
     auto& reg = ComponentSerializerRegistry::Get();
 
     for (auto& [sig, arch] : scene->archetypes) {
-        // Архетипы вспомогательной визуализации (debug-рамки коллайдеров и т.п.) помечены
-        // EditorHiddenComponent — в файл сцены не выгружаем (как и в списке объектов UI).
-        if (arch.components.count(std::type_index(typeid(EditorHiddenComponent)))) continue;
+        // Сгенерированные кодом сущности (debug-рамки и т.п.) в файл не идут — их пересоздаст
+        // генератор при загрузке. Маркер — GeneratedComponent (НЕ EditorHidden: тот лишь
+        // прячет из списка UI и к персистентности отношения не имеет).
+        if (arch.components.count(std::type_index(typeid(GeneratedComponent)))) continue;
 
         for (size_t i = 0; i < arch.entities.size(); ++i) {
             std::string body;
@@ -166,7 +168,10 @@ std::string ObjectManager::SaveScene(SceneData* scene)
                 body += '\n';
             }
             if (!body.empty()) {                        // нечего сохранять — нет и блока
-                out += "[entity]\n";
+                // id сущности в заголовке — стабильный ключ для ссылок Parent (ремап при загрузке).
+                out += "[entity] ";
+                out += std::to_string(arch.entities[i]);
+                out += '\n';
                 out += body;
             }
         }
@@ -184,20 +189,32 @@ void ObjectManager::LoadScene(const SceneName& scene_name, const std::string& te
     // Накопленные компоненты текущей сущности — собираем ВЕСЬ набор до создания
     // (нужна полная сигнатура архетипа), затем одна вставка (как CreateEntity).
     struct Pending { const ComponentSerializer* h; std::vector<std::string> tokens; };
-    std::vector<Pending> current;
+    std::vector<Pending> comps;
+    uint32_t cur_id = 0;
+    bool     have_block = false;
+    uint32_t synthetic = 0xFFFF0000u;                    // id для блоков без явного (back-compat)
+
+    std::unordered_map<uint32_t, Entity> old_to_new;     // id из файла → новый Entity
+    std::vector<Entity> created;
 
     auto flush = [&]() {
-        if (current.empty()) return;
+        if (!have_block) { comps.clear(); return; }
+        have_block = false;
+        if (comps.empty()) return;
+
         std::set<std::type_index> sig;
-        for (auto& p : current) sig.insert(p.h->sig_type);
+        for (auto& p : comps) sig.insert(p.h->sig_type);
 
         Archetype& arch = scene->archetypes[sig];
         Entity e = scene->next_entity_id++;
         arch.entities.push_back(e);
-        for (auto& p : current) p.h->load(arch, p.tokens);   // ensure_component<T> + дописать
+        for (auto& p : comps) p.h->load(arch, p.tokens);   // ensure_component<T> + дописать
         scene->entity_to_archetype[e] = &arch;
         scene->entity_to_index[e] = arch.entities.size() - 1;
-        current.clear();
+
+        old_to_new[cur_id] = e;
+        created.push_back(e);
+        comps.clear();
     };
 
     std::istringstream in(text);
@@ -205,7 +222,17 @@ void ObjectManager::LoadScene(const SceneName& scene_name, const std::string& te
     while (std::getline(in, line)) {
         Trim(line);
         if (line.empty() || line[0] == '#') continue;
-        if (line == "[entity]") { flush(); continue; }
+
+        if (line.rfind("[entity]", 0) == 0) {            // заголовок: [entity] <id>
+            flush();
+            std::vector<std::string> htoks = Tokenize(line.substr(8));
+            cur_id = htoks.empty() ? synthetic++
+                : static_cast<uint32_t>(std::strtoul(htoks[0].c_str(), nullptr, 10));
+            have_block = true;
+            continue;
+        }
+
+        if (!have_block) continue;
 
         const size_t eq = line.find('=');
         std::string name = (eq == std::string::npos) ? line : line.substr(0, eq);
@@ -213,9 +240,27 @@ void ObjectManager::LoadScene(const SceneName& scene_name, const std::string& te
         Trim(name);
         const ComponentSerializer* h = reg.ByName(name);
         if (!h) continue;                                // незнакомый компонент — пропускаем
-        current.push_back({ h, Tokenize(rhs) });
+        comps.push_back({ h, Tokenize(rhs) });
     }
     flush();
+
+    // Проход 2: ParentComponent сейчас держит СТАРЫЙ id из файла. Ремапим в новый Entity
+    // и заполняем обратный индекс scene->children (CreateEntity делает это при создании —
+    // здесь путь иной, поэтому вручную). Родитель уже создан: все сущности есть после прохода 1.
+    for (Entity e : created) {
+        if (!Has<ParentComponent>(scene, e)) continue;
+        ParentComponent& pc = GetComponent<ParentComponent>(scene, e);
+        auto it = old_to_new.find(pc.parent);
+        if (it == old_to_new.end()) {
+            // Родитель не сохранён (напр. был скрыт EditorHidden). Висячий id уронил бы
+            // трансформ-модуль — делаем самоссылку (существует, без падения) и логируем.
+            SDL_Log("LoadScene: parent id %u unresolved for entity %u — hierarchy dropped", pc.parent, e);
+            pc.parent = e;
+            continue;
+        }
+        pc.parent = it->second;
+        scene->children[pc.parent].push_back(e);
+    }
 
     dirty_entity = true;
 }

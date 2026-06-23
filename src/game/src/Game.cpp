@@ -209,75 +209,75 @@ SDL_AppResult Game::MainInit()
             }
     });
 
-    ctx->CreateEntity("main_menu",
-        MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
-        ModelComponent{ model_car },
-        PositionProxy16{ 1,0,0,3,  0,1,0,0,  0,0,1,0,  0,0,0,1 },
-        ShadowComponent{},
-        ColliderComponent{},
-        DrawComponent{}
-    );
-    ctx->CreateEntity("main_menu",
-        MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
-        ModelComponent{ model_car },
-        PositionProxy16{
-            -1, 0,  0, 0.5,     // X basis = (-1, 0, 0)
-             0, 1,  0, 0.0,
-             0, 0, -1, 0.0,     // Z basis = (0, 0, -1)
-             0, 0,  0, 1.0
-        }, ShadowComponent{},
-        ColliderComponent{},
-        DrawComponent{}
-    );
-    ctx->CreateEntity("main_menu",
-        MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
-        ModelComponent{ model_car },
-        PositionProxy16{
-            -1, 0,  0, 0.5f,     // X basis = (-1, 0, 0)
-             0, 1,  0, 0.0f,
-             0, 0, -1, 2.5f,     // Z basis = (0, 0, -1)
-             0, 0,  0, 1.0f
-        }, ShadowComponent{},
-        ColliderComponent{},
-        DrawComponent{}
-    );
-    Entity parent_id = ctx->CreateEntity("main_menu",
-        MaterialComponent{ {material_car, material_car2, material_glass, material_ground} },
-        ModelComponent{ model_car },
-        PositionProxy16{ 1,0,0,3,  0,1,0,0,  0,0,1,2.5f,  0,0,0,1 },
-        ShadowComponent{},
-        ColliderComponent{},
-        DrawComponent{}
-    );
+    //ctx->CreateEntity("main_menu",
+    //    MaterialComponent{ {material_car, material_car2, material_glass, material_ground}, {"car","car2","transparent","ground"} },
+    //    ModelComponent{ model_car, "car" },
+    //    PositionProxy16{ 1,0,0,3,  0,1,0,0,  0,0,1,0,  0,0,0,1 },
+    //    ShadowComponent{},
+    //    ColliderComponent{},
+    //    DrawComponent{}
+    //);
+    //ctx->CreateEntity("main_menu",
+    //    MaterialComponent{ {material_car, material_car2, material_glass, material_ground}, {"car","car2","transparent","ground"} },
+    //    ModelComponent{ model_car, "car" },
+    //    PositionProxy16{
+    //        -1, 0,  0, 0.5,     // X basis = (-1, 0, 0)
+    //         0, 1,  0, 0.0,
+    //         0, 0, -1, 0.0,     // Z basis = (0, 0, -1)
+    //         0, 0,  0, 1.0
+    //    }, ShadowComponent{},
+    //    ColliderComponent{},
+    //    DrawComponent{}
+    //);
+    //ctx->CreateEntity("main_menu",
+    //    MaterialComponent{ {material_car, material_car2, material_glass, material_ground}, {"car","car2","transparent","ground"} },
+    //    ModelComponent{ model_car, "car" },
+    //    PositionProxy16{
+    //        -1, 0,  0, 0.5f,     // X basis = (-1, 0, 0)
+    //         0, 1,  0, 0.0f,
+    //         0, 0, -1, 2.5f,     // Z basis = (0, 0, -1)
+    //         0, 0,  0, 1.0f
+    //    }, ShadowComponent{},
+    //    ColliderComponent{},
+    //    DrawComponent{}
+    //);
+    //Entity parent_id = ctx->CreateEntity("main_menu",
+    //    MaterialComponent{ {material_car, material_car2, material_glass, material_ground}, {"car","car2","transparent","ground"} },
+    //    ModelComponent{ model_car, "car" },
+    //    PositionProxy16{ 1,0,0,3,  0,1,0,0,  0,0,1,2.5f,  0,0,0,1 },
+    //    ShadowComponent{},
+    //    ColliderComponent{},
+    //    DrawComponent{}
+    //);
 
-    // Спрайт: общий единичный квад, размер берётся из пиксельного размера текстуры.
-    // ppu — локальный масштаб пиксели→мир (не глобальная константа): мир = пиксели * ppu.
-    const float ppu = 0.001f;
-    ctx->CreateEntity("main_menu",
-        MaterialComponent{ { metal2 } },
-        ModelComponent{ quad },
-        PositionProxy16{
-            texture_cube->width * ppu, 0, 0, 0.0f,
-            0, texture_cube->height * ppu, 0, 0.0f,
-            0, 0, 1, 0.0f,
-            0, 0, 0, 1.0f
-        },
-        ColliderComponent{},
-        DrawComponent{}
-    );
+    //// Спрайт: общий единичный квад, размер берётся из пиксельного размера текстуры.
+    //// ppu — локальный масштаб пиксели→мир (не глобальная константа): мир = пиксели * ppu.
+    //const float ppu = 0.001f;
+    //ctx->CreateEntity("main_menu",
+    //    MaterialComponent{ { metal2 }, {"metal2"} },
+    //    ModelComponent{ quad, "quad" },
+    //    PositionProxy16{
+    //        texture_cube->width * ppu, 0, 0, 0.0f,
+    //        0, texture_cube->height * ppu, 0, 0.0f,
+    //        0, 0, 1, 0.0f,
+    //        0, 0, 0, 1.0f
+    //    },
+    //    ColliderComponent{},
+    //    DrawComponent{}
+    //);
 
-    ctx->CreateEntity("main_menu",
-        MaterialComponent{ {m_orange, material_glass, metal1, m_gray, metal2, emission} },
-        ModelComponent{ model_ship },
-        PositionProxy16{
-            -1, 0,  0, 0.5f,     // X basis = (-1, 0, 0)
-             0, 1,  0, 0.0f,
-             0, 0, -1, 2.5f,     // Z basis = (0, 0, -1)
-             0, 0,  0, 1.0f
-        }, ShadowComponent{},
-        ColliderComponent{},
-        DrawComponent{}
-    );
+    //ctx->CreateEntity("main_menu",
+    //    MaterialComponent{ {m_orange, material_glass, metal1, m_gray, metal2, emission}, {"m_orange","transparent","metal1","m_gray","metal2","emission"} },
+    //    ModelComponent{ model_ship, "ship" },
+    //    PositionProxy16{
+    //        -1, 0,  0, 0.5f,     // X basis = (-1, 0, 0)
+    //         0, 1,  0, 0.0f,
+    //         0, 0, -1, 2.5f,     // Z basis = (0, 0, -1)
+    //         0, 0,  0, 1.0f
+    //    }, ShadowComponent{},
+    //    ColliderComponent{},
+    //    DrawComponent{}
+    //);
     // Сфера: тот же путь (generator → staging → append), размер ~1 через диагональ.
     //Collider second_collide = Collider::Sphere(1.0f, { 0, 0.5f, 0 });
     //ctx->CreateEntity("main_menu",
@@ -303,17 +303,21 @@ SDL_AppResult Game::MainInit()
     //    ColliderComponent{}
     //);
 
-    ctx->CreateEntity("main_menu",
-        DirectLightComponent{ DirectLightComponent::DirectLightData{
-            0.0f, -1.0f, -0.70f,   // dir
-            1.0f, 1.0f, 1.0f,      // color
-            2.5f,                  // power
-            -0.5f, 0.0f, 0.0f,      // box center
-            1.0f, 1.0f } },      // half_extent, half_depth
-        ShadowCasterComponent{}
-    );
+    //ctx->CreateEntity("main_menu",
+    //    DirectLightComponent{ DirectLightComponent::DirectLightData{
+    //        0.0f, -1.0f, -0.70f,   // dir
+    //        1.0f, 1.0f, 1.0f,      // color
+    //        2.5f,                  // power
+    //        -0.5f, 0.0f, 0.0f,      // box center
+    //        1.0f, 1.0f } },      // half_extent, half_depth
+    //    ShadowCasterComponent{}
+    //);
 
-    CreateDebugColliders();
+    // Рамки коллайдеров — производные сущности: здесь только РЕГИСТРИРУЕМ генератор.
+    // Запуск не тут, а в EngineContext::LoadScene — генераторы создают производное из
+    // загруженных авторских данных. На ручном init не прогоняем: сцена должна приходить
+    // из файла (ручное создание сущностей выше — временное, уйдёт).
+    ctx->RegisterGenerator([this] { CreateDebugColliders(); });
 
     ChangeState(GameState::MAIN_MENU);
 
@@ -376,7 +380,7 @@ void Game::CreateDebugColliders()
 
     for (const DebugColliderSystem::DebugShape& s : shapes) {
         ModelData* model = (s.kind == ShapeKind::Box) ? debug_box_model : debug_sphere_model;
-        LocalMatrixComponent lm{};
+        LocalMatrixProxy16 lm{};   // SoA-локаль: в CreateEntity едет как прокси (как PositionProxy16)
         for (int i = 0; i < 16; ++i) lm.m[i] = s.local[i];
         ctx->CreateEntity("main_menu",
             MaterialComponent{ { debug_collider_material } },
@@ -386,7 +390,8 @@ void Game::CreateDebugColliders()
             lm,
             DrawComponent{ false, 1.0f, 0 },
             DebugColliderTag{},
-            EditorHiddenComponent{});   // движковый тег: не показывать в списке объектов UI
+            EditorHiddenComponent{},    // движковый тег: не показывать в списке объектов UI
+            GeneratedComponent{});      // сгенерировано кодом → не сериализуется, пересоздаётся генератором
     }
 }
 

@@ -157,6 +157,17 @@ void EngineContext::SetActiveScene(const SceneName& name)
 	batch_builder->SetDirtyBatches(true);
 }
 
+void EngineContext::RegisterGenerator(SceneGenerator generator)
+{
+	generators_.push_back(std::move(generator));
+}
+
+void EngineContext::RunGenerators()
+{
+	for (auto& g : generators_)
+		if (g) g();
+}
+
 void EngineContext::SaveScene(const SceneName& scene_name, const std::string& path)
 {
 	SceneData* scene = object_manager->GetScene(scene_name);
@@ -182,19 +193,32 @@ void EngineContext::LoadScene(const SceneName& scene_name, const std::string& pa
 	if (!scene) return;
 
 	// Чиним указатели на ассеты по сохранённым именам — это знает только верхний слой.
+	// Незаполнённое/неизвестное имя оставляет nullptr; сборщик батчей такие сущности
+	// пропускает (см. BatchBuilder::AddEntityToBatches), но логируем для диагностики.
 	object_manager->ForEach<ModelComponent>(scene, [&](ModelComponent& m) {
-		if (!m.name.empty()) m.model = (*model_manager)[m.name];
+		m.model = m.name.empty() ? nullptr : (*model_manager)[m.name];
+		if (!m.model)
+			SDL_Log("LoadScene: model '%s' not resolved (entity will not render)", m.name.c_str());
 	});
 	object_manager->ForEach<MaterialComponent>(scene, [&](MaterialComponent& mc) {
 		mc.materials.clear();
 		mc.materials.reserve(mc.names.size());
-		for (const auto& n : mc.names)
-			mc.materials.push_back(material_manager->GetMaterial(n));
+		for (const auto& n : mc.names) {
+			Material* mat = material_manager->GetMaterial(n);
+			if (!mat) SDL_Log("LoadScene: material '%s' not resolved", n.c_str());
+			mc.materials.push_back(mat);
+		}
 	});
 
 	// Флаги рендера (как при смене активной сцены): сделать активной + полная пересборка
 	// батчей — BuildRenderBatches перечитает все сущности, PIB/Indirect подхватят по ревизии.
 	object_manager->SetSceneState(scene_name, true);
+
+	// Производные сущности — ПОСЛЕ загрузки авторских данных и активации сцены: генераторы
+	// выводят их из загруженных компонентов (напр. рамки из ColliderComponent). Это и есть
+	// тот триггер «настройки сцены», который при ручном init намеренно не вызывается.
+	RunGenerators();
+
 	batch_builder->SetDirtyBatches(true);
 	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), path.c_str());
 }

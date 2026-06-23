@@ -157,12 +157,37 @@ struct ParentComponent {
 // не знает про их типы-теги — он фильтрует по своему.
 struct EditorHiddenComponent {};
 
+// Маркер «сущность сгенерирована кодом при настройке сцены, а не авторская». Такие
+// НЕ сериализуются (SaveScene их пропускает) — при загрузке их заново создаёт
+// зарегистрированный генератор (EngineContext::RegisterGenerator/RunGenerators).
+// Пример: debug-рамки коллайдеров, выводимые из ColliderComponent. Единственный смысл —
+// «не в файл, пересоздаётся»; в отличие от EditorHiddenComponent (только фильтр UI).
+struct GeneratedComponent {};
+
 // Локальная (относительно родителя) матрица 4×4 в column-major раскладке glm
 // (m[0..3] = столбец 0 = образ X-оси, m[12..14] = трансляция). Каждый кадр
 // TransformDataModule::UpdateLocalTransforms пишет в Positions = матрица_родителя ×
 // эта_локальная — полная иерархия (поворот+масштаб+сдвиг), в отличие от LocalOffsets.
-struct LocalMatrixComponent {
+// SoA-локальная матрица (по аналогии с Positions): 16 параллельных колонок, column-major
+// glm (m0..m3 = столбец 0, m12..m14 = трансляция). Заменила AoS LocalMatrixComponent ради
+// единообразия с Positions и cache-friendly доступа в TransformDataModule. В CreateEntity
+// передаётся как LocalMatrixProxy16 (как PositionProxy16 для Positions).
+struct LocalMatrices : SoAProxyAddable<LocalMatrices> {
+    using soa_tag = void;
+    std::vector<float> m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15;
+    size_t size() const { return m0.size(); }
+    auto columns() { return std::tie(m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15); }
+};
+struct LocalMatrixProxy16 {
     float m[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+    using related_soa = LocalMatrices;
+    template<class SoA>
+    void emplace_to(SoA& soa) const {
+        soa.m0.push_back(m[0]);   soa.m1.push_back(m[1]);   soa.m2.push_back(m[2]);   soa.m3.push_back(m[3]);
+        soa.m4.push_back(m[4]);   soa.m5.push_back(m[5]);   soa.m6.push_back(m[6]);   soa.m7.push_back(m[7]);
+        soa.m8.push_back(m[8]);   soa.m9.push_back(m[9]);   soa.m10.push_back(m[10]); soa.m11.push_back(m[11]);
+        soa.m12.push_back(m[12]); soa.m13.push_back(m[13]); soa.m14.push_back(m[14]); soa.m15.push_back(m[15]);
+    }
 };
 
 struct LocalOffsets : SoAProxyAddable<LocalOffsets> {

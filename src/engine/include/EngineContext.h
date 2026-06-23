@@ -11,6 +11,8 @@
 #include "PipeManager.h"
 #include "GpuTaskContext.h"
 #include "Aliases.h"
+#include <functional>
+#include <vector>
 
 class InputManager;
 class TextureLoader;
@@ -77,6 +79,15 @@ public:
 	void SaveScene(const SceneName& scene_name, const std::string& path);
 	void LoadScene(const SceneName& scene_name, const std::string& path);
 
+	// Генераторы — функции, создающие ПРОИЗВОДНЫЕ сущности при настройке сцены (помечают
+	// их GeneratedComponent, чтобы те не сериализовались). RunGenerators прогоняет все;
+	// зовётся на старте (после создания авторских сущностей) и при загрузке сцены. Так
+	// зависимость «производное ← авторское» (напр. рамки ← коллайдеры) живёт в одной
+	// системе с одним триггером, без ручного учёта зависимых сущностей.
+	using SceneGenerator = std::function<void()>;
+	void RegisterGenerator(SceneGenerator generator);
+	void RunGenerators();
+
 	FragmentShaderData CreateFragmentShader(const char* hlsl_path);
 	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout);
 	ShaderProgramDescription* CreateShaderProgramDescription(const std::string& name);
@@ -124,6 +135,8 @@ private:
 
 	InputManager* input_manager = nullptr;
 	TextureLoader* texture_loader = nullptr;
+
+	std::vector<SceneGenerator> generators_;   // производят производные сущности (см. RunGenerators)
 
 	GpuTaskContext gpu_ctx;
 };

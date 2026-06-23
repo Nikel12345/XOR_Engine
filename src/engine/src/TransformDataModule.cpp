@@ -34,17 +34,26 @@ static void StorePositionMatrix(Positions& P, size_t i, const glm::mat4& m)
 // рамками коллайдеров (статичная локальная матрица — рамка сама следует за владельцем).
 void TransformDataModule::UpdateLocalTransforms(ObjectManager* om, SceneData* scene)
 {
-    om->ForEach<Positions, ParentComponent, LocalMatrixComponent>(scene,
-        [&](SoAElement<Positions> pos_el, ParentComponent& parentComp, LocalMatrixComponent& local)
+    om->ForEach<Positions, ParentComponent, LocalMatrices>(scene,
+        [&](SoAElement<Positions> pos_el, ParentComponent& parentComp, SoAElement<LocalMatrices> local_el)
     {
         auto arch_it = scene->entity_to_archetype.find(parentComp.parent);
         if (arch_it == scene->entity_to_archetype.end() || !arch_it->second) return;
         auto* parentPosArr = arch_it->second->get_array<Positions>();
         if (!parentPosArr) return;
 
+        const LocalMatrices& L = local_el.container();
+        const size_t li = local_el.i();
+        const float lm[16] = {
+            L.m0[li],  L.m1[li],  L.m2[li],  L.m3[li],
+            L.m4[li],  L.m5[li],  L.m6[li],  L.m7[li],
+            L.m8[li],  L.m9[li],  L.m10[li], L.m11[li],
+            L.m12[li], L.m13[li], L.m14[li], L.m15[li]
+        };
+
         size_t pIndex = scene->entity_to_index.at(parentComp.parent);
         glm::mat4 world = LoadPositionMatrix(parentPosArr->data, pIndex)
-                        * glm::make_mat4(local.m);
+                        * glm::make_mat4(lm);
         StorePositionMatrix(pos_el.container(), pos_el.i(), world);
     });
 }
