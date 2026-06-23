@@ -123,12 +123,29 @@ void BatchBuilder::QueueDelete(Entity entity)
 void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
     const MaterialComponent& material_component, const ModelComponent& model_component) {
 
+    // Защита от незаполненных ссылок: сущность из загрузки сцены, чьё имя ассета не
+    // разрешилось в указатель (пустое/неизвестное имя), приходит с model == nullptr.
+    // Без этого гарда разыменование model->submeshes падает в сборке батчей.
+    if (!model_component.model) {
+        SDL_Log("BatchBuilder: entity %u has null model — skipped (unresolved asset?)", entity);
+        return;
+    }
+
     for (SubMeshData& submesh : model_component.model->submeshes)
     {
         if (material_component.materials.size() != model_component.model->submeshes.size()) {
             SDL_Log("BulidBatches:: Submash and material sizes mismatch");
         }
+        // Границы + null материала (тоже может быть не разрешён по имени при загрузке).
+        if (submesh.material_index >= material_component.materials.size()) {
+            SDL_Log("BatchBuilder: entity %u material_index out of range — skipped", entity);
+            continue;
+        }
         Material* material = material_component.materials[submesh.material_index];
+        if (!material) {
+            SDL_Log("BatchBuilder: entity %u has null material — skipped (unresolved asset?)", entity);
+            continue;
+        }
 
         for (ShaderProgram* sp : material->shader_programs)
         {
