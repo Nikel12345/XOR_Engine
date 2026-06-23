@@ -317,7 +317,7 @@ SDL_AppResult Game::MainInit()
     // Запуск не тут, а в EngineContext::LoadScene — генераторы создают производное из
     // загруженных авторских данных. На ручном init не прогоняем: сцена должна приходить
     // из файла (ручное создание сущностей выше — временное, уйдёт).
-    ctx->RegisterGenerator([this] { CreateDebugColliders(); });
+    ctx->RegisterGenerator("main_menu", [this] { CreateDebugColliders(); });
 
     ChangeState(GameState::MAIN_MENU);
 

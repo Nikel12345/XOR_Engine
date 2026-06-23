@@ -157,15 +157,13 @@ void EngineContext::SetActiveScene(const SceneName& name)
 	batch_builder->SetDirtyBatches(true);
 }
 
-void EngineContext::RegisterGenerator(SceneGenerator generator)
+void EngineContext::RegisterGenerator(const SceneName& scene_name, std::function<void()> generator)
 {
-	generators_.push_back(std::move(generator));
-}
-
-void EngineContext::RunGenerators()
-{
-	for (auto& g : generators_)
-		if (g) g();
+	// Сцена должна уже существовать (паттерн «ресурс создан до использования»: CreateScene
+	// раньше). Генератор живёт в самой сцене и переживает clear/перезагрузку.
+	SceneData* scene = object_manager->GetScene(scene_name);
+	if (!scene) { SDL_Log("RegisterGenerator: scene '%s' not found (CreateScene first)", scene_name.c_str()); return; }
+	scene->generators.push_back(std::move(generator));
 }
 
 void EngineContext::SaveScene(const SceneName& scene_name, const std::string& path)
@@ -215,9 +213,10 @@ void EngineContext::LoadScene(const SceneName& scene_name, const std::string& pa
 	object_manager->SetSceneState(scene_name, true);
 
 	// Производные сущности — ПОСЛЕ загрузки авторских данных и активации сцены: генераторы
-	// выводят их из загруженных компонентов (напр. рамки из ColliderComponent). Это и есть
-	// тот триггер «настройки сцены», который при ручном init намеренно не вызывается.
-	RunGenerators();
+	// этой сцены выводят их из загруженных компонентов (напр. рамки из ColliderComponent).
+	// Это и есть триггер «настройки сцены», который при ручном init намеренно не вызывается.
+	for (auto& g : scene->generators)
+		if (g) g();
 
 	batch_builder->SetDirtyBatches(true);
 	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), path.c_str());
