@@ -120,7 +120,7 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
         });
 
     // Directional: третий блок в том же порядке spot→sphere→direct, чтобы сквозной
-    // offset/cameraIndex оставался согласован с StoreLightCameras и теневым проходом.
+    // offset/camera_index оставался согласован с StoreLightCameras и теневым проходом.
     om->ForEach<DirectLightComponent>(scene,
         [&](Entity e, DirectLightComponent& light) {
             DirectLightComponent::DirectLightData& d = light.light_data;

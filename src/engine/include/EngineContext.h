@@ -78,6 +78,9 @@ public:
 	// рендера (полная пересборка батчей), как при смене активной сцены.
 	void SaveScene(const SceneName& scene_name, const std::string& path);
 	void LoadScene(const SceneName& scene_name, const std::string& path);
+	// Сносит ВСЁ содержимое сцены (сущности/иерархию; генераторы переживают) и помечает
+	// батчи на полную пересборку. LoadScene вызывает его первым (replace-on-load).
+	void ClearScene(const SceneName& scene_name);
 
 	// Генераторы — функции, восстанавливающие ПРОИЗВОДНЫЕ сущности сцены из её авторских
 	// данных (помечают их GeneratedComponent → не сериализуются). Хранятся в самой сцене

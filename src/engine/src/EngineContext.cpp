@@ -166,6 +166,21 @@ void EngineContext::RegisterGenerator(const SceneName& scene_name, std::function
 	scene->generators.push_back(std::move(generator));
 }
 
+void EngineContext::ClearScene(const SceneName& scene_name)
+{
+	SceneData* scene = object_manager->GetScene(scene_name);
+	if (!scene) return;   // нечего чистить (ещё не создана)
+
+	// Полное удаление контента: архетипы + индексы + иерархия (next_entity_id→0).
+	// Генераторы НЕ трогаем — они навешены однократно и должны пережить перезагрузку
+	// (см. SceneData::clear). Батчи не правим точечно: ставим флаг полной пересборки —
+	// BuildRenderBatches сам сбросит дерево, entity_slots и очереди дельт под локом и
+	// отстроит от (теперь пустой) сцены, так что висячих ссылок на удалённые сущности
+	// не останется (см. BatchBuilder::BuildRenderBatches).
+	scene->clear();
+	batch_builder->SetDirtyBatches(true);
+}
+
 void EngineContext::SaveScene(const SceneName& scene_name, const std::string& path)
 {
 	SceneData* scene = object_manager->GetScene(scene_name);
@@ -184,29 +199,41 @@ void EngineContext::LoadScene(const SceneName& scene_name, const std::string& pa
 	if (!f) { SDL_Log("LoadScene: cannot open '%s'", path.c_str()); return; }
 	std::stringstream ss; ss << f.rdbuf();
 
+	// Replace-on-load: сносим прежнее содержимое сцены ДО наполнения — иначе загрузка
+	// дописала бы поверх (дубликаты сущностей). Делаем это только после успешного
+	// открытия файла, чтобы кривой путь не обнулял текущую сцену.
+	ClearScene(scene_name);
+
 	// ECS-часть: текст → сущности (указатели на ассеты пока пустые, только имена).
-	object_manager->LoadScene(scene_name, ss.str());
+	// Возвращает ИМЕННО созданные этой загрузкой сущности.
+	std::vector<Entity> loaded = object_manager->LoadScene(scene_name, ss.str());
 
 	SceneData* scene = object_manager->GetScene(scene_name);
 	if (!scene) return;
 
 	// Чиним указатели на ассеты по сохранённым именам — это знает только верхний слой.
-	// Незаполнённое/неизвестное имя оставляет nullptr; сборщик батчей такие сущности
-	// пропускает (см. BatchBuilder::AddEntityToBatches), но логируем для диагностики.
-	object_manager->ForEach<ModelComponent>(scene, [&](ModelComponent& m) {
-		m.model = m.name.empty() ? nullptr : (*model_manager)[m.name];
-		if (!m.model)
-			SDL_Log("LoadScene: model '%s' not resolved (entity will not render)", m.name.c_str());
-	});
-	object_manager->ForEach<MaterialComponent>(scene, [&](MaterialComponent& mc) {
-		mc.materials.clear();
-		mc.materials.reserve(mc.names.size());
-		for (const auto& n : mc.names) {
-			Material* mat = material_manager->GetMaterial(n);
-			if (!mat) SDL_Log("LoadScene: material '%s' not resolved", n.c_str());
-			mc.materials.push_back(mat);
+	// Обходим ТОЛЬКО загруженные сущности (не всю сцену): уже существовавшие в ней
+	// производные сущности (напр. дебаг-коллайдеры) держат живые указатели без имён —
+	// их трогать нельзя. Незаполнённое/неизвестное имя оставляет nullptr; сборщик батчей
+	// такие сущности пропускает (см. BatchBuilder::AddEntityToBatches), но логируем.
+	for (Entity e : loaded) {
+		if (object_manager->Has<ModelComponent>(scene, e)) {
+			ModelComponent& m = object_manager->GetComponent<ModelComponent>(scene, e);
+			m.model = m.name.empty() ? nullptr : (*model_manager)[m.name];
+			if (!m.model)
+				SDL_Log("LoadScene: model '%s' not resolved (entity will not render)", m.name.c_str());
 		}
-	});
+		if (object_manager->Has<MaterialComponent>(scene, e)) {
+			MaterialComponent& mc = object_manager->GetComponent<MaterialComponent>(scene, e);
+			mc.materials.clear();
+			mc.materials.reserve(mc.names.size());
+			for (const auto& n : mc.names) {
+				Material* mat = material_manager->GetMaterial(n);
+				if (!mat) SDL_Log("LoadScene: material '%s' not resolved", n.c_str());
+				mc.materials.push_back(mat);
+			}
+		}
+	}
 
 	// Флаги рендера (как при смене активной сцены): сделать активной + полная пересборка
 	// батчей — BuildRenderBatches перечитает все сущности, PIB/Indirect подхватят по ревизии.

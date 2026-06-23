@@ -179,7 +179,7 @@ std::string ObjectManager::SaveScene(SceneData* scene)
     return out;
 }
 
-void ObjectManager::LoadScene(const SceneName& scene_name, const std::string& text)
+std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const std::string& text)
 {
     auto sit = scenes_data.find(scene_name);
     SceneData* scene = (sit != scenes_data.end()) ? sit->second.get()
@@ -263,5 +263,6 @@ void ObjectManager::LoadScene(const SceneName& scene_name, const std::string& te
     }
 
     dirty_entity = true;
+    return created;
 }
 

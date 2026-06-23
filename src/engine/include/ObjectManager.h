@@ -60,7 +60,10 @@ public:
     // (Model/Material) НЕ восстанавливаются здесь — только имена; их чинит верхний слой
     // (EngineContext::LoadScene), т.к. ECS-ядро не знает про менеджеры ресурсов.
     std::string SaveScene(SceneData* scene);
-    void        LoadScene(const SceneName& scene_name, const std::string& text);
+    // Возвращает сущности, созданные ЭТОЙ загрузкой (в порядке появления в файле).
+    // Верхний слой чинит указатели на ассеты только по ним, не трогая то, что уже
+    // было в сцене (напр. сгенерированные сущности с живыми указателями).
+    std::vector<Entity> LoadScene(const SceneName& scene_name, const std::string& text);
 
 	void SetSceneState(const SceneName& scene_name, bool is_active);
     SceneData* GetActiveScene();

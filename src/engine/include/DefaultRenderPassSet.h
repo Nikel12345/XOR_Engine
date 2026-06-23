@@ -22,7 +22,7 @@ namespace DefaultRenderPassNamespace
 
     struct alignas(16) ShadowPushData
     {
-        Uint32 cameraIndex;
+        Uint32 camera_index;
         float  max_range;
         // 1 — directional (ortho): в карту пишется линейная осевая глубина -viewZ/far.
         // 0 — spot/sphere (perspective): евклидова дистанция length(viewPos)/far.
