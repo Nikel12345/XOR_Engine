@@ -177,6 +177,7 @@ void EngineContext::ClearScene(const SceneName& scene_name)
 	// BuildRenderBatches сам сбросит дерево, entity_slots и очереди дельт под локом и
 	// отстроит от (теперь пустой) сцены, так что висячих ссылок на удалённые сущности
 	// не останется (см. BatchBuilder::BuildRenderBatches).
+	// std::lock_guard<std::mutex> lock(object_manager->EcsMutex());   // ДИАГНОСТИКА гонки — ВРЕМЕННО СНЯТО
 	scene->clear();
 	batch_builder->SetDirtyBatches(true);
 }

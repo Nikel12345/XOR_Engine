@@ -498,7 +498,14 @@ bool Engine::RenderFunc(uint8_t slot)
 	if (RenderPassStep* transparent_rp = pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::TRANSPARENT_PASS))
 		transparent_rp->renderPassTexsData.SetColorTexture(tex);
 	pass_manager->SetRenderFrame(slot);
-	pass_manager->ExecutePassesSteps(cb, slot);
+	{
+		// Исключаем чтение дерева батчей во время его ПОЛНОЙ пересборки в prep-потоке
+		// (BuildRenderBatches::shader_batches.clear()). Замок берётся только ребилдом —
+		// редкая операция (загрузка/смена сцены), поэтому стопор render'а здесь почти
+		// никогда не наступает. Инкремент дерево не сносит и замка не держит.
+		std::lock_guard<std::mutex> batch_lock(pass_manager->BatchTreeMutex());
+		pass_manager->ExecutePassesSteps(cb, slot);
+	}
 
 	BeginImGuiFrame();
 	UI_ImGui::Iterate(engine_context);

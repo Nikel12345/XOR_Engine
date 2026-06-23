@@ -284,17 +284,23 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
 
     // Either a full rebuild (scene activation) or an incremental delta — never
     // both. exchange(false) consumes the rebuild request atomically.
-    bool changed;
+    bool changed = false;
     if (dirty_batches.exchange(false)) {
+        // Полная пересборка СНОСИТ узлы дерева (shader_batches.clear()) — единственная
+        // операция, опасная для параллельного render'а. Держим замок дерева на ребилд +
+        // его FinalizeOffsets (он проставляет indirect_command_index, который читает
+        // render). Инкремент ниже узлы не трогает и идёт без замка.
+        std::lock_guard<std::mutex> lock(pass_manager->BatchTreeMutex());
         BuildRenderBatches(pm, pass_manager, om, scene);
+        FinalizeOffsets(pass_manager);
         changed = true;
     }
-    else {
-        changed = ApplyIncremental(pm, pass_manager, om, scene);
+    else if (ApplyIncremental(pm, pass_manager, om, scene)) {
+        FinalizeOffsets(pass_manager);
+        changed = true;
     }
 
     if (changed) {
-        FinalizeOffsets(pass_manager);
         ++batches_revision;
     }
 }

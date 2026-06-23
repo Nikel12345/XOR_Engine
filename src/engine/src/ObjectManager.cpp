@@ -29,6 +29,7 @@ void ObjectManager::DeleteEntity(const SceneName& name, Entity e) {
 }
 
 void ObjectManager::DeleteEntity(SceneData* scene, Entity e) {
+    //std::lock_guard<std::mutex> lock(ecs_mutex_);   // ДИАГНОСТИКА гонки (см. EcsMutex) — ВРЕМЕННО СНЯТО
     if (!scene) { SDL_Log("DeleteEntity: null scene"); return; }
 
     auto arch_it = scene->entity_to_archetype.find(e);
@@ -181,6 +182,7 @@ std::string ObjectManager::SaveScene(SceneData* scene)
 
 std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const std::string& text)
 {
+    //std::lock_guard<std::mutex> lock(ecs_mutex_);   // ДИАГНОСТИКА гонки (см. EcsMutex) — ВРЕМЕННО СНЯТО
     auto sit = scenes_data.find(scene_name);
     SceneData* scene = (sit != scenes_data.end()) ? sit->second.get()
                                                   : CreateScene(scene_name);

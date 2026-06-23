@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <string_view>
 #include <vector>
+#include <mutex>
 //#include "ShaderManager.h"
 #include "TextureData.h"
 #include "BufferManager.h"
@@ -43,6 +44,14 @@ public:
 	const std::vector<ComputePassStep*>& GetOrderedComputePasses() { return ordered_compute_steps; }
 	const std::vector<ComputePassStep*>& GetOrderedComputePrepasses() { return ordered_compute_prepass_steps; }
 
+	// Защищает СТРУКТУРУ дерева батчей (shader_batches в RenderPassStep) на время ПОЛНОЙ
+	// пересборки: BuildRenderBatches делает shader_batches.clear() + перезаполнение, снося
+	// узлы, по которым параллельно идёт render (ExecuteRenderBatches). Берётся в
+	// BuildRenderBatches (prep-поток) и вокруг ExecutePassesSteps (render-поток).
+	// Инкремент (count/offset → per-slot indirect) узлы не удаляет и замок НЕ берёт.
+	// Ребилд редок (загрузка/смена сцены) — конкуренция минимальна.
+	std::mutex& BatchTreeMutex() { return batch_tree_mutex_; }
+
 	~PassManager();
 
 private:
@@ -58,4 +67,6 @@ private:
 	uint8_t render_frame = 0;
 
 	bool passes_filled = false;
+
+	std::mutex batch_tree_mutex_;   // см. BatchTreeMutex() — замок на полную пересборку дерева
 };

@@ -5,6 +5,7 @@
 
 template<typename... Components>
 Entity ObjectManager::CreateEntity(const std::string& scene_name, Components&&... comps) {
+    //std::lock_guard<std::mutex> lock(ecs_mutex_);   // ДИАГНОСТИКА гонки (см. EcsMutex) — ВРЕМЕННО СНЯТО
     SceneData* scene = (*this)[scene_name];
     if (!scene) {
 		SDL_Log("Create entity failed: scene '%s' not found!", scene_name.c_str());

@@ -32,6 +32,11 @@ namespace {
 
 void UI_ImGui::Iterate(EngineContext* ctx)
 {
+    // ВРЕМЕННО СНЯТО: проверяем, крашит ли само чтение ECS из UI (render-поток) при
+    // параллельных мутациях в sim. Если без замка стабильно — источник был не здесь
+    // (вероятно ShadowPass, тоже читающий ECS на render-потоке → отдельно, под снапшоты).
+    //std::lock_guard<std::mutex> ecs_lock(ctx->GetObjectManager()->EcsMutex());
+
     // Должен идти раз за кадр после ImGui::NewFrame (его зовёт Engine::BeginImGuiFrame).
     ImGuizmo::BeginFrame();
 
