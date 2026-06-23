@@ -51,6 +51,17 @@ public:
     bool Has(SceneData* scene, Entity e) const;
 
     SceneData* CreateScene(const SceneName& name);
+
+    // Сериализация сцены (формат и реестр компонентов — ComponentSerializer).
+    // SaveScene: обходит сущности активного набора, на каждый компонент с
+    // зарегистрированным сериалайзером пишет строку. LoadScene: парсит текст и строит
+    // сущности тем же путём, что CreateEntity (собрать сигнатуру → архетип → дописать
+    // в массивы), но набор берётся из файла, а не из шаблона. Указатели на ассеты
+    // (Model/Material) НЕ восстанавливаются здесь — только имена; их чинит верхний слой
+    // (EngineContext::LoadScene), т.к. ECS-ядро не знает про менеджеры ресурсов.
+    std::string SaveScene(SceneData* scene);
+    void        LoadScene(const SceneName& scene_name, const std::string& text);
+
 	void SetSceneState(const SceneName& scene_name, bool is_active);
     SceneData* GetActiveScene();
     SceneName GetActiveSceneName();

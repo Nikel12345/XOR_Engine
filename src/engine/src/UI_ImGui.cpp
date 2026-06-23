@@ -97,6 +97,19 @@ void UI_ImGui::DrawObjectsPanel(EngineContext* ctx)
         ImGui::SameLine();
         if (ImGui::SmallButton("Deselect")) g_selected = GIZMO_NONE;
 
+        // Save/Load сцены в файл. Сама работа — в sim-потоке: UI лишь кладёт команду с
+        // именем активной сцены и путём (payload на куче, удалит функтор). ВНИМАНИЕ:
+        // Load пока ДОБАВЛЯЕТ сущности к сцене (не очищает) — повторная загрузка дублирует.
+        if (ImGui::SmallButton("Save scene")) {
+            ctx->GetInputManager()->PushCommand(CommandId::SaveScene,
+                new SceneIOCmd{ objectManager->GetActiveSceneName(), "saved_scene.scene" });
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Load scene")) {
+            ctx->GetInputManager()->PushCommand(CommandId::LoadScene,
+                new SceneIOCmd{ objectManager->GetActiveSceneName(), "saved_scene.scene" });
+        }
+
         objectManager->ForEach<Positions, MaterialComponent, ModelComponent>(scene,
             [&](Entity e, SoAElement<Positions> pos_el, MaterialComponent&, ModelComponent&)
         {

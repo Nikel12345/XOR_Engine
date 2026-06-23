@@ -36,6 +36,7 @@ target_compile_features(EngineEcs PUBLIC cxx_std_23)
 set(ENGINEECS_SRC
     src/ObjectManager.cpp
     src/BaseComponents.cpp
+    src/ComponentSerializer.cpp
 )
 set(ENGINEECS_HDR
     include/ObjectManager.h
@@ -43,6 +44,7 @@ set(ENGINEECS_HDR
     include/BaseComponents.h
     include/SceneData.h
     include/Aliases.h
+    include/ComponentSerializer.h
 )
 list(TRANSFORM ENGINEECS_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
 list(TRANSFORM ENGINEECS_HDR PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)

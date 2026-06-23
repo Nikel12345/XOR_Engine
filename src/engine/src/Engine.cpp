@@ -1,6 +1,7 @@
 ﻿#include "PCH.h"
 #include "Engine.h"
 #include "TexturesPresets.h"
+#include "ComponentSerializer.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
@@ -605,6 +606,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	InitDefaultBufferUpdaters();
 	InitPasses();
 	InitUICommands();
+	RegisterBuiltinComponentSerializers();   // сериалайзеры компонентов для save/load сцены
 	pass_manager->FillRenderPasses();
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});
@@ -718,6 +720,24 @@ void Engine::InitUICommands()
 				P.e[i] = m[2]; P.f[i] = m[6]; P.g[i] = m[10]; P.h[i] = m[14];
 				P.i[i] = m[3]; P.j[i] = m[7]; P.k[i] = m[11]; P.l[i] = m[15];
 			}
+			delete c;
+		});
+
+	// Save/Load сцены — в sim-потоке (мутация ECS + взвод пересборки батчей). Payload
+	// (имя+путь) выделен на куче в UI, удаляем после применения.
+	input_manager->RegisterCommand(CommandId::SaveScene,
+		[](EngineContext* ctx, const void* data)
+		{
+			const SceneIOCmd* c = static_cast<const SceneIOCmd*>(data);
+			ctx->SaveScene(c->scene, c->path);
+			delete c;
+		});
+
+	input_manager->RegisterCommand(CommandId::LoadScene,
+		[](EngineContext* ctx, const void* data)
+		{
+			const SceneIOCmd* c = static_cast<const SceneIOCmd*>(data);
+			ctx->LoadScene(c->scene, c->path);
 			delete c;
 		});
 }

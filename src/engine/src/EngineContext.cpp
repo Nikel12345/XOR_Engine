@@ -1,6 +1,8 @@
 #include "PCH.h"
 #include "EngineContext.h"
 #include "TextureLoader.h"
+#include <fstream>
+#include <sstream>
 
 EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager* rm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pm, BatchBuilder* bb, TextureLoader* tl)
 	: gpu_ctx(bm, sm, rm, tm)   // GPU-фасад над Buffer/Shader/Pass/Texture
@@ -153,6 +155,48 @@ void EngineContext::SetActiveScene(const SceneName& name)
 {
 	object_manager->SetSceneState(name, true);
 	batch_builder->SetDirtyBatches(true);
+}
+
+void EngineContext::SaveScene(const SceneName& scene_name, const std::string& path)
+{
+	SceneData* scene = object_manager->GetScene(scene_name);
+	if (!scene) { SDL_Log("SaveScene: scene '%s' not found", scene_name.c_str()); return; }
+
+	const std::string text = object_manager->SaveScene(scene);
+	std::ofstream f(path, std::ios::binary);
+	if (!f) { SDL_Log("SaveScene: cannot open '%s' for write", path.c_str()); return; }
+	f << text;
+	SDL_Log("SaveScene: wrote scene '%s' to '%s'", scene_name.c_str(), path.c_str());
+}
+
+void EngineContext::LoadScene(const SceneName& scene_name, const std::string& path)
+{
+	std::ifstream f(path, std::ios::binary);
+	if (!f) { SDL_Log("LoadScene: cannot open '%s'", path.c_str()); return; }
+	std::stringstream ss; ss << f.rdbuf();
+
+	// ECS-часть: текст → сущности (указатели на ассеты пока пустые, только имена).
+	object_manager->LoadScene(scene_name, ss.str());
+
+	SceneData* scene = object_manager->GetScene(scene_name);
+	if (!scene) return;
+
+	// Чиним указатели на ассеты по сохранённым именам — это знает только верхний слой.
+	object_manager->ForEach<ModelComponent>(scene, [&](ModelComponent& m) {
+		if (!m.name.empty()) m.model = (*model_manager)[m.name];
+	});
+	object_manager->ForEach<MaterialComponent>(scene, [&](MaterialComponent& mc) {
+		mc.materials.clear();
+		mc.materials.reserve(mc.names.size());
+		for (const auto& n : mc.names)
+			mc.materials.push_back(material_manager->GetMaterial(n));
+	});
+
+	// Флаги рендера (как при смене активной сцены): сделать активной + полная пересборка
+	// батчей — BuildRenderBatches перечитает все сущности, PIB/Indirect подхватят по ревизии.
+	object_manager->SetSceneState(scene_name, true);
+	batch_builder->SetDirtyBatches(true);
+	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), path.c_str());
 }
 
 void EngineContext::CreateGraphicsPipelines()

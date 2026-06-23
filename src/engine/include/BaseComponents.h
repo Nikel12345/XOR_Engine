@@ -6,6 +6,7 @@
 #include <cstdint>        // uint32_t (Entity)
 #include <cstddef>        // size_t
 #include <vector>
+#include <string>         // имена ассетов в компонентах (для сериализации)
 #include <unordered_map>
 #include <typeindex>
 #include <memory>
@@ -195,13 +196,19 @@ struct TextureComponent {
 
 
 struct ModelComponent {
-    ModelData* model;
+    ModelData* model = nullptr;
+    // Имя ассета: задаётся при создании, пишется при сохранении сцены. Указатель при
+    // загрузке восстанавливается из имени в верхнем слое (ECS не знает про ModelManager) —
+    // так не нужен обратный поиск указатель→имя.
+    std::string name;
 };
 
 // Порядок расположения материалов должен соответствовать порядку сабмешей в модели, поскольку индекс материала в сабмеше используется для доступа к материалу
 // Order of materials must correspond to the order of submeshes in the model, as the material index in the submesh is used to access the material
 struct MaterialComponent {
     std::vector<Material*> materials;
+    // Имена материалов (по одному на элемент materials, тот же порядок). См. ModelComponent::name.
+    std::vector<std::string> names;
 };
 
 enum LightTypes {

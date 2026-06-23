@@ -70,6 +70,13 @@ public:
 	// Activating a scene swaps the whole entity set; force a full batch rebuild.
 	void SetActiveScene(const SceneName& name);
 
+	// Сохранение/загрузка сцены в текстовый файл. OM делает ECS-часть (текст ↔ сущности),
+	// а здесь — файловый IO и то, что ECS-ядру недоступно: восстановление указателей на
+	// ассеты по именам (Model→ModelManager, Material→MaterialManager) и взвод флагов
+	// рендера (полная пересборка батчей), как при смене активной сцены.
+	void SaveScene(const SceneName& scene_name, const std::string& path);
+	void LoadScene(const SceneName& scene_name, const std::string& path);
+
 	FragmentShaderData CreateFragmentShader(const char* hlsl_path);
 	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout);
 	ShaderProgramDescription* CreateShaderProgramDescription(const std::string& name);

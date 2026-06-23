@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <vector>
 
 class EngineContext;
@@ -16,8 +17,18 @@ enum class CommandId : uint32_t {
     HideEntity,   // payload: Entity в младших 32 битах, visible — в бите 32 (см. UI/InitUICommands)
     SetTransform, // payload: SetTransformCmd* на куче (16-float матрица не лезет в указатель),
                   // освобождается функтором после применения (см. InitUICommands)
+    SaveScene,    // payload: SceneIOCmd* на куче (имя сцены + путь), освобождает функтор
+    LoadScene,    // payload: SceneIOCmd* на куче; грузить сцену можно только в sim-потоке
 
     COUNT
+};
+
+// Нагрузка save/load: строки в указатель не упаковать, поэтому продьюсер (UI) выделяет
+// на куче, а консьюмер (sim-поток) применяет и удаляет. Save/Load — операции над ECS и
+// батчами, обязаны идти в sim-потоке, а не из render-потока, где живёт UI.
+struct SceneIOCmd {
+    std::string scene;
+    std::string path;
 };
 
 // Полезная нагрузка SetTransform. В отличие от Delete/Hide данные не упаковать в
