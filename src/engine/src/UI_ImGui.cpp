@@ -255,6 +255,10 @@ void UI_ImGui::DrawMaterialsPanel(EngineContext* ctx)
         {
             auto* p = reinterpret_cast<OpaqueMaterialParams*>(mat->params.data());
             ImGui::ColorEdit3("Base Color", p->baseColor);
+            ImGui::ColorEdit3("Emissive", p->emissive);
+            ImGui::SliderFloat("Emissive Strength", &p->emissiveStrength, 0.0f, 8.0f);
+            ImGui::SliderFloat("Metallic", &p->metallic, 0.0f, 1.0f);
+            ImGui::SliderFloat("Roughness", &p->roughness, 0.0f, 1.0f);
             // По мере раскомментирования полей в OpaqueMaterialParams добавляй виджеты сюда:
             // ImGui::SliderFloat("Metallic",  &p->metallic,  0.0f, 1.0f);
             // ImGui::SliderFloat("Roughness", &p->roughness, 0.0f, 1.0f);

@@ -5,6 +5,11 @@ Model Converter — converts 3D files to binary vertex/index buffers.
 Supported formats (via trimesh):
   OBJ, GLTF/GLB, PLY, STL, 3MF, OFF, DAE, and more.
 
+BLEND (Blender) is supported by shelling out to an installed Blender, which
+exports the scene to a temporary GLB that is then read by trimesh — this is
+exactly how Unity ingests .blend files under the hood. Set the BLENDER env var
+if blender.exe is not auto-detected.
+
 Output vertex struct (44 bytes per vertex):
   float x,  y,  z   — position
   float u,  v        — UV
@@ -23,9 +28,12 @@ Install:
 """
 
 import argparse
+import glob
 import os
 import re
+import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -145,14 +153,32 @@ def dedup_vertices(positions, uvs, normals, tangents, indices):
 # ──────────────────────────────────────────────────────────────────────────────
 
 def extract_meshes(loaded) -> list:
-    """Flatten whatever trimesh returns into a list of Trimesh objects."""
+    """Flatten whatever trimesh returns into a list of Trimesh objects.
+
+    Для Scene ОБЯЗАТЕЛЬНО запекаем node-трансформации из графа сцены в вершины:
+    glTF/GLB (а значит и наш .blend-мост) кладёт неприменённый transform объекта
+    (поворот/неравномерный масштаб/сдвиг) на УЗЕЛ, а geometry.values() отдаёт
+    локальные координаты. Без этого сабмеши искажаются и разъезжаются («один
+    повёрнут, другие сжаты»). OBJ такого бага не даёт — там transform уже в вершинах.
+    """
     meshes = []
     if isinstance(loaded, trimesh.Trimesh):
         meshes = [loaded]
     elif isinstance(loaded, trimesh.Scene):
-        for geom in loaded.geometry.values():
-            if isinstance(geom, trimesh.Trimesh) and len(geom.faces) > 0:
-                meshes.append(geom)
+        # Геометрия может инстанцироваться несколькими узлами с разными матрицами —
+        # собираем трансформы по имени геометрии, сохраняя порядок geometry (стабильный
+        # material_index). nodes_geometry даёт по узлу на инстанс.
+        geom_transforms = {}
+        for node_name in loaded.graph.nodes_geometry:
+            transform, geom_name = loaded.graph[node_name]
+            geom_transforms.setdefault(geom_name, []).append(transform)
+        for geom_name, geom in loaded.geometry.items():
+            if not (isinstance(geom, trimesh.Trimesh) and len(geom.faces) > 0):
+                continue
+            for T in geom_transforms.get(geom_name, [np.eye(4)]):
+                g = geom.copy()
+                g.apply_transform(T)          # запекаем мировой transform в вершины+нормали
+                meshes.append(g)
     elif isinstance(loaded, dict):
         for v in loaded.values():
             meshes.extend(extract_meshes(v))
@@ -240,6 +266,87 @@ def load_dae(full_path: str, process: bool):
         os.remove(tmp)
 
 
+# ── Blender (.blend) ──────────────────────────────────────────────────────────
+# .blend — проприетарный формат авторинга Blender; распарсить его без самого
+# Blender нельзя (структуры завязаны на версию). Поэтому дёргаем установленный
+# Blender в фоне — ровно как Unity под капотом — и читаем его экспорт в .glb.
+
+# Кандидаты на blender.exe: env-var → PATH → типовые пути установки.
+_BLENDER_CANDIDATES = [
+    r"C:\NotSys\Blender\blender.exe",
+    r"C:\Program Files\Blender Foundation\*\blender.exe",
+    r"C:\Program Files (x86)\Blender Foundation\*\blender.exe",
+]
+
+# Скрипт-экспортёр, исполняемый ВНУТРИ Blender (его встроенный Python).
+# Путь вывода берёт из argv (после '--'); пишет GLB всей сцены.
+_BLENDER_EXPORT_PY = (
+    "import bpy, sys\n"
+    "try:\n"
+    "    import addon_utils\n"
+    "    addon_utils.enable('io_scene_gltf2', default_set=False, persistent=True)\n"
+    "except Exception:\n"
+    "    pass\n"
+    "out = sys.argv[-1]\n"
+    # export_apply=True — ЗАПЕКАЕТ модификаторы (Mirror/Subsurf/Solidify/Array...).
+    # Без него зеркальная половина модели и пр. геометрия модификаторов теряется.
+    "bpy.ops.export_scene.gltf(filepath=out, export_format='GLB',\n"
+    "                          use_selection=False, export_apply=True)\n"
+)
+
+
+def _find_blender() -> str:
+    """Найти blender.exe. Переопределяется переменной окружения BLENDER / BLENDER_PATH."""
+    env = os.environ.get("BLENDER") or os.environ.get("BLENDER_PATH")
+    if env and os.path.isfile(env):
+        return env
+    found = shutil.which("blender")
+    if found:
+        return found
+    for pat in _BLENDER_CANDIDATES:
+        matches = sorted(glob.glob(pat))
+        if matches:
+            return matches[-1]          # самая свежая версия по сортировке имён
+    sys.exit(
+        "[ERROR] Blender executable not found.\n"
+        "Install Blender or point the BLENDER env var at blender.exe:\n"
+        "  PowerShell:  $env:BLENDER = 'C:\\path\\to\\blender.exe'"
+    )
+
+
+def load_blend(full_path: str, process: bool):
+    """Экспорт .blend → временный .glb через фоновый Blender, затем чтение trimesh."""
+    blender   = _find_blender()
+    abs_blend = os.path.abspath(full_path)
+
+    fd_glb, tmp_glb = tempfile.mkstemp(suffix=".glb")
+    os.close(fd_glb)
+    fd_py, tmp_py = tempfile.mkstemp(suffix=".py")
+    with os.fdopen(fd_py, "w", encoding="utf-8") as f:
+        f.write(_BLENDER_EXPORT_PY)
+
+    try:
+        print(f"  [blend] exporting via Blender ({blender}) -> temp .glb")
+        proc = subprocess.run(
+            [blender, "--background", "--factory-startup",
+             abs_blend, "--python", tmp_py, "--", tmp_glb],
+            capture_output=True, text=True,
+        )
+        if proc.returncode != 0 or os.path.getsize(tmp_glb) == 0:
+            raise RuntimeError(
+                f"Blender export failed (exit {proc.returncode}).\n"
+                f"--- stdout (tail) ---\n{proc.stdout[-2000:]}\n"
+                f"--- stderr (tail) ---\n{proc.stderr[-2000:]}"
+            )
+        return trimesh.load(tmp_glb, process=process)
+    finally:
+        for p in (tmp_glb, tmp_py):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
 # Остальные форматы — ничего особенного, просто делегируют в trimesh.
 def load_obj(full_path, process):  return _load_trimesh(full_path, process)
 def load_glb(full_path, process):  return _load_trimesh(full_path, process)
@@ -251,7 +358,8 @@ def load_3mf(full_path, process):  return _load_trimesh(full_path, process)
 
 
 LOADERS = {
-    '.dae':  load_dae,
+    '.dae':   load_dae,
+    '.blend': load_blend,
     '.obj':  load_obj,
     '.glb':  load_glb,
     '.gltf': load_gltf,
@@ -426,7 +534,7 @@ Examples:
         """
     )
     parser.add_argument("input",
-                        help="Input model file (OBJ, GLTF/GLB, PLY, STL, DAE, 3MF, OFF, ...)")
+                        help="Input model file (OBJ, GLTF/GLB, PLY, STL, DAE, BLEND, 3MF, OFF, ...)")
     parser.add_argument("-o", "--output",
                         default=None,
                         help="Output file stem (default: same name as input, no extension)")

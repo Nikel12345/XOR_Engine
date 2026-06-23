@@ -37,7 +37,7 @@ namespace DefaultRenderPassNamespace
 
     // PassSystem: общие ресурсы дефолтного набора проходов (разделяемый depth-таргет, его формат).
     // Должна вызываться ПЕРЕД Set*Pass, которые их потребляют (main/transparent/debug).
-    void _SetDefaultCommonResources(EngineContext* ctx);
+    void _SetDefaultCommonResources(EngineContext* ctx, uint32_t width, uint32_t height);
 
     void SetDefaultMainRenderPass(EngineContext* ctx);
     void SetDefaultMainRenderPass(EngineContext* ctx, SDL_GPUDevice* dev, SDL_Window* win);

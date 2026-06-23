@@ -661,14 +661,12 @@ void Engine::InitPasses()
 	//SetDefaultCullingComputeCountPass(pass_manager, buffer_manager, object_manager, transform_data_module, light_data_module, indirect_data_module);
 	//SetDefaultCullingOutIndirectPass(pass_manager, buffer_manager);
 
-	// PassSystem (псевдокласс): дефолтный набор проходов. Общие ресурсы (depth-таргет + формат)
-	// создаёт _SetDefaultCommonResources один раз, дальше Set*Pass их только потребляют.
 	{
-		_SetDefaultCommonResources(engine_context);   // depth-таргет, единый формат depth
+		_SetDefaultCommonResources(engine_context, safe_f_u32(width), safe_f_u32(height));
 		SetDefaultShadowPCFRenderPass(engine_context);
 		SetDefaultMainRenderPass(engine_context);
-		SetTransparentPass(engine_context);     // прозрачная геометрия (блендинг) поверх сцены
-		SetDebugColliderPass(engine_context);   // рамки коллайдеров поверх свопчейна
+		SetTransparentPass(engine_context);
+		SetDebugColliderPass(engine_context);
 	}
 	//SetDefaultShadowVSMRenderPass(pass_manager, texture_manager, buffer_manager, object_manager, batch_builder);
 	//SetDefaultShadowBlurPass(pass_manager, buffer_manager); // ДЛЯ VSM

@@ -47,6 +47,7 @@ struct ShaderBatchData {
     std::vector<BufferData*> vertexStorageBuffers;
     std::vector<BufferData*> fragmentStorageBuffers;
     SDL_GPUGraphicsPipeline* pipeline = nullptr;
+    uint32_t frag_uniform_count = 0;   // число fragment uniform-буферов шейдера (гейт пуша params)
 };
 
 struct RenderPassTexturesInfo {

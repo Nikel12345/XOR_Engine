@@ -149,6 +149,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
                 new_batch.pipeline = pm->GetGraphicPipeline(sp);
                 new_batch.vertexStorageBuffers = sp->vertex_shader_buffers;
                 new_batch.fragmentStorageBuffers = sp->fragment_shader_buffers;
+                new_batch.frag_uniform_count = sp->fs.shader_data.num_uniform_buffers;
                 shader_map[sp_key] = std::move(new_batch);
             }
 
@@ -186,10 +187,10 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
             auto texb_it = tex_map.find(tex_key);
             if (texb_it == tex_map.end()) {
                 TextureBatchData new_texb{};
-                // Факторы — только шейдерам, потребляющим материал (есть текстурные слоты). Геометрия-
-                // only проходы (shadow: required_slots пуст) их не читают → не пушим, иначе пуш в
-                // необъявленный uniform-слот этого пасса.
-                new_texb.params = sp->required_slots.empty() ? nullptr : &material->params;
+                // Указатель ставим всегда; РЕШЕНИЕ пушить — в RenderManager по числу fragment-
+                // uniform’ов шейдера (объявлен ли слот MaterialBlock). Так shadow/depth (без
+                // MaterialBlock) params не получат автоматически, без флагов и прокси по текстурам.
+                new_texb.params = &material->params;
                 new_texb.texture_uvl.reserve(material->textures.size());
                 for (const auto& role : sp->required_slots) {
                     auto it = material->textures.find(role);

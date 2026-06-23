@@ -5,8 +5,8 @@
 
 BufferManager::BufferManager(SDL_GPUDevice* device) : ResourceManager(device) {
     using namespace DefaultBuffersNames;
-	CreateBufferData(DEFAULT_VERTEX_BUFFER, 819060, SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
-	CreateBufferData(DEFAULT_INDEX_BUFFER, 819006, SDL_GPU_BUFFERUSAGE_INDEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
+	CreateBufferData(DEFAULT_VERTEX_BUFFER, 8190600, SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
+	CreateBufferData(DEFAULT_INDEX_BUFFER, 8190006, SDL_GPU_BUFFERUSAGE_INDEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 	CreateBufferData(DEFAULT_TRANSFORM_BUFFER, BASE_TB_SIZE / 10, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_LIGHT_BUFFER, sizeof(LightLayout) * 2, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_CAMERA_BUFFER, sizeof(CameraData), SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Static);

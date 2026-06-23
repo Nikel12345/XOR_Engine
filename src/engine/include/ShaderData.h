@@ -42,6 +42,7 @@ namespace ShaderBase {
         std::shared_ptr<SDL_GPUShader> shader;
         size_t shader_size = 0;
         Uint8* shader_code = nullptr;
+        Uint32 num_uniform_buffers = 0;   // из рефлексии; гейт пуша params (объявил ли шейдер слот MaterialBlock)
     };
 }
 

@@ -17,9 +17,6 @@ public:
 	ShaderProgramDescription* CreateShaderProgramDescription(const std::string& name);
 	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> bindings);
 	FragmentShaderData CreateFragmentShader(const char* path);
-	// Фрагментный шейдер из движковой базы + пользовательской части (getSurface), склеиваемых
-	// в один source (порядок: user → base). Пути — относительно include_dir.
-	FragmentShaderData CreateMaterialFragmentShader(const char* base_path, const char* user_path);
 
 	ShaderProgram* CreateShaderProgram(
 		const std::string& name, ShaderProgramDescription* spd, RenderPassStep* associated_pass,
@@ -68,8 +65,6 @@ private:
 	void ReadVertexAttributes(std::initializer_list<ShaderBase::VertexBufferBinding> bindings, VertexShaderData& vs);
 
 	Uint8* LoadOrCompileSPIRV(const char* hlsl_path, SDL_ShaderCross_ShaderStage stage, size_t& out_size);
-	// Компиляция из готовой source-строки (а не файла) с дисковым .spv-кэшем по переданному хэшу.
-	Uint8* CompileSPIRVFromSource(const char* source, uint64_t hash, const char* dbg_name, SDL_ShaderCross_ShaderStage stage, size_t& out_size);
 
 	// Дедуп GPU-шейдеров по хэшу SPIR-V: одинаковый байткод → один SDL_GPUShader на всех
 	// владельцев (ShaderData держит shared_ptr; здесь — неимущий weak-индекс для поиска).

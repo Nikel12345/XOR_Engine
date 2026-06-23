@@ -57,6 +57,7 @@ SDL_AppResult Game::MainInit()
         SetMainShaderProgram(ctx);
         SetDefaultShadowShaderProgram(ctx);
         SetTransparentShaderProgram(ctx);
+        SetUntexturedShaderProgram(ctx);
         SetDebugColliderProgram(ctx);
     }
     
@@ -82,6 +83,28 @@ SDL_AppResult Game::MainInit()
         {TextureSlotRole::Albedo, "new_car_glass"},
         {TextureSlotRole::Normal, "norm"} },
         { "sp_transparent" });
+
+    // Текстур нет → пустой список текстур; шейдер — ИМЯ ПРОГРАММЫ "sp_untextured" (не дескриптора
+    // "spd_untextured"!). Цвет задаёт фактор baseColor (дефолт белый — видимый).
+    auto ship_material = ctx->CreateMaterial("ship", {}, { "sp_untextured" });
+
+    auto m_orange = ctx->CreateMaterial("m_orange", {}, { "sp_untextured", "sp_shadow" });
+    ctx->SetMaterialParams(m_orange, OpaqueMaterialParams{ {1.0f, 0.45f, 0.1f, 1.0f} });
+
+    auto m_gray = ctx->CreateMaterial("m_gray", {}, { "sp_untextured", "sp_shadow" });
+    ctx->SetMaterialParams(m_gray, OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f} });
+
+    auto metal1 = ctx->CreateMaterial("metal1", {}, { "sp_untextured", "sp_shadow" });
+    ctx->SetMaterialParams(metal1, OpaqueMaterialParams{ {1.0f, 0.5f, 0.5f, 1.0f} });
+
+    auto metal2 = ctx->CreateMaterial("metal2", {}, { "sp_untextured", "sp_shadow" });
+    ctx->SetMaterialParams(metal2, OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f} });
+
+    auto emission = ctx->CreateMaterial("emission", {}, { "sp_untextured", "sp_shadow" });
+    ctx->SetMaterialParams(emission, OpaqueMaterialParams{ {0.0f, 0.0f, 0.0f, 1.0f}, {0.3f, 0.3f, 0.6f}, 1.0f });
+
+    ctx->SetMaterialParams(ship_material, OpaqueMaterialParams{ { 0.55f, 0.6f, 0.7f, 1.0f } });
+
     ctx->SetMaterialParams(material_glass, TransparentMaterialParams{ 0.35f });
 
     // Opaque-материалы тоже несут params (дефолт-белый baseColorFactor = без тинта): иначе их
@@ -94,6 +117,7 @@ SDL_AppResult Game::MainInit()
     debug_collider_material = ctx->CreateMaterial("debug_collider", {}, { "sp_debug_collider" });
 
     ModelData* model_car = ctx->CreateModel("car", "models/new_car_n_fixed.bin", "models/new_car_n_fixed_i.bin");
+	ModelData* model_ship = ctx->CreateModel("ship", "models/low_poly_ship.bin", "models/low_poly_ship_i.bin");
 
     // Псевдомодель — единичный квад в плоскости XY, нормаль +Z, пивот в углу (0..1), UV 0..1.
     // Геометрия не зависит от размера: размер задаётся на инстансе через диагональ матрицы.
@@ -230,7 +254,7 @@ SDL_AppResult Game::MainInit()
     // ppu — локальный масштаб пиксели→мир (не глобальная константа): мир = пиксели * ppu.
     const float ppu = 0.001f;
     ctx->CreateEntity("main_menu",
-        MaterialComponent{ { material_sprite } },
+        MaterialComponent{ { metal2 } },
         ModelComponent{ quad },
         PositionProxy16{
             texture_cube->width * ppu, 0, 0, 0.0f,
@@ -242,6 +266,18 @@ SDL_AppResult Game::MainInit()
         DrawComponent{}
     );
 
+    ctx->CreateEntity("main_menu",
+        MaterialComponent{ {m_orange, material_glass, metal1, m_gray, metal2, emission} },
+        ModelComponent{ model_ship },
+        PositionProxy16{
+            -1, 0,  0, 0.5f,     // X basis = (-1, 0, 0)
+             0, 1,  0, 0.0f,
+             0, 0, -1, 2.5f,     // Z basis = (0, 0, -1)
+             0, 0,  0, 1.0f
+        }, ShadowComponent{},
+        ColliderComponent{},
+        DrawComponent{}
+    );
     // Сфера: тот же путь (generator → staging → append), размер ~1 через диагональ.
     //Collider second_collide = Collider::Sphere(1.0f, { 0, 0.5f, 0 });
     //ctx->CreateEntity("main_menu",

@@ -7,9 +7,16 @@ Texture2DArray<float>     u_shadowDepthArray  : register(t0, space2);
 [[vk::combinedImageSampler]]
 SamplerComparisonState    u_shadowSampler     : register(s0, space2);
 
-StructuredBuffer<Light>       LightBlock    : register(t3, space2);
+// Регистры заданы прологом (зависят от числа сэмплеров пасса: текстурный → t3/t4,
+// текстурелесс → t1/t2). База включается ПОСЛЕ пролога — макросы уже определены.
+StructuredBuffer<Light>       LightBlock    : LIGHT_BLOCK_REGISTER;
 struct ShadowCamera { float4x4 view; float4x4 proj; };
-StructuredBuffer<ShadowCamera> ShadowCameras : register(t4, space2);
+StructuredBuffer<ShadowCamera> ShadowCameras : SHADOW_CAMERAS_REGISTER;
+
+// Камера во фрагменте — для view-зависимого спекуляра. camPos выводим из view (rigid-inverse
+// -R^T·t), т.к. дописать его в CameraData нельзя — она шарится с теневыми камерами (страйд).
+struct CameraData { float4x4 view; float4x4 proj; };
+StructuredBuffer<CameraData> Camera : CAMERA_REGISTER;
 
 static const float AMBIENT_LIGHT = 0.75;    // пол освещённости (max с засветкой)
 
@@ -48,6 +55,15 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
     SurfaceData surface = getSurface(input, isFrontFace);
     float3 n = surface.normal;
 
+    // Спекуляр (Blinn-Phong): V на камеру, shininess из roughness. camPos = -R^T·t из view.
+    float4x4 view      = Camera[0].view;
+    // Трансляция view лежит в СТОЛБЦЕ 3 (_m03_m13_m23), не в строке 3 (та = 0,0,0,1).
+    // camPos (мир) = -R^T·t — обратное rigid-преобразование (R = верхний 3x3, ортонормирован).
+    float3   camPos    = -mul(transpose((float3x3)view), view._m03_m13_m23);
+    float3   V         = normalize(camPos - input.v_worldPos);
+    float    shininess = lerp(8.0, 256.0, saturate(1.0 - surface.roughness));
+    float3   specSum   = float3(0.0, 0.0, 0.0);
+
     float3 lightSum = float3(0.0, 0.0, 0.0);
 
     uint lightCount, stride;
@@ -65,6 +81,7 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
         {
             float3 L_dir     = normalize(-light.direction_angle.xyz);
             float  intensity = computeDirectionalLight(n, light, L_dir);
+            float  dirShadow = 1.0;
 
             if (intensity > 0.0 && cameraOffset >= 0)
             {
@@ -104,12 +121,21 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
                         sampClip,
                         slot,
                         ndcZ - biasNdc);
+                    dirShadow = shadow_d;
                     intensity *= shadow_d;
                 }
             }
 
             if (intensity > 0.0)
                 lightSum += light.color_power.rgb * intensity;
+
+            // Спекуляр Blinn-Phong — пока только от directional. metallic = сила блика.
+            if (surface.metallic > 0.0)
+            {
+                float3 H    = normalize(L_dir + V);
+                float  spec = pow(saturate(dot(n, H)), shininess);
+                specSum += light.color_power.rgb * (spec * light.color_power.a * dirShadow * surface.metallic);
+            }
             continue;
         }
 
@@ -154,7 +180,7 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
     }
 
     float3 lighting = max(lightSum, (float3)AMBIENT_LIGHT);
-    float3 color    = surface.baseColor * lighting;
+    float3 color    = surface.baseColor * lighting + specSum + surface.emission;   // спекуляр + эмиссия поверх света
 
     return float4(color, surface.alpha);
 }

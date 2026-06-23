@@ -283,8 +283,10 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 						safe_u32(texture_batch.texture_uvl.size() * sizeof(TextureData)));
 				}
 
-				if (texture_batch.params && !texture_batch.params->empty()) {
-					SDL_PushGPUFragmentUniformData(cb, uvl_slot + 1,
+				if (texture_batch.params && !texture_batch.params->empty()
+						/* пушим, ТОЛЬКО если шейдер объявил uniform на этом слоте (нет MaterialBlock у shadow/depth → не лезем) */
+						&& (uvl_slot + (texture_batch.texture_uvl.empty() ? 0u : 1u)) < shader_batch.frag_uniform_count) {
+					SDL_PushGPUFragmentUniformData(cb, uvl_slot + (texture_batch.texture_uvl.empty() ? 0u : 1u),   /* params: плотный слот (без UVL → uvl_slot) */
 						texture_batch.params->data(), safe_u32(texture_batch.params->size()));
 				}
 

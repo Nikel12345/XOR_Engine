@@ -159,7 +159,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
     shadow_pass_inited = true;
 }
 
-void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx)
+void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, uint32_t width, uint32_t height)
 {
     if (g_pass_system.common_inited) {
         SDL_Log("PassSystem common resources are already initialized.");
@@ -168,8 +168,8 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx)
     TextureManager* tm = ctx->GetTextureManager();
 
     auto depth_tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
-    depth_tci.width = 800;
-    depth_tci.height = 600;
+    depth_tci.width = width;
+    depth_tci.height = height;
 
     g_pass_system.main_depth = tm->CreateSharedDepthTarget(depth_tci);
     g_pass_system.main_depth_format = depth_tci.format;

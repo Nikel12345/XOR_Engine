@@ -181,10 +181,6 @@ FragmentShaderData EngineContext::CreateFragmentShader(const char* path) {
 	return gpu_ctx.CreateFragmentShader(path);
 }
 
-FragmentShaderData EngineContext::CreateMaterialFragmentShader(const char* base_path, const char* user_path) {
-	return gpu_ctx.CreateMaterialFragmentShader(base_path, user_path);
-}
-
 VertexShaderData EngineContext::CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout) {
 	return gpu_ctx.CreateVertexShader(hlsl_path, vertex_buffer_layout);
 }

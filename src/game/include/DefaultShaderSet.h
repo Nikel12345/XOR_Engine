@@ -16,6 +16,8 @@ namespace DefaultShaderProgramSet
     void SetMainShaderProgram(EngineContext* ctx);
     void SetDefaultShadowShaderProgram(EngineContext* ctx);
     void SetTransparentShaderProgram(EngineContext* ctx);
+    // Текстурелесс main-материал (цвет из фактора, без текстур): свой surface + свой sp (required_slots {}).
+    void SetUntexturedShaderProgram(EngineContext* ctx);
 
     // Голый шейдер дебаг-рамок коллайдеров (без текстур), привязан к DEBUG_PASS.
     void SetDebugColliderProgram(EngineContext* ctx);
