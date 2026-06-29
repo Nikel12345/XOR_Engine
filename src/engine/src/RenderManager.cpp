@@ -181,18 +181,32 @@ void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassS
 		std::vector<SDL_GPUStorageBufferReadWriteBinding> storage_buffer_bindings =
 			bm->BuildBindGPUComputeRWBuffers(shader_batch.rw_storage_buffers, pass_frame);
 
+		// Резолвим СТАБИЛЬНЫЕ атласы в актуальные SDL-биндинги ЗДЕСЬ (на момент диспатча): после
+		// ресайза атлас уже держит новую текстуру, поэтому батч пересобирать не нужно. SDL копирует
+		// массивы при вызове, поэтому локальные временные векторы безопасны.
+		std::vector<SDL_GPUStorageTextureReadWriteBinding> rw_textures;
+		rw_textures.reserve(shader_batch.rw_storage_textures.size());
+		for (const auto& r : shader_batch.rw_storage_textures)
+			rw_textures.push_back({ r.atlas->texture_binding.texture, r.mip_level, r.layer, false });
+
 		SDL_GPUComputePass* cmp = SDL_BeginGPUComputePass(cb,
-			shader_batch.rw_storage_textures.data(), safe_u32(shader_batch.rw_storage_textures.size()),
+			rw_textures.data(), safe_u32(rw_textures.size()),
 			storage_buffer_bindings.data(), safe_u32(storage_buffer_bindings.size()));
 
 		SDL_BindGPUComputePipeline(cmp, shader_batch.pipeline);
 		if (!shader_batch.texture_binding.empty()) {
-			SDL_BindGPUComputeSamplers(cmp, 0,
-				shader_batch.texture_binding.data(), safe_u32(shader_batch.texture_binding.size()));
+			std::vector<SDL_GPUTextureSamplerBinding> samplers;
+			samplers.reserve(shader_batch.texture_binding.size());
+			for (TextureAtlas* a : shader_batch.texture_binding)
+				samplers.push_back(a->texture_binding);
+			SDL_BindGPUComputeSamplers(cmp, 0, samplers.data(), safe_u32(samplers.size()));
 		}
 		if (!shader_batch.ro_storage_textures.empty()) {
-			SDL_BindGPUComputeStorageTextures(cmp, 0,
-				shader_batch.ro_storage_textures.data(), safe_u32(shader_batch.ro_storage_textures.size()));
+			std::vector<SDL_GPUTexture*> ro_textures;
+			ro_textures.reserve(shader_batch.ro_storage_textures.size());
+			for (TextureAtlas* a : shader_batch.ro_storage_textures)
+				ro_textures.push_back(a->texture_binding.texture);
+			SDL_BindGPUComputeStorageTextures(cmp, 0, ro_textures.data(), safe_u32(ro_textures.size()));
 		}
 		if (!shader_batch.ro_storage_buffers.empty()) {
 			bm->BindGPUComputeRO_Buffers(cmp, 0, shader_batch.ro_storage_buffers, pass_frame);

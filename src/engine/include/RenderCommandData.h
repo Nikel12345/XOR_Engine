@@ -79,14 +79,23 @@ struct RenderPassStep {
     int pass_index = -1;
 };
 
+// Стабильная ссылка на rw storage-текстуру: храним АТЛАС (его указатель неизменен), а конкретный
+// SDL_GPUTexture* собирается в ComputePassStandardBody на момент диспатча — батч переживает
+// пересоздание текстур (ресайз) без ребилда.
+struct ComputeRWStorageTextureRef {
+    TextureAtlas* atlas = nullptr;
+    uint32_t mip_level = 0;
+    uint32_t layer = 0;
+};
+
 struct ComputeShaderBatchData {
     std::function<void(const PushConstantBinder&, const void*)> push_func = {};
     std::function<void(DispatchSizeBinder&, const void*)> dispatch_func = {};
     std::vector<BufferData*> ro_storage_buffers; // set=0, SDL_BindGPUComputeStorageBuffers
     std::vector<BufferData*> rw_storage_buffers; // set=1, SDL_BeginGPUComputePass
-    std::vector<SDL_GPUTexture*> ro_storage_textures;
-    std::vector<SDL_GPUStorageTextureReadWriteBinding> rw_storage_textures;
-    std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
+    std::vector<TextureAtlas*> ro_storage_textures;
+    std::vector<ComputeRWStorageTextureRef> rw_storage_textures;
+    std::vector<TextureAtlas*> texture_binding;
     std::string debug_name;
     uint32_t threadcount_x = 1;
     uint32_t threadcount_y = 1;

@@ -14,7 +14,7 @@ namespace DefaultRenderPassNamespace
     inline constexpr const char* BLOOM_PASS = "_DefaultBloomPass";
 
     // Число уровней bloom-пирамиды (bloom_0 = ½ окна, каждый следующий ещё вдвое меньше).
-    inline constexpr uint32_t BLOOM_LEVELS = 6;
+    inline constexpr uint32_t BLOOM_LEVELS = 4;
     inline constexpr const char* SHADOW_PASS = "_DefaultShadowRenderPass";
     inline constexpr const char* CULLING_PREPASS = "_DefaultCullingComputePass";
     inline constexpr const char* CULLING_ZEROS_PREPASS = "_DefaultCullingZerosComputePass";
@@ -66,8 +66,8 @@ namespace DefaultRenderPassNamespace
     struct alignas(16) BloomParams {
         uint32_t useKaris  = 0;     // 1 только на первом downsample (гасит fireflies)
         float    intensity = 0.0f;  // доля подмешивания bloom в composite (~0.05)
-        float    _pad0     = 0.0f;
-        float    _pad1     = 0.0f;
+        float    threshold = 0.0f;  // prefilter: порог яркости, ниже которого сцена не блумит
+        float    knee      = 0.0f;  // prefilter: ширина мягкого колена вокруг порога
     };
 
     // Создаёт compute-проход bloom: пирамида downsample→upsample по эмиссии + composite/tonemap в

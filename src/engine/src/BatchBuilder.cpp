@@ -427,10 +427,9 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager)
 }
 
 void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm) {
-    // Батчи ПЕРСИСТЕНТНЫ: пересобираем только по флагу (создание программ / ресайз), не каждый кадр.
-    // Иначе clear+rebuild на prep-потоке гонится с render'ом, читающим shader_batches под
-    // BatchTreeMutex (→ мерцание/краш). Батч снапшотит SDL_GPUTexture* атласа, поэтому при ресайзе
-    // (текстуры пересоздаются) ResizeSceneHDRTargets взводит SetDirtyComputeBatches(true).
+    // Батчи ПЕРСИСТЕНТНЫ: пересобираем только при создании compute-программ (флаг), не каждый кадр.
+    // Батч хранит СТАБИЛЬНЫЕ TextureAtlas* (не снапшот SDL_GPUTexture*), а резолв в актуальные
+    // биндинги — в ComputePassStandardBody. Поэтому ресайз (пересоздание текстур) ребилда НЕ требует.
     if (!sm || !sm->IsDirtyComputeBatches()) return;
 
     // clear() сносит узлы — опасно для параллельного render'а. Берём тот же замок, что он держит
@@ -457,19 +456,13 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         new_batch.rw_storage_buffers = sp->rw_storage_buffers;
         new_batch.ro_storage_buffers = sp->ro_storage_buffers;
 
+        // Копируем СТАБИЛЬНЫЕ атласы (без резолва SDL_GPUTexture* — он в ComputePassStandardBody).
         new_batch.rw_storage_textures.reserve(sp->rw_storage_textures.size());
         for (const auto& d : sp->rw_storage_textures) {
-            new_batch.rw_storage_textures.emplace_back(
-                d.texture_atlas->texture_binding.texture, d.mip_level, d.layer, false);
+            new_batch.rw_storage_textures.push_back({ d.texture_atlas, d.mip_level, d.layer });
         }
-        new_batch.ro_storage_textures.reserve(sp->ro_storage_textures.size());
-        for (const auto& a : sp->ro_storage_textures) {
-            new_batch.ro_storage_textures.push_back(a->texture_binding.texture);
-        }
-        new_batch.texture_binding.reserve(sp->texture_samplers.size());
-        for (const auto& a : sp->texture_samplers) {
-            new_batch.texture_binding.push_back(a->texture_binding);
-        }
+        new_batch.ro_storage_textures = sp->ro_storage_textures;   // vector<TextureAtlas*>
+        new_batch.texture_binding     = sp->texture_samplers;      // vector<TextureAtlas*>, даёт texture+sampler
         new_batch.push_func = sp->push_func;
         new_batch.dispatch_func = sp->dispatch_func;
 

@@ -225,11 +225,10 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
 
     // HDR-таргеты набора: сцена рендерится в линейный HDR (эмиссия/блики уходят за 1.0), на экран
     // выводится финальным present-проходом (blit). scene_emission — второй MRT-выход main-прохода,
-    // источник bloom. scene_hdr: сэмплер для blit роли не играет (blit берёт свой filter) — дефолтный.
-    // scene_emission и уровни bloom сэмплятся в compute-фильтрах → нужен LINEAR + clamp (ENV_SAMPLER).
-    auto def_sampler = tm->GetSampler(DefaultSamplersNames::DEFAULT_SAMPLER);
+    // источник bloom. scene_hdr сэмплится bloom-prefilter'ом (13-тап) → нужен LINEAR + clamp, как у
+    // эмиссии и уровней bloom (compute-фильтры). На present-blit фильтр сэмплера не влияет.
     auto env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
-    g_pass_system.scene_hdr      = tm->CreateTextureAtlas("scene_hdr",      TexturePresets::SceneHDR(width, height),    def_sampler);
+    g_pass_system.scene_hdr      = tm->CreateTextureAtlas("scene_hdr",      TexturePresets::SceneHDR(width, height),    env_sampler);
     g_pass_system.scene_emission = tm->CreateTextureAtlas("scene_emission", TexturePresets::EmissionHDR(width, height), env_sampler);
 
     // Bloom-пирамида: BLOOM_LEVELS уровней, каждый вдвое меньше предыдущего (bloom_0 = ½ окна).
@@ -454,10 +453,9 @@ void DefaultRenderPassNamespace::ResizeSceneHDRTargets(EngineContext* ctx, uint3
     if (RenderPassStep* dp = pm->GetRenderPassStep(DEBUG_PASS))
         dp->renderPassTexsData.SetColorTexture(hdr, 0);
 
-    // bloom-атласы пересозданы → compute-батчи держат устаревшие SDL_GPUTexture*. Взводим
-    // пересборку батчей (произойдёт под замком в BuildComputeBatches). Пайплайны не трогаем —
-    // они от текстур не зависят.
-    ctx->GetShaderManager()->SetDirtyComputeBatches(true);
+    // Compute-батчи трогать НЕ нужно: они держат стабильные TextureAtlas*, а актуальный
+    // SDL_GPUTexture* резолвится в ComputePassStandardBody каждый диспатч. Атлас тот же — мы лишь
+    // подменили его texture внутри (recreate). Размер тоже берётся из атласа в dispatch_func.
 }
 
 void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
@@ -485,27 +483,49 @@ void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
         26
     );
 
+    ComputeShaderData csd_pre  = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_prefilter.comp.hlsl");
     ComputeShaderData csd_down = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_down.comp.hlsl");
     ComputeShaderData csd_up   = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_up.comp.hlsl");
     ComputeShaderData csd_comp = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_composite.comp.hlsl");
 
     auto bloomName = [](uint32_t i) { return std::string("bloom_") + std::to_string(i); };
 
-    // --- Downsample: scene_emission → bloom_0 (Karis), затем bloom_{i-1} → bloom_i ---
-    for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
-        std::string   src      = (i == 0) ? std::string("scene_emission") : bloomName(i - 1);
-        TextureAtlas* dst      = g_pass_system.bloom[i];
-        uint32_t      useKaris = (i == 0) ? 1u : 0u;
+    // --- Prefilter (level 0): softKnee(scene_hdr) + scene_emission → bloom_0 (Karis) ---
+    // Источник свечения = яркая часть сцены (спекуляр/пересвет выше порога) + вся эмиссия.
+    // Два combined-сэмплера: scene_hdr (t0/s0) + scene_emission (t1/s1).
+    {
+        TextureAtlas* dst = g_pass_system.bloom[0];
+        ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
+            "bloom_down_0", csd_pre,
+            {}, {},
+            { { bloomName(0), 0, 0 } },                       // rw: bloom_0
+            {},
+            { std::string("scene_hdr"), std::string("scene_emission") },   // sampler t0/s0, t1/s1
+            BLOOM_PASS);
+        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            d.threshold = 1.5f;   // ПОЛ: диффуз ≤1 не блумит вообще; ярче — только глинт/пересвет
+            d.knee      = 0.9f;   // ширина гладкого разгона ВВЕРХ от порога (1.0 → 1.3)
+            d.intensity = 0.1f;   // сила вклада сцены (блик/пересвет); эмиссия идёт в полную силу
+            b.Push(0, d);
+        });
+        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { dst->width, dst->height, 1 };
+        });
+    }
+
+    // --- Downsample: bloom_{i-1} → bloom_i (уровни 1..N-1) ---
+    for (uint32_t i = 1; i < BLOOM_LEVELS; ++i) {
+        TextureAtlas* dst = g_pass_system.bloom[i];
 
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
             "bloom_down_" + std::to_string(i), csd_down,
             {}, {},
             { { bloomName(i), 0, 0 } },   // rw: dst = bloom_i
             {},
-            { src },                      // combined sampler: src
+            { bloomName(i - 1) },         // combined sampler: src = bloom_{i-1}
             BLOOM_PASS);
-        p->BindPushConstants<BloomParams>([useKaris](const PushConstantBinder& b, BloomParams d) {
-            d.useKaris = useKaris; d.intensity = 0.0f; b.Push(0, d);
+        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            d.useKaris = 0u; d.intensity = 0.0f; b.Push(0, d);
         });
         p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };   // размер берём из атласа (живой при ресайзе)
