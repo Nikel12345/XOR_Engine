@@ -490,19 +490,14 @@ bool Engine::RenderFunc(uint8_t slot)
 		return false;
 	}
 
-	pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::MAIN_PASS)->renderPassTexsData.SetColorTexture(tex);
-	// Дебаг-пасс рисует поверх того же свопчейна (LOAD). Гард — пасс может быть не создан.
-	if (RenderPassStep* debug_rp = pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::DEBUG_PASS))
-		debug_rp->renderPassTexsData.SetColorTexture(tex);
-	// Прозрачный пасс рисует в тот же свопчейн (LOAD). Гард — пасс может быть не создан.
-	if (RenderPassStep* transparent_rp = pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::TRANSPARENT_PASS))
-		transparent_rp->renderPassTexsData.SetColorTexture(tex);
+	if (texture_manager->main_pass_depth)
+		texture_manager->main_pass_depth->Resize(w, h);
+	DefaultRenderPassNamespace::ResizeSceneHDRTargets(engine_context, w, h);
+
+	if (RenderPassStep* present_rp = pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::PRESENT_PASS))
+		present_rp->renderPassTexsData.SetColorTexture(tex);
 	pass_manager->SetRenderFrame(slot);
 	{
-		// Исключаем чтение дерева батчей во время его ПОЛНОЙ пересборки в prep-потоке
-		// (BuildRenderBatches::shader_batches.clear()). Замок берётся только ребилдом —
-		// редкая операция (загрузка/смена сцены), поэтому стопор render'а здесь почти
-		// никогда не наступает. Инкремент дерево не сносит и замка не держит.
 		std::lock_guard<std::mutex> batch_lock(pass_manager->BatchTreeMutex());
 		pass_manager->ExecutePassesSteps(cb, slot);
 	}
@@ -510,7 +505,6 @@ bool Engine::RenderFunc(uint8_t slot)
 	BeginImGuiFrame();
 	UI_ImGui::Iterate(engine_context);
 	EndImGuiFrame();
-	// === ImGui — только если данные готовы ===
 	if (imgui_draw_data && imgui_draw_data->CmdListsCount > 0)
 	{
 		ImGui_ImplSDLGPU3_PrepareDrawData(imgui_draw_data, cb);
@@ -571,11 +565,10 @@ void Engine::OnWindowResized(Sint32 w, Sint32 h)
 	width = safe_sint32_f(w);
 	height = safe_sint32_f(h);
 
-	// Один вызов пересоздаёт разделяемый depth и ставит старую текстуру в отложенное
-	// удаление. Все проходы (MAIN/TRANSPARENT/DEBUG) резолвят свежий указатель лениво в
-	// RenderPassStandardBody — переназначать по проходам больше не нужно.
-	if (texture_manager->main_pass_depth)
-		texture_manager->main_pass_depth->Resize(safe_f_u32(width), safe_f_u32(height));
+	// GPU-таргеты (depth + HDR) ресайзятся НЕ здесь, а в RenderFunc по размеру реально полученного
+	// свопчейна — раз на отрисованный кадр. Событие resized летит сотнями за drag; пересоздавать
+	// большие текстуры на каждое = VRAM-захлёб и DEVICE_LOST. Здесь только обновляем width/height
+	// (для aspect-ratio камеры и пр.).
 }
 
 Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height)
@@ -676,6 +669,8 @@ void Engine::InitPasses()
 		SetDefaultMainRenderPass(engine_context);
 		SetTransparentPass(engine_context);
 		SetDebugColliderPass(engine_context);
+		SetDefaultBloomPass(engine_context);       // bloom от эмиссии (compute) + composite/tonemap в scene_hdr
+		SetPresentPass(engine_context);            // финал: HDR-сцену в свопчейн (blit)
 	}
 	//SetDefaultShadowVSMRenderPass(pass_manager, texture_manager, buffer_manager, object_manager, batch_builder);
 	//SetDefaultShadowBlurPass(pass_manager, buffer_manager); // ДЛЯ VSM

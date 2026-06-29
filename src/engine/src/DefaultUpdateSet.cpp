@@ -129,7 +129,7 @@ void DefaultUpdateSet::SetDefaultPositionIndexUpdater(EngineContext& ctx, PIB_Da
         return;
     }
     auto* bm = ctx.GetBufferManager();
-    auto* rm = ctx.GetRenderManager();
+    auto* rm = ctx.GetPassManager();
     auto* om = ctx.GetObjectManager();
     auto* bb = ctx.GetBatchBuilder();
 
@@ -231,7 +231,7 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
         return;
     }
     auto* bm = ctx.GetBufferManager();
-    auto* pm = ctx.GetRenderManager();
+    auto* pm = ctx.GetPassManager();
     auto* bb = ctx.GetBatchBuilder();
 
     // Тот же gate-паттерн, что и у PIB: dirty (ревизия батчей) живёт в модуле, сюда
@@ -256,7 +256,7 @@ void DefaultUpdateSet::SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSph
         return;
     }
     auto* bm = ctx.GetBufferManager();
-    auto* pm = ctx.GetRenderManager();
+    auto* pm = ctx.GetPassManager();
     auto* mm = ctx.GetModelManager();
     bm->CreatePrePassUpdateInstruction(DEFAULT_BOUND_SPHERE_BUFFER,
         [pm, bdm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
@@ -302,7 +302,7 @@ void DefaultUpdateSet::SetDefaultOffsetBufferUpdater(EngineContext& ctx, CountBu
 void DefaultUpdateSet::SetDefaultEntityToBatchUpdater(EngineContext& ctx, PIB_DataModule* pdm)
 {
     auto* bm = ctx.GetBufferManager();
-    auto* pm = ctx.GetRenderManager();
+    auto* pm = ctx.GetPassManager();
     auto* bb = ctx.GetBatchBuilder();
 
     // Тот же gate-паттерн, что и у PIB (entity->batch меняется только со структурой батчей).

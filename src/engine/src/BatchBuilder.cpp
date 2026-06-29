@@ -427,13 +427,22 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager)
 }
 
 void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm) {
+    // Батчи ПЕРСИСТЕНТНЫ: пересобираем только по флагу (создание программ / ресайз), не каждый кадр.
+    // Иначе clear+rebuild на prep-потоке гонится с render'ом, читающим shader_batches под
+    // BatchTreeMutex (→ мерцание/краш). Батч снапшотит SDL_GPUTexture* атласа, поэтому при ресайзе
+    // (текстуры пересоздаются) ResizeSceneHDRTargets взводит SetDirtyComputeBatches(true).
+    if (!sm || !sm->IsDirtyComputeBatches()) return;
+
+    // clear() сносит узлы — опасно для параллельного render'а. Берём тот же замок, что он держит
+    // в ExecutePassesSteps, на время clear+rebuild (происходит редко: старт + ресайзы).
+    std::lock_guard<std::mutex> lock(pass_manager->BatchTreeMutex());
+
     for (auto& rp : pass_manager->GetOrderedComputePasses()) {
         rp->shader_batches.clear();
     }
     for (auto& rp : pass_manager->GetOrderedComputePrepasses()) {
         rp->shader_batches.clear();
     }
-    if (!sm || !sm->IsDirtyComputePipelines()) return;
 
     auto& compute_programs = sm->GetComputeShaderPrograms();
     for (auto& sp : compute_programs) {
@@ -472,7 +481,7 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
 
         cmp->shader_batches.push_back(std::move(new_batch));
     }
-    sm->SetDirtyComputePipelines(false);
+    sm->SetDirtyComputeBatches(false);
 }
 
 

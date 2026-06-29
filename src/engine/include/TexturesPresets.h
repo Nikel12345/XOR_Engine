@@ -349,6 +349,59 @@ namespace TexturePresets {
         return info;
     }
 
+    // HDR-таргет сцены (location 0 main-прохода): линейный цвет ДО тонмаппинга, эмиссия и блики
+    // уходят за 1.0. SAMPLER — чтобы финальный blit/постпроцесс мог читать. На экран выводится
+    // отдельным present-проходом (формат свопчейна 8-бит, поэтому прямой рендер сюда невозможен).
+    inline SDL_GPUTextureCreateInfo SceneHDR(uint32_t width, uint32_t height) {
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        // COLOR_TARGET — основной выход main-прохода; SAMPLER — для present-blit; STORAGE_READ/WRITE —
+        // bloom-composite читает и пишет scene_hdr на месте (tonemap поверх + bloom).
+        info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER
+                   | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+        info.width = width;
+        info.height = height;
+        info.layer_count_or_depth = 1;
+        info.num_levels = 1;
+        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        info.props = 0;
+        return info;
+    }
+
+    // MRT-таргет эмиссии (location 1 main-прохода): цветная эмиссия в HDR — источник для bloom.
+    // R11G11B10 = 3 канала, 4 байта (вдвое дешевле RGBA16F); альфа эмиссии не нужна.
+    inline SDL_GPUTextureCreateInfo EmissionHDR(uint32_t width, uint32_t height) {
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT;
+        info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        info.width = width;
+        info.height = height;
+        info.layer_count_or_depth = 1;
+        info.num_levels = 1;
+        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        info.props = 0;
+        return info;
+    }
+
+    // Уровень bloom-пирамиды: HDR, сэмплируется (LINEAR) при down/up-фильтрации И пишется/читается
+    // как storage (down пишет, up прибавляет RMW). RGBA16F — безопасный storage-формат, цветная эмиссия.
+    inline SDL_GPUTextureCreateInfo BloomLevel(uint32_t width, uint32_t height) {
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER
+                   | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+        info.width = width;
+        info.height = height;
+        info.layer_count_or_depth = 1;
+        info.num_levels = 1;
+        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        info.props = 0;
+        return info;
+    }
+
     inline SDL_GPUTextureCreateInfo ShadowDirectionalArray(uint32_t num_lights, uint32_t resolution = 2048) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;

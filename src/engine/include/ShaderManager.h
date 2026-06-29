@@ -51,6 +51,12 @@ public:
 	void SetDirtyGraphicsPipelines(bool dirty) { dirty_graphics_pipelines = dirty; }
 	bool IsDirtyComputePipelines() const { return dirty_compute_pipelines; }
 	void SetDirtyComputePipelines(bool dirty) { dirty_compute_pipelines = dirty; }
+	// Отдельный флаг для пересборки compute-БАТЧЕЙ (а не пайплайнов). Пайплайны строятся один раз
+	// (зависят только от шейдера), а батчи снапшотят SDL_GPUTexture* атласов и должны пересобираться
+	// при создании программ И при ресайзе (текстуры пересоздаются). Разделён с pipeline-флагом, иначе
+	// CreateComputePipelines глотал бы dirty раньше BuildComputeBatches.
+	bool IsDirtyComputeBatches() const { return dirty_compute_batches; }
+	void SetDirtyComputeBatches(bool dirty) { dirty_compute_batches = dirty; }
 
 	~ShaderManager();
 
@@ -89,5 +95,6 @@ private:
 
 	bool dirty_graphics_pipelines = true;
 	bool dirty_compute_pipelines = true;
+	bool dirty_compute_batches = true;
 };
 

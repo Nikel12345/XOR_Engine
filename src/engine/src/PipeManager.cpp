@@ -67,9 +67,6 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp)
     pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
 
 
-    // По одному SDL_GPUColorTargetDescription на каждый MRT-выход прохода. Формат INVALID →
-    // подставляется формат свопчейна (MakeDefaultColorTarget). color_blend один на программу и
-    // применяется ко всем таргетам одинаково (для G-buffer обычно держат color_blend=false).
     const auto& color_formats = sp->associated_render_pass->renderPassTexsData.color_formats;
     std::vector<SDL_GPUColorTargetDescription> ctds;
     ctds.reserve(color_formats.size());

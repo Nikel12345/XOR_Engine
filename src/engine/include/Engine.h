@@ -45,7 +45,7 @@ public:
     ShaderManager* GetShaderManager() const { return shader_manager; }
     PipeManager* GetPipeManager() const { return pipe_manager; }
     ModelManager* GetModelManager() const { return model_manager; }
-    PassManager* GetRenderManager() const { return pass_manager; }
+    PassManager* GetPassManager() const { return pass_manager; }
 	ObjectManager* GetObjectManager() const { return object_manager; }
 	CameraManager* GetCameraManager() const { return camera_manager; }
 	MaterialManager* GetMaterialManager() const { return material_manager; }

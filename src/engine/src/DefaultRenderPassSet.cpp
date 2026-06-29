@@ -23,6 +23,11 @@ namespace DefaultRenderPassNamespace
     struct PassSystemState {
         SharedDepthTarget*   main_depth = nullptr;                                 // depth MAIN/TRANSPARENT/DEBUG
         SDL_GPUTextureFormat main_depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;    // единый формат depth набора
+        TextureAtlas*        scene_hdr = nullptr;       // HDR-цвет сцены (location 0 MAIN_PASS), общий для MAIN/TRANSPARENT/DEBUG
+        TextureAtlas*        scene_emission = nullptr;  // HDR-эмиссия (location 1 MAIN_PASS, MRT) — источник bloom
+        TextureAtlas*        bloom[BLOOM_LEVELS] = {};  // уровни bloom-пирамиды (bloom_0 = ½ окна, далее /2)
+        uint32_t             width = 0;                 // размер HDR-таргетов (= окно на момент init); нужен present-blit'у
+        uint32_t             height = 0;
         bool                 common_inited = false;
     };
     static PassSystemState g_pass_system;
@@ -78,7 +83,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
         return;
     }
 	TextureManager* tm = ctx->GetTextureManager();
-	PassManager* pm = ctx->GetRenderManager();
+	PassManager* pm = ctx->GetPassManager();
 	BufferManager* bm = ctx->GetBufferManager();
 	ObjectManager* om = ctx->GetObjectManager();
 
@@ -218,6 +223,26 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     g_pass_system.main_depth_format = depth_tci.format;
     tm->main_pass_depth = g_pass_system.main_depth;
 
+    // HDR-таргеты набора: сцена рендерится в линейный HDR (эмиссия/блики уходят за 1.0), на экран
+    // выводится финальным present-проходом (blit). scene_emission — второй MRT-выход main-прохода,
+    // источник bloom. scene_hdr: сэмплер для blit роли не играет (blit берёт свой filter) — дефолтный.
+    // scene_emission и уровни bloom сэмплятся в compute-фильтрах → нужен LINEAR + clamp (ENV_SAMPLER).
+    auto def_sampler = tm->GetSampler(DefaultSamplersNames::DEFAULT_SAMPLER);
+    auto env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
+    g_pass_system.scene_hdr      = tm->CreateTextureAtlas("scene_hdr",      TexturePresets::SceneHDR(width, height),    def_sampler);
+    g_pass_system.scene_emission = tm->CreateTextureAtlas("scene_emission", TexturePresets::EmissionHDR(width, height), env_sampler);
+
+    // Bloom-пирамида: BLOOM_LEVELS уровней, каждый вдвое меньше предыдущего (bloom_0 = ½ окна).
+    for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
+        uint32_t lw = width  >> (i + 1); if (lw == 0) lw = 1;
+        uint32_t lh = height >> (i + 1); if (lh == 0) lh = 1;
+        g_pass_system.bloom[i] = tm->CreateTextureAtlas("bloom_" + std::to_string(i),
+            TexturePresets::BloomLevel(lw, lh), env_sampler);
+    }
+
+    g_pass_system.width  = width;
+    g_pass_system.height = height;
+
     g_pass_system.common_inited = true;
 }
 
@@ -235,11 +260,15 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
         SDL_Log("SetDefaultMainRenderPass: _SetDefaultCommonResources must be called first.");
         return;
     }
-    PassManager* pm = ctx->GetRenderManager();
+    PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
+    // Два color-таргета (MRT): location 0 — HDR-цвет сцены, location 1 — эмиссия. Форматы берём
+    // из созданных атласов (PipeManager строит пайплайн по этому массиву → согласовано с фрагментом,
+    // у которого теперь два SV_Target). Раньше color был INVALID (= свопчейн); теперь сцена в HDR.
     RenderPassTexturesInfo main_rptd{};
-    main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.1f,0.1f,0.14f,1.0f }, SDL_GPU_TEXTUREFORMAT_INVALID);
+    main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.1f,0.1f,0.14f,1.0f }, g_pass_system.scene_hdr->format);
+    main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.0f,0.0f,0.0f,0.0f }, g_pass_system.scene_emission->format);
     main_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, g_pass_system.main_depth_format);
 
     auto mainPass = pm->CreateRenderPass(
@@ -257,6 +286,10 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
         shadow_depth_flat_array->texture_binding,           // слот 0 (t0/s0) — тень
         GetDefaultEnvBinding(ctx)                           // слот 1 (t1/s1) — env-кубмапа
     };
+    // Цвет привязан в setup (не per-frame): сцена рендерится в свои HDR-таргеты постоянно,
+    // свопчейн теперь получает только present-проход.
+    mainPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr->texture_binding.texture, 0);
+    mainPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_emission->texture_binding.texture, 1);
     mainPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 
     main_pass_inited = true;
@@ -264,7 +297,7 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
 
 void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
 {
-    PassManager* pm = ctx->GetRenderManager();
+    PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
     if (!main_pass_inited || !g_pass_system.common_inited) {
@@ -272,13 +305,12 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
         return;
     }
 
-    // Рисуем ПОВЕРХ свопчейна: цвет грузим (LOAD), не чистим. Формат INVALID → формат
-    // свопчейна подставит PipeManager (MakeDefaultColorTarget). Depth ЗАГРУЖАЕМ из
-    // MAIN_PASS (LOAD) — дебаг-шейдер тестит его (ReadsDepthOnly), поэтому рамки
-    // перекрываются геометрией сцены. depth_write выключен → рамки не портят буфер.
-    // Формат depth берём из общего PassSystem — он обязан совпадать с форматом текстуры.
+    // Рисуем ПОВЕРХ HDR-сцены: цвет грузим (LOAD) из scene_hdr, не чистим. Формат = scene_hdr
+    // (раньше INVALID/свопчейн — теперь сцена в HDR, present выводит её отдельно). Depth ЗАГРУЖАЕМ
+    // из MAIN_PASS (LOAD) — дебаг-шейдер тестит его (ReadsDepthOnly), поэтому рамки перекрываются
+    // геометрией сцены. depth_write выключен → рамки не портят буфер.
     RenderPassTexturesInfo debug_rptd{};
-    debug_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, SDL_GPU_TEXTUREFORMAT_INVALID);
+    debug_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
     debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, g_pass_system.main_depth_format);
 
     auto debugPass = pm->CreateRenderPass(
@@ -296,12 +328,14 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
         25
     );
 
+    // Цвет — общий HDR-таргет сцены (привязан в setup, не per-frame).
+    debugPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr->texture_binding.texture, 0);
     debugPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 }
 
 void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
 {
-    PassManager* pm = ctx->GetRenderManager();
+    PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
     if (!main_pass_inited || !g_pass_system.common_inited) {
@@ -309,13 +343,13 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
         return;
     }
 
-    // Цвет грузим (LOAD) — рисуем поверх непрозрачной сцены в свопчейне. Depth ЗАГРУЖАЕМ
+    // Цвет грузим (LOAD) — рисуем поверх непрозрачной HDR-сцены (scene_hdr). Depth ЗАГРУЖАЕМ
     // из MAIN_PASS и только тестим (depth_write выключен у программы) — прозрачная
     // геометрия корректно перекрывается непрозрачной, но не портит depth-буфер.
     // Блендинг включается на стороне программы через BehavesAsTransparentGeometry.
-    // Формат depth — общий из PassSystem.
+    // Один color-таргет (эмиссию прозрачные не пишут) — формат = scene_hdr.
     RenderPassTexturesInfo transparent_rptd{};
-    transparent_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, SDL_GPU_TEXTUREFORMAT_INVALID);
+    transparent_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
     transparent_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, g_pass_system.main_depth_format);
 
     auto transparentPass = pm->CreateRenderPass(
@@ -330,7 +364,189 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
         22   // между MAIN_PASS (20) и DEBUG_PASS (25)
     );
 
+    // Цвет — общий HDR-таргет сцены (привязан в setup, не per-frame).
+    transparentPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr->texture_binding.texture, 0);
     transparentPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
+}
+
+void DefaultRenderPassNamespace::SetPresentPass(EngineContext* ctx)
+{
+    PassManager* pm = ctx->GetPassManager();
+
+    if (!g_pass_system.common_inited) {
+        SDL_Log("SetPresentPass: common resources must be initialized first.");
+        return;
+    }
+
+    // Финал кадра: HDR-сцена → свопчейн. Именно blit (а не copy-pass) — форматы разные
+    // (R16G16B16A16_FLOAT → формат свопчейна 8-бит), blit конвертирует на лету. Значения > 1.0
+    // пока просто клампятся; полноценный тонмаппинг появится в bloom-composite. Один color-слот
+    // нужен лишь чтобы Engine::RenderFunc мог положить сюда свопчейн (texture index 0) —
+    // BeginGPURenderPass мы не зовём, всё делает SDL_BlitGPUTexture.
+    RenderPassTexturesInfo present_rptd{};
+    present_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, SDL_GPU_TEXTUREFORMAT_INVALID);
+
+    pm->CreateRenderPass(
+        PRESENT_PASS,
+        [](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+    {
+        SDL_GPUTexture* swap = rp.renderPassTexsData.colorTargetInfos.empty()
+            ? nullptr : rp.renderPassTexsData.colorTargetInfos[0].texture;
+        if (!swap || !g_pass_system.scene_hdr) return;
+
+        SDL_GPUBlitInfo blit{};
+        blit.source.texture      = g_pass_system.scene_hdr->texture_binding.texture;
+        blit.source.w            = g_pass_system.width;
+        blit.source.h            = g_pass_system.height;
+        blit.destination.texture = swap;
+        blit.destination.w       = g_pass_system.width;
+        blit.destination.h       = g_pass_system.height;
+        blit.load_op             = SDL_GPU_LOADOP_DONT_CARE;   // покрываем весь экран
+        blit.filter              = SDL_GPU_FILTER_NEAREST;     // 1:1, фильтр не важен
+        blit.cycle               = false;
+        SDL_BlitGPUTexture(cb, &blit);
+    },
+        std::move(present_rptd),
+        30   // последним, после MAIN(20)/TRANSPARENT(22)/DEBUG(25)
+    );
+}
+
+void DefaultRenderPassNamespace::ResizeSceneHDRTargets(EngineContext* ctx, uint32_t width, uint32_t height)
+{
+    if (!g_pass_system.common_inited || !g_pass_system.scene_hdr) return;
+    if (g_pass_system.width == width && g_pass_system.height == height) return;   // размер не изменился
+    if (width == 0 || height == 0) return;
+
+    TextureManager* tm = ctx->GetTextureManager();
+    PassManager* pm = ctx->GetPassManager();
+
+    // Пересоздаём GPU-текстуру атласа на новый размер; старую — в отложенное удаление (её ещё
+    // могут читать кадры в полёте). texture_binding.texture меняется, проходы подхватят его
+    // ниже через SetColorTexture.
+    auto recreate = [&](TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci) {
+        SDL_GPUTexture* old_tex = atlas->texture_binding.texture;
+        atlas->texture_binding.texture = tm->CreateGPU_Texture(tci);
+        atlas->width  = tci.width;        // из tci: bloom-уровни меньше окна
+        atlas->height = tci.height;
+        tm->QueueDeleteTexture(old_tex);
+    };
+    recreate(g_pass_system.scene_hdr, TexturePresets::SceneHDR(width, height));
+    recreate(g_pass_system.scene_emission, TexturePresets::EmissionHDR(width, height));
+    // Уровни bloom — те же размеры, что при создании (½ окна и далее /2). compute-батчи
+    // пересобираются каждый кадр (BuildComputeBatches) → подхватят новые texture* и размеры.
+    for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
+        uint32_t lw = width  >> (i + 1); if (lw == 0) lw = 1;
+        uint32_t lh = height >> (i + 1); if (lh == 0) lh = 1;
+        if (g_pass_system.bloom[i]) recreate(g_pass_system.bloom[i], TexturePresets::BloomLevel(lw, lh));
+    }
+    g_pass_system.width = width;
+    g_pass_system.height = height;
+
+    // Перебиндить новые текстуры во все проходы, что в них пишут (texture* поменялся).
+    SDL_GPUTexture* hdr = g_pass_system.scene_hdr->texture_binding.texture;
+    SDL_GPUTexture* emi = g_pass_system.scene_emission->texture_binding.texture;
+    if (RenderPassStep* mp = pm->GetRenderPassStep(MAIN_PASS)) {
+        mp->renderPassTexsData.SetColorTexture(hdr, 0);
+        mp->renderPassTexsData.SetColorTexture(emi, 1);
+    }
+    if (RenderPassStep* tp = pm->GetRenderPassStep(TRANSPARENT_PASS))
+        tp->renderPassTexsData.SetColorTexture(hdr, 0);
+    if (RenderPassStep* dp = pm->GetRenderPassStep(DEBUG_PASS))
+        dp->renderPassTexsData.SetColorTexture(hdr, 0);
+
+    // bloom-атласы пересозданы → compute-батчи держат устаревшие SDL_GPUTexture*. Взводим
+    // пересборку батчей (произойдёт под замком в BuildComputeBatches). Пайплайны не трогаем —
+    // они от текстур не зависят.
+    ctx->GetShaderManager()->SetDirtyComputeBatches(true);
+}
+
+void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
+{
+    if (!g_pass_system.common_inited || !g_pass_system.scene_emission) {
+        SDL_Log("SetDefaultBloomPass: common resources must be initialized first.");
+        return;
+    }
+    PassManager*   pm = ctx->GetPassManager();
+    BufferManager* bm = ctx->GetBufferManager();
+
+    // Один compute-проход (приоритет 26: после DEBUG=25, до PRESENT=30). Программы внутри
+    // исполняются в порядке создания: down-цепочка → up-цепочка → composite. Каждая программа —
+    // отдельный compute-dispatch с барьером (см. ComputePassStandardBody), поэтому RAW-зависимости
+    // между уровнями соблюдаются. push/dispatch у каждой программы свои (через BindPushConstants/
+    // BindDispatch); общий push_data здесь — лишь scratch нужного размера.
+    pm->CreateComputePass(
+        BLOOM_PASS,
+        [bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)
+    {
+        BloomParams      push{};
+        DummyDispatchData dd{};
+        pm->ComputePassStandardBody(cb, &cp, bm, &push, &dd, pass_frame);
+    },
+        26
+    );
+
+    ComputeShaderData csd_down = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_down.comp.hlsl");
+    ComputeShaderData csd_up   = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_up.comp.hlsl");
+    ComputeShaderData csd_comp = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_composite.comp.hlsl");
+
+    auto bloomName = [](uint32_t i) { return std::string("bloom_") + std::to_string(i); };
+
+    // --- Downsample: scene_emission → bloom_0 (Karis), затем bloom_{i-1} → bloom_i ---
+    for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
+        std::string   src      = (i == 0) ? std::string("scene_emission") : bloomName(i - 1);
+        TextureAtlas* dst      = g_pass_system.bloom[i];
+        uint32_t      useKaris = (i == 0) ? 1u : 0u;
+
+        ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
+            "bloom_down_" + std::to_string(i), csd_down,
+            {}, {},
+            { { bloomName(i), 0, 0 } },   // rw: dst = bloom_i
+            {},
+            { src },                      // combined sampler: src
+            BLOOM_PASS);
+        p->BindPushConstants<BloomParams>([useKaris](const PushConstantBinder& b, BloomParams d) {
+            d.useKaris = useKaris; d.intensity = 0.0f; b.Push(0, d);
+        });
+        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { dst->width, dst->height, 1 };   // размер берём из атласа (живой при ресайзе)
+        });
+    }
+
+    // --- Upsample (tent, аддитивно): bloom_{i+1} → += bloom_i, от мелкого к крупному ---
+    for (int i = (int)BLOOM_LEVELS - 2; i >= 0; --i) {
+        TextureAtlas* dst = g_pass_system.bloom[i];
+        ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
+            "bloom_up_" + std::to_string(i), csd_up,
+            {}, {},
+            { { bloomName(i), 0, 0 } },   // rw: dst = bloom_i (RMW: += размытие)
+            {},
+            { bloomName(i + 1) },         // combined sampler: bloom_{i+1}
+            BLOOM_PASS);
+        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            b.Push(0, d);                 // up параметров не использует
+        });
+        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { dst->width, dst->height, 1 };
+        });
+    }
+
+    // --- Composite + tonemap: scene_hdr = reinhard(scene_hdr + bloom_0 * intensity) ---
+    {
+        TextureAtlas* dst = g_pass_system.scene_hdr;
+        ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
+            "bloom_composite", csd_comp,
+            {}, {},
+            { { std::string("scene_hdr"), 0, 0 } },   // rw: scene_hdr (RMW)
+            {},
+            { std::string("bloom_0") },               // combined sampler: bloom_0
+            BLOOM_PASS);
+        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            d.intensity = 0.5f; d.useKaris = 0u; b.Push(0, d);   // сила свечения — главная ручка
+        });
+        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { dst->width, dst->height, 1 };
+        });
+    }
 }
 
 //void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx,
@@ -344,7 +560,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
 //        SDL_Log("Default shadow render pass must be initialized before the default main render pass.");
 //        return;
 //    }
-//    PassManager* pm = ctx->GetRenderManager();
+//    PassManager* pm = ctx->GetPassManager();
 //    BufferManager* bm = ctx->GetBufferManager();
 //	TextureManager* tm = ctx->GetTextureManager();
 //
@@ -452,7 +668,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
         SDL_Log("Default shadow render pass is already initialized.");
         return;
     }
-    PassManager* pm = ctx->GetRenderManager();
+    PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 	TextureManager* tm = ctx->GetTextureManager();
 	ObjectManager* om = ctx->GetObjectManager();
@@ -522,7 +738,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
 
 void DefaultRenderPassNamespace::SetDefaultShadowBlurPass(EngineContext* ctx)
 {
-    PassManager* pm = ctx->GetRenderManager();
+    PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
     pm->CreateComputePass(
@@ -539,7 +755,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowBlurPass(EngineContext* ctx)
 
 void DefaultRenderPassNamespace::SetDefaultCullingComputeZerosPass(EngineContext* ctx)
 {
-    PassManager* pm = ctx->GetRenderManager();
+    PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
     auto compute_zeros_pass = pm->CreateComputePrepass(
@@ -554,7 +770,7 @@ void DefaultRenderPassNamespace::SetDefaultCullingComputeZerosPass(EngineContext
 
 void DefaultRenderPassNamespace::SetDefaultCullingComputeCountPass(EngineContext* ctx, TransformDataModule* tdm, LightDataModule* ldm, IndirectDataModule* idm)
 {
-    PassManager* pm = ctx->GetRenderManager();
+    PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
     ObjectManager* om = ctx->GetObjectManager();
 
@@ -574,7 +790,7 @@ void DefaultRenderPassNamespace::SetDefaultCullingComputeCountPass(EngineContext
 
 void DefaultRenderPassNamespace::SetDefaultCullingOffstPass(EngineContext* ctx)
 {
-    PassManager* pm = ctx->GetRenderManager();
+    PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
     auto compute_pass = pm->CreateComputePrepass(CULLING_OFFSET_PREPASS,
@@ -587,7 +803,7 @@ void DefaultRenderPassNamespace::SetDefaultCullingOffstPass(EngineContext* ctx)
 
 void DefaultRenderPassNamespace::SetDefaultCullingOutIndirectPass(EngineContext* ctx)
 {
-    PassManager* pm = ctx->GetRenderManager();
+    PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
     pm->CreateComputePrepass(CULLING_OUT_INDIRECT_PREPASS,
@@ -601,7 +817,7 @@ void DefaultRenderPassNamespace::SetDefaultCullingOutIndirectPass(EngineContext*
 
 void DefaultRenderPassNamespace::SetDefaultCullingOutTransformPass(EngineContext* ctx, TransformDataModule* tdm, LightDataModule* ldm, IndirectDataModule* idm)
 {
-    PassManager* pm = ctx->GetRenderManager();
+    PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 	ObjectManager* om = ctx->GetObjectManager();
 

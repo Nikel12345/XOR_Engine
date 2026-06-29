@@ -10,6 +10,11 @@ namespace DefaultRenderPassNamespace
     inline constexpr const char* MAIN_PASS = "_DefaultMainRenderPass";
     inline constexpr const char* TRANSPARENT_PASS = "_DefaultTransparentRenderPass";
     inline constexpr const char* DEBUG_PASS = "_DefaultDebugRenderPass";
+    inline constexpr const char* PRESENT_PASS = "_DefaultPresentPass";
+    inline constexpr const char* BLOOM_PASS = "_DefaultBloomPass";
+
+    // Число уровней bloom-пирамиды (bloom_0 = ½ окна, каждый следующий ещё вдвое меньше).
+    inline constexpr uint32_t BLOOM_LEVELS = 6;
     inline constexpr const char* SHADOW_PASS = "_DefaultShadowRenderPass";
     inline constexpr const char* CULLING_PREPASS = "_DefaultCullingComputePass";
     inline constexpr const char* CULLING_ZEROS_PREPASS = "_DefaultCullingZerosComputePass";
@@ -46,6 +51,28 @@ namespace DefaultRenderPassNamespace
     void SetDebugColliderPass(EngineContext* ctx);
 
     void SetTransparentPass(EngineContext* ctx);
+
+    // Финальный проход: blit HDR-сцены (scene_hdr) в свопчейн с конвертацией формата.
+    // Регистрируется последним (приоритет 30). Тонмаппинг появится на этапе bloom-composite.
+    void SetPresentPass(EngineContext* ctx);
+
+    // Пересоздаёт HDR-таргеты набора (scene_hdr/scene_emission + уровни bloom) под новый размер
+    // окна и переинъектит их во все проходы (MAIN/TRANSPARENT/DEBUG). Обязана вызываться из
+    // обработчика ресайза ВМЕСТЕ с ресайзом depth — иначе размеры color/depth аттачментов разойдутся.
+    void ResizeSceneHDRTargets(EngineContext* ctx, uint32_t width, uint32_t height);
+
+    // Push-константы bloom-программ (один layout на все: down/up/composite). Раскладка совпадает с
+    // cbuffer BloomParams в шейдерах comp/bloom_*.comp.hlsl.
+    struct alignas(16) BloomParams {
+        uint32_t useKaris  = 0;     // 1 только на первом downsample (гасит fireflies)
+        float    intensity = 0.0f;  // доля подмешивания bloom в composite (~0.05)
+        float    _pad0     = 0.0f;
+        float    _pad1     = 0.0f;
+    };
+
+    // Создаёт compute-проход bloom: пирамида downsample→upsample по эмиссии + composite/tonemap в
+    // scene_hdr. Должна вызываться ПОСЛЕ main/transparent/debug (читает их результат) и до present.
+    void SetDefaultBloomPass(EngineContext* ctx);
 
     void SetDefaultCullingComputeZerosPass(EngineContext* ctx);
 

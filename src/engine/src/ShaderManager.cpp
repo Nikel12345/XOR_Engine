@@ -86,6 +86,7 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     compute_shader_programs_by_name.emplace(name, ptr);
 
     dirty_compute_pipelines = true;
+    dirty_compute_batches = true;
     return ptr;
 }
 

@@ -67,7 +67,17 @@ float shadowRefDist(float dist, float maxRange, float NdotL)
     return d - bias;
 }
 
-float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
+// Два выхода MRT: color (location 0) и emission (location 1). Раздельная эмиссия нужна,
+// чтобы будущий bloom брал ИМЕННО светящееся, а не яркость вообще (тусклый glow должен
+// блумить, освещённая стена — нет). Число выходов обязано совпадать с числом color-таргетов
+// прохода (MAIN_PASS: scene_hdr + scene_emission).
+struct PSOutput
+{
+    float4 color    : SV_Target0;   // линейный HDR-цвет сцены (свет + спекуляр + эмиссия)
+    float4 emission : SV_Target1;   // только эмиссия — отдельный выход под bloom
+};
+
+PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
 {
     // Пользовательская часть: какова поверхность в этом пикселе (до освещения).
     SurfaceData surface = getSurface(input, isFrontFace);
@@ -210,5 +220,8 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
     float3 lighting = max(lightSum, (float3)AMBIENT_LIGHT);
     float3 color    = surface.baseColor * lighting + specSum + surface.emission;   // спекуляр + эмиссия поверх света
 
-    return float4(color, surface.alpha);
+    PSOutput o;
+    o.color    = float4(color, surface.alpha);
+    o.emission = float4(surface.emission, 1.0);
+    return o;
 }
