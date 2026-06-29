@@ -62,6 +62,37 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 	return texture_manager->CreateTexture(name, atlas, img.width, img.height, std::move(img.pixels));
 }
 
+TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, const AtlasName& atlas_name, const char* path) {
+	TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
+	if (!atlas) return nullptr;   // GetTextureAtlas уже залогировал отсутствие
+
+	// Компатибилити-проверка — задача дирижёра: куб грузим только в cube-атлас, и он обязан
+	// быть квадратным (требование GPU-кубмапа, иначе faceSize=width≠height даст битые грани).
+	if (atlas->texture_type != SDL_GPU_TEXTURETYPE_CUBE) {
+		SDL_Log("EngineContext::CreateCubeMapTexture: atlas '%s' is not a cube map (texture_type=%d)", atlas_name.c_str(), (int)atlas->texture_type);
+		return nullptr;
+	}
+	if (atlas->width != atlas->height) {
+		SDL_Log("EngineContext::CreateCubeMapTexture: cube atlas '%s' must be square (%ux%u)", atlas_name.c_str(), atlas->width, atlas->height);
+		return nullptr;
+	}
+
+	// Loader отдаёт ГОЛЫЕ пиксели 6 граней (размер грани диктует tci атласа); превращение в
+	// GPU-текстуры — задача TM: по разу на грань (имена name+"_f0".."_f5"), порядок = слои куба,
+	// поэтому _BuildUploadTasks кладёт f-ю грань на слой f.
+	DecodedCubeFaces cube = texture_loader->LoadCubeMapFromFile(path, atlas->width, PixelFormatForGpuFormat(atlas->format));
+	if (!cube.ok()) {
+		SDL_Log("EngineContext::CreateCubeMapTexture: failed to decode cube faces from '%s'", path);
+		return nullptr;
+	}
+
+	TextureHandle* first = nullptr;
+	for (int f = 0; f < 6; ++f) {
+		TextureHandle* h = texture_manager->CreateTexture(name + "_f" + std::to_string(f), atlas, cube.faceSize, cube.faceSize, std::move(cube.faces[f]));
+		if (f == 0) first = h;
+	}
+	return first;
+}
 
 Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders)
 {

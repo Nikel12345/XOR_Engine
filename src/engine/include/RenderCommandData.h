@@ -51,18 +51,21 @@ struct ShaderBatchData {
 };
 
 struct RenderPassTexturesInfo {
-    void CreateColorTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_FColor color, SDL_GPUTextureFormat format, Uint32 numColorTargets = 1);
+    // append-only: КАЖДЫЙ вызов добавляет новый color target (MRT). Один вызов → один таргет,
+    // два вызова → два выхода фрагментного шейдера (location 0,1) за один проход геометрии.
+    void CreateColorTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_FColor color, SDL_GPUTextureFormat format);
     void CreateDepthTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_GPUTextureFormat format);
-    void SetColorTexture(SDL_GPUTexture* tex);
+    void SetColorTexture(SDL_GPUTexture* tex, uint32_t index = 0);
     void SetDepthTexture(SDL_GPUTexture* tex);
     // Привязка к разделяемому depth-таргету: фактический texture резолвится лениво в
     // RenderPassStandardBody, поэтому ресайз таргета не требует переназначения по проходам.
     void SetDepthTexture(SharedDepthTarget* dt);
 
-    void SetColorTargetInfoLayer(uint32_t layer) { colorTargetInfo.layer_or_depth_plane = layer; };
-    SDL_GPUColorTargetInfo colorTargetInfo{};
-    Uint32 numColorTargets = 0;
-    SDL_GPUTextureFormat color_format = SDL_GPU_TEXTUREFORMAT_INVALID;
+    void SetColorTargetInfoLayer(uint32_t layer, uint32_t index = 0) { colorTargetInfos[index].layer_or_depth_plane = layer; };
+    // Параллельные массивы: colorTargetInfos[i] — рантайм-привязка (texture/clear/layer),
+    // color_formats[i] — формат таргета i для построения пайплайна (PipeManager). Размер = число MRT-выходов.
+    std::vector<SDL_GPUColorTargetInfo> colorTargetInfos;
+    std::vector<SDL_GPUTextureFormat>   color_formats;
     SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUDepthStencilTargetInfo depthTargetInfo{};
     SharedDepthTarget* shared_depth = nullptr;   // != nullptr → depth берётся отсюда (лениво)

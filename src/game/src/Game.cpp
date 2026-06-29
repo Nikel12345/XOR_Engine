@@ -95,10 +95,10 @@ SDL_AppResult Game::MainInit()
     ctx->SetMaterialParams(m_gray, OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f} });
 
     auto metal1 = ctx->CreateMaterial("metal1", {}, { "sp_untextured", "sp_shadow" });
-    ctx->SetMaterialParams(metal1, OpaqueMaterialParams{ {1.0f, 0.5f, 0.5f, 1.0f} });
+    ctx->SetMaterialParams(metal1, OpaqueMaterialParams{ {1.0f, 0.5f, 0.5f, 1.0f}, {0.0f, 0.0f, 0.0f}, 0.0f, 1.0f, 0.96f });
 
     auto metal2 = ctx->CreateMaterial("metal2", {}, { "sp_untextured", "sp_shadow" });
-    ctx->SetMaterialParams(metal2, OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f} });
+    ctx->SetMaterialParams(metal2, OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.0f, 0.0f, 0.0f}, 0.0f, 1.0f, 0.96f });
 
     auto emission = ctx->CreateMaterial("emission", {}, { "sp_untextured", "sp_shadow" });
     ctx->SetMaterialParams(emission, OpaqueMaterialParams{ {0.0f, 0.0f, 0.0f, 1.0f}, {0.3f, 0.3f, 0.6f}, 1.0f });
@@ -278,21 +278,22 @@ SDL_AppResult Game::MainInit()
     //    ColliderComponent{},
     //    DrawComponent{}
     //);
-    // Сфера: тот же путь (generator → staging → append), размер ~1 через диагональ.
-    //Collider second_collide = Collider::Sphere(1.0f, { 0, 0.5f, 0 });
-    //ctx->CreateEntity("main_menu",
-    //    MaterialComponent{ { material_sprite } },
-    //    ModelComponent{ sphere },
-    //    PositionProxy16{ 1,0,0,-2.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
-    //    ShadowComponent{},
-    //    // Явный сферический коллайдер (радиус 1 = радиус UV-сферы) — иначе пустой
-    //    // ColliderComponent уходит в fallback авто-AABB и рамка становится боксом.
-    //    ColliderComponent{ { Collider::Sphere(1.0f), second_collide } },
-    //    DrawComponent{}
-    //);
 
     //ctx->CreateEntity("main_menu",
-    //    SpotLightComponent{ SpotLightComponent::SpotLightData{ 0, 1.0f, 0.0f, 0.0f, 0.18f, 1, 1, 1, 100 } },
+    //    DirectLightComponent{ DirectLightComponent::DirectLightData{
+    //        0.0f, -1.0f, -0.70f,   // dir
+    //        1.0f, 1.0f, 1.0f,      // color
+    //        2.5f,                  // power
+    //        -0.5f, 0.0f, 0.0f,      // box center
+    //        1.0f, 1.0f } },      // half_extent, half_depth
+    //        ShadowCasterComponent{}
+    //        );
+
+    // Сфера: тот же путь (generator → staging → append), размер ~1 через диагональ.
+    //Collider second_collide = Collider::Sphere(1.0f, { 0, 0.5f, 0 });
+
+    //ctx->CreateEntity("main_menu",
+    //    SpotLightComponent{ SpotLightComponent::SpotLightData{ 0, 1.0f, 0.0f, 0.0f, 0.18f, 1,\sd   1, 1, 100 } },
     //    PositionProxy16{ 1,0,0,-2.5f,  0,1,0,0,  0,0, 1,1.25f,  0,0,0,1 },
     //    ShadowCasterComponent{}
     //);
@@ -303,21 +304,25 @@ SDL_AppResult Game::MainInit()
     //    ColliderComponent{}
     //);
 
-    //ctx->CreateEntity("main_menu",
-    //    DirectLightComponent{ DirectLightComponent::DirectLightData{
-    //        0.0f, -1.0f, -0.70f,   // dir
-    //        1.0f, 1.0f, 1.0f,      // color
-    //        2.5f,                  // power
-    //        -0.5f, 0.0f, 0.0f,      // box center
-    //        1.0f, 1.0f } },      // half_extent, half_depth
-    //    ShadowCasterComponent{}
-    //);
+
 
     // Рамки коллайдеров — производные сущности: здесь только РЕГИСТРИРУЕМ генератор.
     // Запуск не тут, а в EngineContext::LoadScene — генераторы создают производное из
     // загруженных авторских данных. На ручном init не прогоняем: сцена должна приходить
     // из файла (ручное создание сущностей выше — временное, уйдёт).
     ctx->RegisterGenerator("main_menu", [this] { CreateDebugColliders(); });
+    ctx->LoadScene("main_menu", "saved_scene.scene");
+
+    ctx->CreateEntity("main_menu",
+        MaterialComponent{ { metal2 } },
+        ModelComponent{ sphere },
+        PositionProxy16{ 1,0,0,-2.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
+        ShadowComponent{},
+        // Явный сферический коллайдер (радиус 1 = радиус UV-сферы) — иначе пустой
+        // ColliderComponent уходит в fallback авто-AABB и рамка становится боксом.
+        ColliderComponent{ { Collider::Sphere(1.0f)} },
+        DrawComponent{}
+    );
 
     ChangeState(GameState::MAIN_MENU);
 

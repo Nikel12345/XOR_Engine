@@ -7,6 +7,24 @@ Texture2DArray<float>     u_shadowDepthArray  : register(t0, space2);
 [[vk::combinedImageSampler]]
 SamplerComparisonState    u_shadowSampler     : register(s0, space2);
 
+// Env-кубмапа — глобалка пасса (как тень), слот 1. Заливается движком из skybox-креста
+// (EngineContext::CreateCubemapFromCross). Объявлена в базе (общей для текстурного и
+// текстурелесс прологов); прологи знают про этот сэмплер и сдвигают свои регистры.
+[[vk::combinedImageSampler]]
+TextureCube  u_envCube    : register(t1, space2);
+[[vk::combinedImageSampler]]
+SamplerState u_envSampler : register(s1, space2);
+
+// Интерфейс окружения — единственная точка, знающая про источник. roughness → мип-LOD: гладкое
+// зеркало (0) сэмплит детальный уровень, шероховатый металл (→1) — размытые мипы. Прим.: это
+// дешёвая аппроксимация (обычные мипы, не prefiltered-IBL), но визуально размытие даёт.
+float3 sampleEnv(float3 dir, float roughness)
+{
+    uint w, h, levels;
+    u_envCube.GetDimensions(0, w, h, levels);
+    return u_envCube.SampleLevel(u_envSampler, dir, saturate(roughness) * float(levels - 1)).rgb;
+}
+
 // Регистры заданы прологом (зависят от числа сэмплеров пасса: текстурный → t3/t4,
 // текстурелесс → t1/t2). База включается ПОСЛЕ пролога — макросы уже определены.
 StructuredBuffer<Light>       LightBlock    : LIGHT_BLOCK_REGISTER;
@@ -130,10 +148,13 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
                 lightSum += light.color_power.rgb * intensity;
 
             // Спекуляр Blinn-Phong — пока только от directional. metallic = сила блика.
+            // Энергонормировка (shininess+8)/8π: пик растёт с резкостью лоба, поэтому острый
+            // блик (низкий roughness) пробивает ярким концентрированным глинтом, а не теряется.
             if (surface.metallic > 0.0)
             {
                 float3 H    = normalize(L_dir + V);
-                float  spec = pow(saturate(dot(n, H)), shininess);
+                float  norm = (shininess + 8.0) / (8.0 * 3.14159265);
+                float  spec = norm * pow(saturate(dot(n, H)), shininess);
                 specSum += light.color_power.rgb * (spec * light.color_power.a * dirShadow * surface.metallic);
             }
             continue;
@@ -178,6 +199,13 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
         if (intensity <= 0.0) continue;
         lightSum += light.color_power.rgb * intensity;
     }
+
+    // Отражение окружения для металла: цвет из кубмапы по вектору отражения R. Анти-блик
+    // (тёмное перпендикулярно яркому) — следствие направленной вариации кубмапы. Тинт baseColor:
+    // металл-проводник окрашивает отражение своим цветом (F0 ≈ baseColor). Гейтится metallic.
+    float3 R       = reflect(-V, n);
+    float3 envRefl = sampleEnv(R, surface.roughness);
+    specSum += envRefl * surface.baseColor * surface.metallic;
 
     float3 lighting = max(lightSum, (float3)AMBIENT_LIGHT);
     float3 color    = surface.baseColor * lighting + specSum + surface.emission;   // спекуляр + эмиссия поверх света

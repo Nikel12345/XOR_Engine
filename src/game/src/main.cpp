@@ -23,7 +23,7 @@ int main() {
     SDL_SetGPUAllowedFramesInFlight(dev, BUFFERING_LEVEL);
 
     // === Настройка swapchain ===
-    SDL_GPUPresentMode desired_mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+    SDL_GPUPresentMode desired_mode = SDL_GPU_PRESENTMODE_MAILBOX;
     SDL_GPUSwapchainComposition desired_comp = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
 
     // Проверяем, поддерживается ли нужный режим

@@ -1,14 +1,15 @@
 #include "PCH.h"
 #include "RenderCommandData.h"
-#include "TextureData.h"   // SharedDepthTarget (полное определение для перегрузки SetDepthTexture)
+#include "TextureData.h"
 
-void RenderPassTexturesInfo::CreateColorTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_FColor color, SDL_GPUTextureFormat format, Uint32 num_color_targets)
+void RenderPassTexturesInfo::CreateColorTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_FColor color, SDL_GPUTextureFormat format)
 {
-	colorTargetInfo.load_op = load_op;
-	colorTargetInfo.store_op = store_op;
-	colorTargetInfo.clear_color = color;
-	numColorTargets = num_color_targets;
-	color_format = format;
+	SDL_GPUColorTargetInfo info{};
+	info.load_op = load_op;
+	info.store_op = store_op;
+	info.clear_color = color;
+	colorTargetInfos.push_back(info); 
+	color_formats.push_back(format);
 }
 
 void RenderPassTexturesInfo::CreateDepthTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_GPUTextureFormat format)
@@ -17,17 +18,16 @@ void RenderPassTexturesInfo::CreateDepthTextureInfo(SDL_GPULoadOp load_op, SDL_G
 	depthTargetInfo.clear_stencil = 0;
 	depthTargetInfo.load_op = load_op;
 	depthTargetInfo.store_op = store_op;
-	// cycle (ротация субресурса) несовместим с LOAD — при загрузке надо переиспользовать
-	// существующий depth (иначе SDL ассертит). Циклим только когда не грузим.
-	depthTargetInfo.cycle = (load_op != SDL_GPU_LOADOP_LOAD);
+	depthTargetInfo.cycle = false;
 	depthTargetInfo.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
 	depthTargetInfo.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 	depth_format = format;
 }
 
-void RenderPassTexturesInfo::SetColorTexture(SDL_GPUTexture* tex)
+void RenderPassTexturesInfo::SetColorTexture(SDL_GPUTexture* tex, uint32_t index)
 {
-	colorTargetInfo.texture = tex;
+	if (index < colorTargetInfos.size())
+		colorTargetInfos[index].texture = tex;
 }
 
 void RenderPassTexturesInfo::SetDepthTexture(SDL_GPUTexture* tex)
@@ -35,13 +35,12 @@ void RenderPassTexturesInfo::SetDepthTexture(SDL_GPUTexture* tex)
 	if (depthTargetInfo.texture) {
 
 	}
-	shared_depth = nullptr;          // сырой указатель — отвязываемся от разделяемого таргета
+	shared_depth = nullptr;
 	depthTargetInfo.texture = tex;
 }
 
 void RenderPassTexturesInfo::SetDepthTexture(SharedDepthTarget* dt)
 {
 	shared_depth = dt;
-	depthTargetInfo.texture = dt ? dt->texture : nullptr;   // стартовое значение; обновляется лениво
+	depthTargetInfo.texture = dt ? dt->texture : nullptr;
 }
-

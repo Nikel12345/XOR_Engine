@@ -14,6 +14,7 @@ struct TextureAtlas{
 	std::vector<std::unique_ptr<TextureData>> textures_data;
 	SDL_GPUTextureSamplerBinding texture_binding;
 	SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_INVALID;
+	SDL_GPUTextureType texture_type = SDL_GPU_TEXTURETYPE_2D; // 2D / CUBE / ARRAY — берётся из tci при создании; компатибилити-проверки (это куб?) смотрят сюда
 	uint32_t width = 0;
 	uint32_t height = 0;
 	uint16_t layers = 0;

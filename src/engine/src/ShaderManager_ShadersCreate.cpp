@@ -1,5 +1,6 @@
 ﻿#include "PCH.h"
 #include "ShaderManager.h"
+#include <string_view>
 
 inline uint64_t HashBytes(const uint8_t* data, size_t size) {
     uint64_t hash = 14695981039346656037ULL;
@@ -8,6 +9,41 @@ inline uint64_t HashBytes(const uint8_t* data, size_t size) {
         hash *= 1099511628211ULL;
     }
     return hash;
+}
+
+// FNV-1a, продолжаемый: домешивает байты в уже накопленный hash (а не начинает с нуля).
+static inline void FnvMix(uint64_t& hash, const uint8_t* data, size_t size) {
+    for (size_t i = 0; i < size; ++i) { hash ^= data[i]; hash *= 1099511628211ULL; }
+}
+
+// Рекурсивно домешивает в hash содержимое файла и всех его #include "..." . Инклуды движка
+// пишутся root-relative и резолвятся от include_dir (как делает сам SDL_ShaderCross при
+// компиляции). visited защищает от циклов (наш сканер не видит include-guard'ы) и от
+// повторного учёта файла, включённого из нескольких мест. Так правка ЛЮБОГО файла по цепочке
+// инклудов меняет хэш → кэш .spv корректно инвалидируется (раньше хэшировался только верхний файл).
+static void HashIncludesRecursive(uint64_t& hash, const std::string& path,
+    const char* include_dir, std::unordered_set<std::string>& visited)
+{
+    if (!visited.insert(path).second) return;
+
+    size_t size = 0;
+    char* data = (char*)SDL_LoadFile(path.c_str(), &size);
+    if (!data) return;   // файл не найден — пропускаем; реальную ошибку выдаст компиляция
+    FnvMix(hash, (const uint8_t*)data, size);
+
+    std::string_view sv(data, size);
+    for (size_t pos = 0; (pos = sv.find("#include", pos)) != std::string_view::npos; ) {
+        size_t q1 = sv.find('"', pos + 8);
+        size_t nl = sv.find('\n', pos + 8);
+        // Кавычка обязана быть на той же строке, что и #include — иначе это не директива.
+        if (q1 == std::string_view::npos || (nl != std::string_view::npos && q1 > nl)) { pos += 8; continue; }
+        size_t q2 = sv.find('"', q1 + 1);
+        if (q2 == std::string_view::npos) break;
+        std::string rel(sv.substr(q1 + 1, q2 - q1 - 1));
+        HashIncludesRecursive(hash, std::string(include_dir) + "/" + rel, include_dir, visited);
+        pos = q2 + 1;
+    }
+    SDL_free(data);
 }
 
 std::string ShaderManager::BuildCachePath(const char* source_path, uint64_t hash) const
@@ -67,12 +103,19 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
         return nullptr;
     }
 
-    // === Улучшенный хэш: учитываем не только текст, но и целевую платформу/GPU ===
+    // === Хэш: верхний файл + рекурсивно все его #include + целевая платформа/GPU ===
     const SDL_GPUShaderFormat supported = SDL_GetGPUShaderFormats(dev);
-    uint64_t hash = HashBytes((const uint8_t*)src, src_size);
+    const char* include_dir = "../engine/shaders_code";   // один источник истины (см. ниже hlsl_info)
 
-    // Добавляем информацию о GPU-формате в хэш (DXIL / MSL / SPIRV)
-    // Это гарантирует, что при смене видеокарты/ОС кэш пересоберётся
+    // Раньше хэшировался ТОЛЬКО верхний файл (src) → правки инклудов (база/прологи) кэш не
+    // сбрасывали и грузился устаревший .spv. Теперь обходим всю цепочку #include.
+    uint64_t hash = 14695981039346656037ULL;
+    {
+        std::unordered_set<std::string> visited;
+        HashIncludesRecursive(hash, hlsl_path, include_dir, visited);
+    }
+
+    // GPU-формат (DXIL / MSL / SPIRV) — чтобы при смене видеокарты/ОС кэш пересобрался.
     hash ^= (uint64_t)supported;
     hash *= 1099511628211ULL;   // чтобы изменение формата сильно меняло хэш
 
@@ -91,7 +134,7 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     hlsl_info.source = src;
     hlsl_info.entrypoint = "main";
     hlsl_info.shader_stage = stage;
-    hlsl_info.include_dir = "../engine/shaders_code";
+    hlsl_info.include_dir = include_dir;
     hlsl_info.defines = nullptr;
     hlsl_info.props = 0;
 

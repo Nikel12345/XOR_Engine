@@ -28,6 +28,11 @@ public:
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name);
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name);
 	TextureHandle* CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path);
+	// Грузит cube-текстуру (4×3 крест) в УЖЕ существующий cube-атлас (создаётся отдельно
+	// через CreateTextureAtlas с tci.type=CUBE — характер атласа задаёт только tci). ctx здесь
+	// дирижёр: проверяет совместимость (что атлас и правда куб + квадратный) и делегирует
+	// нарезку/заливку 6 граней TextureLoader'у. Размер грани диктует tci атласа.
+	TextureHandle* CreateCubeMapTexture(const TextureName& name, const AtlasName& atlas_name, const char* path);
 	TextureAtlas* GetTextureAtlas(const AtlasName& name) const { return texture_manager->GetTextureAtlas(name); }
 
 	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders);
@@ -116,6 +121,7 @@ public:
 	MaterialManager* GetMaterialManager() const { return material_manager; }
 
 	BatchBuilder* GetBatchBuilder() const { return batch_builder; }
+	TextureLoader* GetTextureLoader() const { return texture_loader; }
 
 	void SetInputManager(InputManager* im) { input_manager = im; }
 	InputManager* GetInputManager() const { return input_manager; }

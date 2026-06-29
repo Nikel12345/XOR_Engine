@@ -34,3 +34,41 @@ DecodedImage TextureLoader::LoadFromFile(const char* path, SDL_PixelFormat targe
 	SDL_DestroySurface(converted);
 	return out;
 }
+
+DecodedCubeFaces TextureLoader::LoadCubeMapFromFile(const char* path, uint32_t faceSize, SDL_PixelFormat target_format)
+{
+	DecodedCubeFaces out;
+	if (faceSize == 0) { SDL_Log("LoadCubeMapFromFile: zero faceSize for '%s'", path); return out; }
+
+	DecodedImage img = LoadFromFile(path, target_format);
+	if (!img.ok()) { SDL_Log("LoadCubeMapFromFile: failed to load '%s'", path); return out; }
+
+	const uint32_t cellW = img.width / 4;
+	const uint32_t cellH = img.height / 3;
+	if (cellW == 0 || cellH == 0) { SDL_Log("LoadCubeMapFromFile: '%s' too small for 4x3 cross (%ux%u)", path, img.width, img.height); return out; }
+
+	const uint32_t bpp = SDL_BYTESPERPIXEL(target_format);
+	const uint32_t srcStride = img.width * bpp;
+	// Ячейка креста (col,row) для слоя SDL cube: 0:+X 1:-X 2:+Y 3:-Y 4:+Z 5:-Z.
+	// Полоса -X +Z +X -Z даёт непрерывный горизонт; +Y верх (col1,row0), -Y низ (col1,row2).
+	const int cell[6][2] = { {2,1}, {0,1}, {1,0}, {1,2}, {1,1}, {3,1} };
+	for (int f = 0; f < 6; ++f) {
+		const uint32_t ox = (uint32_t)cell[f][0] * cellW;
+		const uint32_t oy = (uint32_t)cell[f][1] * cellH;
+		std::vector<std::byte> face((size_t)faceSize * faceSize * bpp);
+		for (uint32_t dj = 0; dj < faceSize; ++dj) {
+			uint32_t sy = oy + (uint32_t)(((dj + 0.5f) / faceSize) * cellH);
+			if (sy >= img.height) sy = img.height - 1;
+			for (uint32_t di = 0; di < faceSize; ++di) {
+				uint32_t sx = ox + (uint32_t)(((di + 0.5f) / faceSize) * cellW);
+				if (sx >= img.width) sx = img.width - 1;
+				const std::byte* s = img.pixels.data() + (size_t)sy * srcStride + (size_t)sx * bpp;
+				std::byte* d = face.data() + ((size_t)dj * faceSize + di) * bpp;
+				SDL_memcpy(d, s, bpp);   // пиксель как есть (формат совпал с атласом)
+			}
+		}
+		out.faces[f] = std::move(face);
+	}
+	out.faceSize = faceSize;
+	return out;
+}

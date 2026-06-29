@@ -148,8 +148,8 @@ void PassManager::RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassSte
 
 	SDL_GPURenderPass* rp = nullptr;
 	rp = SDL_BeginGPURenderPass(cb,
-		&tex_data.colorTargetInfo,
-		tex_data.numColorTargets,
+		tex_data.colorTargetInfos.data(),
+		safe_u32(tex_data.colorTargetInfos.size()),
 		&tex_data.depthTargetInfo);
 	if (!rp) {
 		SDL_Log("PassManager::ExecutePassesSteps: Failed to begin render pass!");

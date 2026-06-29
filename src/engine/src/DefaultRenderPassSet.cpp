@@ -9,6 +9,7 @@
 #include "IndirectDataModule.h"
 #include "BatchBuilder.h"
 #include "EngineContext.h"
+#include "TextureLoader.h"
 
 namespace DefaultRenderPassNamespace
 {
@@ -34,6 +35,38 @@ namespace DefaultRenderPassNamespace
     static SDL_GPUTexture* split_depth_half = nullptr; // общий depth обеих половин
     static Uint32 split_half_w = 0;                    // нужен copy-степу для смещения правой половины
     static Uint32 split_full_h = 0;
+
+    static TextureAtlas* default_env_atlas = nullptr;
+
+    // Env-окружение для отражений металла. texture_binding куба → в global_texture_bindings пасса
+    // (слот 1, после тени), шейдер сэмплит через sampleEnv. Файла нет — фолбэк 1×1×6 куб тоном сцены.
+    static SDL_GPUTextureSamplerBinding GetDefaultEnvBinding(EngineContext* ctx)
+    {
+        if (!default_env_atlas) {
+            TextureManager* tm = ctx->GetTextureManager();
+            auto env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
+
+            // Cube-атлас создаётся ОТДЕЛЬНО (его характер задаёт tci-пресет EnvCube), а нарезку
+            // 4×3 креста на 6 граней и заливку делает ctx->CreateCubeMapTexture. faceSize пресета —
+            // единственный источник истины о разрешении env-куба.
+            TextureAtlas* cube = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(200), env_sampler);
+
+            // Путь — ассет игры (CWD = src/game); временно здесь, позже окружение задаёт игра.
+            if (cube && ctx->CreateCubeMapTexture("env_skybox", "env_skybox", "textures/assets/skybox.png"))
+                default_env_atlas = cube;
+
+            if (!default_env_atlas) {
+                // Фолбэк: вырожденный 1×1×6 куб тоном сцены (тот же пресет с faceSize=1).
+                default_env_atlas = tm->CreateTextureAtlas("env_fallback", TexturePresets::EnvCube(1), env_sampler);
+                for (int f = 0; f < 6; ++f) {
+                    std::vector<std::byte> px(4);
+                    px[0] = std::byte{ 36 }; px[1] = std::byte{ 26 }; px[2] = std::byte{ 26 }; px[3] = std::byte{ 255 }; // BGRA ≈ тон сцены
+                    tm->CreateTexture("env_fallback_f" + std::to_string(f), default_env_atlas, 1, 1, std::move(px));
+                }
+            }
+        }
+        return default_env_atlas->texture_binding;
+    }
 }
 
 
@@ -57,7 +90,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
     TextureAtlas* shadow_temp = tm->CreateTextureAtlas("shadow_depth_single_temp", TexturePresets::GetCreateInfo(TexturePreset::TempDepth1024), shadow_sampler);
 
     RenderPassTexturesInfo shadow_rptd{};
-    shadow_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, shadow_depth_flat_array->format);
+    shadow_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, shadow_temp->format);
 
     auto shadowPass = pm->CreateRenderPass(
         SHADOW_PASS,
@@ -207,7 +240,6 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
 
     RenderPassTexturesInfo main_rptd{};
     main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.1f,0.1f,0.14f,1.0f }, SDL_GPU_TEXTUREFORMAT_INVALID);
-    // STORE (был DONT_CARE) — depth сцены нужен DEBUG_PASS для окклюзии рамок коллайдеров.
     main_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, g_pass_system.main_depth_format);
 
     auto mainPass = pm->CreateRenderPass(
@@ -221,7 +253,10 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
     );
 
 
-    mainPass->global_texture_bindings = { shadow_depth_flat_array->texture_binding };
+    mainPass->global_texture_bindings = {
+        shadow_depth_flat_array->texture_binding,           // слот 0 (t0/s0) — тень
+        GetDefaultEnvBinding(ctx)                           // слот 1 (t1/s1) — env-кубмапа
+    };
     mainPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 
     main_pass_inited = true;
@@ -251,7 +286,7 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
         [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
         // Цвет (свопчейн) ставится в Engine::RenderFunc каждый кадр; если не задан — пропуск.
-        if (!rp.renderPassTexsData.colorTargetInfo.texture) return;
+        if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
         // Цвет рамок прокидываем как push_data_raw — его читает push_func дебаг-шейдера
         // (fragment slot 0). Другие программы к этому пассу не привязаны.
         DebugColliderPushData color{};
@@ -288,7 +323,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
         [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
         // Цвет (свопчейн) ставится в Engine::RenderFunc каждый кадр; если не задан — пропуск.
-        if (!rp.renderPassTexsData.colorTargetInfo.texture) return;
+        if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
         pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
     },
         std::move(transparent_rptd),
@@ -298,114 +333,117 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
     transparentPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 }
 
-void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx,
-    SDL_GPUDevice* dev, SDL_Window* win)
-{
-    if (main_pass_inited) {
-        SDL_Log("Default main render pass is already initialized.");
-        return;
-    }
-    if (!shadow_pass_inited) {
-        SDL_Log("Default shadow render pass must be initialized before the default main render pass.");
-        return;
-    }
-    PassManager* pm = ctx->GetRenderManager();
-    BufferManager* bm = ctx->GetBufferManager();
-	TextureManager* tm = ctx->GetTextureManager();
-
-    const SDL_GPUTextureFormat sc_format = SDL_GetGPUSwapchainTextureFormat(dev, win);
-
-    int win_w = 0, win_h = 0;
-    SDL_GetWindowSizeInPixels(win, &win_w, &win_h);
-    split_half_w = (Uint32)win_w / 2;
-    split_full_h = (Uint32)win_h;
-
-    // --- offscreen-таргеты, один раз ---
-    SDL_GPUTextureCreateInfo color_ci{};
-    color_ci.type = SDL_GPU_TEXTURETYPE_2D;
-    color_ci.format = sc_format;                          // == swapchain, чтобы copy шёл без конвертации
-    color_ci.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;  // для copy-source отдельный флаг не нужен
-    color_ci.width = split_half_w;
-    color_ci.height = split_full_h;
-    color_ci.layer_count_or_depth = 1;
-    color_ci.num_levels = 1;
-    color_ci.sample_count = SDL_GPU_SAMPLECOUNT_1;
-    main_color_half = tm->CreateGPU_Texture(color_ci);
-    debug_color_half = tm->CreateGPU_Texture(color_ci);
-
-    auto depth_ci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
-    depth_ci.width = split_half_w;
-    depth_ci.height = split_full_h;
-    split_depth_half = tm->CreateGPU_Texture(depth_ci);
-
-    // --- SCENE_PASS: бывший MAIN_PASS, рисует сцену в левую половину ---
-    RenderPassTexturesInfo scene_rptd{};
-    scene_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.1f,0.1f,0.14f,1.0f }, sc_format);
-    scene_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_DONT_CARE, depth_ci.format);
-
-    auto scenePass = pm->CreateRenderPass(
-        "SCENE_PASS",
-        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
-    {
-        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
-    },
-        std::move(scene_rptd),
-        20
-    );
-    scenePass->global_texture_bindings = { shadow_depth_flat_array->texture_binding };
-    scenePass->renderPassTexsData.SetColorTexture(main_color_half);
-    scenePass->renderPassTexsData.SetDepthTexture(split_depth_half);
-
-    // --- DEBUG_PASS: затычка с такой же color+depth-структурой, рисует в правую половину ---
-    RenderPassTexturesInfo debug_rptd{};
-    debug_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.14f,0.1f,0.1f,1.0f }, sc_format);
-    debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_DONT_CARE, depth_ci.format);
-
-    auto debugPass = pm->CreateRenderPass(
-        "DEBUG_PASS",
-        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
-    {
-        // ЗАТЫЧКА: пока та же сцена; сюда позже воткнёшь debug-пайплайн
-        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
-    },
-        std::move(debug_rptd),
-        25
-    );
-    debugPass->global_texture_bindings = { shadow_depth_flat_array->texture_binding };
-    debugPass->renderPassTexsData.SetColorTexture(debug_color_half);
-    debugPass->renderPassTexsData.SetDepthTexture(split_depth_half);
-
-    // --- MAIN_PASS: теперь copy-step в swapchain ---
-    RenderPassTexturesInfo main_rptd{};
-    main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, SDL_GPU_TEXTUREFORMAT_INVALID);
-    // depth не нужен — это copy, а не render pass
-
-    auto mainPass = pm->CreateRenderPass(
-        MAIN_PASS,
-        [](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
-    {
-        // swapchain поставлен в RenderFunc через SetColorTexture(tex)
-        SDL_GPUTexture* swap = rp.renderPassTexsData.colorTargetInfo.texture; // (или [0].texture, если массив)
-        if (!swap || !main_color_half || !debug_color_half) return;
-
-        SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
-
-        SDL_GPUTextureLocation src_left{};  src_left.texture = main_color_half;
-        SDL_GPUTextureLocation dst_left{};   dst_left.texture = swap; dst_left.x = 0;             dst_left.y = 0;
-        SDL_CopyGPUTextureToTexture(cp, &src_left, &dst_left, split_half_w, split_full_h, 1, false);
-
-        SDL_GPUTextureLocation src_right{}; src_right.texture = debug_color_half;
-        SDL_GPUTextureLocation dst_right{};  dst_right.texture = swap; dst_right.x = split_half_w; dst_right.y = 0;
-        SDL_CopyGPUTextureToTexture(cp, &src_right, &dst_right, split_half_w, split_full_h, 1, false);
-
-        SDL_EndGPUCopyPass(cp);
-    },
-        std::move(main_rptd),
-        30
-    );
-
-    main_pass_inited = true;
-}
+//void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx,
+//    SDL_GPUDevice* dev, SDL_Window* win)
+//{
+//    if (main_pass_inited) {
+//        SDL_Log("Default main render pass is already initialized.");
+//        return;
+//    }
+//    if (!shadow_pass_inited) {
+//        SDL_Log("Default shadow render pass must be initialized before the default main render pass.");
+//        return;
+//    }
+//    PassManager* pm = ctx->GetRenderManager();
+//    BufferManager* bm = ctx->GetBufferManager();
+//	TextureManager* tm = ctx->GetTextureManager();
+//
+//    const SDL_GPUTextureFormat sc_format = SDL_GetGPUSwapchainTextureFormat(dev, win);
+//
+//    int win_w = 0, win_h = 0;
+//    SDL_GetWindowSizeInPixels(win, &win_w, &win_h);
+//    split_half_w = (Uint32)win_w / 2;
+//    split_full_h = (Uint32)win_h;
+//
+//    // --- offscreen-таргеты, один раз ---
+//    SDL_GPUTextureCreateInfo color_ci{};
+//    color_ci.type = SDL_GPU_TEXTURETYPE_2D;
+//    color_ci.format = sc_format;                          // == swapchain, чтобы copy шёл без конвертации
+//    color_ci.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;  // для copy-source отдельный флаг не нужен
+//    color_ci.width = split_half_w;
+//    color_ci.height = split_full_h;
+//    color_ci.layer_count_or_depth = 1;
+//    color_ci.num_levels = 1;
+//    color_ci.sample_count = SDL_GPU_SAMPLECOUNT_1;
+//    main_color_half = tm->CreateGPU_Texture(color_ci);
+//    debug_color_half = tm->CreateGPU_Texture(color_ci);
+//
+//    auto depth_ci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
+//    depth_ci.width = split_half_w;
+//    depth_ci.height = split_full_h;
+//    split_depth_half = tm->CreateGPU_Texture(depth_ci);
+//
+//    // --- SCENE_PASS: бывший MAIN_PASS, рисует сцену в левую половину ---
+//    RenderPassTexturesInfo scene_rptd{};
+//    scene_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.1f,0.1f,0.14f,1.0f }, sc_format);
+//    scene_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_DONT_CARE, depth_ci.format);
+//
+//    auto scenePass = pm->CreateRenderPass(
+//        "SCENE_PASS",
+//        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+//    {
+//        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
+//    },
+//        std::move(scene_rptd),
+//        20
+//    );
+//    scenePass->global_texture_bindings = {
+//        shadow_depth_flat_array->texture_binding,
+//        GetDefaultEnvBinding(ctx)                           // env-кубмапа на слоте 1 (как в MAIN_PASS)
+//    };
+//    scenePass->renderPassTexsData.SetColorTexture(main_color_half);
+//    scenePass->renderPassTexsData.SetDepthTexture(split_depth_half);
+//
+//    // --- DEBUG_PASS: затычка с такой же color+depth-структурой, рисует в правую половину ---
+//    RenderPassTexturesInfo debug_rptd{};
+//    debug_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.14f,0.1f,0.1f,1.0f }, sc_format);
+//    debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_DONT_CARE, depth_ci.format);
+//
+//    auto debugPass = pm->CreateRenderPass(
+//        "DEBUG_PASS",
+//        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+//    {
+//        // ЗАТЫЧКА: пока та же сцена; сюда позже воткнёшь debug-пайплайн
+//        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
+//    },
+//        std::move(debug_rptd),
+//        25
+//    );
+//    debugPass->global_texture_bindings = { shadow_depth_flat_array->texture_binding };
+//    debugPass->renderPassTexsData.SetColorTexture(debug_color_half);
+//    debugPass->renderPassTexsData.SetDepthTexture(split_depth_half);
+//
+//    // --- MAIN_PASS: теперь copy-step в swapchain ---
+//    RenderPassTexturesInfo main_rptd{};
+//    main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, SDL_GPU_TEXTUREFORMAT_INVALID);
+//    // depth не нужен — это copy, а не render pass
+//
+//    auto mainPass = pm->CreateRenderPass(
+//        MAIN_PASS,
+//        [](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+//    {
+//        // swapchain поставлен в RenderFunc через SetColorTexture(tex)
+//        SDL_GPUTexture* swap = rp.renderPassTexsData.colorTargetInfo.texture; // (или [0].texture, если массив)
+//        if (!swap || !main_color_half || !debug_color_half) return;
+//
+//        SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
+//
+//        SDL_GPUTextureLocation src_left{};  src_left.texture = main_color_half;
+//        SDL_GPUTextureLocation dst_left{};   dst_left.texture = swap; dst_left.x = 0;             dst_left.y = 0;
+//        SDL_CopyGPUTextureToTexture(cp, &src_left, &dst_left, split_half_w, split_full_h, 1, false);
+//
+//        SDL_GPUTextureLocation src_right{}; src_right.texture = debug_color_half;
+//        SDL_GPUTextureLocation dst_right{};  dst_right.texture = swap; dst_right.x = split_half_w; dst_right.y = 0;
+//        SDL_CopyGPUTextureToTexture(cp, &src_right, &dst_right, split_half_w, split_full_h, 1, false);
+//
+//        SDL_EndGPUCopyPass(cp);
+//    },
+//        std::move(main_rptd),
+//        30
+//    );
+//
+//    main_pass_inited = true;
+//}
 
 
 void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ctx)
@@ -446,7 +484,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
             uint32_t byte_offset = (1 + camera_index) * commands_byte_offset;
             if (light.needsUpdate) {
                 SDL_PushGPUVertexUniformData(cb, 0, &camera_index, sizeof(Uint32));
-                rp.renderPassTexsData.colorTargetInfo.layer_or_depth_plane = camera_index;
+                rp.renderPassTexsData.SetColorTargetInfoLayer(camera_index, 0);
                 pm->RenderPassStandardBody(cb, &rp, bm, 0, &camera_index);
             };
             camera_index++;
@@ -460,7 +498,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
                 if (light.needsUpdate) {
                     SDL_PushGPUVertexUniformData(cb, 0, &camera_index, sizeof(Uint32));
 
-                    rp.renderPassTexsData.colorTargetInfo.layer_or_depth_plane = camera_index;
+                    rp.renderPassTexsData.SetColorTargetInfoLayer(camera_index, 0);
                     pm->RenderPassStandardBody(cb, &rp, bm, 0, &camera_index);
                 }
                 camera_index++;

@@ -9,6 +9,7 @@ TextureManager::TextureManager(SDL_GPUDevice* device): ResourceManager(device){
     CreateSampler(DEFAULT_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::DEFAULT_SAMPLER));
     CreateSampler(DEFAULT_SHADOW_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::SHADOW_SAMPLER));
 	CreateSampler(VSM_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::VSM_SAMPLER));
+	CreateSampler(ENV_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::ENV_SAMPLER));
 }
 
 TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler)
@@ -33,6 +34,7 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
     atlas->padding = 3;
     atlas->mip_levels = tci.num_levels;
     atlas->format = tci.format;
+    atlas->texture_type = tci.type;
 
 	TextureAtlas* ptr = atlas.get();
 	atlases_data[name] = std::move(atlas);
@@ -58,6 +60,8 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, Textur
     atlas->layers = existing_atlas->layers;
     atlas->padding = existing_atlas->padding;
     atlas->mip_levels = existing_atlas->mip_levels;
+    atlas->texture_type = existing_atlas->texture_type;
+    atlas->format = existing_atlas->format;
 
     TextureAtlas* ptr = atlas.get();
     atlases_data[name] = std::move(atlas);

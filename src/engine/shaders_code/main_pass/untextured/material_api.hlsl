@@ -29,11 +29,11 @@ struct SurfaceData
     float  roughness;  // → shininess
 };
 
-// UVL нет → MaterialBlock первый fragment-uniform (b0). Storage базы — после единственного
-// сэмплера (тень t0): LightBlock t1, ShadowCameras t2.
+// UVL нет → MaterialBlock первый fragment-uniform (b0). Сэмплеров пасса 2 (тень t0 + env t1,
+// оба объявлены базой), поэтому storage базы съезжают: LightBlock t2, ShadowCameras t3.
 #define MATERIAL_BLOCK_REGISTER  register(b0, space3)
-#define LIGHT_BLOCK_REGISTER     register(t1, space2)
-#define SHADOW_CAMERAS_REGISTER  register(t2, space2)
-#define CAMERA_REGISTER          register(t3, space2)   // 1 сэмплер (тень) + LightBlock(t1) + ShadowCameras(t2) → Camera t3
+#define LIGHT_BLOCK_REGISTER     register(t2, space2)
+#define SHADOW_CAMERAS_REGISTER  register(t3, space2)
+#define CAMERA_REGISTER          register(t4, space2)   // 2 сэмплера (тень+env) + LightBlock(t2) + ShadowCameras(t3) → Camera t4
 
 #endif

@@ -28,5 +28,11 @@
   Shadow =
   Draw = 1 1 0
 [entity] 5
+  Transform = -0.32 0 0 0.5 0 0.3170912 0 0 0 0 -0.32 2.5 0 0 0 1
+  Material = m_orange transparent metal1 m_gray metal2 emission
+  Model = ship
+  Shadow =
+  Draw = 1 1 0
+[entity] 6
   ShadowCaster =
   DirectLight = 0 -1 -0.7 1 1 1 2.5 -0.5 0 0 1 1 3 3

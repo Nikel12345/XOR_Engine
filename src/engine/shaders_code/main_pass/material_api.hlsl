@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Движковый ПРОЛОГ material-API для main-пасса. Прячет всё движко-определённое, чтобы
 // пользовательский surface содержал только `cbuffer MaterialBlock` + `getSurface`.
-// Регистры материальных текстур — t1/t2 (слот 0/space2 занят глобалкой теней пасса).
+// Регистры материальных текстур — t2/t3 (слоты 0/1 заняты глобалками пасса: тень + env-кубмапа).
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "main_pass/math.hlsl"
@@ -34,15 +34,17 @@ struct SurfaceData
     float  roughness;  // → shininess
 };
 
+// Слоты 0/1 заняты глобалками пасса (тень t0/s0, env-кубмапа t1/s1 — объявлены базой),
+// материальные текстуры идут после: albedo t2, normal t3.
 [[vk::combinedImageSampler]]
-Texture2DArray u_albedo        : register(t1, space2);
+Texture2DArray u_albedo        : register(t2, space2);
 [[vk::combinedImageSampler]]
-SamplerState   u_albedoSampler : register(s1, space2);
+SamplerState   u_albedoSampler : register(s2, space2);
 
 [[vk::combinedImageSampler]]
-Texture2DArray u_normal        : register(t2, space2);
+Texture2DArray u_normal        : register(t3, space2);
 [[vk::combinedImageSampler]]
-SamplerState   u_normalSampler : register(s2, space2);
+SamplerState   u_normalSampler : register(s3, space2);
 
 struct TextureData { uint4 data; };
 cbuffer TextureUVLBlock : register(b0, space3) {
@@ -52,11 +54,11 @@ cbuffer TextureUVLBlock : register(b0, space3) {
 #define MATERIAL_BLOCK_REGISTER register(b1, space3)
 
 // Регистры движковых storage-буферов базы зависят от числа сэмплеров пасса (shadercross
-// нумерует storage ПОСЛЕ сэмплеров). Здесь 3 сэмплера (shadow t0 + albedo t1 + normal t2) →
-// LightBlock t3, ShadowCameras t4. База берёт их через эти макросы (включается после пролога).
-#define LIGHT_BLOCK_REGISTER     register(t3, space2)
-#define SHADOW_CAMERAS_REGISTER  register(t4, space2)
-#define CAMERA_REGISTER          register(t5, space2)   // 3 сэмплера + LightBlock(t3) + ShadowCameras(t4) → Camera t5
+// нумерует storage ПОСЛЕ сэмплеров). Здесь 4 сэмплера (shadow t0 + env t1 + albedo t2 + normal t3) →
+// LightBlock t4, ShadowCameras t5. База берёт их через эти макросы (включается после пролога).
+#define LIGHT_BLOCK_REGISTER     register(t4, space2)
+#define SHADOW_CAMERAS_REGISTER  register(t5, space2)
+#define CAMERA_REGISTER          register(t6, space2)   // 4 сэмплера + LightBlock(t4) + ShadowCameras(t5) → Camera t6
 
 float4 SampleAlbedo(float2 uv)
 {

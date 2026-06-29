@@ -67,11 +67,17 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp)
     pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
 
 
-    SDL_GPUColorTargetDescription ctd;
-    if(sp->associated_render_pass->renderPassTexsData.numColorTargets > 0) {
-        SDL_zero(ctd);
-        if (sp->associated_render_pass->renderPassTexsData.color_format != SDL_GPU_TEXTUREFORMAT_INVALID) {
-            ctd.format = sp->associated_render_pass->renderPassTexsData.color_format;
+    // По одному SDL_GPUColorTargetDescription на каждый MRT-выход прохода. Формат INVALID →
+    // подставляется формат свопчейна (MakeDefaultColorTarget). color_blend один на программу и
+    // применяется ко всем таргетам одинаково (для G-buffer обычно держат color_blend=false).
+    const auto& color_formats = sp->associated_render_pass->renderPassTexsData.color_formats;
+    std::vector<SDL_GPUColorTargetDescription> ctds;
+    ctds.reserve(color_formats.size());
+    for (SDL_GPUTextureFormat fmt : color_formats) {
+        SDL_GPUColorTargetDescription ctd;
+        if (fmt != SDL_GPU_TEXTUREFORMAT_INVALID) {
+            SDL_zero(ctd);
+            ctd.format = fmt;
         }
         else {
             ctd = MakeDefaultColorTarget();
@@ -85,8 +91,11 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp)
             ctd.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
             ctd.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
         }
-        pci.target_info.num_color_targets = 1;
-        pci.target_info.color_target_descriptions = &ctd;
+        ctds.push_back(ctd);
+    }
+    if (!ctds.empty()) {
+        pci.target_info.num_color_targets = safe_u32(ctds.size());
+        pci.target_info.color_target_descriptions = ctds.data();
     }
     else {
         pci.target_info.num_color_targets = 0;

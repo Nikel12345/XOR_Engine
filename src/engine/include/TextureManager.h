@@ -23,6 +23,7 @@ namespace DefaultSamplersNames {
 	inline constexpr const char* DEFAULT_SAMPLER = "_DefaultSampler";
 	inline constexpr const char* DEFAULT_SHADOW_SAMPLER = "_DefaultShadowSampler";
 	inline constexpr const char* VSM_SAMPLER = "_VsmSampler";
+	inline constexpr const char* ENV_SAMPLER = "_EnvSampler";
 };
 
 struct PendingTextureDestroy {

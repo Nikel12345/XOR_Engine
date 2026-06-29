@@ -95,7 +95,7 @@ namespace TexturePresets {
             info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
             info.width = 2048;
             info.height = 2048;
-            info.layer_count_or_depth = 1 * 6; // 1 êóáìàïîâ * 6 ãðàíåé
+            info.layer_count_or_depth = 1 * 6; // 1 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ * 6 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             info.num_levels = 1;
 
             break;
@@ -106,7 +106,7 @@ namespace TexturePresets {
             info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
             info.width = 2048;
             info.height = 2048;
-            info.layer_count_or_depth = 4 * 6; // 4 êóáìàïîâ * 6 ãðàíåé
+            info.layer_count_or_depth = 4 * 6; // 4 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ * 6 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             info.num_levels = 1;
 
             break;
@@ -117,7 +117,7 @@ namespace TexturePresets {
             info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
             info.width = 2048;
             info.height = 2048;
-            info.layer_count_or_depth = 8 * 6; // 8 êóáìàïîâ * 6 ãðàíåé
+            info.layer_count_or_depth = 8 * 6; // 8 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ * 6 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             info.num_levels = 1;
 
             break;
@@ -127,7 +127,7 @@ namespace TexturePresets {
             info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
             info.width = 1024;
             info.height = 1024;
-            info.layer_count_or_depth = 1 * 6; // 1 êóáìàïîâ * 6 ãðàíåé
+            info.layer_count_or_depth = 1 * 6; // 1 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ * 6 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             info.num_levels = 1;
             break;
 
@@ -308,14 +308,14 @@ namespace TexturePresets {
             break;
 
         case TexturePreset::Custom:
-            // Äëÿ Custom íóæíî çàïîëíèòü âðó÷íóþ
+            // ï¿½ï¿½ï¿½ Custom ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             break;
         }
 
         return info;
     }
 
-    // Âåðñèÿ ñ ïàðàìåòðàìè äëÿ ãèáêîñòè
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     inline SDL_GPUTextureCreateInfo ShadowCubemapArray(uint32_t num_cubemaps, uint32_t resolution = 2048) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_CUBE_ARRAY;
@@ -325,6 +325,25 @@ namespace TexturePresets {
         info.height = resolution;
         info.layer_count_or_depth = num_cubemaps * 6;
         info.num_levels = 1;
+        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        info.props = 0;
+        return info;
+    }
+
+    // Env-ÐºÑƒÐ±Ð¼Ð°Ð¿ Ð´Ð»Ñ Ð¾Ñ‚Ñ€Ð°Ð¶ÐµÐ½Ð¸Ð¹ Ð¼ÐµÑ‚Ð°Ð»Ð»Ð°: ÐºÐ²Ð°Ð´Ñ€Ð°Ñ‚Ð½Ñ‹Ðµ Ð³Ñ€Ð°Ð½Ð¸ faceSizeÃ—faceSize, Ð¿Ð¾Ð»Ð½Ð°Ñ Ð¼Ð¸Ð¿-Ñ†ÐµÐ¿Ð¾Ñ‡ÐºÐ°
+    // (Ð¼Ð¸Ð¿Ñ‹ = roughness-Ñ€Ð°Ð·Ð¼Ñ‹Ñ‚Ð¸Ðµ, ÑÑ‡Ð¸Ñ‚Ð°ÑŽÑ‚ÑÑ Ð¾Ñ‚ faceSize), COLOR_TARGET â€” Ñ‡Ñ‚Ð¾Ð±Ñ‹ GenerateMipmaps Ð¼Ð¾Ð³
+    // Ð² Ð½ÐµÐ³Ð¾ Ð¿Ð¸ÑÐ°Ñ‚ÑŒ. faceSize â€” ÐµÐ´Ð¸Ð½ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº Ð¸ÑÑ‚Ð¸Ð½Ñ‹ Ð¾ Ñ€Ð°Ð·Ñ€ÐµÑˆÐµÐ½Ð¸Ð¸ env-ÐºÑƒÐ±Ð°.
+    inline SDL_GPUTextureCreateInfo EnvCube(uint32_t faceSize) {
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_CUBE;
+        info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+        info.width = faceSize;
+        info.height = faceSize;
+        info.layer_count_or_depth = 6;
+        uint32_t levels = 1;
+        for (uint32_t s = faceSize; s > 1; s >>= 1) ++levels;
+        info.num_levels = levels;
         info.sample_count = SDL_GPU_SAMPLECOUNT_1;
         info.props = 0;
         return info;
