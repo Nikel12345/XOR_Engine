@@ -140,8 +140,6 @@ void PassManager::ExecutePrepassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_f
 
 void PassManager::RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass_step, BufferManager* bm, uint32_t additional_offset, const void* push_data_raw)
 {
-	// Разделяемый depth резолвим в момент begin: после ресайза таргет уже держит новую
-	// текстуру, поэтому все проходы подхватывают её автоматически, без переназначения.
 	auto& tex_data = render_pass_step->renderPassTexsData;
 	if (tex_data.shared_depth)
 		tex_data.depthTargetInfo.texture = tex_data.shared_depth->texture;

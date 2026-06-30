@@ -267,18 +267,19 @@ void EngineContext::LoadScene(const SceneName& scene_name, const std::string& pa
 		}
 	}
 
-	// Флаги рендера (как при смене активной сцены): сделать активной + полная пересборка
-	// батчей — BuildRenderBatches перечитает все сущности, PIB/Indirect подхватят по ревизии.
 	object_manager->SetSceneState(scene_name, true);
 
-	// Производные сущности — ПОСЛЕ загрузки авторских данных и активации сцены: генераторы
-	// этой сцены выводят их из загруженных компонентов (напр. рамки из ColliderComponent).
-	// Это и есть триггер «настройки сцены», который при ручном init намеренно не вызывается.
+	batch_builder->SetDirtyBatches(true);
+	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), path.c_str());
+}
+
+void EngineContext::ExecuteGenerators()
+{
+	auto scene = object_manager->GetActiveScene();
 	for (auto& g : scene->generators)
 		if (g) g();
 
 	batch_builder->SetDirtyBatches(true);
-	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), path.c_str());
 }
 
 void EngineContext::CreateGraphicsPipelines()

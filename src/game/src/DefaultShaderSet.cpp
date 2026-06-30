@@ -429,3 +429,96 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
 
     shadow_blur_inited = true;
 }
+
+void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
+{
+    using namespace DefaultRenderPassNamespace;
+    static bool inited = false;
+    if (inited) { SDL_Log("Bloom shader programs already initialized."); return; }
+
+    ComputeShaderData csd_pre  = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_prefilter.comp.hlsl");
+    ComputeShaderData csd_down = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_down.comp.hlsl");
+    ComputeShaderData csd_up   = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_up.comp.hlsl");
+    ComputeShaderData csd_comp = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_composite.comp.hlsl");
+
+    auto bloomName = [](uint32_t i) { return std::string("bloom_") + std::to_string(i); };
+
+    // --- Prefilter (level 0): softKnee(scene_hdr) + scene_emission → bloom_0 (Karis) ---
+    // Источник свечения = яркая часть сцены (спекуляр/пересвет выше порога) + вся эмиссия.
+    // Два combined-сэмплера: scene_hdr (t0/s0) + scene_emission (t1/s1).
+    {
+        auto dst = ctx->GetTextureAtlas(bloomName(0));
+        ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
+            "bloom_down_0", csd_pre,
+            {}, {},
+            { { bloomName(0), 0, 0 } },                       // rw: bloom_0
+            {},
+            { std::string("scene_hdr"), std::string("scene_emission") },   // sampler t0/s0, t1/s1
+            BLOOM_PASS);
+        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            d.threshold = 1.2f;   // ПОЛ: диффуз ≤1 не блумит вообще; ярче — только глинт/пересвет
+            d.knee      = 0.9f;   // ширина гладкого разгона ВВЕРХ от порога
+            d.intensity = 0.1f;   // сила вклада сцены (блик/пересвет); эмиссия идёт в полную силу
+            b.Push(0, d);
+        });
+        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { dst->width, dst->height, 1 };   // размер берём из атласа (живой при ресайзе)
+        });
+    }
+
+    // --- Downsample: bloom_{i-1} → bloom_i (уровни 1..N-1) ---
+    for (uint32_t i = 1; i < BLOOM_LEVELS; ++i) {
+        auto dst = ctx->GetTextureAtlas(bloomName(i));
+        ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
+            "bloom_down_" + std::to_string(i), csd_down,
+            {}, {},
+            { { bloomName(i), 0, 0 } },   // rw: dst = bloom_i
+            {},
+            { bloomName(i - 1) },         // combined sampler: src = bloom_{i-1}
+            BLOOM_PASS);
+        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            d.useKaris = 0u; d.intensity = 0.0f; b.Push(0, d);
+        });
+        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { dst->width, dst->height, 1 };
+        });
+    }
+
+    // --- Upsample (tent, аддитивно): bloom_{i+1} → += bloom_i, от мелкого к крупному ---
+    for (int i = (int)BLOOM_LEVELS - 2; i >= 0; --i) {
+        auto dst = ctx->GetTextureAtlas(bloomName(i));
+        ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
+            "bloom_up_" + std::to_string(i), csd_up,
+            {}, {},
+            { { bloomName(i), 0, 0 } },   // rw: dst = bloom_i (RMW: += размытие)
+            {},
+            { bloomName(i + 1) },         // combined sampler: bloom_{i+1}
+            BLOOM_PASS);
+        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            b.Push(0, d);                 // up параметров не использует
+        });
+        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { dst->width, dst->height, 1 };
+        });
+    }
+
+    // --- Composite: scene_hdr = clip(scene_hdr + bloom_0 * intensity) ---
+    {
+        auto dst = ctx->GetTextureAtlas(std::string("scene_hdr"));
+        ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
+            "bloom_composite", csd_comp,
+            {}, {},
+            { { std::string("scene_hdr"), 0, 0 } },   // rw: scene_hdr (RMW)
+            {},
+            { std::string("bloom_0") },               // combined sampler: bloom_0
+            BLOOM_PASS);
+        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            d.intensity = 0.5f; d.useKaris = 0u; b.Push(0, d);   // сила свечения — главная ручка
+        });
+        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { dst->width, dst->height, 1 };
+        });
+    }
+
+    inited = true;
+}

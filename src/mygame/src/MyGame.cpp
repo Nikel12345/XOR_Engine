@@ -103,6 +103,7 @@ void MainMenuMode::Enter()
         SetDefaultShadowShaderProgram(ctx);
         SetTransparentShaderProgram(ctx);
         SetDebugColliderProgram(ctx);
+        SetBloomPrograms(ctx);   // программы bloom под BLOOM_PASS (проход создаёт engine)
     }
 
     ModelData* quad = ctx->CreateModel("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {

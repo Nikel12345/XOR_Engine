@@ -29,4 +29,9 @@ namespace DefaultShaderProgramSet
     void SetCullingOutIndirectPrograms(EngineContext* ctx, LightDataModule* ldm);
     void SetCullingWritePrograms(EngineContext* ctx, LightDataModule* ldm);
     void SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm);
+
+    // Программы bloom-пирамиды (prefilter/down/up/composite), привязка к BLOOM_PASS по имени.
+    // Проход создаёт engine (DefaultRenderPassNamespace::SetDefaultBloomPass); сюда вынесены сами
+    // программы и их push/dispatch — атласы берутся по имени, локальных зависимостей от прохода нет.
+    void SetBloomPrograms(EngineContext* ctx);
 }

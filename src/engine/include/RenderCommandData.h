@@ -4,7 +4,7 @@
 #include <SDL3/SDL_gpu.h>
 #include "Aliases.h"
 #include "MaterialData.h"
-#include "TextureData.h"   // TextureData по значению в TextureBatchData::texture_uvl
+#include "TextureData.h"
 
 struct SubMeshData;
 struct BufferData;
@@ -79,9 +79,7 @@ struct RenderPassStep {
     int pass_index = -1;
 };
 
-// Стабильная ссылка на rw storage-текстуру: храним АТЛАС (его указатель неизменен), а конкретный
-// SDL_GPUTexture* собирается в ComputePassStandardBody на момент диспатча — батч переживает
-// пересоздание текстур (ресайз) без ребилда.
+
 struct ComputeRWStorageTextureRef {
     TextureAtlas* atlas = nullptr;
     uint32_t mip_level = 0;

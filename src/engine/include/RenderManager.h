@@ -27,11 +27,11 @@ public:
 	void FillRenderPasses();
 	void ExecutePassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_frame);
 	void ExecutePrepassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_frame);
-	// �������� � ��������� SDL_GPURenderPass
+	// Начинает и завершает SDL_GPURenderPass
 	// Starts and end SDL_GPURenderPass
 	void RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass, BufferManager* bm, uint32_t additional_offset, const void* push_data_raw);
 	void WaitComputePrepass(SDL_GPUDevice* dev);
-	// �������� � ��������� SDL_GPUComputePass
+	// Начинает и завершает SDL_GPUComputePass
 	// Starts and end SDL_GPUComputePass
 	void ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassStep* compute_pass, BufferManager* bm, const void* push_data_raw, const void* dispatch_data_raw, uint8_t pass_frame);
 
@@ -44,12 +44,7 @@ public:
 	const std::vector<ComputePassStep*>& GetOrderedComputePasses() { return ordered_compute_steps; }
 	const std::vector<ComputePassStep*>& GetOrderedComputePrepasses() { return ordered_compute_prepass_steps; }
 
-	// Защищает СТРУКТУРУ дерева батчей (shader_batches в RenderPassStep) на время ПОЛНОЙ
-	// пересборки: BuildRenderBatches делает shader_batches.clear() + перезаполнение, снося
-	// узлы, по которым параллельно идёт render (ExecuteRenderBatches). Берётся в
-	// BuildRenderBatches (prep-поток) и вокруг ExecutePassesSteps (render-поток).
-	// Инкремент (count/offset → per-slot indirect) узлы не удаляет и замок НЕ берёт.
-	// Ребилд редок (загрузка/смена сцены) — конкуренция минимальна.
+	// Ставится только на полную пересборку батчей
 	std::mutex& BatchTreeMutex() { return batch_tree_mutex_; }
 
 	~PassManager();
