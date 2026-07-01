@@ -37,4 +37,9 @@ struct SurfaceData
 #define SHADOW_CAMERAS_REGISTER  register(t3, space2)
 #define CAMERA_REGISTER          register(t4, space2)   // 2 сэмплера (тень+env) + LightBlock(t2) + ShadowCameras(t3) → Camera t4
 
+// Камера объявлена в прологе (симметрично текстурному: там getSurface считает POM-view до базы).
+// Текстурелесс POM не использует, но объявление держим здесь, чтобы база была единой (без Camera).
+struct CameraData { float4x4 view; float4x4 proj; };
+StructuredBuffer<CameraData> Camera : CAMERA_REGISTER;
+
 #endif

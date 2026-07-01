@@ -69,20 +69,55 @@ cbuffer TextureUVLBlock : register(b0, space3) {
 // Регистры движковых storage-буферов базы зависят от числа сэмплеров пасса (shadercross
 // нумерует storage ПОСЛЕ сэмплеров). Здесь 6 сэмплеров (shadow t0 + env t1 + albedo t2 +
 // normal t3 + orm t4 + emissive t5) → LightBlock t6, ShadowCameras t7, Camera t8.
+// Height НЕ добавляет сэмплер: живёт в альфе u_normal → регистры не сдвигаются.
 #define LIGHT_BLOCK_REGISTER     register(t6, space2)
 #define SHADOW_CAMERAS_REGISTER  register(t7, space2)
 #define CAMERA_REGISTER          register(t8, space2)
+
+// Камера объявлена ЗДЕСЬ (не в базе), чтобы getSurface мог посчитать view-вектор для POM
+// ДО включения базы. База (main_pass.frag.hlsl) её только использует. Дублируется в текстурелесс
+// прологе (правка = оба пролога). Раскладка совпадает с CameraData вершинника/базы.
+struct CameraData { float4x4 view; float4x4 proj; };
+StructuredBuffer<CameraData> Camera : CAMERA_REGISTER;
 
 float4 SampleAlbedo(float2 uv)
 {
     return sampleAtlas(u_albedo, u_albedoSampler, textures[0].data, uv);
 }
-float3 SampleNormalWorld(PSInput input, bool isFrontFace)
+float3 SampleNormalWorld(PSInput input, float2 uv, bool isFrontFace)
 {
     float3 n = computeNormal(
         u_normal, u_normalSampler, textures[1].data,
-        input.v_uv, input.v_worldTangent, input.v_worldBitangent, input.v_worldNormal);
+        uv, input.v_worldTangent, input.v_worldBitangent, input.v_worldNormal);
     return isFrontFace ? n : -n;
+}
+
+// POM: смещённый mesh-UV. view-вектор строим из камеры (camPos = -R^T·t из view, как в базе)
+// и переводим в tangent space через TBN. heightScale — глубина рельефа из MaterialBlock (0 = off);
+// pomBias — префильтр к крупным деталям. Глубина — из альфы normal-текстуры (textures[1]).
+float2 ApplyParallax(PSInput input, float heightScale, float pomBias)
+{
+    // Градиенты mesh-UV считаем ДО любых ветвлений/циклов (нужны для SampleGrad в марче, где
+    // авто-LOD запрещён). heightScale — uniform, поэтому ранний выход ниже когерентен по варпу.
+    float2 ddx_uv = ddx(input.v_uv);
+    float2 ddy_uv = ddy(input.v_uv);
+    if (heightScale <= 0.0) return input.v_uv;
+
+    float3   camPos = -mul(transpose((float3x3)Camera[0].view), Camera[0].view._m03_m13_m23);
+    float3   Vw     = normalize(camPos - input.v_worldPos);
+    float3x3 TBN    = float3x3(
+        normalize(input.v_worldTangent),
+        normalize(input.v_worldBitangent),
+        normalize(input.v_worldNormal));
+    float3   Vt     = normalize(mul(TBN, Vw));   // world → tangent (строки TBN = базис)
+    // Изнанка поверхности (пассы рисуют без куллинга): камера «под» поверхностью, марч вниз
+    // геометрически бессмыслен и даёт мусорные пересечения → без смещения.
+    if (Vt.z <= 0.0) return input.v_uv;
+    // saturate: смещённый UV может выйти за [0..1] (до heightScale) → клампим к тайлу, иначе
+    // финальные сэмплы albedo/normal/orm/emissive прочитали бы соседний тайл атласа (seam на грани).
+    // Клампим ТОЛЬКО POM-ветку; heightScale<=0 выше вернул input.v_uv как есть (тайлинг не ломаем).
+    return saturate(parallaxOcclusionUV(u_normal, u_normalSampler, textures[1].data,
+                               input.v_uv, Vt, heightScale, ddx_uv, ddy_uv, pomBias));
 }
 // ORM: возвращает сырой RGB (R=AO, G=Roughness, B=Metallic) — разбирает getSurface.
 float3 SampleORM(float2 uv)

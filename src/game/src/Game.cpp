@@ -42,7 +42,9 @@ SDL_AppResult Game::MainInit()
         glm::vec3(0.0f, 1.0f, 0.0f)  // вектор вверх
     );
 
-    TextureAtlas* atlas = ctx->CreateTextureAtlas("albedo_atlas", TexturePresets::AlbedoAtlas(2048, 3, 1), DefaultSamplersNames::DEFAULT_SAMPLER);
+    TextureAtlas* atlas = ctx->CreateTextureAtlas("albedo_atlas", TexturePresets::AlbedoAtlas(2048, 3, TexturePresets::FullMipLevels(2048)), DefaultSamplersNames::DEFAULT_SAMPLER);
+	// Мипы обязательны: без них (а) POM-префильтр pomBias — no-op (нет грубых уровней), (б) нормаль
+	// не сглаживается (мерцание, см. заметку про red-shift). FullMipLevels включает мип-цепочку.
 	TextureAtlas* normal_atlas   = ctx->CreateTextureAtlas("normal_atlas",   TexturePresets::NormalAtlas(2048, 2, TexturePresets::FullMipLevels(2048)),   DefaultSamplersNames::DEFAULT_SAMPLER);
 	TextureAtlas* orm_atlas      = ctx->CreateTextureAtlas("orm_atlas",      TexturePresets::ORMAtlas(2048, 2), DefaultSamplersNames::DEFAULT_SAMPLER);
 	TextureAtlas* emissive_atlas = ctx->CreateTextureAtlas("emissive_atlas", TexturePresets::EmissiveAtlas(1024, 1), DefaultSamplersNames::DEFAULT_SAMPLER);
@@ -50,11 +52,14 @@ SDL_AppResult Game::MainInit()
 	TextureHandle* texture_cube = ctx->CreateTextureFromFile("albedo_cube", "albedo_atlas", "textures/assets/cube_test.png");
 	TextureHandle* norm = ctx->CreateTextureFromFile("norm", "normal_atlas", "textures/assets/car_norm.png");
 
-    ctx->CreateTextureFromFile("texture_asphalt", "albedo_atlas", "textures/blocks/wood_base.png");
+    ctx->CreateTextureFromFile("texture_asphalt", "albedo_atlas", "textures/blocks/brick_base.png");
     // G у этой ORM хранит smoothness (asphalt G≈0.12 → как roughness это «мокрое зеркало»).
     // Нормализуем к канону движка (roughness) инверсией G на импорте.
-    ctx->CreateTextureFromFile("texture_asphalt_orm", "orm_atlas", "textures/blocks/wood_orm.png", ChannelConvention::SmoothnessInGreen);
-    ctx->CreateTextureFromFile("wood_norm", "normal_atlas", "textures/blocks/wood_normal.png", ChannelConvention::SmoothnessInGreen);
+    ctx->CreateTextureFromFile("texture_asphalt_orm", "orm_atlas", "textures/blocks/brick_orm.png", ChannelConvention::SmoothnessInGreen);
+    // Normal с картой ВЫСОТ в альфе (RGB=нормаль, A=height: яркое=выше; POM читает depth=1-A из
+    // u_normal.a — без нового атласа/слота). AsIs: G-флип был компенсацией левосторонней развёртки
+    // квада (см. CreateModel("quad")) — после её исправления нормаль грузится как есть.
+    ctx->CreateTextureFromFile("wood_norm", "normal_atlas", "textures/blocks/brick_normal_h.png", ChannelConvention::AsIs);
 
 	textureManager->CreateTexture("default_orm",      "orm_atlas",      2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
 	textureManager->CreateTexture("default_emissive", "emissive_atlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
@@ -70,11 +75,9 @@ SDL_AppResult Game::MainInit()
         SetTransparentShaderProgram(ctx);
         SetUntexturedShaderProgram(ctx);
         SetDebugColliderProgram(ctx);
-        SetBloomPrograms(ctx);   // программы bloom под BLOOM_PASS (проход создаёт engine)
+        SetBloomPrograms(ctx); 
     }
     
-    // "sp" теперь требует 4 слота: albedo, normal, orm, emissive. Реальных ORM/эмиссии нет →
-    // подставляем дефолт-белые (default_orm / default_emissive) — поведение как при albedo+normal.
     auto material_car = ctx->CreateMaterial("car", {
         {TextureSlotRole::Albedo, "new_car"},
         {TextureSlotRole::Normal, "norm"},
@@ -100,7 +103,10 @@ SDL_AppResult Game::MainInit()
         {TextureSlotRole::ORM, "texture_asphalt_orm"},
         {TextureSlotRole::Emissive, "default_emissive"} },
         { "sp", "sp_shadow" });
-    ctx->SetMaterialParams(material_sprite, OpaqueMaterialParams{ {1,1,1,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f });
+    // heightScale = глубина POM (0 = выкл; depth = альфа normal-карты). ~0.04–0.08 реалистично;
+    // выше сильнее ломает близкий план/силуэт. pomBias = префильтр к крупным деталям (0 = чётко).
+    // Реальные фиксы: бинарное уточнение (убирает «шлейф»), offset-limiting (скользящие углы), мипы.
+    ctx->SetMaterialParams(material_sprite, OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.06f, /*pomBias*/0.05f });
 
     auto material_sprite2 = ctx->CreateMaterial("material_sprite2", {
         {TextureSlotRole::Albedo, "texture_asphalt"},
@@ -115,8 +121,7 @@ SDL_AppResult Game::MainInit()
         {TextureSlotRole::Normal, "norm"} },
         { "sp_transparent" });
 
-    // Текстур нет → пустой список текстур; шейдер — ИМЯ ПРОГРАММЫ "sp_untextured" (не дескриптора
-    // "spd_untextured"!). Цвет задаёт фактор baseColor (дефолт белый — видимый).
+
     auto ship_material = ctx->CreateMaterial("ship", {}, { "sp_untextured" });
 
     auto m_orange = ctx->CreateMaterial("m_orange", {}, { "sp_untextured", "sp_shadow" });
@@ -149,12 +154,17 @@ SDL_AppResult Game::MainInit()
     ModelData* model_car = ctx->CreateModel("car", "models/new_car_n_fixed.bin", "models/new_car_n_fixed_i.bin");
 	ModelData* model_ship = ctx->CreateModel("ship", "models/low_poly_ship.bin", "models/low_poly_ship_i.bin");
 
+    // ВАЖНО: развёртка обязана быть ПРАВОсторонней (du × dv = +N), потому что вершинник строит
+    // битангент как cross(N, T) без tangent.w. Старая развёртка (v = 1 - y) была левосторонней →
+    // ось v tangent-пространства инвертировалась: POM марчил по Y в обратную сторону (искажения,
+    // «работает по Y, слабо по X»), а свет по v требовал компенсации G-флипом. v = y — согласовано
+    // со сферой; текстура на кваде отобразится вертикально зеркально (для кирпича неважно).
     ModelData* quad = ctx->CreateModel("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
         v = {
-            { 0,0,0,  0,1,  0,0,1,  1,0,0 },
-            { 1,0,0,  1,1,  0,0,1,  1,0,0 },
-            { 1,1,0,  1,0,  0,0,1,  1,0,0 },
-            { 0,1,0,  0,0,  0,0,1,  1,0,0 },
+            { 0,0,0,  0,0,  0,0,1,  1,0,0 },
+            { 1,0,0,  1,0,  0,0,1,  1,0,0 },
+            { 1,1,0,  1,1,  0,0,1,  1,0,0 },
+            { 0,1,0,  0,1,  0,0,1,  1,0,0 },
         };
         i = { 0, 1, 2, 0, 2, 3 };
     });

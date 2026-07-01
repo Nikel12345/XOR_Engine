@@ -31,10 +31,8 @@ StructuredBuffer<Light>       LightBlock    : LIGHT_BLOCK_REGISTER;
 struct ShadowCamera { float4x4 view; float4x4 proj; };
 StructuredBuffer<ShadowCamera> ShadowCameras : SHADOW_CAMERAS_REGISTER;
 
-// Камера во фрагменте — для view-зависимого спекуляра. camPos выводим из view (rigid-inverse
-// -R^T·t), т.к. дописать его в CameraData нельзя — она шарится с теневыми камерами (страйд).
-struct CameraData { float4x4 view; float4x4 proj; };
-StructuredBuffer<CameraData> Camera : CAMERA_REGISTER;
+// Camera объявлена в ПРОЛОГЕ (material_api), чтобы getSurface мог посчитать view-вектор для POM
+// до включения базы. Здесь она только используется (camPos = -R^T·t из view — rigid-inverse).
 
 static const float AMBIENT_LIGHT = 0.75;    // пол освещённости (max с засветкой)
 

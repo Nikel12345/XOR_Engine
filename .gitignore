@@ -3,5 +3,6 @@ commands.txt
 src/engine/shaders/
 scripts/model_loader/raw/*
 scripts/model_loader/venv
+scripts/texture_packer/venv
 !scripts/model_loader/raw/.gitkeep
 todo.txt

@@ -31,7 +31,10 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
     atlas->width = tci.width;
     atlas->height = tci.height;
     atlas->layers = tci.layer_count_or_depth;
-    atlas->padding = 3;
+    // Мипованный атлас: GenerateMipmaps мипует атлас ЦЕЛИКОМ, на мипе L кромка тайла усредняется
+    // с соседями в радиусе ~2^L текселей. 16px паддинга (+заполнение кромкой в _BuildUploadTasks)
+    // держат мипы 0..4 чистыми; 3px хватало бы только для мипов 0..1 → тёмная рамка по краю тайла.
+    atlas->padding = (tci.num_levels > 1) ? 16 : 3;
     atlas->mip_levels = tci.num_levels;
     atlas->format = tci.format;
     atlas->texture_type = tci.type;
@@ -232,16 +235,7 @@ void TextureManager::_BuildUploadTasks() {
             continue;
         }
 
-        task.dst.texture = atlas->texture_binding.texture;
-        task.dst.x = (Uint32)result->x + pad;
-        task.dst.y = (Uint32)result->y + pad;
-        task.dst.z = 0;
-        task.dst.layer = state.layer;
-        task.dst.mip_level = 0;
-        task.dst.w = task.width;
-        task.dst.h = task.height;
-        task.dst.d = 1;
-
+        // UVL считаем от ВНУТРЕННЕГО прямоугольника (без паддинга) и ДО расширения пикселей.
         TextureData* td = task.target_handle->texture_data;
         float ox = (float)(result->x + pad) / (float)atlas->width;
         float oy = (float)(result->y + pad) / (float)atlas->height;
@@ -252,8 +246,53 @@ void TextureManager::_BuildUploadTasks() {
         td->layer = state.layer;
         td->_pad = 0;
 
+        // Заполняем gutter репликацией кромки: грузим (w+2p)×(h+2p) вместо w×h. Без этого паддинг
+        // остаётся мусором/чёрным, и мип-генерация (она идёт по атласу целиком) подмешивает его в
+        // кромку тайла на грубых мипах → тёмная рамка по периметру меша и битая POM-глубина у края.
+        if (pad > 0 && task.width > 0 && task.height > 0) {
+            const uint32_t bpp   = (uint32_t)(task.pixels.size() / ((size_t)task.width * task.height));
+            const uint32_t new_w = task.width + pad * 2;
+            const uint32_t new_h = task.height + pad * 2;
+            std::vector<std::byte> padded((size_t)new_w * new_h * bpp);
+            for (uint32_t y = 0; y < new_h; ++y) {
+                const uint32_t sy_row = (uint32_t)SDL_clamp((int)y - (int)pad, 0, (int)task.height - 1);
+                const std::byte* srow = task.pixels.data() + (size_t)sy_row * task.width * bpp;
+                std::byte* drow = padded.data() + (size_t)y * new_w * bpp;
+                for (uint32_t x = 0; x < pad; ++x)                       // левая кромка
+                    SDL_memcpy(drow + (size_t)x * bpp, srow, bpp);
+                SDL_memcpy(drow + (size_t)pad * bpp, srow, (size_t)task.width * bpp);   // центр
+                for (uint32_t x = 0; x < pad; ++x)                       // правая кромка
+                    SDL_memcpy(drow + ((size_t)pad + task.width + x) * bpp, srow + (size_t)(task.width - 1) * bpp, bpp);
+            }
+            task.pixels = std::move(padded);
+            task.width  = new_w;
+            task.height = new_h;
+            task.size   = (uint32_t)task.pixels.size();
+        }
+
+        // Грузим от угла РЕЗЕРВАЦИИ: при pad>0 картинка уже расширена gutter'ом до (w+2p)×(h+2p),
+        // при pad==0 внутренний прямоугольник совпадает с резервацией.
+        task.dst.texture = atlas->texture_binding.texture;
+        task.dst.x = (Uint32)result->x;
+        task.dst.y = (Uint32)result->y;
+        task.dst.z = 0;
+        task.dst.layer = state.layer;
+        task.dst.mip_level = 0;
+        task.dst.w = task.width;
+        task.dst.h = task.height;
+        task.dst.d = 1;
+
         state.placed_count++;
     }
+
+    // Расширение пикселей меняет размеры задач → пересобираем офсеты transfer-буфера
+    // (маппинг и EnsureCapacity происходят ПОЗЖЕ, в ExecuteUploadTasks — порядок безопасен).
+    uint32_t off = 0;
+    for (auto& t : upload_tasks) {
+        t.offset = off;
+        off += t.size;
+    }
+    current_upload_tb_offset = off;
 }
 
 void TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
