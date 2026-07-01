@@ -50,7 +50,7 @@ static SDL_PixelFormat PixelFormatForGpuFormat(SDL_GPUTextureFormat fmt)
 	}
 }
 
-TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path) {
+TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv) {
 	TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
 	if (!atlas) return nullptr;   // GetTextureAtlas уже залогировал отсутствие
 
@@ -59,6 +59,15 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 		SDL_Log("EngineContext::CreateTextureFromFile failed to load '%s'", path);
 		return nullptr;
 	}
+
+	// Нормализация исходной конвенции к канону движка (G = linear roughness). smoothness → roughness
+	// = инверсия зелёного канала (индекс 1 и в RGBA, и в BGRA). Делается один раз здесь на CPU,
+	// поэтому шейдер/материалы остаются без веток и флагов.
+	if (conv == ChannelConvention::SmoothnessInGreen) {
+		for (size_t i = 1; i < img.pixels.size(); i += 4)
+			img.pixels[i] = std::byte{ static_cast<unsigned char>(255 - std::to_integer<int>(img.pixels[i])) };
+	}
+
 	return texture_manager->CreateTexture(name, atlas, img.width, img.height, std::move(img.pixels));
 }
 

@@ -24,6 +24,7 @@ SurfaceData getSurface(PSInput input, bool isFrontFace)
     s.emission  = emissive * emissiveStrength;
     s.metallic  = metallic;
     s.roughness = roughness;
+    s.ao        = 1.0;   // AO-карты нет → без затенения непрямого света
     return s;
 }
 

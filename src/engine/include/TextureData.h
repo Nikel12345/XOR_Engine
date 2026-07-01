@@ -3,6 +3,15 @@
 #include <vector>
 #include <memory>
 
+// Конвенция упаковки ИСХОДНОГО файла текстуры. Канон движка: G = linear roughness.
+// Импорт нормализует к нему один раз на CPU (см. EngineContext::CreateTextureFromFile),
+// поэтому шейдер/материалы всегда видят единую конвенцию — без рантайм-веток и флагов на материале.
+// Зелёный канал — индекс 1 и в RGBA, и в BGRA, так что инверсия формат-независима.
+enum class ChannelConvention {
+	AsIs,                // без изменений (по умолчанию) — файл уже в каноне движка
+	SmoothnessInGreen,   // G = smoothness/glossiness (Unity-стиль) → инвертируется в roughness (G = 255 - G)
+};
+
 struct TextureData {
 	uint32_t uv_packed_offset;  // unorm16 × 2: offset_x в low, offset_y в high
 	uint32_t uv_packed_scale;   // unorm16 × 2: scale_x в low, scale_y в high

@@ -14,8 +14,9 @@ RWTexture2D<float4> u_scene : register(u0, space1);
 cbuffer BloomParams : register(b0, space2) {
     uint  useKaris;
     float intensity;   // доля подмешивания bloom (~0.05)
-    float _pad0;
-    float _pad1;
+    float threshold;   // не используется
+    float knee;        // не используется
+    uint  srcLod;      // не используется (composite читает bloom mip0)
 };
 
 [numthreads(16, 16, 1)]

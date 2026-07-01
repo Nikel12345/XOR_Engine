@@ -32,8 +32,20 @@ float3 computeNormal(
         worldBitangent,
         normalize(worldNormal)
     );
-    float3 n = sampleAtlas(normalMap, normalSampler, normalTextureData, uv).rgb * 2.0 - 1.0;
-    n.x = -n.x;
+    // Нормаль-маппинг. Освещение нелинейно по нормали, а фильтрация сглаживает лишь ВЕКТОР нормали
+    // → высокочастотная нормаль недосэмпливается и её шейдинг мерцает при движении камеры (тёмное
+    // дрожание, на тёплом дереве читается как цветовой сдвиг). Полностью убрать субпиксельное
+    // мерцание при сильном рельефе можно только TAA; здесь — компромисс двумя ручками:
+    //   NORMAL_STRENGTH — сила рельефа. Больше = выразительнее, но заметнее мерцает.
+    //   NORMAL_MIP_BIAS — префильтр (блюр нормали, +к авто-LOD). Больше = меньше мерцания, мягче
+    //                     рельеф. Работает ТОЛЬКО с aniso=OFF у DEFAULT_SAMPLER (иначе резкая ось
+    //                     футпринта не даёт мипу префильтровать) — см. TextureSamplerPresets.h.
+    const float NORMAL_STRENGTH = 0.7;
+    const float NORMAL_MIP_BIAS = 1.0;
+    float2 noff = unpackUnorm2x16(normalTextureData.x);
+    float2 nsc  = unpackUnorm2x16(normalTextureData.y);
+    float3 n = normalMap.SampleBias(normalSampler, float3(uv * nsc + noff, float(normalTextureData.z)), NORMAL_MIP_BIAS).rgb * 2.0 - 1.0;
+    n.xy *= NORMAL_STRENGTH;
     return normalize(mul(n, TBN));
 }
 

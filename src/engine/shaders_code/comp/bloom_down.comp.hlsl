@@ -14,11 +14,15 @@ RWTexture2D<float4> u_dst : register(u0, space1);
 cbuffer BloomParams : register(b0, space2) {
     uint  useKaris;
     float intensity;   // не используется здесь
-    float _pad0;
-    float _pad1;
+    float threshold;
+    float knee;
+    uint  srcLod;      // mip-уровень источника (= уровень i-1)
 };
 
-float3 S(float2 uv) { return u_src.SampleLevel(u_sampler, uv, 0).rgb; }
+// Пирамида — ОДНА текстура с мипами: src = mip srcLod (вдвое крупнее), dst = mip i. Читаем src
+// сэмплером (билинейка) на уровне srcLod, пишем dst storage'ом — разные мипы одной текстуры
+// (под флагом SIMULTANEOUS).
+float3 S(float2 uv) { return u_src.SampleLevel(u_sampler, uv, srcLod).rgb; }
 float  karis(float3 c) { float l = dot(c, float3(0.2126, 0.7152, 0.0722)); return 1.0 / (1.0 + l); }
 
 [numthreads(16, 16, 1)]
@@ -27,7 +31,7 @@ void main(uint3 tid : SV_DispatchThreadID)
     uint dw, dh; u_dst.GetDimensions(dw, dh);
     if (tid.x >= dw || tid.y >= dh) return;
 
-    uint sw, sh; u_src.GetDimensions(sw, sh);
+    uint sw, sh, nl; u_src.GetDimensions(srcLod, sw, sh, nl);
     float2 t  = 1.0 / float2(sw, sh);                       // шаг = 1 тексель ИСТОЧНИКА
     float2 uv = (float2(tid.xy) + 0.5) / float2(dw, dh);
 

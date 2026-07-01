@@ -60,7 +60,8 @@ void DefaultShaderProgramSet::SetMainShaderProgram(EngineContext* ctx)
     ctx->CreateShaderProgram("sp", spd_main, DefaultRenderPassNamespace::MAIN_PASS,
         vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
         fs, { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
-        { TextureSlotRole::Albedo, TextureSlotRole::Normal }
+        // Порядок ДОЛЖЕН совпадать с textures[] в прологе: albedo, normal, orm, emissive.
+        { TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive }
     );
 
     render_main_inited = true;
@@ -418,15 +419,24 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     ComputeShaderData csd_up   = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_up.comp.hlsl");
     ComputeShaderData csd_comp = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_composite.comp.hlsl");
 
-    auto bloomName = [](uint32_t i) { return std::string("bloom_") + std::to_string(i); };
+    // Вся пирамида — ОДНА текстура "bloom_pyramid" с BLOOM_LEVELS мипами: уровень i = mip i.
+    // down/up биндят её одновременно как RW-storage (нужный mip) и как sampler (читают соседний mip)
+    // — это требует флага SIMULTANEOUS на текстуре (см. BloomPyramid-пресет). Размер mip i = базовый
+    // (mip0 = ½ окна) >> i; берём из живого атласа при диспатче.
+    const std::string PYR = "bloom_pyramid";
+    auto pyr = ctx->GetTextureAtlas(PYR);
+    auto mipDispatch = [](TextureAtlas* a, uint32_t mip) -> std::pair<uint32_t, uint32_t> {
+        uint32_t w = a->width  >> mip; if (w == 0) w = 1;
+        uint32_t h = a->height >> mip; if (h == 0) h = 1;
+        return { w, h };
+    };
 
-    // --- Prefilter (level 0): softKnee(scene_hdr) + scene_emission → bloom_0 (Karis) ---
+    // --- Prefilter (mip0): softKnee(scene_hdr) + scene_emission → bloom mip0 (Karis) ---
     {
-        auto dst = ctx->GetTextureAtlas(bloomName(0));
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
             "bloom_down_0", csd_pre,
             {}, {},
-            { { bloomName(0), 0, 0 } },                       // rw: bloom_0
+            { { PYR, 0, 0 } },                                             // rw: bloom_pyramid mip0
             {},
             { std::string("scene_hdr"), std::string("scene_emission") },   // sampler t0/s0, t1/s1
             BLOOM_PASS);
@@ -436,48 +446,46 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             d.intensity = 0.1f;   // сила вклада сцены (блик/пересвет); эмиссия идёт в полную силу
             b.Push(0, d);
         });
-        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
-            b.element_count = { dst->width, dst->height, 1 };
+        p->BindDispatch<DummyDispatchData>([pyr, mipDispatch](DispatchSizeBinder& b, DummyDispatchData) {
+            auto s = mipDispatch(pyr, 0); b.element_count = { s.first, s.second, 1 };
         });
     }
 
-    // --- Downsample: bloom_{i-1} → bloom_i (уровни 1..N-1) ---
+    // --- Downsample: mip(i-1) → mip i (уровни 1..N-1). Читаем srcLod=i-1, пишем mip i. ---
     for (uint32_t i = 1; i < BLOOM_LEVELS; ++i) {
-        auto dst = ctx->GetTextureAtlas(bloomName(i));
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
             "bloom_down_" + std::to_string(i), csd_down,
             {}, {},
-            { { bloomName(i), 0, 0 } },   // rw: dst = bloom_i
+            { { PYR, i, 0 } },   // rw: bloom_pyramid mip i
             {},
-            { bloomName(i - 1) },         // combined sampler: src = bloom_{i-1}
+            { PYR },             // combined sampler: та же текстура (читаем mip i-1)
             BLOOM_PASS);
-        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
-            d.useKaris = 0u; d.intensity = 0.0f; b.Push(0, d);
+        p->BindPushConstants<BloomParams>([i](const PushConstantBinder& b, BloomParams d) {
+            d.useKaris = 0u; d.srcLod = i - 1; b.Push(0, d);
         });
-        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
-            b.element_count = { dst->width, dst->height, 1 };
+        p->BindDispatch<DummyDispatchData>([pyr, mipDispatch, i](DispatchSizeBinder& b, DummyDispatchData) {
+            auto s = mipDispatch(pyr, i); b.element_count = { s.first, s.second, 1 };
         });
     }
 
-    // --- Upsample (tent, аддитивно): bloom_{i+1} → += bloom_i, от мелкого к крупному ---
+    // --- Upsample (tent, аддитивно): mip(i+1) → += mip i, от мелкого к крупному. srcLod=i+1. ---
     for (int i = (int)BLOOM_LEVELS - 2; i >= 0; --i) {
-        auto dst = ctx->GetTextureAtlas(bloomName(i));
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
             "bloom_up_" + std::to_string(i), csd_up,
             {}, {},
-            { { bloomName(i), 0, 0 } },   // rw: dst = bloom_i (RMW: += размытие)
+            { { PYR, (uint32_t)i, 0 } },   // rw: bloom_pyramid mip i (RMW: += размытие)
             {},
-            { bloomName(i + 1) },         // combined sampler: bloom_{i+1}
+            { PYR },                       // combined sampler: та же текстура (читаем mip i+1)
             BLOOM_PASS);
-        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
-            b.Push(0, d);                 // up параметров не использует
+        p->BindPushConstants<BloomParams>([i](const PushConstantBinder& b, BloomParams d) {
+            d.srcLod = (uint32_t)i + 1; b.Push(0, d);
         });
-        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
-            b.element_count = { dst->width, dst->height, 1 };
+        p->BindDispatch<DummyDispatchData>([pyr, mipDispatch, i](DispatchSizeBinder& b, DummyDispatchData) {
+            auto s = mipDispatch(pyr, (uint32_t)i); b.element_count = { s.first, s.second, 1 };
         });
     }
 
-    // --- Composite: scene_hdr = clip(scene_hdr + bloom_0 * intensity) ---
+    // --- Composite: scene_hdr += bloom mip0 * intensity (hue-preserving clip) ---
     {
         auto dst = ctx->GetTextureAtlas(std::string("scene_hdr"));
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
@@ -485,10 +493,10 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             {}, {},
             { { std::string("scene_hdr"), 0, 0 } },   // rw: scene_hdr (RMW)
             {},
-            { std::string("bloom_0") },               // combined sampler: bloom_0
+            { PYR },                                  // combined sampler: bloom_pyramid (читаем mip0)
             BLOOM_PASS);
         p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
-            d.intensity = 0.5f; d.useKaris = 0u; b.Push(0, d);   // сила свечения — главная ручка
+            d.intensity = 0.5f; d.srcLod = 0u; b.Push(0, d);   // сила свечения — главная ручка
         });
         p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };

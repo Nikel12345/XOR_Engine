@@ -29,6 +29,11 @@ enum class TexturePreset {
 	Albedo_Atlas2048_1Layer,
     NAOPBR_Atlas2048_1Layer,
     NAOPBR_Atlas4096_3Layer,
+    // PBR-атласы по тирам детализации (все UNORM, как остальные — движок не использует sRGB-форматы).
+    // Normal — высокодетальный (нужна попиксельная деталь); ORM/Emissive — низкочастотные → меньше.
+    Normal_Atlas2048_1Layer,
+    ORM_Atlas1024_1Layer,
+    Emissive_Atlas1024_1Layer,
     Custom
 };
 
@@ -307,12 +312,84 @@ namespace TexturePresets {
             info.num_levels = 1;
             break;
 
+        case TexturePreset::Normal_Atlas2048_1Layer:
+            info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+            info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;   // линейные данные (нормали)
+            info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+            info.width = 2048;
+            info.height = 2048;
+            info.layer_count_or_depth = 1;
+            info.num_levels = 1;
+            break;
+        case TexturePreset::ORM_Atlas1024_1Layer:
+            info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+            info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;   // R=AO G=Rough B=Metal (линейные)
+            info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+            info.width = 1024;
+            info.height = 1024;
+            info.layer_count_or_depth = 1;
+            info.num_levels = 1;
+            break;
+        case TexturePreset::Emissive_Atlas1024_1Layer:
+            info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+            info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+            info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+            info.width = 1024;
+            info.height = 1024;
+            info.layer_count_or_depth = 1;
+            info.num_levels = 1;
+            break;
+
         case TexturePreset::Custom:
             // ��� Custom ����� ��������� �������
             break;
         }
 
         return info;
+    }
+
+    // ── Атласы текстур материала (параметризуемые) ───────────────────────────────
+    // Квадратный 2D-array атлас под material-текстуры: BGRA8 UNORM (движок не использует
+    // sRGB-форматы), задаёшь разрешение, число слоёв и число мип-уровней.
+    // Полная мип-цепочка от разрешения: log2(res)+1. Для partial-цепочки передавай число вручную.
+    inline uint32_t FullMipLevels(uint32_t resolution) {
+        uint32_t levels = 1;
+        for (uint32_t s = resolution; s > 1; s >>= 1) ++levels;
+        return levels;
+    }
+    inline SDL_GPUTextureCreateInfo _MaterialAtlas(uint32_t resolution, uint32_t layers,
+                                                   uint32_t mip_levels, SDL_GPUTextureUsageFlags usage) {
+        // Мип-генерация (SDL_GenerateMipmapsForGPUTexture) рендерит в уровни → требует COLOR_TARGET.
+        // Добавляем его автоматически, когда мипы запрошены, иначе GenerateMipmaps молча ничего не даст.
+        if (mip_levels > 1) usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+        info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+        info.usage = usage;
+        info.width = resolution;
+        info.height = resolution;
+        info.layer_count_or_depth = layers;
+        info.num_levels = mip_levels < 1 ? 1 : mip_levels;
+        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        info.props = 0;
+        return info;
+    }
+    // Albedo (sRGB-данные, но формат UNORM как везде в движке). COLOR_TARGET — может быть приёмником.
+    inline SDL_GPUTextureCreateInfo AlbedoAtlas(uint32_t resolution, uint32_t layers = 1, uint32_t mip_levels = 1) {
+        return _MaterialAtlas(resolution, layers, mip_levels,
+            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
+    }
+    // Normal — линейные данные (tangent-space нормали).
+    inline SDL_GPUTextureCreateInfo NormalAtlas(uint32_t resolution, uint32_t layers = 1, uint32_t mip_levels = 1) {
+        return _MaterialAtlas(resolution, layers, mip_levels, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+    }
+    // ORM — упаковка R=AO, G=Roughness, B=Metallic (линейные).
+    inline SDL_GPUTextureCreateInfo ORMAtlas(uint32_t resolution, uint32_t layers = 1, uint32_t mip_levels = 1) {
+        return _MaterialAtlas(resolution, layers, mip_levels, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+    }
+    // Emissive — цвет свечения.
+    inline SDL_GPUTextureCreateInfo EmissiveAtlas(uint32_t resolution, uint32_t layers = 1, uint32_t mip_levels = 1) {
+        return _MaterialAtlas(resolution, layers, mip_levels, SDL_GPU_TEXTUREUSAGE_SAMPLER);
     }
 
     // ������ � ����������� ��� ��������
@@ -397,6 +474,27 @@ namespace TexturePresets {
         info.height = height;
         info.layer_count_or_depth = 1;
         info.num_levels = 1;
+        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        info.props = 0;
+        return info;
+    }
+
+    // Вся bloom-пирамида в ОДНОЙ текстуре: уровень i = mip i (mip0 = ½ окна, далее /2). Down/up
+    // читают mip-источник СЭМПЛЕРОМ (аппаратная билинейность) и storage-пишут соседний mip ТОЙ ЖЕ
+    // текстуры в одном дисптаче — это требует флага SIMULTANEOUS_READ_WRITE (чтение+запись одной
+    // текстуры в пределах одного compute-прохода; разные мипы не пересекаются → гонки нет). Поддержку
+    // формата под SIMULTANEOUS надо проверять (SDL_GPUTextureSupportsFormat) — не универсальна.
+    inline SDL_GPUTextureCreateInfo BloomPyramid(uint32_t width, uint32_t height, uint32_t levels) {
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER
+                   | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE
+                   | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE;
+        info.width = width;
+        info.height = height;
+        info.layer_count_or_depth = 1;
+        info.num_levels = levels;
         info.sample_count = SDL_GPU_SAMPLECOUNT_1;
         info.props = 0;
         return info;

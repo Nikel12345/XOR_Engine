@@ -68,6 +68,7 @@ namespace DefaultRenderPassNamespace
         float    intensity = 0.0f;  // доля подмешивания bloom в composite (~0.05)
         float    threshold = 0.0f;  // prefilter: порог яркости, ниже которого сцена не блумит
         float    knee      = 0.0f;  // prefilter: ширина мягкого колена вокруг порога
+        uint32_t srcLod    = 0;     // down/up: mip-уровень источника в единой bloom-пирамиде
     };
 
     // Создаёт compute-проход bloom: пирамида downsample→upsample по эмиссии + composite/tonemap в

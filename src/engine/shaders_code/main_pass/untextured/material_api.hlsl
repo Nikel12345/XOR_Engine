@@ -27,6 +27,7 @@ struct SurfaceData
     float3 emission;   // добавляется к освещению в main базы
     float  metallic;   // сила спекуляра (Blinn-Phong)
     float  roughness;  // → shininess
+    float  ao;         // контракт с базой (нет AO-карты → всегда 1)
 };
 
 // UVL нет → MaterialBlock первый fragment-uniform (b0). Сэмплеров пасса 2 (тень t0 + env t1,

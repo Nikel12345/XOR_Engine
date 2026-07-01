@@ -27,7 +27,9 @@ public:
 
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name);
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name);
-	TextureHandle* CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path);
+	// conv — конвенция исходного файла; импорт нормализует её к канону движка (G = roughness).
+	// По умолчанию AsIs (поведение без изменений). SmoothnessInGreen инвертирует G на загрузке.
+	TextureHandle* CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv = ChannelConvention::AsIs);
 	// Грузит cube-текстуру (4×3 крест) в УЖЕ существующий cube-атлас (создаётся отдельно
 	// через CreateTextureAtlas с tci.type=CUBE — характер атласа задаёт только tci). ctx здесь
 	// дирижёр: проверяет совместимость (что атлас и правда куб + квадратный) и делегирует

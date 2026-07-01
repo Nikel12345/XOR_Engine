@@ -139,10 +139,25 @@ struct ShaderProgramDescription
 };
 
 enum class TextureSlotRole {
+    // Well-known PBR-роли: движок знает их семантику (colorspace, встроенные хелперы
+    // SampleAlbedo/computeNormal/SampleORM). Порядок здесь не задаёт бинды — их порядок
+    // диктует ShaderProgram::required_slots (он же → textures[i] в прологе).
     Albedo,
     Normal,
+    ORM,                     // упаковка: R=AO, G=Roughness, B=Metallic (одна текстура, один UVL)
     Emissive,
-	MetallicRoughness,
+    MetallicRoughness = ORM, // back-compat алиас: тот же слот, что ORM (старое имя)
+
+    // Generic-слоты для пользовательских прологов: движок просто биндит хэндл по роли,
+    // никакой семантики. Кастомный surface.hlsl сам объявляет сэмплеры/textures[] под них.
+    Custom0 = 1000,
+    Custom1,
+    Custom2,
+    Custom3,
+    Custom4,
+    Custom5,
+    Custom6,
+    Custom7,
 };
 
 struct ShaderProgram {

@@ -22,6 +22,7 @@ cbuffer BloomParams : register(b0, space2) {
     float intensity;   // здесь = масштаб вклада СЦЕНЫ (блик/пересвет); эмиссию НЕ трогает
     float threshold;   // порог яркости сцены
     float knee;        // ширина мягкого колена
+    uint  srcLod;      // не используется (prefilter пишет mip0, читает scene_* на lod0)
 };
 
 // Одностороннее колено: НИЖЕ threshold — строго ноль (обычный диффуз ≤1 не блумит вообще),

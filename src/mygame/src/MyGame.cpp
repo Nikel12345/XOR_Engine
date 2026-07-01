@@ -131,11 +131,18 @@ void MainMenuMode::Enter()
 
 	auto common_normals = ctx->CreateTextureFromFile("norm", "NAOPBR_atlas", "textures/car_norm.png");
 
+	// "sp" теперь требует 4 слота (albedo, normal, orm, emissive). Для материалов без реальных
+	// ORM/эмиссии — искусственные дефолт-белые 2×2 (множитель-единица: AO=1, factor-driven metal/rough/emission).
+	ctx->GetTextureManager()->CreateTexture("default_orm",      "NAOPBR_atlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
+	ctx->GetTextureManager()->CreateTexture("default_emissive", "NAOPBR_atlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
+
 
 
     auto material_player = ctx->CreateMaterial("car", {
     {TextureSlotRole::Albedo, "player_texture"},
-    {TextureSlotRole::Normal, "norm"} },
+    {TextureSlotRole::Normal, "norm"},
+    {TextureSlotRole::ORM, "default_orm"},
+    {TextureSlotRole::Emissive, "default_emissive"} },
         { "sp", "sp_shadow" });
 
     //auto material_enemy = ctx->CreateMaterial("enemy",
@@ -171,7 +178,9 @@ void MainMenuMode::Enter()
 
     auto material_sprite = ctx->CreateMaterial("sprite", {
     {TextureSlotRole::Albedo, "albedo_cube"},
-    {TextureSlotRole::Normal, "norm"} },
+    {TextureSlotRole::Normal, "norm"},
+    {TextureSlotRole::ORM, "default_orm"},
+    {TextureSlotRole::Emissive, "default_emissive"} },
         { "sp", "sp_shadow" });
 
     // Opaque-материалы несут params (дефолт-белый baseColorFactor = без тинта): иначе их

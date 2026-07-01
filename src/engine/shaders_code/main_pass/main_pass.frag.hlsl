@@ -90,6 +90,9 @@ PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
     float3   camPos    = -mul(transpose((float3x3)view), view._m03_m13_m23);
     float3   V         = normalize(camPos - input.v_worldPos);
     float    shininess = lerp(8.0, 256.0, saturate(1.0 - surface.roughness));
+    // F0 — отражательность в лоб: диэлектрик ≈ 0.04 (4%), металл ≈ albedo. metallic интерполирует.
+    // Благодаря этому спекуляр/отражение (и значит roughness) есть и у неметаллов, не только у металла.
+    float3   F0        = lerp((float3)0.04, surface.baseColor, surface.metallic);
     float3   specSum   = float3(0.0, 0.0, 0.0);
 
     float3 lightSum = float3(0.0, 0.0, 0.0);
@@ -157,15 +160,24 @@ PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
             if (intensity > 0.0)
                 lightSum += light.color_power.rgb * intensity;
 
-            // Спекуляр Blinn-Phong — пока только от directional. metallic = сила блика.
+            // Спекуляр Blinn-Phong от directional — теперь для ВСЕХ поверхностей, сила = Френель(F0).
             // Энергонормировка (shininess+8)/8π: пик растёт с резкостью лоба, поэтому острый
             // блик (низкий roughness) пробивает ярким концентрированным глинтом, а не теряется.
-            if (surface.metallic > 0.0)
             {
-                float3 H    = normalize(L_dir + V);
-                float  norm = (shininess + 8.0) / (8.0 * 3.14159265);
-                float  spec = norm * pow(saturate(dot(n, H)), shininess);
-                specSum += light.color_power.rgb * (spec * light.color_power.a * dirShadow * surface.metallic);
+                float  NdotL_s = saturate(dot(n, L_dir));
+                float3 HV      = L_dir + V;
+                float  hl      = length(HV);
+                // Защита от NaN: при L≈-V полувектор вырождается в ноль → normalize даёт NaN,
+                // который через HDR/bloom расползается на весь кадр (мерцание). Гейтим спекуляр.
+                if (NdotL_s > 0.0 && hl > 1e-4)
+                {
+                    float3 H     = HV / hl;
+                    float  VdotH = saturate(dot(V, H));
+                    float3 F     = F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);   // Шлик: блик растёт к краям
+                    float  norm  = (shininess + 8.0) / (8.0 * 3.14159265);
+                    float  spec  = norm * pow(saturate(dot(n, H)), shininess);
+                    specSum += light.color_power.rgb * (spec * NdotL_s * light.color_power.a * dirShadow) * F;
+                }
             }
             continue;
         }
@@ -208,17 +220,39 @@ PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
         intensity *= shadow;
         if (intensity <= 0.0) continue;
         lightSum += light.color_power.rgb * intensity;
+
+        // Спекуляр от спота/точки (тот же Френель-Blinn-Phong). intensity уже несёт NdotL,
+        // затухание, конус и тень → маскирует блик так же, как диффуз.
+        {
+            float3 HV = L + V;
+            float  hl = length(HV);
+            if (hl > 1e-4)   // защита от NaN при L≈-V (см. directional выше)
+            {
+            float3 H     = HV / hl;
+            float  VdotH = saturate(dot(V, H));
+            float3 F     = F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);
+            float  norm  = (shininess + 8.0) / (8.0 * 3.14159265);
+            float  spec  = norm * pow(saturate(dot(n, H)), shininess);
+            specSum += light.color_power.rgb * (spec * intensity * light.color_power.a) * F;
+            }
+        }
     }
 
-    // Отражение окружения для металла: цвет из кубмапы по вектору отражения R. Анти-блик
-    // (тёмное перпендикулярно яркому) — следствие направленной вариации кубмапы. Тинт baseColor:
-    // металл-проводник окрашивает отражение своим цветом (F0 ≈ baseColor). Гейтится metallic.
+    // Отражение окружения — для ВСЕХ поверхностей, сила = Френель по углу взгляда. F0 несёт
+    // цвет: у металла env окрашивается в albedo, у диэлектрика — нейтральное небо, слабое в
+    // лоб и сильнее к краям. roughness-aware (max(1-rough,F0)) гасит грязевой грань-блик на
+    // шершавых. roughness уже размывает env через мип-LOD в sampleEnv.
+    float  NdotV   = saturate(dot(n, V));
+    float3 Fenv    = F0 + (max((float3)(1.0 - surface.roughness), F0) - F0) * pow(1.0 - NdotV, 5.0);
     float3 R       = reflect(-V, n);
     float3 envRefl = sampleEnv(R, surface.roughness);
-    specSum += envRefl * surface.baseColor * surface.metallic;
+    specSum += envRefl * Fenv * surface.ao;   // AO гасит непрямое отражение
 
-    float3 lighting = max(lightSum, (float3)AMBIENT_LIGHT);
-    float3 color    = surface.baseColor * lighting + specSum + surface.emission;   // спекуляр + эмиссия поверх света
+    // AO — затенение НЕпрямого света: модулирует только ambient-пол (и env выше), прямой свет нетронут.
+    float3 lighting = max(lightSum, (float3)AMBIENT_LIGHT * surface.ao);
+    // Диффуз гаснет на металле: проводник почти не имеет диффузного отражения, вся энергия — в зеркальном.
+    float3 diffuse  = surface.baseColor * lighting * (1.0 - surface.metallic);
+    float3 color    = diffuse + specSum + surface.emission;   // диффуз + спекуляр/отражение + эмиссия
 
     PSOutput o;
     o.color    = float4(color, surface.alpha);

@@ -42,11 +42,22 @@ SDL_AppResult Game::MainInit()
         glm::vec3(0.0f, 1.0f, 0.0f)  // вектор вверх
     );
 
-    TextureAtlas* atlas = ctx->CreateTextureAtlas("albedo_atlas", TexturePresets::GetCreateInfo(TexturePreset::Albedo_Atlas2048_1Layer), DefaultSamplersNames::DEFAULT_SAMPLER);
-	TextureAtlas* NAOPBR_atlas = ctx->CreateTextureAtlas("NAOPBR_atlas", TexturePresets::GetCreateInfo(TexturePreset::NAOPBR_Atlas2048_1Layer), DefaultSamplersNames::DEFAULT_SAMPLER);
+    TextureAtlas* atlas = ctx->CreateTextureAtlas("albedo_atlas", TexturePresets::AlbedoAtlas(2048, 3, 1), DefaultSamplersNames::DEFAULT_SAMPLER);
+	TextureAtlas* normal_atlas   = ctx->CreateTextureAtlas("normal_atlas",   TexturePresets::NormalAtlas(2048, 2, TexturePresets::FullMipLevels(2048)),   DefaultSamplersNames::DEFAULT_SAMPLER);
+	TextureAtlas* orm_atlas      = ctx->CreateTextureAtlas("orm_atlas",      TexturePresets::ORMAtlas(2048, 2), DefaultSamplersNames::DEFAULT_SAMPLER);
+	TextureAtlas* emissive_atlas = ctx->CreateTextureAtlas("emissive_atlas", TexturePresets::EmissiveAtlas(1024, 1), DefaultSamplersNames::DEFAULT_SAMPLER);
 
 	TextureHandle* texture_cube = ctx->CreateTextureFromFile("albedo_cube", "albedo_atlas", "textures/assets/cube_test.png");
-	TextureHandle* norm = ctx->CreateTextureFromFile("norm", "NAOPBR_atlas", "textures/assets/car_norm.png");
+	TextureHandle* norm = ctx->CreateTextureFromFile("norm", "normal_atlas", "textures/assets/car_norm.png");
+
+    ctx->CreateTextureFromFile("texture_asphalt", "albedo_atlas", "textures/blocks/wood_base.png");
+    // G у этой ORM хранит smoothness (asphalt G≈0.12 → как roughness это «мокрое зеркало»).
+    // Нормализуем к канону движка (roughness) инверсией G на импорте.
+    ctx->CreateTextureFromFile("texture_asphalt_orm", "orm_atlas", "textures/blocks/wood_orm.png", ChannelConvention::SmoothnessInGreen);
+    ctx->CreateTextureFromFile("wood_norm", "normal_atlas", "textures/blocks/wood_normal.png", ChannelConvention::SmoothnessInGreen);
+
+	textureManager->CreateTexture("default_orm",      "orm_atlas",      2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
+	textureManager->CreateTexture("default_emissive", "emissive_atlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
 
     TextureHandle* texture_car = ctx->CreateTextureFromFile("new_car", "albedo_atlas", "textures/assets/new_car.png");
 	TextureHandle* ground = ctx->CreateTextureFromFile("new_car_ground", "albedo_atlas", "textures/assets/new_car_ground.png");
@@ -62,23 +73,42 @@ SDL_AppResult Game::MainInit()
         SetBloomPrograms(ctx);   // программы bloom под BLOOM_PASS (проход создаёт engine)
     }
     
+    // "sp" теперь требует 4 слота: albedo, normal, orm, emissive. Реальных ORM/эмиссии нет →
+    // подставляем дефолт-белые (default_orm / default_emissive) — поведение как при albedo+normal.
     auto material_car = ctx->CreateMaterial("car", {
         {TextureSlotRole::Albedo, "new_car"},
-        {TextureSlotRole::Normal, "norm"} },
+        {TextureSlotRole::Normal, "norm"},
+        {TextureSlotRole::ORM, "default_orm"},
+        {TextureSlotRole::Emissive, "default_emissive"} },
         { "sp", "sp_shadow" });
 	auto material_car2 = ctx->CreateMaterial("car2", {
         {TextureSlotRole::Albedo, "new_car"},
-        {TextureSlotRole::Normal, "norm"} },
+        {TextureSlotRole::Normal, "norm"},
+        {TextureSlotRole::ORM, "default_orm"},
+        {TextureSlotRole::Emissive, "default_emissive"} },
 		{ "sp", "sp_shadow" });
     auto material_ground = ctx->CreateMaterial("ground", {
         {TextureSlotRole::Albedo, "new_car_ground"},
-        {TextureSlotRole::Normal, "norm"} },
+        {TextureSlotRole::Normal, "norm"},
+        {TextureSlotRole::ORM, "default_orm"},
+        {TextureSlotRole::Emissive, "default_emissive"} },
 		{ "sp", "sp_shadow" });
 
-    auto material_sprite = ctx->CreateMaterial("sprite", {
-        {TextureSlotRole::Albedo, "albedo_cube"},
-        {TextureSlotRole::Normal, "norm"} },
+    auto material_sprite = ctx->CreateMaterial("material_sprite", {
+        {TextureSlotRole::Albedo, "texture_asphalt"},
+        {TextureSlotRole::Normal, "wood_norm"},
+        {TextureSlotRole::ORM, "texture_asphalt_orm"},
+        {TextureSlotRole::Emissive, "default_emissive"} },
         { "sp", "sp_shadow" });
+    ctx->SetMaterialParams(material_sprite, OpaqueMaterialParams{ {1,1,1,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f });
+
+    auto material_sprite2 = ctx->CreateMaterial("material_sprite2", {
+        {TextureSlotRole::Albedo, "texture_asphalt"},
+        {TextureSlotRole::Normal, "norm"},
+        {TextureSlotRole::ORM, "default_orm"},
+        {TextureSlotRole::Emissive, "default_emissive"} },
+        { "sp", "sp_shadow" });
+    ctx->SetMaterialParams(material_sprite2, OpaqueMaterialParams{ {1,1,1,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f });
 
     auto material_glass = ctx->CreateMaterial("transparent", {
         {TextureSlotRole::Albedo, "new_car_glass"},
@@ -113,7 +143,6 @@ SDL_AppResult Game::MainInit()
     ctx->SetMaterialParams(material_car,    OpaqueMaterialParams{});
     ctx->SetMaterialParams(material_car2,   OpaqueMaterialParams{});
     ctx->SetMaterialParams(material_ground, OpaqueMaterialParams{});
-    ctx->SetMaterialParams(material_sprite, OpaqueMaterialParams{});
 
     debug_collider_material = ctx->CreateMaterial("debug_collider", {}, { "sp_debug_collider" });
 
@@ -265,7 +294,8 @@ SDL_AppResult Game::MainIterate()
     }
     mouse_x = input->MouseX();
     mouse_y = input->MouseY();
-    camera->RotateView(mouse_x, mouse_y, input->IsMouseButtonDown(SDL_BUTTON_LEFT));
+    bool rotate = input->IsMouseButtonDown(SDL_BUTTON_LEFT) && !io.WantCaptureMouse;
+    camera->RotateView(mouse_x, mouse_y, rotate);
 
     input->ExecuteCommands(ctx);
 
