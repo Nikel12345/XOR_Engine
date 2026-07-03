@@ -208,7 +208,10 @@ void TextureManager::_BuildUploadTasks() {
         if (!state.spaces)
             state.spaces = std::make_unique<spaces_t>(rect_wh((int)atlas->width, (int)atlas->height));
 
-        uint32_t pad = (state.placed_count == 0) ? 0 : atlas->padding;
+        // Паддинг — всем, КРОМЕ текстур точно в размер атласа (кубмап-грани/полнослойные: паддинг
+        // не влезает и не нужен — сосед у них не появится). Раньше pad=0 получал ПЕРВЫЙ тайл слоя —
+        // он оставался без gutter'а и ловил mip-bleed по краям, смежным с более поздними тайлами.
+        uint32_t pad = (task.width >= atlas->width || task.height >= atlas->height) ? 0 : atlas->padding;
         int packed_w = (int)(task.width + pad * 2);
         int packed_h = (int)(task.height + pad * 2);
 
@@ -223,7 +226,7 @@ void TextureManager::_BuildUploadTasks() {
             }
             state.spaces = std::make_unique<spaces_t>(rect_wh((int)atlas->width, (int)atlas->height));
 
-            // На новом слое placed_count == 0, поэтому pad тоже 0
+            // Последний шанс на свежем слое — без паддинга (для почти-полнослойных текстур).
             pad = 0;
             packed_w = (int)task.width;
             packed_h = (int)task.height;

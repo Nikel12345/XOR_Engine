@@ -19,8 +19,11 @@ struct alignas(16) OpaqueMaterialParams
     float emissiveStrength = 1.0f;
     float metallic         = 0.0f;   // сила спекуляра (Blinn-Phong, пока только от directional)
     float roughness        = 1.0f;   // → shininess (1 = матовый, 0 = резкий блик)
-    float heightScale      = 0.0f;   // глубина POM (parallax); 0 = выкл. Альфа normal = ВЫСОТА (depth=1-A)
-    float pomBias          = 0.0f;   // префильтр POM к крупным деталям (нужны мипы у normal-атласа)
+    float heightScale      = 0.0f;   // глубина POM (parallax); 0 = ВЫКЛючатель POM. Альфа normal = ВЫСОТА (depth=1-A)
+    // Префильтр рельефа POM в лог2-мипах (НЕ выключатель!): 0 = полная детализация, 1..3 = рабочий
+    // диапазон укрупнения (глушит высокочастотный шум карты — «шпили»), <0.5 визуально ≈ ничего.
+    // Требует мип-цепочку у normal-атласа (FullMipLevels), иначе silent no-op.
+    float pomBias          = 0.0f;
 };
 // Раскладка cbuffer: baseColor[0..16] + emissive(16..28)+strength(28..32) + metallic(32..36)+
 // roughness(36..40) + heightScale(40..44) + pomBias(44..48) → 48. heightScale/pomBias заняли

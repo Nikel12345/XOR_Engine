@@ -94,14 +94,26 @@ float3 SampleNormalWorld(PSInput input, float2 uv, bool isFrontFace)
 
 // POM: смещённый mesh-UV. view-вектор строим из камеры (camPos = -R^T·t из view, как в базе)
 // и переводим в tangent space через TBN. heightScale — глубина рельефа из MaterialBlock (0 = off);
-// pomBias — префильтр к крупным деталям. Глубина — из альфы normal-текстуры (textures[1]).
+// pomBias — АБСОЛЮТНЫЙ пол LOD рельефа (mip L = среднее по 2^L×2^L соседям → глушит шум карты на
+// любой дистанции; 0 = полная детализация). Глубина — из альфы normal-текстуры (textures[1]).
 float2 ApplyParallax(PSInput input, float heightScale, float pomBias)
 {
-    // Градиенты mesh-UV считаем ДО любых ветвлений/циклов (нужны для SampleGrad в марче, где
-    // авто-LOD запрещён). heightScale — uniform, поэтому ранний выход ниже когерентен по варпу.
+    // Градиенты mesh-UV считаем ДО любых ветвлений/циклов (деривативы легальны только в uniform
+    // control flow). heightScale — uniform, поэтому ранний выход ниже когерентен по варпу.
     float2 ddx_uv = ddx(input.v_uv);
     float2 ddy_uv = ddy(input.v_uv);
     if (heightScale <= 0.0) return input.v_uv;
+
+    // LOD рельефа: один раз до марча (внутри цикла — SampleLevel). Базовый экранный LOD считаем
+    // руками из градиентов в ТЕКСЕЛЯХ атласа (та же формула, что у аппаратного LOD), затем
+    // поднимаем до пола pomBias. max() оставляет анти-алиасинг вдали (там базовый LOD больше).
+    uint tw, th, tlayers;
+    u_normal.GetDimensions(tw, th, tlayers);
+    float2 nsc     = unpackUnorm2x16(textures[1].data.y);
+    float2 gx      = ddx_uv * nsc * float2(tw, th);
+    float2 gy      = ddy_uv * nsc * float2(tw, th);
+    float  lodBase = 0.5 * log2(max(dot(gx, gx), dot(gy, gy)));
+    float  lod     = max(lodBase, pomBias);
 
     float3   camPos = -mul(transpose((float3x3)Camera[0].view), Camera[0].view._m03_m13_m23);
     float3   Vw     = normalize(camPos - input.v_worldPos);
@@ -113,11 +125,13 @@ float2 ApplyParallax(PSInput input, float heightScale, float pomBias)
     // Изнанка поверхности (пассы рисуют без куллинга): камера «под» поверхностью, марч вниз
     // геометрически бессмыслен и даёт мусорные пересечения → без смещения.
     if (Vt.z <= 0.0) return input.v_uv;
-    // saturate: смещённый UV может выйти за [0..1] (до heightScale) → клампим к тайлу, иначе
-    // финальные сэмплы albedo/normal/orm/emissive прочитали бы соседний тайл атласа (seam на грани).
-    // Клампим ТОЛЬКО POM-ветку; heightScale<=0 выше вернул input.v_uv как есть (тайлинг не ломаем).
-    return saturate(parallaxOcclusionUV(u_normal, u_normalSampler, textures[1].data,
-                               input.v_uv, Vt, heightScale, ddx_uv, ddy_uv, pomBias));
+
+    // mirrorTile: у кромки марч уходит за тайл (до ~heightScale) — там продолжаем рельеф и
+    // контент ЗЕРКАЛОМ (см. mirrorTile в material.hlsl). Внутри [0..1] это ТОЧНАЯ identity —
+    // интерьер не меняется ни на йоту; кромка получает непрерывное поле вместо «стены»
+    // (clamp прилипал к крайним текселям, wrap бился о несшитый край) → растянутой каймы нет.
+    return mirrorTile(parallaxOcclusionUV(u_normal, u_normalSampler, textures[1].data,
+                               input.v_uv, Vt, heightScale, lod));
 }
 // ORM: возвращает сырой RGB (R=AO, G=Roughness, B=Metallic) — разбирает getSurface.
 float3 SampleORM(float2 uv)

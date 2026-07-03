@@ -52,13 +52,15 @@ SDL_AppResult Game::MainInit()
 	TextureHandle* texture_cube = ctx->CreateTextureFromFile("albedo_cube", "albedo_atlas", "textures/assets/cube_test.png");
 	TextureHandle* norm = ctx->CreateTextureFromFile("norm", "normal_atlas", "textures/assets/car_norm.png");
 
-    ctx->CreateTextureFromFile("texture_asphalt", "albedo_atlas", "textures/blocks/brick_base.png");
+    ctx->CreateTextureFromFile("texture_asphalt", "albedo_atlas", "textures/blocks/brick_base_c.png");
     // G у этой ORM хранит smoothness (asphalt G≈0.12 → как roughness это «мокрое зеркало»).
     // Нормализуем к канону движка (roughness) инверсией G на импорте.
     ctx->CreateTextureFromFile("texture_asphalt_orm", "orm_atlas", "textures/blocks/brick_orm.png", ChannelConvention::SmoothnessInGreen);
     // Normal с картой ВЫСОТ в альфе (RGB=нормаль, A=height: яркое=выше; POM читает depth=1-A из
-    // u_normal.a — без нового атласа/слота). AsIs: G-флип был компенсацией левосторонней развёртки
-    // квада (см. CreateModel("quad")) — после её исправления нормаль грузится как есть.
+    // u_normal.a — без нового атласа/слота). AsIs: и нормаль в конвенции движка, и альфа height-стиля
+    // (у бороздчатой коры средняя яркость низкая — это НЕ признак cavity-карты; проверено глазами).
+    // DepthInAlpha — только для действительно перевёрнутых (cavity) альф. Для волокнистых карт
+    // укрупняй рельеф pomBias ~2..3 (абсолютный пол LOD; НЕ выключатель POM — выключатель heightScale=0).
     ctx->CreateTextureFromFile("wood_norm", "normal_atlas", "textures/blocks/brick_normal_h.png", ChannelConvention::AsIs);
 
 	textureManager->CreateTexture("default_orm",      "orm_atlas",      2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
@@ -103,10 +105,10 @@ SDL_AppResult Game::MainInit()
         {TextureSlotRole::ORM, "texture_asphalt_orm"},
         {TextureSlotRole::Emissive, "default_emissive"} },
         { "sp", "sp_shadow" });
-    // heightScale = глубина POM (0 = выкл; depth = альфа normal-карты). ~0.04–0.08 реалистично;
-    // выше сильнее ломает близкий план/силуэт. pomBias = префильтр к крупным деталям (0 = чётко).
-    // Реальные фиксы: бинарное уточнение (убирает «шлейф»), offset-limiting (скользящие углы), мипы.
-    ctx->SetMaterialParams(material_sprite, OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.06f, /*pomBias*/0.05f });
+    // heightScale = глубина POM (0 = ВЫКЛючатель). pomBias = АБСОЛЮТНЫЙ пол LOD рельефа (лог2:
+    // 2 = среднее по 4×4 соседям, 3 = 8×8): глушит высокочастотный шум карты («шпили») на любой
+    // дистанции; 0 = полная детализация (кирпич с чётким швом). Для волокнистой коры — 2..3.
+    ctx->SetMaterialParams(material_sprite, OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.08f, /*pomBias*/2.5f });
 
     auto material_sprite2 = ctx->CreateMaterial("material_sprite2", {
         {TextureSlotRole::Albedo, "texture_asphalt"},

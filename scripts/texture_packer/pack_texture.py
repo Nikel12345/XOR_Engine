@@ -86,9 +86,9 @@ def pack_rgb_alpha(rgb_path, a_path=None, out="packed.png",
 def main():
     # Normal (RGB kept as-is) + height packed into alpha.
     pack_rgb_alpha(
-        rgb_path="white_cracked_brick_wall_pbr_texture_with_subtle_surface_damage__Normal_DX.png",
-        a_path="white_cracked_brick_wall_pbr_texture_with_subtle_surface_damage__Height.png",
-        out="brick_normal_h.png",
+        rgb_path="wood_normal.png",
+        a_path="gray.png",
+        out="brick_normal_h_t.png",
     )
 
     # --- ORM-style example: four separate grayscale maps into RGBA ---

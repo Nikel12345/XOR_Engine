@@ -60,11 +60,15 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 		return nullptr;
 	}
 
-	// Нормализация исходной конвенции к канону движка (G = linear roughness). smoothness → roughness
-	// = инверсия зелёного канала (индекс 1 и в RGBA, и в BGRA). Делается один раз здесь на CPU,
-	// поэтому шейдер/материалы остаются без веток и флагов.
+	// Нормализация исходной конвенции к канону движка (G = linear roughness; A = height).
+	// Инверсия канала формат-независима (G = индекс 1, A = индекс 3 и в RGBA, и в BGRA).
+	// Делается один раз здесь на CPU, поэтому шейдер/материалы остаются без веток и флагов.
 	if (conv == ChannelConvention::SmoothnessInGreen) {
 		for (size_t i = 1; i < img.pixels.size(); i += 4)
+			img.pixels[i] = std::byte{ static_cast<unsigned char>(255 - std::to_integer<int>(img.pixels[i])) };
+	}
+	else if (conv == ChannelConvention::DepthInAlpha) {
+		for (size_t i = 3; i < img.pixels.size(); i += 4)
 			img.pixels[i] = std::byte{ static_cast<unsigned char>(255 - std::to_integer<int>(img.pixels[i])) };
 	}
 

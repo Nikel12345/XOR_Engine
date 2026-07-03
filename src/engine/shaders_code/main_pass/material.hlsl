@@ -58,32 +58,44 @@ float3 computeNormal(
 // NB: ранее «работавший» depth=A на кваде был двойной инверсией (левосторонняя развёртка квада
 // переворачивала ось v марча) — после исправления развёртки корректен именно 1-A.
 
-// Сэмпл глубины из альфы атласа. Внутри динамического цикла авто-LOD запрещён → используем
-// SampleGrad с ЯВНЫМИ градиентами (посчитаны до цикла): корректная трилинейная фильтрация против
-// высокочастотного алиасинга. pomBias (>0) дополнительно поднимает LOD → префильтр рельефа к
-// крупным формам (кора → пряди вместо «ряби»). ВАЖНО: bias работает ТОЛЬКО если у normal-атласа
-// есть мип-цепочка (NormalAtlas(..., FullMipLevels)); без мипов bias — no-op. Per-material.
+// Зеркальное продолжение tile-UV за границы [0..1]: ВНУТРИ тайла — точная identity (визуал
+// не меняется), снаружи — отражение (валидно при |выходе| ≤ 1; марч ограничен heightScale << 1).
+// Зачем: у кромки тайла depth-поле обрывается, и любой «ответ» сэмплера ломает марч — clamp
+// прилипает пересечения к крайней линии текселей, wrap бьётся о шов несшитой карты; в обоих
+// случаях полоса пикселей читает одни и те же тексели → растянутая плоская кайма по периметру,
+// сторона зависит от камеры. Зеркало делает поле НЕПРЕРЫВНЫМ через кромку (отражённый рельеф =
+// то же поле) — пересечения распределяются естественно, прилипать не к чему. Бонус: mirror
+// 1-Липшицев (|d mirror| ≤ |d uv|) → неявные производные финальных сэмплов не взрываются
+// (в отличие от frac-скачка 0.99→0.01, взрывавшего авто-LOD до грубейшего мипа).
+float2 mirrorTile(float2 uv)
+{
+    return 1.0 - abs(1.0 - abs(uv));
+}
+
+// Сэмпл глубины из альфы атласа на ЯВНОМ LOD (SampleLevel легален внутри динамического цикла,
+// где авто-LOD запрещён). lod считается ОДИН раз до марча (см. ApplyParallax):
+//   lod = max(базовый экранный LOD, pomBias)
+// pomBias — АБСОЛЮТНЫЙ пол LOD рельефа: mip уровня L = предпосчитанное среднее по блоку 2^L×2^L
+// соседних текселей, поэтому pomBias=2..3 глушит высокочастотный шум карты (шпили) НА ЛЮБОЙ
+// дистанции, включая близкую (у прежней реализации через градиенты префильтр вблизи не работал:
+// базовый LOD при магнификации сильно отрицателен, и +bias не дотягивал до mip>0).
+// max() сохраняет анти-алиасинг вдали (там экранный LOD больше пола). Требует мип-цепочку у
+// normal-атласа (NormalAtlas(..., FullMipLevels)); без мипов pomBias — silent no-op.
 float sampleDepthAtlas(
     Texture2DArray atlas,
     SamplerState   samp,
     uint4          textureData,
     float2         uv,
-    float2         ddx_uv,
-    float2         ddy_uv,
-    float          pomBias)
+    float          lod)
 {
-    // Клампим tile-UV к [0..1]: марч смещает UV за пределы тайла, а атласная раскладка
-    // (uv*scale+offset) не wrap'ает — без клампа сэмпл ушёл бы в соседний тайл атласа (bleed).
-    uv = saturate(uv);
+    // Зеркальное продолжение за кромкой (identity внутри тайла) — непрерывное depth-поле для
+    // марча у края и гарантия, что сэмпл не утечёт в соседний тайл атласа. См. mirrorTile.
+    uv = mirrorTile(uv);
     float2 offset = unpackUnorm2x16(textureData.x);
     float2 scale  = unpackUnorm2x16(textureData.y);
     uint   layer  = textureData.z;
-    // Координата сэмпла = uv*scale+offset → её градиент = d(uv)*scale (offset — константа).
-    // exp2(pomBias) масштабирует градиент → поднимает LOD (префильтр крупного рельефа).
-    float  g = exp2(pomBias);
     // A = height (яркое=выше) → depth = 1 - A: верх поверхности (A=1) даёт depth 0 (без смещения).
-    return 1.0 - atlas.SampleGrad(samp, float3(uv * scale + offset, float(layer)),
-                                  ddx_uv * scale * g, ddy_uv * scale * g).a;
+    return 1.0 - atlas.SampleLevel(samp, float3(uv * scale + offset, float(layer)), lod).a;
 }
 
 // Рей-марч depth-поля в tangent space: возвращает СМЕЩЁННЫЙ mesh-UV (в [0..1] тайла — атласную
@@ -93,6 +105,10 @@ float sampleDepthAtlas(
 // OFFSET LIMITING: сдвиг = Vt.xy * heightScale (БЕЗ деления на Vt.z). Деление на Vt.z геометрически
 // «точнее», но на скользящих углах (Vt.z→0) взрывает сдвиг до пол-текстуры → размазывание/искажение.
 // Offset-limiting ограничивает |сдвиг| ≤ heightScale на любом угле — стабильно, без grazing-артефактов.
+// ИЗВЕСТНЫЙ ПРЕДЕЛ: вплотную к поверхности картинка «плывёт» при движении камеры — резкое альбедо
+// скользит по сглаженному (pomBias) рельефу. Перепробовано и ОТКЛОНЕНО (каждое меняло одобренный
+// визуал или меняло шило на мыло): /max(Vt.z,0.5), дистанционный фейд, LOD-когерентность вблизи
+// (вернула шпили). Структурные решения — TAA (позволит снизить pomBias) или настоящий displacement.
 float2 parallaxOcclusionUV(
     Texture2DArray depthAtlas,
     SamplerState   samp,
@@ -100,9 +116,7 @@ float2 parallaxOcclusionUV(
     float2         uv,
     float3         Vt,
     float          heightScale,
-    float2         ddx_uv,
-    float2         ddy_uv,
-    float          pomBias)
+    float          lod)
 {
     if (heightScale <= 0.0) return uv;
 
@@ -117,7 +131,7 @@ float2 parallaxOcclusionUV(
 
     float2 curUV         = uv;
     float  curLayerDepth = 0.0;
-    float  curDepth      = sampleDepthAtlas(depthAtlas, samp, textureData, curUV, ddx_uv, ddy_uv, pomBias);
+    float  curDepth      = sampleDepthAtlas(depthAtlas, samp, textureData, curUV, lod);
 
     // ЛИНЕЙНЫЙ поиск: шагаем вниз, пока луч не окажется под depth-полем (грубый интервал).
     [loop]
@@ -125,7 +139,7 @@ float2 parallaxOcclusionUV(
     {
         if (curLayerDepth >= curDepth) break;
         curUV         -= deltaUV;
-        curDepth       = sampleDepthAtlas(depthAtlas, samp, textureData, curUV, ddx_uv, ddy_uv, pomBias);
+        curDepth       = sampleDepthAtlas(depthAtlas, samp, textureData, curUV, lod);
         curLayerDepth += layerDepth;
     }
 
@@ -143,7 +157,7 @@ float2 parallaxOcclusionUV(
     {
         dUV    *= 0.5;
         dLayer *= 0.5;
-        curDepth = sampleDepthAtlas(depthAtlas, samp, textureData, curUV, ddx_uv, ddy_uv, pomBias);
+        curDepth = sampleDepthAtlas(depthAtlas, samp, textureData, curUV, lod);
         if (curLayerDepth < curDepth) { curUV -= dUV; curLayerDepth += dLayer; }   // над полем → глубже
         else                          { curUV += dUV; curLayerDepth -= dLayer; }   // под полем → назад
     }

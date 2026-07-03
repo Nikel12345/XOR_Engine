@@ -3,13 +3,15 @@
 #include <vector>
 #include <memory>
 
-// Конвенция упаковки ИСХОДНОГО файла текстуры. Канон движка: G = linear roughness.
-// Импорт нормализует к нему один раз на CPU (см. EngineContext::CreateTextureFromFile),
+// Конвенция упаковки ИСХОДНОГО файла текстуры. Канон движка: G = linear roughness (ORM),
+// A нормал-карты = HEIGHT (яркое = выше; POM марчит depth = 1 - A).
+// Импорт нормализует к канону один раз на CPU (см. EngineContext::CreateTextureFromFile),
 // поэтому шейдер/материалы всегда видят единую конвенцию — без рантайм-веток и флагов на материале.
-// Зелёный канал — индекс 1 и в RGBA, и в BGRA, так что инверсия формат-независима.
+// Индексы каналов одинаковы в RGBA и BGRA (G = 1, A = 3), так что инверсии формат-независимы.
 enum class ChannelConvention {
 	AsIs,                // без изменений (по умолчанию) — файл уже в каноне движка
 	SmoothnessInGreen,   // G = smoothness/glossiness (Unity-стиль) → инвертируется в roughness (G = 255 - G)
+	DepthInAlpha,        // A = depth/cavity (яркое = ГЛУБЖЕ, напр. wood_normal_h) → инвертируется в height (A = 255 - A)
 };
 
 struct TextureData {
