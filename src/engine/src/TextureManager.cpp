@@ -4,12 +4,68 @@
 #include "TextureSamplerPresets.h"
 #include "finders_interface.h"
 
+// Персистентный упаковщик атласа. Держим список свободных прямоугольников по слоям МЕЖДУ вызовами
+// PackAtlases. rectpack2D::empty_spaces прячет свой список свободных мест (вернуть регион нельзя),
+// поэтому строим свой тонкий упаковщик поверх свободной функции insert_and_split — с ним удаление
+// может честно вернуть регион в пул.
+struct AtlasPacker {
+    struct Layer {
+        std::vector<rectpack2D::space_rect> free_spaces;   // свободные прямоугольники слоя
+
+        void reset(int w, int h) {
+            free_spaces.clear();
+            free_spaces.push_back(rectpack2D::rect_xywh(0, 0, w, h));
+        }
+
+        // Первое подходящее свободное место (порядок обхода — как в rectpack2D::empty_spaces::insert,
+        // ветка без flip: с конца к началу). При успехе разбивает место на остатки и возвращает угол.
+        std::optional<rectpack2D::rect_xywh> insert(int w, int h) {
+            using namespace rectpack2D;
+            for (int i = (int)free_spaces.size() - 1; i >= 0; --i) {
+                const space_rect candidate = free_spaces[i];
+                const auto splits = insert_and_split(rect_wh(w, h), candidate);
+                if (!splits) continue;                         // не помещается — ищем дальше
+                free_spaces[i] = free_spaces.back();           // удаляем кандидата (swap-with-back)
+                free_spaces.pop_back();
+                for (int s = 0; s < splits.count; ++s)         // добавляем остатки-сплиты
+                    free_spaces.push_back(splits.spaces[s]);
+                return rect_xywh(candidate.x, candidate.y, w, h);
+            }
+            return std::nullopt;
+        }
+
+        // Вычесть ЗАНЯТЫЙ прямоугольник из свободного места (гильотинный разрез без перекрытий):
+        // каждый пересечённый свободный прямоугольник заменяется на не-перекрывающиеся куски вокруг
+        // занятого. Используется при пересборке слоя после удаления — слой сбрасывается в один целый
+        // прямоугольник, затем вычитаются прямоугольники выживших, и остаток остаётся КРУПНЫМ.
+        void carve(rectpack2D::rect_xywh o) {
+            using namespace rectpack2D;
+            std::vector<space_rect> out;
+            out.reserve(free_spaces.size() + 3);
+            for (const space_rect& f : free_spaces) {
+                const int ix = std::max(f.x, o.x);
+                const int iy = std::max(f.y, o.y);
+                const int ir = std::min(f.x + f.w, o.x + o.w);
+                const int ib = std::min(f.y + f.h, o.y + o.h);
+                if (ir <= ix || ib <= iy) { out.push_back(f); continue; }   // не пересекаются
+                if (ix > f.x)         out.push_back(rect_xywh(f.x, f.y, ix - f.x, f.h));          // левый (полная высота)
+                if (ir < f.x + f.w)   out.push_back(rect_xywh(ir, f.y, f.x + f.w - ir, f.h));      // правый (полная высота)
+                if (iy > f.y)         out.push_back(rect_xywh(ix, f.y, ir - ix, iy - f.y));        // верх (средняя колонка)
+                if (ib < f.y + f.h)   out.push_back(rect_xywh(ix, ib, ir - ix, f.y + f.h - ib));   // низ (средняя колонка)
+            }
+            free_spaces.swap(out);
+        }
+    };
+    std::vector<Layer> layers;   // растёт лениво, size() <= atlas->layers
+};
+
 TextureManager::TextureManager(SDL_GPUDevice* device): ResourceManager(device){
     using namespace DefaultSamplersNames;
     CreateSampler(DEFAULT_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::DEFAULT_SAMPLER));
     CreateSampler(DEFAULT_SHADOW_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::SHADOW_SAMPLER));
 	CreateSampler(VSM_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::VSM_SAMPLER));
 	CreateSampler(ENV_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::ENV_SAMPLER));
+    CreateSampler("_SimpleSampler", SamplerPresets::GetSamplerCreateInfo(SamplerPreset::SIMPLE_SAMPLER));
 }
 
 TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler)
@@ -95,18 +151,17 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtl
         return it->second.get();
     }
 
-    auto texture_handle = std::make_unique<TextureHandle>();
-    auto td = std::make_unique<TextureData>();
-
+    auto texture_handle = std::make_shared<TextureHandle>();
     texture_handle->atlas = atlas;
-	texture_handle->texture_data = td.get();
 
     TextureHandle* ptr = texture_handle.get();
     ptr->width = w;
     ptr->height = h;
     handles_data[name] = std::move(texture_handle);
-	atlas->textures_data.push_back(std::move(td));
+	atlas->textures.push_back(&ptr->texture_data);   // НЕвладеющая ссылка на размещение (владелец — handles_data)
 
+	// Пиксели уходят в транзитную upload-задачу (перемещением); после заливки+мипов они
+	// освобождаются в GenerateMipmaps. На CPU ничего не дублируем — источник истины пикселей — GPU.
 	CreateUploadTask(ptr, w, h, std::move(pixels), name);
 
 	return ptr;
@@ -163,133 +218,137 @@ void SharedDepthTarget::Resize(uint32_t w, uint32_t h)
     owner->QueueDeleteTexture(old_texture);                      // старую — в отложенное удаление
 }
 
-void TextureManager::CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name)
-{
-    // Размер берём из самих пикселей — TextureLoader уже упаковал их под формат атласа.
-    uint32_t size = (uint32_t)pixels.size();
-
-    UploadTaskTexture task;
-    task.name = name;
-    task.pixels = std::move(pixels);
-    task.target_handle = handle;
-    task.offset = current_upload_tb_offset;
-    task.width = w;
-    task.height = h;
-	task.size = size;
-
-    current_upload_tb_offset += size;
-
-	upload_tasks.push_back(std::move(task));
-
-}
-
 static uint32_t PackUnorm16x2(float x, float y) {
     uint16_t lx = static_cast<uint16_t>(SDL_clamp(x, 0.0f, 1.0f) * 65535.0f + 0.5f);
     uint16_t ly = static_cast<uint16_t>(SDL_clamp(y, 0.0f, 1.0f) * 65535.0f + 0.5f);
     return static_cast<uint32_t>(lx) | (static_cast<uint32_t>(ly) << 16);
 }
 
-void TextureManager::_BuildUploadTasks() {
+void TextureManager::CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name)
+{
+    UploadTaskTexture task;
+    task.name = name;
+    task.pixels = std::move(pixels);
+    task.target_handle = handle;
+    task.width = w;
+    task.height = h;
+    task.size = (uint32_t)task.pixels.size();
+    upload_tasks.push_back(std::move(task));
+}
+
+bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     using namespace rectpack2D;
-    using spaces_t = empty_spaces<false>;
+    if (task.placed) return true;             // идемпотентность: повторный PackAtlases не сдвинет тайл
 
-    struct AtlasState {
-        uint32_t layer = 0;
-        uint32_t placed_count = 0;
-        std::unique_ptr<spaces_t> spaces;
+    TextureAtlas* atlas = task.target_handle->atlas;
+    auto& packer_uptr = atlas_packers[atlas];
+    if (!packer_uptr) packer_uptr = std::make_unique<AtlasPacker>();
+    AtlasPacker& packer = *packer_uptr;
+
+    const uint32_t w = task.width, h = task.height;   // нативный размер (до gutter'а)
+    if (w == 0 || h == 0) { task.placed = true; return true; }  // пустышка — задачу не грузим
+
+    // Паддинг — всем, КРОМЕ текстур точно в размер атласа (кубмап-грани/полнослойные: паддинг
+    // не влезает и не нужен — сосед у них не появится). Раньше pad=0 получал ПЕРВЫЙ тайл слоя —
+    // он оставался без gutter'а и ловил mip-bleed по краям, смежным с более поздними тайлами.
+    uint32_t pad = (w >= atlas->width || h >= atlas->height) ? 0 : atlas->padding;
+
+    // Ищем ВНЕШНИЙ (с gutter'ом) прямоугольник слой за слоем от 0-го: текстура садится в ПЕРВЫЙ
+    // слой, где помещается → ранние слои заполняются максимально, а очередь не «перескакивает» на
+    // новый слой из-за одной не влезшей текстуры. Свободные места персистентны, так что новые
+    // текстуры (в т.ч. после загрузки) садятся в остаток, а не поверх уже размещённых.
+    uint32_t placed_layer = 0;
+    rect_xywh outer{};
+
+    auto try_place = [&](uint32_t ow, uint32_t oh, bool allow_new_layer) -> bool {
+        for (uint32_t L = 0; L < packer.layers.size(); ++L)
+            if (auto r = packer.layers[L].insert((int)ow, (int)oh)) { placed_layer = L; outer = *r; return true; }
+        if (allow_new_layer && packer.layers.size() < atlas->layers) {
+            AtlasPacker::Layer lp;
+            lp.reset((int)atlas->width, (int)atlas->height);
+            if (auto r = lp.insert((int)ow, (int)oh)) {
+                packer.layers.push_back(std::move(lp));
+                placed_layer = (uint32_t)packer.layers.size() - 1;
+                outer = *r;
+                return true;
+            }
+        }
+        return false;
     };
-    std::unordered_map<TextureAtlas*, AtlasState> states;
 
-    for (int idx = 0; idx < (int)upload_tasks.size(); idx++) {
-        auto& task = upload_tasks[idx];
-        TextureAtlas* atlas = task.target_handle->atlas;
-        auto& state = states[atlas];
+    bool ok = try_place(w + pad * 2, h + pad * 2, /*allow_new_layer=*/true);
 
-        if (!state.spaces)
-            state.spaces = std::make_unique<spaces_t>(rect_wh((int)atlas->width, (int)atlas->height));
-
-        // Паддинг — всем, КРОМЕ текстур точно в размер атласа (кубмап-грани/полнослойные: паддинг
-        // не влезает и не нужен — сосед у них не появится). Раньше pad=0 получал ПЕРВЫЙ тайл слоя —
-        // он оставался без gutter'а и ловил mip-bleed по краям, смежным с более поздними тайлами.
-        uint32_t pad = (task.width >= atlas->width || task.height >= atlas->height) ? 0 : atlas->padding;
-        int packed_w = (int)(task.width + pad * 2);
-        int packed_h = (int)(task.height + pad * 2);
-
-        auto result = state.spaces->insert(rect_wh(packed_w, packed_h));
-
-        if (!result) {
-            state.layer++;
-            state.placed_count = 0;
-            if (state.layer >= atlas->layers) {
-                SDL_Log("Atlas out of layers for task '%s'", task.name.c_str());
-                continue;
-            }
-            state.spaces = std::make_unique<spaces_t>(rect_wh((int)atlas->width, (int)atlas->height));
-
-            // Последний шанс на свежем слое — без паддинга (для почти-полнослойных текстур).
-            pad = 0;
-            packed_w = (int)task.width;
-            packed_h = (int)task.height;
-            result = state.spaces->insert(rect_wh(packed_w, packed_h));
-        }
-
-        if (!result) {
-            SDL_Log("Failed to pack task '%s' even on new layer", task.name.c_str());
-            continue;
-        }
-
-        // UVL считаем от ВНУТРЕННЕГО прямоугольника (без паддинга) и ДО расширения пикселей.
-        TextureData* td = task.target_handle->texture_data;
-        float ox = (float)(result->x + pad) / (float)atlas->width;
-        float oy = (float)(result->y + pad) / (float)atlas->height;
-        float sx = (float)task.width / (float)atlas->width;
-        float sy = (float)task.height / (float)atlas->height;
-        td->uv_packed_offset = PackUnorm16x2(ox, oy);
-        td->uv_packed_scale = PackUnorm16x2(sx, sy);
-        td->layer = state.layer;
-        td->_pad = 0;
-
-        // Заполняем gutter репликацией кромки: грузим (w+2p)×(h+2p) вместо w×h. Без этого паддинг
-        // остаётся мусором/чёрным, и мип-генерация (она идёт по атласу целиком) подмешивает его в
-        // кромку тайла на грубых мипах → тёмная рамка по периметру меша и битая POM-глубина у края.
-        if (pad > 0 && task.width > 0 && task.height > 0) {
-            const uint32_t bpp   = (uint32_t)(task.pixels.size() / ((size_t)task.width * task.height));
-            const uint32_t new_w = task.width + pad * 2;
-            const uint32_t new_h = task.height + pad * 2;
-            std::vector<std::byte> padded((size_t)new_w * new_h * bpp);
-            for (uint32_t y = 0; y < new_h; ++y) {
-                const uint32_t sy_row = (uint32_t)SDL_clamp((int)y - (int)pad, 0, (int)task.height - 1);
-                const std::byte* srow = task.pixels.data() + (size_t)sy_row * task.width * bpp;
-                std::byte* drow = padded.data() + (size_t)y * new_w * bpp;
-                for (uint32_t x = 0; x < pad; ++x)                       // левая кромка
-                    SDL_memcpy(drow + (size_t)x * bpp, srow, bpp);
-                SDL_memcpy(drow + (size_t)pad * bpp, srow, (size_t)task.width * bpp);   // центр
-                for (uint32_t x = 0; x < pad; ++x)                       // правая кромка
-                    SDL_memcpy(drow + ((size_t)pad + task.width + x) * bpp, srow + (size_t)(task.width - 1) * bpp, bpp);
-            }
-            task.pixels = std::move(padded);
-            task.width  = new_w;
-            task.height = new_h;
-            task.size   = (uint32_t)task.pixels.size();
-        }
-
-        // Грузим от угла РЕЗЕРВАЦИИ: при pad>0 картинка уже расширена gutter'ом до (w+2p)×(h+2p),
-        // при pad==0 внутренний прямоугольник совпадает с резервацией.
-        task.dst.texture = atlas->texture_binding.texture;
-        task.dst.x = (Uint32)result->x;
-        task.dst.y = (Uint32)result->y;
-        task.dst.z = 0;
-        task.dst.layer = state.layer;
-        task.dst.mip_level = 0;
-        task.dst.w = task.width;
-        task.dst.h = task.height;
-        task.dst.d = 1;
-
-        state.placed_count++;
+    // Почти-полнослойные: паддинг нигде не влез. Существующие слои всегда непусты (пустые не
+    // создаём), значит без паддинга сесть можно только на СВЕЖИЙ слой — пробуем его.
+    if (!ok && pad > 0) {
+        pad = 0;
+        ok = try_place(w, h, /*allow_new_layer=*/true);
     }
 
-    // Расширение пикселей меняет размеры задач → пересобираем офсеты transfer-буфера
-    // (маппинг и EnsureCapacity происходят ПОЗЖЕ, в ExecuteUploadTasks — порядок безопасен).
+    if (!ok) {
+        SDL_Log("Failed to pack task '%s' (%ux%u) — atlas full", task.name.c_str(), w, h);
+        return false;
+    }
+
+    // UVL считаем от ВНУТРЕННЕГО прямоугольника (outer + pad) и ДО расширения пикселей. Позицию
+    // отдельно НЕ храним — регион точно восстанавливается из UVL при удалении (см. _DecodeOuterRect).
+    TextureData& td = task.target_handle->texture_data;
+    float ox = (float)(outer.x + pad) / (float)atlas->width;
+    float oy = (float)(outer.y + pad) / (float)atlas->height;
+    float sx = (float)w / (float)atlas->width;
+    float sy = (float)h / (float)atlas->height;
+    td.uv_packed_offset = PackUnorm16x2(ox, oy);
+    td.uv_packed_scale  = PackUnorm16x2(sx, sy);
+    td.layer = placed_layer;
+    td._pad  = 0;
+
+    // Заполняем gutter репликацией кромки: грузим (w+2p)×(h+2p) вместо w×h. Без этого паддинг
+    // остаётся мусором/чёрным, и мип-генерация (она идёт по атласу целиком) подмешивает его в
+    // кромку тайла на грубых мипах → тёмная рамка по периметру меша и битая POM-глубина у края.
+    if (pad > 0) {
+        const uint32_t bpp   = (uint32_t)(task.pixels.size() / ((size_t)w * h));
+        const uint32_t new_w = w + pad * 2;
+        const uint32_t new_h = h + pad * 2;
+        std::vector<std::byte> padded((size_t)new_w * new_h * bpp);
+        for (uint32_t y = 0; y < new_h; ++y) {
+            const uint32_t sy_row = (uint32_t)SDL_clamp((int)y - (int)pad, 0, (int)h - 1);
+            const std::byte* srow = task.pixels.data() + (size_t)sy_row * w * bpp;
+            std::byte* drow = padded.data() + (size_t)y * new_w * bpp;
+            for (uint32_t x = 0; x < pad; ++x)                       // левая кромка
+                SDL_memcpy(drow + (size_t)x * bpp, srow, bpp);
+            SDL_memcpy(drow + (size_t)pad * bpp, srow, (size_t)w * bpp);   // центр
+            for (uint32_t x = 0; x < pad; ++x)                       // правая кромка
+                SDL_memcpy(drow + ((size_t)pad + w + x) * bpp, srow + (size_t)(w - 1) * bpp, bpp);
+        }
+        task.pixels = std::move(padded);
+        task.width  = new_w;
+        task.height = new_h;
+        task.size   = (uint32_t)task.pixels.size();
+    }
+
+    // Грузим от угла ВНЕШНЕГО прямоугольника: при pad>0 картинка уже расширена gutter'ом до
+    // (w+2p)×(h+2p), при pad==0 внутренний прямоугольник совпадает с внешним.
+    task.dst.texture   = atlas->texture_binding.texture;
+    task.dst.x         = (Uint32)outer.x;
+    task.dst.y         = (Uint32)outer.y;
+    task.dst.z         = 0;
+    task.dst.layer     = placed_layer;
+    task.dst.mip_level = 0;
+    task.dst.w         = task.width;
+    task.dst.h         = task.height;
+    task.dst.d         = 1;
+
+    task.placed = true;
+    return true;
+}
+
+void TextureManager::_BuildUploadTasks() {
+    // Каждую новую задачу вставляем в ПЕРСИСТЕНТНЫЙ упаковщик её атласа. Уже размещённые задачи
+    // (placed) пропускаются, поэтому существующие тайлы не двигаются, а новые садятся в остаток —
+    // ни пересборки атласа, ни наложения на старое содержимое.
+    for (auto& task : upload_tasks)
+        _PlaceTask(task);
+
     uint32_t off = 0;
     for (auto& t : upload_tasks) {
         t.offset = off;
@@ -309,6 +368,7 @@ void TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
     // Упаковка (UVL + task.dst) сделана заранее в PackAtlases() — до сборки батчей.
 	EnsureUploadTransferBufferCapacity(current_upload_tb_offset);
     for (auto& task : upload_tasks) {
+        if (!task.dst.texture) continue;   // задача не разместилась (атлас переполнен) — не грузим
         // Пиксели уже декодированы TextureLoader'ом (BGRA32, плотно) — просто копируем.
         SDL_GPUTextureTransferInfo src{};
         src.transfer_buffer = upload_transfer_buffer;
@@ -327,8 +387,9 @@ void TextureManager::GenerateMipmaps(SDL_GPUCommandBuffer* cb)
 {
     std::unordered_set<SDL_GPUTexture*> seen;
     for (auto& task : upload_tasks) {
-        SDL_GPUTexture* tex = task.target_handle->atlas->texture_binding.texture;
-        if (seen.insert(tex).second and task.target_handle->atlas->mip_levels > 1){
+        TextureAtlas* atlas = task.target_handle->atlas;
+        SDL_GPUTexture* tex = atlas->texture_binding.texture;
+        if (seen.insert(tex).second and atlas->mip_levels > 1){
             SDL_GenerateMipmapsForGPUTexture(cb, tex);
         }
     }
@@ -354,16 +415,62 @@ SDL_GPUSampler* TextureManager::GetSampler(const std::string& name)
     }
 }
 
-void TextureManager::DeleteTexture(const std::string& name)
+// Распаковать ВНЕШНИЙ (с gutter'ом) прямоугольник размещения из UVL. unorm16 при размере атласа
+// ≤ ~4096 даёт пиксель-в-пиксель (шаг unorm ≫ 1 текселя), поэтому отдельно позицию не храним.
+// pad восстанавливаем той же формулой, что и при укладке; для почти-полнослойных, уложенных без
+// паддинга (fallback), формула может дать pad>0 — но тогда получится лишь БОЛЬШИЙ прямоугольник
+// (с clamp по границам атласа), т.е. переоценка занятого → безопасно (место не выдастся повторно).
+static rectpack2D::rect_xywh _DecodeOuterRect(const TextureData& td, const TextureAtlas* atlas) {
+    auto unpack_lo = [](uint32_t p) { return (float)(p & 0xFFFFu) / 65535.0f; };
+    auto unpack_hi = [](uint32_t p) { return (float)(p >> 16)      / 65535.0f; };
+    const int w  = (int)(unpack_lo(td.uv_packed_scale)  * atlas->width  + 0.5f);
+    const int h  = (int)(unpack_hi(td.uv_packed_scale)  * atlas->height + 0.5f);
+    const int ix = (int)(unpack_lo(td.uv_packed_offset) * atlas->width  + 0.5f);
+    const int iy = (int)(unpack_hi(td.uv_packed_offset) * atlas->height + 0.5f);
+    const int pad = ((uint32_t)w >= atlas->width || (uint32_t)h >= atlas->height) ? 0 : atlas->padding;
+
+    const int ox = std::max(0, ix - pad);
+    const int oy = std::max(0, iy - pad);
+    const int orr = std::min((int)atlas->width,  ix + w + pad);
+    const int ob = std::min((int)atlas->height, iy + h + pad);
+    return rectpack2D::rect_xywh(ox, oy, orr - ox, ob - oy);
+}
+
+void TextureManager::DeleteTextureHandle(const std::string& name)
 {
-  //  auto it = textures_data.find(name);
-  //  if (it != textures_data.end()) {
-  //      SDL_ReleaseGPUTexture(dev, it->second->texture.texture);
-		//textures_data.erase(it);
-  //  }
-  //  else {
-  //      SDL_Log("Texture '%s' not found, cannot delete", name.c_str());
-  //  }
+    auto it = handles_data.find(name);
+    if (it == handles_data.end()) {
+        SDL_Log("Texture handle '%s' not found, cannot delete", name.c_str());
+        return;
+    }
+    TextureHandle* handle = it->second.get();
+    TextureData* td = &handle->texture_data;
+
+    if (TextureAtlas* atlas = handle->atlas) {
+        auto& v = atlas->textures;
+        v.erase(std::remove(v.begin(), v.end(), td), v.end());
+
+        auto pit = atlas_packers.find(atlas);
+        if (pit != atlas_packers.end() && pit->second) {
+            const uint32_t L = td->layer;
+            if (L < pit->second->layers.size()) {
+                auto& layer = pit->second->layers[L];
+                layer.reset((int)atlas->width, (int)atlas->height);
+                for (TextureData* s : atlas->textures)
+                    if (s->layer == L) {
+                        rectpack2D::rect_xywh o = _DecodeOuterRect(*s, atlas);
+                        if (o.w > 0 && o.h > 0) layer.carve(o);
+                    }
+            }
+        }
+    }
+
+    upload_tasks.erase(
+        std::remove_if(upload_tasks.begin(), upload_tasks.end(),
+                       [handle](const UploadTaskTexture& t) { return t.target_handle == handle; }),
+        upload_tasks.end());
+
+    handles_data.erase(it);   // уничтожает TextureHandle вместе с его TextureData (по значению)
 }
 
 void TextureManager::DeleteTexture(SDL_GPUTexture* texture)

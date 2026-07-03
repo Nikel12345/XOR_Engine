@@ -14,6 +14,7 @@ struct SceneData;
 struct ModelBatchData;
 struct MaterialComponent;
 struct ModelComponent;
+struct TextureHandle;
 
 using Entity = uint32_t;
 
@@ -37,6 +38,8 @@ public:
 	void SetDirtyBatches(bool state) { dirty_batches = state; };
 	uint32_t AskNumCommands();
 
+	void SetDummyTexture(TextureHandle* dummy) { dummy_texture = dummy; };
+
 private:
 	// One place an entity lives inside a ModelBatchData::pib_sub_buffer.
 	struct PibSlot {
@@ -56,6 +59,7 @@ private:
 		const MaterialComponent& material_component, const ModelComponent& model_component);
 	void RemoveEntityFromBatches(Entity entity);
 
+	TextureHandle* dummy_texture = nullptr;
 	// Reverse index: entity -> all its slots across model batches. Rebuilt on full
 	// rebuild, mutated incrementally by AddEntityToBatches/RemoveEntityFromBatches.
 	std::unordered_map<Entity, std::vector<PibSlot>> entity_slots;

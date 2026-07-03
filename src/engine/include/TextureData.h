@@ -22,7 +22,13 @@ struct TextureData {
 };
 
 struct TextureAtlas{
-	std::vector<std::unique_ptr<TextureData>> textures_data;
+	// НЕвладеющий список размещений текстур в атласе. Держим именно TextureData (а не TextureHandle):
+	// атлас — тонкая прослойка над GPU-текстурой, ему нужны только регионы (UVL+layer). Владелец
+	// самих TextureData — TextureManager::handles_data (по значению внутри TextureHandle, адрес
+	// стабилен). Пусто для атласов-таргетов, где хэндлы не создавались. Регион каждого элемента
+	// точно распаковывается из UVL (unorm16, пиксель-в-пиксель) — этого достаточно для пересборки
+	// свободного места при удалении и для гипотетической GPU→GPU перепаковки.
+	std::vector<TextureData*> textures;
 	SDL_GPUTextureSamplerBinding texture_binding;
 	SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_INVALID;
 	SDL_GPUTextureType texture_type = SDL_GPU_TEXTURETYPE_2D; // 2D / CUBE / ARRAY — берётся из tci при создании; компатибилити-проверки (это куб?) смотрят сюда
@@ -40,9 +46,13 @@ struct TextureAtlas{
 //};
 
 
-struct TextureHandle {
+// enable_shared_from_this: владелец — TextureManager::handles_data (shared_ptr). Материалы держат
+// weak_ptr на хэндл (см. Material::textures) и потому умеют детектировать его удаление. weak_from_this()
+// позволяет выдать такой weak_ptr из сырого TextureHandle* без протаскивания shared_ptr через API.
+struct TextureHandle : std::enable_shared_from_this<TextureHandle> {
 	TextureAtlas* atlas = nullptr;
-	TextureData* texture_data = nullptr;
+	TextureData texture_data{};   // GPU-раскладка UVL, ПО ЗНАЧЕНИЮ: handle владеет своей записью,
+	                              // адрес стабилен (handles_data держит shared_ptr<TextureHandle>).
 	uint32_t width = 0;   // нативный размер картинки в пикселях, пишется при загрузке
 	uint32_t height = 0;  // (точный исходник, без round-trip через unorm16 uv_packed_scale)
 };

@@ -61,8 +61,9 @@ AtlasBatchKey HashAtlasBatchKey(const Material* mat) {
     //    key ^= reinterpret_cast<AtlasBatchKey>(mat->normal_texture->atlas) * 2654435761ull;
     //}
     for (const auto& [slot, tex] : mat->textures) {
-        if (tex && tex->atlas) {
-            key ^= reinterpret_cast<AtlasBatchKey>(tex->atlas) * (2654435761ull + static_cast<uint64_t>(slot));
+        auto h = tex.lock();   // удалённая текстура → пусто → в ключ не входит (в батче будет dummy)
+        if (h && h->atlas) {
+            key ^= reinterpret_cast<AtlasBatchKey>(h->atlas) * (2654435761ull + static_cast<uint64_t>(slot));
         }
     }
     key ^= key >> 33;
@@ -179,15 +180,19 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
             if (atlas_it == atlas_map.end())
             {
                 AtlasBatchData new_tex{};
+                TextureHandle* texture_handle = nullptr;
 
                 for (const auto& role : sp->required_slots) {
                     auto it = material->textures.find(role);
-                    if (it == material->textures.end() || !it->second || !it->second->atlas) {
+                    std::shared_ptr<TextureHandle> h = (it != material->textures.end()) ? it->second.lock() : nullptr;
+                    if (!h || !h->atlas) {   // нет слота / текстура удалена (weak протух) / нет атласа
                         SDL_Log("BuildBatches:: Material is missing required atlas for shader slot");
-                        assert(false && "Material is missing required texture for shader slot!");
-                        continue;
+                        texture_handle = dummy_texture;
                     }
-                    new_tex.texture_binding.push_back(it->second->atlas->texture_binding);
+                    else {
+                        texture_handle = h.get();
+                    }
+                    new_tex.texture_binding.push_back(texture_handle->atlas->texture_binding);
 
                 }
 
@@ -211,12 +216,16 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
                 new_texb.texture_uvl.reserve(material->textures.size());
                 for (const auto& role : sp->required_slots) {
                     auto it = material->textures.find(role);
-                    if (it == material->textures.end() || !it->second || !it->second->texture_data) {
+                    std::shared_ptr<TextureHandle> h = (it != material->textures.end()) ? it->second.lock() : nullptr;
+                    TextureHandle* texture_handle = nullptr;
+                    if (!h) {   // нет слота / текстура удалена (weak протух)
                         SDL_Log("BuildBatches:: Material is missing required texture_data for shader slot");
-                        assert(false && "Material is missing required texture for shader slot!");
-                        continue;
+                        texture_handle = dummy_texture;
                     }
-                    new_texb.texture_uvl.push_back(*it->second->texture_data);   // КОПИЯ значения (см. инвариант в TextureBatchData)
+                    else {
+                        texture_handle = h.get();
+                    }
+                    new_texb.texture_uvl.push_back(texture_handle->texture_data);   // КОПИЯ значения (см. инвариант в TextureBatchData)
                 }
 
                 tex_map[tex_key] = std::move(new_texb);

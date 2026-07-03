@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "MaterialManager.h"
+#include "TextureData.h"   // полное определение TextureHandle: нужно для weak_from_this()
 
 MaterialManager::MaterialManager()
 {
@@ -34,7 +35,7 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 			SDL_Log("MaterialManager::Creating material with non existing shader program");
 			continue;
 		}
-		// ��������� ��� ��� required_slots ������� ����������� textures
+		// ��������� ��� ��� required_slots ������� ����������� textures
 		for (const auto& required_role : shader_program->required_slots) {
 			bool found = false;
 			for (const auto& [role, handle] : textures) {
@@ -46,14 +47,16 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 			if (!found) {
 				SDL_Log("Material '%s': missing texture for required slot %d",
 					name.c_str(), static_cast<int>(required_role));
-				return nullptr; // ��� assert, ��� throw
+				return nullptr; // ��� assert, ��� throw
 			}
 		}
 	}
 	auto data = std::make_unique<Material>();
 	data->shader_programs.insert(shader_programs.begin(), shader_programs.end());
 	for (const auto& [role, handle] : textures) {
-		data->textures[role] = handle;
+		// Сырой хэндл → weak_ptr (владелец shared_ptr — TextureManager::handles_data). Пустой weak
+		// для отсутствующей текстуры; удаление хэндла позже сделает weak протухшим → dummy в батче.
+		data->textures[role] = handle ? handle->weak_from_this() : std::weak_ptr<TextureHandle>{};
 	}
 	materials[name] = std::move(data);
 	return materials[name].get();

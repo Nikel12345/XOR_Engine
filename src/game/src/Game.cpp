@@ -52,15 +52,10 @@ SDL_AppResult Game::MainInit()
 	TextureHandle* texture_cube = ctx->CreateTextureFromFile("albedo_cube", "albedo_atlas", "textures/assets/cube_test.png");
 	TextureHandle* norm = ctx->CreateTextureFromFile("norm", "normal_atlas", "textures/assets/car_norm.png");
 
+    ctx->CreateTextureFromFile("texture_sun", "albedo_atlas", "textures/assets/2k_sun.jpg");
+
     ctx->CreateTextureFromFile("texture_asphalt", "albedo_atlas", "textures/blocks/brick_base_c.png");
-    // G у этой ORM хранит smoothness (asphalt G≈0.12 → как roughness это «мокрое зеркало»).
-    // Нормализуем к канону движка (roughness) инверсией G на импорте.
     ctx->CreateTextureFromFile("texture_asphalt_orm", "orm_atlas", "textures/blocks/brick_orm.png", ChannelConvention::SmoothnessInGreen);
-    // Normal с картой ВЫСОТ в альфе (RGB=нормаль, A=height: яркое=выше; POM читает depth=1-A из
-    // u_normal.a — без нового атласа/слота). AsIs: и нормаль в конвенции движка, и альфа height-стиля
-    // (у бороздчатой коры средняя яркость низкая — это НЕ признак cavity-карты; проверено глазами).
-    // DepthInAlpha — только для действительно перевёрнутых (cavity) альф. Для волокнистых карт
-    // укрупняй рельеф pomBias ~2..3 (абсолютный пол LOD; НЕ выключатель POM — выключатель heightScale=0).
     ctx->CreateTextureFromFile("wood_norm", "normal_atlas", "textures/blocks/brick_normal_h.png", ChannelConvention::AsIs);
 
 	textureManager->CreateTexture("default_orm",      "orm_atlas",      2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
@@ -122,9 +117,18 @@ SDL_AppResult Game::MainInit()
         {TextureSlotRole::Albedo, "new_car_glass"},
         {TextureSlotRole::Normal, "norm"} },
         { "sp_transparent" });
+    ctx->SetMaterialParams(material_glass, TransparentMaterialParams{ 0.35f });
 
+    auto material_sun = ctx->CreateMaterial("material_sun", {
+        {TextureSlotRole::Albedo, "texture_sun"},
+        {TextureSlotRole::Normal, "norm"},
+        {TextureSlotRole::ORM, "default_orm"},
+        {TextureSlotRole::Emissive, "default_emissive"} },
+        { "sp"});
+    ctx->SetMaterialParams(material_sun, OpaqueMaterialParams{ {1,1,1,1}, {0.99f,0.85f,0.45f}, 2.4f, /*metallic*/0.0f, /*roughness*/1.0f });
 
     auto ship_material = ctx->CreateMaterial("ship", {}, { "sp_untextured" });
+    ctx->SetMaterialParams(ship_material, OpaqueMaterialParams{ { 0.55f, 0.6f, 0.7f, 1.0f } });
 
     auto m_orange = ctx->CreateMaterial("m_orange", {}, { "sp_untextured", "sp_shadow" });
     ctx->SetMaterialParams(m_orange, OpaqueMaterialParams{ {1.0f, 0.45f, 0.1f, 1.0f} });
@@ -141,9 +145,7 @@ SDL_AppResult Game::MainInit()
     auto emission = ctx->CreateMaterial("emission", {}, { "sp_untextured", "sp_shadow" });
     ctx->SetMaterialParams(emission, OpaqueMaterialParams{ {0.0f, 0.0f, 0.0f, 1.0f}, {0.3f, 0.3f, 0.6f}, 1.0f });
 
-    ctx->SetMaterialParams(ship_material, OpaqueMaterialParams{ { 0.55f, 0.6f, 0.7f, 1.0f } });
 
-    ctx->SetMaterialParams(material_glass, TransparentMaterialParams{ 0.35f });
 
     // Opaque-материалы тоже несут params (дефолт-белый baseColorFactor = без тинта): иначе их
     // MaterialBlock @ b1 остался бы несвязанным. metallic/roughness/emission — задел (закомм.).
@@ -255,28 +257,32 @@ SDL_AppResult Game::MainInit()
     //    PositionProxy16{ 1,0,0,-2.5f,  0,1,0,0,  0,0, 1,1.25f,  0,0,0,1 },
     //    ShadowCasterComponent{}
     //);
-    //ctx->CreateEntity("main_menu",
-    //    SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
-    //    PositionProxy16{ 1,0,0, 0.0f,  0,1,0,0,  0,0, 1,1.25f,  0,0,0,1 },
-    //    ShadowCasterComponent{},
-    //    ColliderComponent{}
-    //);
+
 
 
     ctx->RegisterGenerator("main_menu", [this] { CreateDebugColliders(); });
     ctx->LoadScene("main_menu", "saved_scene.scene");
 
-    ctx->CreateEntity("main_menu",
-        MaterialComponent{ { metal2 } },
+    Entity sun = ctx->CreateEntity("main_menu",
+        MaterialComponent{ { material_sun } },
         ModelComponent{ sphere },
         PositionProxy16{ 1,0,0,-2.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
         ShadowComponent{},
         ColliderComponent{ { Collider::Sphere(1.0f)} },
-        DrawComponent{}
+        DrawComponent{},
+        GeneratedComponent{}
+    );
+
+    ctx->CreateEntity("main_menu",
+        ParentComponent{ sun },
+        SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
+        LocalMatrixProxy16{},
+        PositionProxy16{},
+        ShadowCasterComponent{},
+        ColliderComponent{}
     );
 
     ctx->ExecuteGenerators();
-
 
     ChangeState(GameState::MAIN_MENU);
 

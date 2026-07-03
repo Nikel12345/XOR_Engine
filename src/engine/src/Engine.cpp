@@ -630,6 +630,11 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	init_info.ColorTargetFormat = SDL_GetGPUSwapchainTextureFormat(dev, window);
 	init_info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
 	ImGui_ImplSDLGPU3_Init(&init_info);
+
+	engine_context->CreateTextureAtlas("_FallbackAtlas", TexturePresets::AlbedoAtlas(64, 1, 1), "_SimpleSampler");
+	TextureHandle* dummy = engine_context->CreateTextureFromFile("_NoTextureDummy", "_FallbackAtlas", "../engine/textures/dummy.png");
+
+	batch_builder->SetDummyTexture(dummy);
 }
 
 void Engine::InitDefaultBufferUpdaters()

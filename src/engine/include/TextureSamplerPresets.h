@@ -5,7 +5,8 @@ enum class SamplerPreset {
 	DEFAULT_SAMPLER,
 	SHADOW_SAMPLER,
     VSM_SAMPLER,
-    ENV_SAMPLER
+    ENV_SAMPLER,
+    SIMPLE_SAMPLER
 };
 
 namespace SamplerPresets {
@@ -39,7 +40,22 @@ namespace SamplerPresets {
             sci.enable_compare = false;
             sci.props = 0;
             break;
-
+        case SamplerPreset::SIMPLE_SAMPLER:
+            sci.min_filter = SDL_GPU_FILTER_NEAREST;
+            sci.mag_filter = SDL_GPU_FILTER_NEAREST;
+            sci.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
+            sci.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+            sci.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+            sci.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+            sci.mip_lod_bias = 0.0f;
+            sci.max_anisotropy = 1.0f;
+            sci.compare_op = SDL_GPU_COMPAREOP_ALWAYS;
+            sci.min_lod = 0.0f;
+            sci.max_lod = 32.0f;
+            sci.enable_anisotropy = false;
+            sci.enable_compare = false;
+            sci.props = 0;
+            break;
         case SamplerPreset::SHADOW_SAMPLER:
             sci.min_filter = SDL_GPU_FILTER_LINEAR;
             sci.mag_filter = SDL_GPU_FILTER_LINEAR;

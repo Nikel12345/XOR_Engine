@@ -1,6 +1,8 @@
 #pragma once
 #include <unordered_set>
+#include <unordered_map>
 #include <vector>
+#include <memory>
 #include <cstdint>
 #include "ShaderData.h"
 
@@ -12,7 +14,10 @@ struct TextureHandle;
 enum class MaterialParamsKind : uint32_t { None = 0, Opaque, Transparent };
 
 struct Material {
-    std::unordered_map<TextureSlotRole, TextureHandle*> textures;
+    // weak_ptr, а не сырой указатель: текстуру могут удалить независимо от материала
+    // (TextureManager::DeleteTextureHandle). weak_ptr::lock() → nullptr для удалённой → BatchBuilder
+    // подставит dummy. Так «висячий указатель» невозможен by design, без ручной инвалидации.
+    std::unordered_map<TextureSlotRole, std::weak_ptr<TextureHandle>> textures;
     std::unordered_set<ShaderProgram*> shader_programs;
 
     // Непрозрачный блоб per-material факторов (alpha, baseColorFactor, metallic, ...). Layout

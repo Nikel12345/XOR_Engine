@@ -10,14 +10,21 @@
 
 struct UploadTaskTexture {
 	SDL_GPUTextureRegion dst{};
-	std::vector<std::byte> pixels;
+	std::vector<std::byte> pixels;          // транзитные пиксели этой задачи (с gutter'ом, если pad>0)
 	std::string name;                       // для диагностики при упаковке
-	TextureHandle* target_handle = nullptr;
+	TextureHandle* target_handle = nullptr; // куда писать UVL + через него атлас для GenerateMipmaps
 	Uint32 offset = 0;
 	Uint32 size = 0;
 	Uint32 width = 0, height = 0, pitch = 0;
+	bool placed = false;                    // уже размещена в атласе (защита от повторной вставки)
 
 };
+
+// Персистентное состояние упаковщика атласа (свободные места по слоям). Живёт МЕЖДУ вызовами
+// PackAtlases, поэтому CreateTexture после загрузки садится в оставшееся место, а не пересобирает
+// атлас; DeleteTexture возвращает регион в это состояние для переиспользования. Определён в .cpp
+// (использует типы rectpack2D) — здесь только forward-declaration.
+struct AtlasPacker;
 
 namespace DefaultSamplersNames {
 	inline constexpr const char* DEFAULT_SAMPLER = "_DefaultSampler";
@@ -69,8 +76,14 @@ public:
 	SDL_GPUSampler* CreateSampler(const std::string& name, SDL_GPUSamplerCreateInfo sci);
 	SDL_GPUSampler* GetSampler(const std::string& name);
 	
-	void DeleteTexture(const std::string& name);
+	// Немедленное освобождение GPU-текстуры (как QueueDeleteTexture, но без отложенной очереди).
 	void DeleteTexture(SDL_GPUTexture* texture);
+
+	// Удаление ОДНОЙ текстуры из атласа: снимает хэндл и освобождает его регион (GPU-текстуру
+	// атласа НЕ трогает — атлас общий). Слой удалённой текстуры пересобирается «начисто» (весь слой
+	// снова один прямоугольник минус выжившие), поэтому освободившееся место сливается в крупный
+	// остаток. Выжившие не двигаются.
+	void DeleteTextureHandle(const std::string& name);
 
 	SharedDepthTarget* CreateSharedDepthTarget(SDL_GPUTextureCreateInfo tci);
 	void QueueDeleteTexture(SDL_GPUTexture* texture);
@@ -104,9 +117,16 @@ public:
 private:
 	void CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name);
 	void _BuildUploadTasks();
+	// Разместить одну upload-задачу в персистентном упаковщике её атласа (слой за слоем от 0-го,
+	// с переиспользованием освобождённых регионов). При успехе пишет UVL/placement в handle,
+	// gutter'ит пиксели и заполняет task.dst. См. TextureManager.cpp.
+	bool _PlaceTask(UploadTaskTexture& task);
 	std::unordered_map<std::string, std::unique_ptr<TextureAtlas>> atlases_data;
-	std::unordered_map<std::string, std::unique_ptr<TextureHandle>> handles_data;
+	// shared_ptr — единственный СИЛЬНЫЙ владелец хэндла; материалы держат weak_ptr. Поэтому
+	// DeleteTextureHandle = просто erase: хэндл освобождается, а все weak_ptr сами протухают.
+	std::unordered_map<std::string, std::shared_ptr<TextureHandle>> handles_data;
 	std::unordered_map<std::string, SDL_GPUSampler*> samplers_data;
+	std::unordered_map<TextureAtlas*, std::unique_ptr<AtlasPacker>> atlas_packers;  // персистентное состояние упаковки
 	std::vector<UploadTaskTexture> upload_tasks;
 
 	std::vector<std::unique_ptr<SharedDepthTarget>> shared_depth_targets;
