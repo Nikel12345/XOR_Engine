@@ -7,6 +7,7 @@ enum class TexturePreset {
     Depth_FlatArray2048_8Layers,
     Depth_FlatArray2048_16Layers,
     Depth_FlatArray1024_8Layers,
+    Depth_FlatArray1024_16Layers,
     Depth_CubemapArray2048_1Cubes,
     Depth_CubemapArray2048_4Cubes,
     Depth_CubemapArray2048_8Cubes,
@@ -91,6 +92,16 @@ namespace TexturePresets {
             info.width = 1024;
             info.height = 1024;
             info.layer_count_or_depth = 8;
+            info.num_levels = 1;
+            break;
+
+        case TexturePreset::Depth_FlatArray1024_16Layers:
+            info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+            info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+            info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+            info.width = 1024;
+            info.height = 1024;
+            info.layer_count_or_depth = 16;
             info.num_levels = 1;
             break;
 
