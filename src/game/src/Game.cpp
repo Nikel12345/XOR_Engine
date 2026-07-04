@@ -263,25 +263,24 @@ SDL_AppResult Game::MainInit()
     ctx->RegisterGenerator("main_menu", [this] { CreateDebugColliders(); });
     ctx->LoadScene("main_menu", "saved_scene.scene");
 
-    //Entity sun = ctx->CreateEntity("main_menu",
-    //    MaterialComponent{ { material_sun } },
-    //    ModelComponent{ sphere },
-    //    PositionProxy16{ 1,0,0,-2.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
-    //    ShadowComponent{},
-    //    ColliderComponent{ { Collider::Sphere(1.0f)} },
-    //    DrawComponent{},
-    //    GeneratedComponent{}
-    //);
+    Entity sun = ctx->CreateEntity("main_menu",
+        MaterialComponent{ { material_sun } },
+        ModelComponent{ sphere },
+        PositionProxy16{ 1,0,0,-2.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
+        ShadowComponent{},
+        ColliderComponent{ { Collider::Sphere(1.0f)} },
+        DrawComponent{},
+        GeneratedComponent{}
+    );
 
-    //ctx->CreateEntity("main_menu",
-    //    ParentComponent{ sun },
-    //    SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
-    //    LocalMatrixProxy16{},
-    //    PositionProxy16{},
-    //    ShadowCasterComponent{},
-    //    ColliderComponent{}
-    //);
-
+    ctx->CreateEntity("main_menu",
+        ParentComponent{ sun },
+        SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
+        LocalMatrixProxy16{},
+        PositionProxy16{},
+        ShadowCasterComponent{},
+        ColliderComponent{}
+    );
     ctx->ExecuteGenerators();
 
     ChangeState(GameState::MAIN_MENU);

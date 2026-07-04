@@ -252,7 +252,8 @@ static const int    PRINT_EVERY = 600;
 
 void Engine::PrepareFunc(uint8_t slot)
 {
-	slot_controller->SetSlotState(slot, PREPARING);
+	// Слот уже зарезервирован (RESERVED) в момент выдачи — Get/WaitFreeSlotIndex
+	// делает это атомарно с выбором, отдельного состояния PREPARING больше нет.
 	buffer_manager->logic_index = slot;
 
 	engine_context->CreateGraphicsPipelines();
@@ -280,8 +281,6 @@ void Engine::PrepareFunc(uint8_t slot)
 	//}
 
 	slot_controller->SetSlotState(slot, PREPARED);
-	slot_controller->SetSlotState(slot, UPLOADING);
-	slot_controller->SetSlotState(slot, UPLOADED);
 }
 
 void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
@@ -452,24 +451,6 @@ void Engine::PrepareFuncPrepassDepended(uint8_t slot)
 	transfer_manager->ReleaseTB(postreadback_tbd);
 }
 
-void Engine::UploadFunc(uint8_t slot)
-{
-	//slot_controller->SetSlotState(slot, UPLOADING);
-
-	//SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
-	//SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
-	//buffer_manager->MapUploadTransferBuffer();
-	//texture_manager->MapUploadTransferBuffer();
-	//texture_manager->ExecuteUploadTasks(cp);
-	//buffer_manager->UnmapUploadTransferBuffer();
-	//texture_manager->UnmapUploadTransferBuffer();
-	//SDL_EndGPUCopyPass(cp);
-	//SDL_SubmitGPUCommandBuffer(cb);
-
-	//slot_controller->SetSlotState(slot, UPLOADED);
-
-}
-
 bool Engine::RenderFunc(uint8_t slot)
 {
 	SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
@@ -517,8 +498,9 @@ bool Engine::RenderFunc(uint8_t slot)
 	}
 
 	SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+	// IS_RENDERING на слоте уже стоит — его поставил WaitRenderableSlot в момент
+	// выбора (атомарно, чтобы sim не захватил слот до сабмита). Здесь только fence.
 	slot_controller->SetSlotFence(slot, fence);
-	slot_controller->SetSlotState(slot, RENDERING);
 
 	return true;
 }
@@ -530,8 +512,10 @@ void Engine::FenceFunc(uint8_t slot) {
 
 	if (!fence) return;
 
-	if (!SDL_QueryGPUFence(dev, fence))
-		return;
+	// Блокирующее ожидание вместо опроса: неблокирующий SDL_QueryGPUFence в цикле
+	// FenceThread был busy-poll'ом — ядро выгорало на всё время исполнения кадра GPU,
+	// и CPU-нагрузка росла вместе с GPU-нагрузкой. Kernel-wait спит до сигнала fence.
+	SDL_WaitForGPUFences(dev, true, &fence, 1);
 
 	SDL_ReleaseGPUFence(dev, fence);
 	sd.fence = nullptr;
@@ -607,7 +591,6 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	pass_manager->FillRenderPasses();
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});
-	thread_controller->SetUploadCallback([this](uint8_t slot) {this->UploadFunc(slot); });
 	thread_controller->SetRenderCallback(
 		[this](uint8_t slot) {
 			return this->RenderFunc(slot);   // !!! return

@@ -66,7 +66,6 @@ public:
     //void Iterate();
     void PrepareFunc(uint8_t idx);
 
-	void UploadFunc(uint8_t idx);
     bool RenderFunc(uint8_t idx);
 
     void FenceFunc(uint8_t slot);

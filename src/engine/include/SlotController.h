@@ -2,27 +2,32 @@
 #include <cstdint>
 #include <mutex>
 #include <condition_variable>
-#include "config.h"
 #include <chrono>
+#include "config.h"
 #include <Utils.h>
 
-enum SlotState : uint8_t { FREE, PREPARING, PREPARED, UPLOADING, UPLOADED, RENDERING, RENDERED };
+// Жизненный цикл слота (флаги):
+//   RESERVED  — sim-поток захватил слот и заливает его буферы (prepare)
+//   PREPARED  — кадр готов и ждёт рендера
+//   RENDERING — кадр отправлен на GPU, fence ещё не отстрелил
+//
+// «Записываемый» для sim = нет RESERVED, нет RENDERING и слот не last_rendering_slot
+// (его буферы может читать fallback-пере-рендер). Мешает ли записи PREPARED —
+// зависит от режима (allow_frame_skip в Get/WaitFreeSlotIndex):
+//   skip разрешён (UPS_priority=true)  — неотрисованный кадр перезаписывается более
+//     свежим, sim никогда не ждёт рендер; рендер показывает самое свежее готовое;
+//   skip запрещён (UPS_priority=false) — каждый подготовленный кадр обязан
+//     отрисоваться, sim блокируется и UPS проседает до темпа рендера.
+enum SlotState : uint8_t { PREPARED, RENDERED };
 
-static constexpr uint8_t QUEUE_CAPACITY = BUFFERING_LEVEL + 1;
-
-// ������� ����� ��� �����:
-// P � ���� �������������� CPU-������ (������ � upload)
-// U � ���� ����������� �� GPU ������ (������ � ������� / ���������� �������)
-// R � ���� ������ ��������� � �������
-constexpr uint8_t SLOT_FLAG_HAS_PREPARED = 1u << 0;
-constexpr uint8_t SLOT_FLAG_HAS_UPLOADED = 1u << 1;
+constexpr uint8_t SLOT_FLAG_RESERVED     = 1u << 0;
+constexpr uint8_t SLOT_FLAG_HAS_PREPARED = 1u << 1;
 constexpr uint8_t SLOT_FLAG_IS_RENDERING = 1u << 2;
 
 struct SlotData {
-    uint32_t frame_id = 0;
-    uint8_t  flags = 0;                 // ���������� mutex_ ������ SlotController
+    uint32_t frame_id = 0;              // порядковый номер prepare — рендер берёт наибольший (самый свежий)
+    uint8_t  flags = 0;                 // защищается mutex_ внутри SlotController
     SDL_GPUFence* fence = nullptr;
-    uint64_t fence_time_ns = 0;
 };
 
 static constexpr uint8_t INVALID_SLOT = 0xFF;
@@ -30,83 +35,49 @@ static constexpr uint8_t INVALID_SLOT = 0xFF;
 class SlotController {
 public:
     SlotController();
+    ~SlotController();
 
-    // ������������� �������� (��� � ����)
-    uint8_t GetFreeSlotIndex();   // ���� ��� P (CPU-������ ����� ��������)
-    uint8_t GetPreparedSlot();    // ��������� ���� � P (��� upload-������)
-    uint8_t GetRenderableSlot();  // ������� U-�������, ����� fallback �� last_rendering
-    uint8_t GetRendering();
+    // Sim: захват слота под запись. Резервация происходит АТОМАРНО с выбором
+    // (под mutex_): ставится RESERVED (при skip'е заодно снимается PREPARED) —
+    // рендер не может взять слот в середине заливки его буферов.
+    uint8_t GetFreeSlotIndex(bool allow_frame_skip);    // неблокирующий: INVALID_SLOT, если писать некуда
+    uint8_t WaitFreeSlotIndex(bool allow_frame_skip);   // блокирующий
 
-    // ����� ����������� ��������, ��� �������� �� sleep-�������� � cv
-    uint8_t WaitFreeSlotIndex();
-    uint8_t WaitPreparedSlot();
-    uint8_t GetUploadedSlotUnsafe();
-    uint8_t GetRenderableFallbackUnsafe();
+    // Render: самый свежий PREPARED-слот, иначе fallback на last_rendering_slot
+    // (задел на будущее: пере-рендер последнего кадра с per-render данными).
+    // Возвращаемый слот помечается IS_RENDERING здесь же, под mutex_ — иначе sim
+    // мог бы захватить его в окне между выбором и сабмитом.
     uint8_t WaitRenderableSlot();
 
     bool IsRenderingSlot(uint8_t slot);
 
     SlotData* GetSlotsData() { return slots_data; }
 
-    void SetLastRenderedSlot(uint8_t slot);
-    void SetSlotState(uint8_t slot_index, SlotState new_state);
-
-    void RemoveFlag(uint8_t slot, uint8_t flag);
-
+    void SetSlotState(uint8_t slot, SlotState new_state);
     void SetSlotFence(uint8_t slot, SDL_GPUFence* fence);
-    void SetSlotFence(uint8_t slot, std::chrono::steady_clock::time_point fence);
-
-    ~SlotController();
 
     void DebugDump(const char* tag = nullptr);
 
 private:
     SlotData slots_data[BUFFERING_LEVEL];
 
+    // Последний ОТПРАВЛЕННЫЙ на рендер слот (не «завершённый»). Fallback пользуется
+    // им только после снятия IS_RENDERING — см. GetRenderableFallbackUnsafe.
     uint8_t last_rendering_slot;
 
-    uint8_t prepared_queue[QUEUE_CAPACITY];
-    uint8_t prepared_head;
-    uint8_t prepared_tail;
+    uint8_t  next_free_slot_index = 0;
+    uint32_t prepared_seq = 0;
 
-    uint8_t uploaded_queue[QUEUE_CAPACITY];
-    uint8_t uploaded_head;
-    uint8_t uploaded_tail;
-
-    uint8_t rendering_queue[QUEUE_CAPACITY];
-    uint8_t rendering_head;
-    uint8_t rendering_tail;
-
-    // ����� �������������
     std::mutex mutex_;
-    std::condition_variable cv_free_;
-    std::condition_variable cv_prepared_;
-    std::condition_variable cv_renderable_;
+    std::condition_variable cv_free_;        // sim ждёт записываемый слот
+    std::condition_variable cv_renderable_;  // render ждёт готовый кадр / fallback
 
-    uint8_t next_free_slot_index = 0;
+    // Все *Unsafe — только под уже захваченным mutex_.
+    uint8_t AcquireFreeSlotUnsafe(bool allow_frame_skip);
+    uint8_t GetReadySlotUnsafe();
+    uint8_t GetRenderableFallbackUnsafe();
+    void    MarkRenderingUnsafe(uint8_t slot);
 
-    // ����������� ��������� (������ ��� inline, ���������� � .cpp)
-    void HandleFree(uint8_t slot);
     void HandlePrepared(uint8_t slot);
-    void HandleUploaded(uint8_t slot);
-    void HandleRendering(uint8_t slot);
     void HandleRendered(uint8_t slot);
-
-    // ���������� �������� GetComponent* ��� ��� ����������� mutex_
-    uint8_t GetFreeSlotIndexUnsafe();
-    uint8_t GetPreparedSlotUnsafe();
-    uint8_t GetRenderableSlotUnsafe();
-
-    // ��������������� (��� ����, �� ������ ���� ��� mutex_)
-    uint8_t GetUploadedSlot();
-    uint8_t GetLastRenderingSlotIndex();
-
-    bool    PushPrepared(uint8_t slot);
-    uint8_t PopPrepared();
-
-    uint8_t PopUploaded();
-    bool    PushUploaded(uint8_t slot);
-
-    void PushRendering(uint8_t slot);
-    void PopRendering();
 };
