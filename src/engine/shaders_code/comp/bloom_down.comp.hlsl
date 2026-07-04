@@ -9,6 +9,9 @@ Texture2D<float4>   u_src     : register(t0, space0);
 [[vk::combinedImageSampler]]
 SamplerState        u_sampler : register(s0, space0);
 
+// [[vk::image_format]]: DXC не выводит формат storage-образа из float4 (молча даёт rgba32f) —
+// формат обязан совпадать с текстурой (rgba16f, см. TexturesPresets::BloomLevel), иначе UB.
+[[vk::image_format("rgba16f")]]
 RWTexture2D<float4> u_dst : register(u0, space1);
 
 cbuffer BloomParams : register(b0, space2) {
@@ -16,13 +19,12 @@ cbuffer BloomParams : register(b0, space2) {
     float intensity;   // не используется здесь
     float threshold;
     float knee;
-    uint  srcLod;      // mip-уровень источника (= уровень i-1)
+    uint  srcLod;      // не используется (уровни пирамиды — отдельные текстуры, читаем lod 0)
 };
 
-// Пирамида — ОДНА текстура с мипами: src = mip srcLod (вдвое крупнее), dst = mip i. Читаем src
-// сэмплером (билинейка) на уровне srcLod, пишем dst storage'ом — разные мипы одной текстуры
-// (под флагом SIMULTANEOUS).
-float3 S(float2 uv) { return u_src.SampleLevel(u_sampler, uv, srcLod).rgb; }
+// Пирамида — ОТДЕЛЬНАЯ текстура на уровень: src = уровень i-1 (вдвое крупнее, sampled),
+// dst = уровень i (storage). Разные текстуры → никакого одновременного RW+sampled одной.
+float3 S(float2 uv) { return u_src.SampleLevel(u_sampler, uv, 0).rgb; }
 float  karis(float3 c) { float l = dot(c, float3(0.2126, 0.7152, 0.0722)); return 1.0 / (1.0 + l); }
 
 [numthreads(16, 16, 1)]
@@ -31,7 +33,7 @@ void main(uint3 tid : SV_DispatchThreadID)
     uint dw, dh; u_dst.GetDimensions(dw, dh);
     if (tid.x >= dw || tid.y >= dh) return;
 
-    uint sw, sh, nl; u_src.GetDimensions(srcLod, sw, sh, nl);
+    uint sw, sh; u_src.GetDimensions(sw, sh);
     float2 t  = 1.0 / float2(sw, sh);                       // шаг = 1 тексель ИСТОЧНИКА
     float2 uv = (float2(tid.xy) + 0.5) / float2(dw, dh);
 

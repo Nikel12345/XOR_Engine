@@ -25,7 +25,10 @@ namespace DefaultRenderPassNamespace
         SDL_GPUTextureFormat main_depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;    // единый формат depth набора
         TextureAtlas*        scene_hdr = nullptr;       // HDR-цвет сцены (location 0 MAIN_PASS), общий для MAIN/TRANSPARENT/DEBUG
         TextureAtlas*        scene_emission = nullptr;  // HDR-эмиссия (location 1 MAIN_PASS, MRT) — источник bloom
-        TextureAtlas*        bloom_pyramid = nullptr;   // ВСЯ bloom-пирамида в одной текстуре: mip i = уровень i (mip0 = ½ окна)
+        // Bloom-пирамида: ОТДЕЛЬНАЯ текстура на уровень "bloom_L<i>" (уровень 0 = ½ окна, дальше /2).
+        // Не мипы одной текстуры: dst-уровень биндится RW, src — сэмплером, отдельные текстуры
+        // исключают одновременный RW+sampled бинд одной (см. TexturesPresets::BloomLevel).
+        TextureAtlas*        bloom_levels[BLOOM_LEVELS] = {};
         uint32_t             width = 0;                 // размер HDR-таргетов (= окно на момент init); нужен present-blit'у
         uint32_t             height = 0;
         bool                 common_inited = false;
@@ -231,13 +234,12 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     g_pass_system.scene_hdr      = tm->CreateTextureAtlas("scene_hdr",      TexturePresets::SceneHDR(width, height),    env_sampler);
     g_pass_system.scene_emission = tm->CreateTextureAtlas("scene_emission", TexturePresets::EmissionHDR(width, height), env_sampler);
 
-    // Bloom-пирамида: ОДНА текстура с BLOOM_LEVELS мипами. mip0 = ½ окна, далее /2 (мип-цепочка).
-    // Down/up читают mip-источник сэмплером и пишут соседний mip storage'ом (флаг SIMULTANEOUS).
-    {
-        uint32_t bw = width  >> 1; if (bw == 0) bw = 1;
-        uint32_t bh = height >> 1; if (bh == 0) bh = 1;
-        g_pass_system.bloom_pyramid = tm->CreateTextureAtlas("bloom_pyramid",
-            TexturePresets::BloomPyramid(bw, bh, BLOOM_LEVELS), env_sampler);
+    // Bloom-пирамида: BLOOM_LEVELS отдельных текстур "bloom_L<i>". Уровень 0 = ½ окна, дальше /2.
+    for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
+        uint32_t lw = width  >> (1 + i); if (lw == 0) lw = 1;
+        uint32_t lh = height >> (1 + i); if (lh == 0) lh = 1;
+        g_pass_system.bloom_levels[i] = tm->CreateTextureAtlas("bloom_L" + std::to_string(i),
+            TexturePresets::BloomLevel(lw, lh), env_sampler);
     }
 
     g_pass_system.width  = width;
@@ -423,11 +425,11 @@ void DefaultRenderPassNamespace::ResizeSceneHDRTargets(EngineContext* ctx, uint3
     recreate(g_pass_system.scene_hdr, TexturePresets::SceneHDR(width, height));
     recreate(g_pass_system.scene_emission, TexturePresets::EmissionHDR(width, height));
 
-    {
-        uint32_t bw = width  >> 1; if (bw == 0) bw = 1;
-        uint32_t bh = height >> 1; if (bh == 0) bh = 1;
-        if (g_pass_system.bloom_pyramid)
-            recreate(g_pass_system.bloom_pyramid, TexturePresets::BloomPyramid(bw, bh, BLOOM_LEVELS));
+    for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
+        if (!g_pass_system.bloom_levels[i]) continue;
+        uint32_t lw = width  >> (1 + i); if (lw == 0) lw = 1;
+        uint32_t lh = height >> (1 + i); if (lh == 0) lh = 1;
+        recreate(g_pass_system.bloom_levels[i], TexturePresets::BloomLevel(lw, lh));
     }
     g_pass_system.width = width;
     g_pass_system.height = height;

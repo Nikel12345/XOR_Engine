@@ -9,6 +9,9 @@ Texture2D<float4>   u_bloom   : register(t0, space0);
 [[vk::combinedImageSampler]]
 SamplerState        u_sampler : register(s0, space0);
 
+// [[vk::image_format]]: DXC не выводит формат storage-образа из float4 (молча даёт rgba32f) —
+// формат обязан совпадать с текстурой (rgba16f, см. TexturesPresets::SceneHDR), иначе UB.
+[[vk::image_format("rgba16f")]]
 RWTexture2D<float4> u_scene : register(u0, space1);
 
 cbuffer BloomParams : register(b0, space2) {

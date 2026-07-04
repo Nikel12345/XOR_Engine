@@ -442,18 +442,16 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     ComputeShaderData csd_up   = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_up.comp.hlsl");
     ComputeShaderData csd_comp = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_composite.comp.hlsl");
 
-    const std::string PYR = "bloom_pyramid";
-    auto pyr = ctx->GetTextureAtlas(PYR);
-    auto mipDispatch = [](TextureAtlas* a, uint32_t mip) -> std::pair<uint32_t, uint32_t> {
-        uint32_t w = a->width  >> mip; if (w == 0) w = 1;
-        uint32_t h = a->height >> mip; if (h == 0) h = 1;
-        return { w, h };
-    };
+    // Пирамида — BLOOM_LEVELS ОТДЕЛЬНЫХ текстур "bloom_L<i>" (см. _SetDefaultCommonResources):
+    // dst-уровень биндится RW-storage, src-уровень — сэмплером. Отдельные текстуры исключают
+    // одновременный RW+sampled бинд одной (layout-ошибки валидации на общей мип-цепочке).
+    // Размер диспатча — по живому атласу уровня (ресайз меняет width/height внутри атласа).
+    auto L = [](uint32_t i) { return "bloom_L" + std::to_string(i); };
 
     ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
         "bloom_down_0", csd_pre,
         {}, {},
-        { { PYR, 0, 0 } },                                             // rw: bloom_pyramid mip0
+        { { L(0), 0, 0 } },                                            // rw: bloom_L0
         {},
         { std::string("scene_hdr"), std::string("scene_emission") },   // sampler t0/s0, t1/s1
         BLOOM_PASS);
@@ -463,46 +461,50 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
         d.intensity = 0.1f;   // сила вклада сцены (блик/пересвет); эмиссия идёт в полную силу
         b.Push(0, d);
     });
-    p->BindDispatch<DummyDispatchData>([pyr, mipDispatch](DispatchSizeBinder& b, DummyDispatchData) {
-        auto s = mipDispatch(pyr, 0); b.element_count = { s.first, s.second, 1 };
-    });
-    
+    {
+        TextureAtlas* dst = ctx->GetTextureAtlas(L(0));
+        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { dst->width, dst->height, 1 };
+        });
+    }
 
-    // --- Downsample: mip(i-1) → mip i (уровни 1..N-1). Читаем srcLod=i-1, пишем mip i. ---
+    // --- Downsample: уровень i-1 → уровень i (1..N-1). Источник — sampler соседнего уровня. ---
     for (uint32_t i = 1; i < BLOOM_LEVELS; ++i) {
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
             "bloom_down_" + std::to_string(i), csd_down,
             {}, {},
-            { { PYR, i, 0 } },   // rw: bloom_pyramid mip i
+            { { L(i), 0, 0 } },   // rw: bloom_L<i>
             {},
-            { PYR },             // combined sampler: та же текстура (читаем mip i-1)
+            { L(i - 1) },         // combined sampler: предыдущий (вдвое крупнее) уровень
             BLOOM_PASS);
-        p->BindPushConstants<BloomParams>([i](const PushConstantBinder& b, BloomParams d) {
-            d.useKaris = 0u; d.srcLod = i - 1; b.Push(0, d);
+        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            d.useKaris = 0u; b.Push(0, d);
         });
-        p->BindDispatch<DummyDispatchData>([pyr, mipDispatch, i](DispatchSizeBinder& b, DummyDispatchData) {
-            auto s = mipDispatch(pyr, i); b.element_count = { s.first, s.second, 1 };
+        TextureAtlas* dst = ctx->GetTextureAtlas(L(i));
+        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { dst->width, dst->height, 1 };
         });
     }
 
-    // --- Upsample (tent, аддитивно): mip(i+1) → += mip i, от мелкого к крупному. srcLod=i+1. ---
+    // --- Upsample (tent, аддитивно): уровень i+1 → += уровень i, от мелкого к крупному. ---
     for (int i = (int)BLOOM_LEVELS - 2; i >= 0; --i) {
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
             "bloom_up_" + std::to_string(i), csd_up,
             {}, {},
-            { { PYR, (uint32_t)i, 0 } },   // rw: bloom_pyramid mip i (RMW: += размытие)
+            { { L((uint32_t)i), 0, 0 } },   // rw: bloom_L<i> (RMW: += размытие → нужен SIMULTANEOUS)
             {},
-            { PYR },                       // combined sampler: та же текстура (читаем mip i+1)
+            { L((uint32_t)i + 1) },         // combined sampler: следующий (вдвое мельче) уровень
             BLOOM_PASS);
-        p->BindPushConstants<BloomParams>([i](const PushConstantBinder& b, BloomParams d) {
-            d.srcLod = (uint32_t)i + 1; b.Push(0, d);
+        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            b.Push(0, d);
         });
-        p->BindDispatch<DummyDispatchData>([pyr, mipDispatch, i](DispatchSizeBinder& b, DummyDispatchData) {
-            auto s = mipDispatch(pyr, (uint32_t)i); b.element_count = { s.first, s.second, 1 };
+        TextureAtlas* dst = ctx->GetTextureAtlas(L((uint32_t)i));
+        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { dst->width, dst->height, 1 };
         });
     }
 
-    // --- Composite: scene_hdr += bloom mip0 * intensity (hue-preserving clip) ---
+    // --- Composite: scene_hdr += bloom_L0 * intensity (hue-preserving clip) ---
     {
         auto dst = ctx->GetTextureAtlas(std::string("scene_hdr"));
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
@@ -510,10 +512,10 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             {}, {},
             { { std::string("scene_hdr"), 0, 0 } },   // rw: scene_hdr (RMW)
             {},
-            { PYR },                                  // combined sampler: bloom_pyramid (читаем mip0)
+            { L(0) },                                 // combined sampler: bloom_L0
             BLOOM_PASS);
         p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
-            d.intensity = 0.5f; d.srcLod = 0u; b.Push(0, d);   // сила свечения — главная ручка
+            d.intensity = 0.5f; b.Push(0, d);   // сила свечения — главная ручка
         });
         p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };

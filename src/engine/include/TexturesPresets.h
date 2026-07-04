@@ -473,29 +473,15 @@ namespace TexturePresets {
         return info;
     }
 
-    // Уровень bloom-пирамиды: HDR, сэмплируется (LINEAR) при down/up-фильтрации И пишется/читается
-    // как storage (down пишет, up прибавляет RMW). RGBA16F — безопасный storage-формат, цветная эмиссия.
+    // ОДИН уровень bloom-пирамиды — ОТДЕЛЬНАЯ текстура (уровень 0 = ½ окна, дальше /2), а не мип
+    // общей. Раньше пирамида была одной текстурой с мипами, но down/up-шаг биндит dst-мип как
+    // RW-storage, а src читает сэмплером — sampled-вью покрывает ВСЕ мипы, включая RW-мип
+    // (GENERAL), и дескриптор нарушает layout-правила (VUID-VkDescriptorImageInfo-imageLayout-00344).
+    // Отдельные текстуры исключают алиасинг по построению. SIMULTANEOUS остаётся только ради
+    // честного RMW в bloom_up (читает и пишет ОДИН уровень в одном диспатче); его поддержку
+    // формата надо проверять (SDL_GPUTextureSupportsFormat) — не универсальна.
+    // Формат согласован с [[vk::image_format("rgba16f")]] в bloom-шейдерах.
     inline SDL_GPUTextureCreateInfo BloomLevel(uint32_t width, uint32_t height) {
-        SDL_GPUTextureCreateInfo info = {};
-        info.type = SDL_GPU_TEXTURETYPE_2D;
-        info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER
-                   | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
-        info.width = width;
-        info.height = height;
-        info.layer_count_or_depth = 1;
-        info.num_levels = 1;
-        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-        info.props = 0;
-        return info;
-    }
-
-    // Вся bloom-пирамида в ОДНОЙ текстуре: уровень i = mip i (mip0 = ½ окна, далее /2). Down/up
-    // читают mip-источник СЭМПЛЕРОМ (аппаратная билинейность) и storage-пишут соседний mip ТОЙ ЖЕ
-    // текстуры в одном дисптаче — это требует флага SIMULTANEOUS_READ_WRITE (чтение+запись одной
-    // текстуры в пределах одного compute-прохода; разные мипы не пересекаются → гонки нет). Поддержку
-    // формата под SIMULTANEOUS надо проверять (SDL_GPUTextureSupportsFormat) — не универсальна.
-    inline SDL_GPUTextureCreateInfo BloomPyramid(uint32_t width, uint32_t height, uint32_t levels) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;
         info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
@@ -505,7 +491,7 @@ namespace TexturePresets {
         info.width = width;
         info.height = height;
         info.layer_count_or_depth = 1;
-        info.num_levels = levels;
+        info.num_levels = 1;
         info.sample_count = SDL_GPU_SAMPLECOUNT_1;
         info.props = 0;
         return info;

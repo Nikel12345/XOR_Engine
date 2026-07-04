@@ -4,7 +4,7 @@
 #include "config.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
-extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 0;
+extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 static SDL_Window* win = NULL;
 static SDL_GPUDevice* dev = NULL;
 static constexpr float WIDTH = 800.0f;
@@ -28,7 +28,7 @@ int main() {
 
     // Проверяем, поддерживается ли нужный режим
     if (!SDL_WindowSupportsGPUPresentMode(dev, win, desired_mode)) {
-        SDL_Log("IMMEDIATE mode not supported — falling back to VSYNC");
+        SDL_Log("MAILBOX mode not supported — falling back to VSYNC");
         desired_mode = SDL_GPU_PRESENTMODE_VSYNC;
     }
     if (!SDL_WindowSupportsGPUSwapchainComposition(dev, win, desired_comp)) {
