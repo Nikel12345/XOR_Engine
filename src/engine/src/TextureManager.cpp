@@ -59,7 +59,7 @@ struct AtlasPacker {
     std::vector<Layer> layers;   // растёт лениво, size() <= atlas->layers
 };
 
-TextureManager::TextureManager(SDL_GPUDevice* device): ResourceManager(device){
+TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_manager): dev(device), trm(transfer_manager){
     using namespace DefaultSamplersNames;
     CreateSampler(DEFAULT_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::DEFAULT_SAMPLER));
     CreateSampler(DEFAULT_SHADOW_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::SHADOW_SAMPLER));
@@ -354,33 +354,34 @@ void TextureManager::_BuildUploadTasks() {
         t.offset = off;
         off += t.size;
     }
-    current_upload_tb_offset = off;
 }
 
-void TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
+TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
     if (upload_tasks.empty())
-        return;
+        return nullptr;
 
-    if (!mapped_upload_tb) {
-        SDL_Log("UploadToTransferBuffer called without mapping the upload transfer buffer");
-        return;
-    }
-    // Упаковка (UVL + task.dst) сделана заранее в PackAtlases() — до сборки батчей.
-	EnsureUploadTransferBufferCapacity(current_upload_tb_offset);
+    // Упаковка (UVL + task.dst) сделана заранее в PackAtlases() — до сборки батчей,
+    // там же назначены offset'ы, поэтому суммарный размер = конец последней задачи.
+    const UploadTaskTexture& last = upload_tasks.back();
+    TransferBufferData* tbd = trm->AcquireUploadTB(last.offset + last.size);
+    if (!tbd)
+        return nullptr;
+
     for (auto& task : upload_tasks) {
         if (!task.dst.texture) continue;   // задача не разместилась (атлас переполнен) — не грузим
         // Пиксели уже декодированы TextureLoader'ом (BGRA32, плотно) — просто копируем.
         SDL_GPUTextureTransferInfo src{};
-        src.transfer_buffer = upload_transfer_buffer;
+        src.transfer_buffer = tbd->tb;
         src.offset = task.offset;
         src.pixels_per_row = task.width;
         src.rows_per_layer = task.height;
 
-        std::byte* base = static_cast<std::byte*>(mapped_upload_tb);
+        std::byte* base = static_cast<std::byte*>(tbd->mapped);
         SDL_memcpy(base + task.offset, task.pixels.data(), task.size);
 
         SDL_UploadToGPUTexture(cp, &src, &task.dst, false);
     };
+    return tbd;
 }
 
 void TextureManager::GenerateMipmaps(SDL_GPUCommandBuffer* cb)

@@ -5,7 +5,9 @@
 #include <cstddef>
 #include <deque>
 #include <memory>
-#include "ResourceManager.h"
+#include <unordered_map>
+#include "config.h"
+#include "TransferManager.h"
 #include "TextureData.h"
 
 struct UploadTaskTexture {
@@ -38,10 +40,10 @@ struct PendingTextureDestroy {
 	uint64_t frame_ready;
 };
 
-class TextureManager:public ResourceManager
+class TextureManager
 {
 public:
-	TextureManager(SDL_GPUDevice* device);
+	TextureManager(SDL_GPUDevice* device, TransferManager* transfer_manager);
 
 	TextureAtlas* CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler);
 	// �������� TextureAtlas �� ��� ������������ TextureAtlas
@@ -66,7 +68,10 @@ public:
 
 	void GenerateMipmaps(SDL_GPUCommandBuffer* cb);
 
-	void ExecuteUploadTasks(SDL_GPUCopyPass* cp);
+	// Арендует transfer-буфер у TransferManager и возвращает его; владелец fence фазы
+	// обязан вернуть его через TransferManager::ReleaseTB ПОСЛЕ ожидания fence.
+	// nullptr (нет задач) — допустим, ReleaseTB(nullptr) — no-op.
+	TransferBufferData* ExecuteUploadTasks(SDL_GPUCopyPass* cp);
 	// CPU-упаковка атласов (rectpack) → присваивает текстурам UVL. ДОЛЖНА вызываться ДО
 	// сборки батчей: батч копирует UVL ЗНАЧЕНИЯМИ (см. TextureBatchData), не указателями,
 	// поэтому к моменту BuildRenderBatches UVL уже обязан быть посчитан. Детерминирована и
@@ -132,5 +137,7 @@ private:
 	std::vector<std::unique_ptr<SharedDepthTarget>> shared_depth_targets;
 	std::deque<PendingTextureDestroy> texture_trash;
 
+	SDL_GPUDevice* dev = nullptr;
+	TransferManager* trm = nullptr;
 };
 

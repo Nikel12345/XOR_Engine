@@ -286,14 +286,11 @@ void Engine::PrepareFunc(uint8_t slot)
 
 void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 {
-	buffer_manager->MapUploadTransferBuffer();
-	texture_manager->MapUploadTransferBuffer();
-
 	SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
 	SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
-	buffer_manager->ExecuteUpdateInstructions(cp);
+	TransferBufferData* undepended_tbd = buffer_manager->ExecuteUpdateInstructions(cp);
 	buffer_manager->ExecuteUploadTasks(cp, slot);
-	texture_manager->ExecuteUploadTasks(cp);
+	TransferBufferData* texture_tbd = texture_manager->ExecuteUploadTasks(cp);
 	SDL_EndGPUCopyPass(cp);
 	texture_manager->GenerateMipmaps(cb);
 	SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
@@ -301,8 +298,9 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 	SDL_WaitForGPUFences(dev, true, &fence, 1);
 	SDL_ReleaseGPUFence(dev, fence);
 
-	buffer_manager->UnmapUploadTransferBuffer();
-	texture_manager->UnmapUploadTransferBuffer();
+	// Fence дождались — GPU дочитал transfer-буферы, возвращаем их в пул.
+	transfer_manager->ReleaseTB(undepended_tbd);
+	transfer_manager->ReleaseTB(texture_tbd);
 }
 
 //PrepassTimingReport Engine::PrepareFuncPrepassDepended_Original(uint8_t slot)
@@ -403,19 +401,18 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 
 void Engine::PrepareFuncPrepassDepended(uint8_t slot)
 {
-	buffer_manager->MapPrepassDependedTransferBuffer();
 	SDL_GPUCommandBuffer* cb0 = SDL_AcquireGPUCommandBuffer(dev);
 	SDL_GPUCopyPass* cp0 = SDL_BeginGPUCopyPass(cb0);
 
-	buffer_manager->ExecutePrePassUpdateInstruction(cp0);
+	TransferBufferData* prepass_tbd = buffer_manager->ExecutePrePassUpdateInstruction(cp0);
 	buffer_manager->ExecutePrePassUploadTasks(cp0, slot);
 
 	SDL_EndGPUCopyPass(cp0);
-	buffer_manager->UnmapPrepassDependedTransferBuffer();
 	SDL_GPUFence* prepass_task_fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb0);
 
 	SDL_WaitForGPUFences(dev, true, &prepass_task_fence, 1);
 	SDL_ReleaseGPUFence(dev, prepass_task_fence);
+	transfer_manager->ReleaseTB(prepass_tbd);
 
 
 	SDL_GPUCommandBuffer* cb1 = SDL_AcquireGPUCommandBuffer(dev);
@@ -427,11 +424,10 @@ void Engine::PrepareFuncPrepassDepended(uint8_t slot)
 	SDL_ReleaseGPUFence(dev, prepass_fence);
 
 
-	buffer_manager->MapReadTransferBuffer();
 	SDL_GPUCommandBuffer* cb2 = SDL_AcquireGPUCommandBuffer(dev);
 	SDL_GPUCopyPass* cp2 = SDL_BeginGPUCopyPass(cb2);
 
-	buffer_manager->ExecuteReadBackInstructionsSize();
+	TransferBufferData* readback_tbd = buffer_manager->ExecuteReadBackInstructionsSize();
 	buffer_manager->ExecuteDownloadTasks(cp2, slot);
 
 	SDL_EndGPUCopyPass(cp2);
@@ -441,19 +437,19 @@ void Engine::PrepareFuncPrepassDepended(uint8_t slot)
 
 
 	buffer_manager->ExecuteReadBackInstructionsReader();
-	buffer_manager->UnmapReadTransferBuffer();
+	transfer_manager->ReleaseTB(readback_tbd);
 
 
-	buffer_manager->MapPrepassDependedTransferBuffer();
 	SDL_GPUCommandBuffer* cb3 = SDL_AcquireGPUCommandBuffer(dev);
 	SDL_GPUCopyPass* cp3 = SDL_BeginGPUCopyPass(cb3);
-	buffer_manager->ExecutePostReadbackInstructions(cp3);
+	TransferBufferData* postreadback_tbd = buffer_manager->ExecutePostReadbackInstructions(cp3);
 	buffer_manager->ExecutePostreadBackUploadTasks(cp3, slot);
-	
+	SDL_EndGPUCopyPass(cp3);
+
 	SDL_GPUFence* postreadbackUI_fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb3);
-	buffer_manager->UnmapPrepassDependedTransferBuffer();
 	SDL_WaitForGPUFences(dev, true, &postreadbackUI_fence, 1);
 	SDL_ReleaseGPUFence(dev, postreadbackUI_fence);
+	transfer_manager->ReleaseTB(postreadback_tbd);
 }
 
 void Engine::UploadFunc(uint8_t slot)
@@ -577,8 +573,9 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	this->dev = dev;
 	this->width = width;
 	this->height = height;
-	buffer_manager = new BufferManager(dev);
-	texture_manager = new TextureManager(dev);
+	transfer_manager = new TransferManager(dev);
+	buffer_manager = new BufferManager(dev, transfer_manager);
+	texture_manager = new TextureManager(dev, transfer_manager);
 	shader_manager = new ShaderManager(dev);
 	pipe_manager = new PipeManager(dev, win);
 	model_manager = new ModelManager();
@@ -758,6 +755,7 @@ Engine::~Engine()
 
 	delete buffer_manager;
 	delete texture_manager;
+	delete transfer_manager;   // после менеджеров: они возвращают арендованные TB в пул
 	delete shader_manager;
 	delete pipe_manager;
 	delete model_manager;

@@ -37,7 +37,7 @@ void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, Pa
 			for (const auto& [_, atlas_batch] : shader_batch.atlases_batches) {
 				for (const auto& [_, texture_batch] : atlas_batch.texture_batches) {
 					for (const auto& [_, model_batch] : texture_batch.model_batches) {
-						bm->UploadToPrePassTransferBuffer(task, sizeof(glm::vec4), &model_batch.submesh->sphere);
+						bm->UploadToTransferBuffer(task, sizeof(glm::vec4), &model_batch.submesh->sphere);
 					}
 				}
 			}

@@ -40,6 +40,7 @@ class Engine
 {
 public:
     Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height);
+    TransferManager* GetTransferManager() const { return transfer_manager; }
     BufferManager* GetBufferManager() const { return buffer_manager; }
     TextureManager* GetTextureManager() const { return texture_manager; }
     ShaderManager* GetShaderManager() const { return shader_manager; }
@@ -101,6 +102,7 @@ private:
 
     SDL_Window* win = nullptr;
     SDL_GPUDevice* dev = nullptr;
+    TransferManager* transfer_manager = nullptr;
     BufferManager* buffer_manager = nullptr;
     TextureManager* texture_manager = nullptr;
     ShaderManager* shader_manager = nullptr;

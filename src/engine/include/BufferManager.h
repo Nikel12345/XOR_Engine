@@ -5,8 +5,11 @@
 #include <string_view>
 #include <string>
 #include <span>
+#include <unordered_map>
+#include <memory>
+#include <atomic>
 #include "Aliases.h"
-#include "ResourceManager.h"
+#include "TransferManager.h"
 #include "BufferData.h"
 #include "BufferUpdateStruct.h"
 
@@ -34,10 +37,10 @@ struct PendingDestroy {
 	uint64_t frame_ready;
 };
 
-class BufferManager : public ResourceManager
+class BufferManager
 {
 public:
-	BufferManager(SDL_GPUDevice* device);
+	BufferManager(SDL_GPUDevice* device, TransferManager* transfer_manager);
 	BufferData* CreateBufferData(BufferDataName name, Uint32 size, SDL_GPUBufferUsageFlags usage, BufferDataType type, ResizeBehaviour resize_behaviour = ResizeBehaviour::RESIZE_ONLY);
 
 	void CreatePrePassUpdateInstruction(BufferData& buffer_data, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
@@ -52,23 +55,26 @@ public:
 	void CreatePostReadbackUpdateInstruction(BufferData& buffer_data, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
 	void CreatePostReadbackUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
 
-	void ExecutePrePassUpdateInstruction(SDL_GPUCopyPass* cp);
+	// Execute*, строящие таски, арендуют transfer-буфер у TransferManager и возвращают его.
+	// Владелец fence фазы (prep-функция) обязан вернуть его через TransferManager::ReleaseTB
+	// ПОСЛЕ ожидания fence. nullptr (пустая фаза) — допустим, ReleaseTB(nullptr) — no-op.
+	TransferBufferData* ExecutePrePassUpdateInstruction(SDL_GPUCopyPass* cp);
 	// Требует завершения работы GPU
 	// Requre GPU idle
 	void ExecutePrePassUploadTasks(SDL_GPUCopyPass* cp, uint8_t idx);
 
-	void ExecuteUpdateInstructions(SDL_GPUCopyPass* cp);
+	TransferBufferData* ExecuteUpdateInstructions(SDL_GPUCopyPass* cp);
 	// Требует завершения работы GPU
 	// Requre GPU idle
 	void ExecuteUploadTasks(SDL_GPUCopyPass* cp, uint8_t idx);
 
-	void ExecuteReadBackInstructionsSize();
+	TransferBufferData* ExecuteReadBackInstructionsSize();
 	// Требует завершения работы GPU
 	// Requre GPU idle
-	void ExecuteDownloadTasks(SDL_GPUCopyPass* cp, uint8_t idx); 
+	void ExecuteDownloadTasks(SDL_GPUCopyPass* cp, uint8_t idx);
 	void ExecuteReadBackInstructionsReader();
 
-	void ExecutePostReadbackInstructions(SDL_GPUCopyPass* cp);
+	TransferBufferData* ExecutePostReadbackInstructions(SDL_GPUCopyPass* cp);
 	void ExecutePostreadBackUploadTasks(SDL_GPUCopyPass* cp, uint8_t idx);
 
 	void BindGPUIndexBuffer(SDL_GPURenderPass* rp, Uint32 offset);
@@ -83,7 +89,7 @@ public:
 
 	void BindGPUComputeRO_Buffers(SDL_GPUComputePass* cmp, uint32_t slot, const std::vector<BufferData*>& buffers_data, uint8_t frame);
 
-	void UploadToPrePassTransferBuffer(UploadTask* task, Uint32 size, const void* data);
+	// Пишет в transfer-буфер самого таска (task->tbd) — одна функция на все фазы.
 	void UploadToTransferBuffer(UploadTask* task, Uint32 size, const void* data);
 	std::span<const std::byte> ReadFromTransferBuffer(ReadBackTask* task, uint32_t size);
 
@@ -112,15 +118,15 @@ public:
 
 private:
 	void _CreateUpdateInstruction(BufferData* buffer_data, std::vector<UpdateInstruction>& target_vector, UpdateInstructionUpdaterFunc fn = nullptr, UpdateInstructionSizeFunc size_fn = nullptr, UpdateInstructionOffsetFunc offset_fn = nullptr);
-	void _ExecuteUpdateInstructions(SDL_GPUCopyPass* cp, std::vector<UpdateInstruction> target_instr_vector, std::vector<UploadTask>& target_task_vector, uint32_t& current_tb_offset,
-		std::function<void(uint32_t)> ensure_capacity_fn);
-	void _BuildUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadTask>& target_vector, uint32_t& current_tb_offset, std::function<void(uint32_t)> ensure_capacity_fn);
-	void _BuildDownloadTasks();
-	void _ExecuteUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadTask>& target_vector, SDL_GPUTransferBuffer* target_tb, uint8_t idx);
-
-	void _UploadToTransferBuffer(UploadTask* task, Uint32 size, const void* data, void* target_mapped);
+	TransferBufferData* _ExecuteUpdateInstructions(SDL_GPUCopyPass* cp, std::vector<UpdateInstruction>& target_instr_vector, std::vector<UploadTask>& target_task_vector);
+	TransferBufferData* _BuildUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadTask>& target_vector);
+	TransferBufferData* _BuildDownloadTasks();
+	void _ExecuteUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadTask>& target_vector, uint8_t idx);
 
 	SDL_GPUBuffer* CreateBuffer(Uint32 size, SDL_GPUBufferUsageFlags usage);
+
+	SDL_GPUDevice* dev = nullptr;
+	TransferManager* trm = nullptr;
 	std::unordered_map<BufferDataName, std::unique_ptr<BufferData>> buffers_data;
 
 	std::vector<UploadTask> prepass_upload_tasks;

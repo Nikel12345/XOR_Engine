@@ -3,7 +3,7 @@
 #include "CameraStruct.h"
 #include "LightStruct.h"
 
-BufferManager::BufferManager(SDL_GPUDevice* device) : ResourceManager(device) {
+BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_manager) : dev(device), trm(transfer_manager) {
     using namespace DefaultBuffersNames;
 	CreateBufferData(DEFAULT_VERTEX_BUFFER, 8190600, SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 	CreateBufferData(DEFAULT_INDEX_BUFFER, 8190006, SDL_GPU_BUFFERUSAGE_INDEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);

@@ -4,11 +4,14 @@
 #include "BufferData.h"
 
 class BufferManager;
-
+struct TransferBufferData;
 
 
 struct UploadTask {
 	BufferData* dst_buffer_data = nullptr;
+	// Арендованный у TransferManager буфер, в который указывает tb_offset. Проставляется
+	// в _BuildUploadTasks после Acquire; у resize_dst_buf_only-тасков остаётся nullptr.
+	TransferBufferData* tbd = nullptr;
 	Uint32 dst_offset = 0;
 	Uint32 tb_offset = 0;
 	Uint32 size = 0;
@@ -40,6 +43,8 @@ struct UpdateInstruction {
 
 struct ReadBackTask {
 	BufferData* src_buffer_data = nullptr;
+	// Арендованный download-буфер, в который указывает tb_offset (см. UploadTask::tbd).
+	TransferBufferData* tbd = nullptr;
 	Uint32 src_offset = 0;
 	Uint32 tb_offset = 0;
 	Uint32 size = 0;

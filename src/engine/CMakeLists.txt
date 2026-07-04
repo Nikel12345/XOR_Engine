@@ -76,7 +76,7 @@ add_library(EngineGpu STATIC)
 target_compile_features(EngineGpu PUBLIC cxx_std_23)
 
 set(ENGINEGPU_SRC
-    src/ResourceManager.cpp
+    src/TransferManager.cpp
     src/BufferManager.cpp
     src/BufferManager_Binds.cpp
     src/BufferManager_Update.cpp
@@ -90,7 +90,7 @@ set(ENGINEGPU_SRC
     src/GpuTaskContext.cpp
 )
 set(ENGINEGPU_HDR
-    include/ResourceManager.h
+    include/TransferManager.h
     include/BufferManager.h
     include/BufferData.h
     include/BufferUpdateStruct.h

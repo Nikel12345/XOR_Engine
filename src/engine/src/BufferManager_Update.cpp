@@ -49,27 +49,23 @@ void BufferManager::CreatePostReadbackUpdateInstruction(BufferDataName name, Upd
     CreatePostReadbackUpdateInstruction(*bd, fn, size_fn);
 }
 
-void BufferManager::ExecutePrePassUpdateInstruction(SDL_GPUCopyPass* cp)
+TransferBufferData* BufferManager::ExecutePrePassUpdateInstruction(SDL_GPUCopyPass* cp)
 {
-    _ExecuteUpdateInstructions(cp, prepass_update_instructions, prepass_upload_tasks,
-        current_prepass_dep_tb_offset,
-        [this](uint32_t size) { EnsurePrepassDependedTransferBufferCapacity(size); });
+    return _ExecuteUpdateInstructions(cp, prepass_update_instructions, prepass_upload_tasks);
 }
 
-void BufferManager::ExecuteUpdateInstructions(SDL_GPUCopyPass* cp)
+TransferBufferData* BufferManager::ExecuteUpdateInstructions(SDL_GPUCopyPass* cp)
 {
-    _ExecuteUpdateInstructions(cp, update_instructions, upload_tasks,
-        current_upload_tb_offset,
-        [this](uint32_t size) { EnsureUploadTransferBufferCapacity(size); });
+    return _ExecuteUpdateInstructions(cp, update_instructions, upload_tasks);
 }
 
 void BufferManager::ExecutePrePassUploadTasks(SDL_GPUCopyPass* cp, uint8_t idx)
 {
-    _ExecuteUploadTasks(cp, prepass_upload_tasks, prepass_dep_transfer_buffer, idx);
+    _ExecuteUploadTasks(cp, prepass_upload_tasks, idx);
 }
 
 void BufferManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp, uint8_t idx) {
-    _ExecuteUploadTasks(cp, upload_tasks, upload_transfer_buffer, idx);
+    _ExecuteUploadTasks(cp, upload_tasks, idx);
 }
 
 void BufferManager::_CreateUpdateInstruction(BufferData* buffer_data, std::vector<UpdateInstruction>& target_vector, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn, UpdateInstructionOffsetFunc offset_fn)
@@ -82,8 +78,7 @@ void BufferManager::_CreateUpdateInstruction(BufferData* buffer_data, std::vecto
     target_vector.push_back(std::move(instr));
 }
 
-void BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* cp, std::vector<UpdateInstruction> target_instr_vector, std::vector<UploadTask>& target_task_vector, uint32_t& current_tb_offset, 
-    std::function<void(uint32_t)> ensure_capacity_fn)
+TransferBufferData* BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* cp, std::vector<UpdateInstruction>& target_instr_vector, std::vector<UploadTask>& target_task_vector)
 {
     target_task_vector.clear();
     target_task_vector.reserve(target_instr_vector.size());
@@ -99,7 +94,7 @@ void BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* cp, std::vector<
         target_task_vector.push_back(task);
     }
 
-    _BuildUploadTasks(cp, target_task_vector, current_tb_offset, ensure_capacity_fn);
+    TransferBufferData* tbd = _BuildUploadTasks(cp, target_task_vector);
 
     for (size_t i = 0; i < target_instr_vector.size(); ++i) {
         auto& instr = target_instr_vector[i];
@@ -108,13 +103,14 @@ void BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* cp, std::vector<
             instr.updater(cp, this, task);
         }
     }
+    return tbd;
 }
-void BufferManager::_BuildUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadTask>& target_vector, uint32_t& current_tb_offset, std::function<void(uint32_t)> ensure_capacity_fn)
+TransferBufferData* BufferManager::_BuildUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadTask>& target_vector)
 {
     uint8_t li = logic_index.load();
     std::unordered_map<BufferData*, uint32_t> buffers_written;
     std::unordered_map<BufferData*, uint32_t> buffers_req_size;
-    current_tb_offset = 0;
+    uint32_t tb_size = 0;
 
     for (auto& task : target_vector) {
         task.dst_offset = task.additional_offset + buffers_written[task.dst_buffer_data];
@@ -127,42 +123,37 @@ void BufferManager::_BuildUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadTas
             task.tb_offset = 0;
             continue;
         }
-        task.tb_offset = current_tb_offset;
-        current_tb_offset += task.size;
+        task.tb_offset = tb_size;
+        tb_size += task.size;
     }
 
     for (auto& [buffer_data, req_size] : buffers_req_size)
         EnsureBufferCapacity(cp, buffer_data, req_size, li);
 
-    ensure_capacity_fn(current_tb_offset);
+    TransferBufferData* tbd = trm->AcquireUploadTB(tb_size);
+    for (auto& task : target_vector)
+        if (!task.resize_dst_buf_only)
+            task.tbd = tbd;
+    return tbd;
 }
 
-void BufferManager::_ExecuteUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadTask>& target_vector, SDL_GPUTransferBuffer* target_tb, uint8_t idx)
+void BufferManager::_ExecuteUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadTask>& target_vector, uint8_t idx)
 {
     for (auto task : target_vector) {
-        if (task.size == 0 || task.resize_dst_buf_only) continue;
+        if (task.size == 0 || task.resize_dst_buf_only || !task.tbd) continue;
         BufferData* buffer_data = task.dst_buffer_data;
         SDL_GPUBuffer* target_buffer = _GetGPUBufferForFrame(buffer_data, idx);
-        SDL_GPUTransferBufferLocation src = { target_tb, task.tb_offset };
+        SDL_GPUTransferBufferLocation src = { task.tbd->tb, task.tb_offset };
         SDL_GPUBufferRegion dstReg = { target_buffer, task.dst_offset, task.size };
         SDL_UploadToGPUBuffer(cp, &src, &dstReg, false);
     }
     target_vector.clear();
 }
 
-void BufferManager::UploadToPrePassTransferBuffer(UploadTask* task, Uint32 size, const void* data)
+void BufferManager::UploadToTransferBuffer(UploadTask* task, Uint32 size, const void* data)
 {
-    _UploadToTransferBuffer(task, size, data, mapped_prepass_dep_tb);
-}
-
-void BufferManager::UploadToTransferBuffer(UploadTask* task, Uint32 size, const void* data) {
-    _UploadToTransferBuffer(task, size, data, mapped_upload_tb);
-}
-
-void BufferManager::_UploadToTransferBuffer(UploadTask* task, Uint32 size, const void* data, void* target_mapped)
-{
-    if (!target_mapped) {
-        SDL_Log("UploadToTransferBuffer called without mapping the upload transfer buffer");
+    if (!task->tbd || !task->tbd->mapped) {
+        SDL_Log("UploadToTransferBuffer: task has no mapped transfer buffer");
         return;
     }
 
@@ -184,7 +175,7 @@ void BufferManager::_UploadToTransferBuffer(UploadTask* task, Uint32 size, const
         return;
     }
 
-    std::byte* base = static_cast<std::byte*>(target_mapped);
+    std::byte* base = static_cast<std::byte*>(task->tbd->mapped);
     SDL_memcpy(base + task->tb_offset + task->written_size, data, size);
     task->written_size += size;
 
@@ -202,7 +193,7 @@ void BufferManager::_UploadToTransferBuffer(UploadTask* task, Uint32 size, const
     }
 }
 
-void BufferManager::ExecuteReadBackInstructionsSize()
+TransferBufferData* BufferManager::ExecuteReadBackInstructionsSize()
 {
     download_tasks.clear();
     download_tasks.reserve(readback_instructions.size());
@@ -214,22 +205,24 @@ void BufferManager::ExecuteReadBackInstructionsSize()
         download_tasks.push_back(task);
     }
 
-    _BuildDownloadTasks();
+    return _BuildDownloadTasks();
 }
 
-void BufferManager::_BuildDownloadTasks() {
-    uint8_t li = logic_index.load();
+TransferBufferData* BufferManager::_BuildDownloadTasks() {
     std::unordered_map<BufferData*, uint32_t> buffers_used_data_size;
-    current_read_tb_offset = 0;
+    uint32_t tb_size = 0;
 
     for (auto& task : download_tasks) {
-        task.tb_offset = current_read_tb_offset;
+        task.tb_offset = tb_size;
         task.src_offset = buffers_used_data_size[task.src_buffer_data];
         buffers_used_data_size[task.src_buffer_data] += task.size;
-        current_read_tb_offset += task.size;
+        tb_size += task.size;
     }
 
-    EnsureReadTransferBufferCapacity(current_read_tb_offset);
+    TransferBufferData* tbd = trm->AcquireDownloadTB(tb_size);
+    for (auto& task : download_tasks)
+        task.tbd = tbd;
+    return tbd;
 }
 
 void BufferManager::ExecuteReadBackInstructionsReader()
@@ -244,23 +237,23 @@ void BufferManager::ExecuteReadBackInstructionsReader()
     download_tasks.clear();
 }
 
-void BufferManager::ExecutePostReadbackInstructions(SDL_GPUCopyPass* cp)
+TransferBufferData* BufferManager::ExecutePostReadbackInstructions(SDL_GPUCopyPass* cp)
 {
-    _ExecuteUpdateInstructions(cp, post_readback_update_instructions, post_readback_upload_tasks, current_prepass_dep_tb_offset, [this](uint32_t size) {EnsurePrepassDependedTransferBufferCapacity(size); });
+    return _ExecuteUpdateInstructions(cp, post_readback_update_instructions, post_readback_upload_tasks);
 }
 
 void BufferManager::ExecutePostreadBackUploadTasks(SDL_GPUCopyPass* cp, uint8_t idx)
 {
-    _ExecuteUploadTasks(cp, post_readback_upload_tasks, prepass_dep_transfer_buffer, idx);
+    _ExecuteUploadTasks(cp, post_readback_upload_tasks, idx);
 }
 
 void BufferManager::ExecuteDownloadTasks(SDL_GPUCopyPass* cp, uint8_t idx) {
     for (auto task : download_tasks) {
-        if (task.size == 0) continue;
+        if (task.size == 0 || !task.tbd) continue;
         BufferData* buffer_data = task.src_buffer_data;
         SDL_GPUBuffer* source_buffer = _GetGPUBufferForFrame(buffer_data, idx);
         SDL_GPUBufferRegion srcReg = { source_buffer, task.src_offset, task.size };
-        SDL_GPUTransferBufferLocation dst = { read_transfer_buffer, task.tb_offset };
+        SDL_GPUTransferBufferLocation dst = { task.tbd->tb, task.tb_offset };
         //SDL_Log("Download source buffer ptr: %p", (void*)source_buffer);
 
         SDL_DownloadFromGPUBuffer(cp, &srcReg, &dst);
@@ -270,15 +263,15 @@ void BufferManager::ExecuteDownloadTasks(SDL_GPUCopyPass* cp, uint8_t idx) {
 std::span<const std::byte> BufferManager::ReadFromTransferBuffer(ReadBackTask* task, uint32_t size)
 {
     const std::byte* dummy = nullptr;
-    if (!mapped_read_tb) {
-        SDL_Log("ReadFromTransferBuffer called without mapping the read transfer buffer");
+    if (!task->tbd || !task->tbd->mapped) {
+        SDL_Log("ReadFromTransferBuffer: task has no mapped transfer buffer");
         return { dummy, 0 };
     }
     if (size > task->size - task->read_size) {
         SDL_Log("ReadFromTransferBuffer: size exceeds task size");
         return { dummy, 0 };
     }
-    const std::byte* p = static_cast<const std::byte*>(mapped_read_tb)
+    const std::byte* p = static_cast<const std::byte*>(task->tbd->mapped)
         + task->tb_offset + task->read_size;
 
     task->read_size += size;

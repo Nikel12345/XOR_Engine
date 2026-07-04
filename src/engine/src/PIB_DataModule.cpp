@@ -89,7 +89,7 @@ void PIB_DataModule::StoreEntityToBatch(BufferManager* bm, PassManager* pm, Uplo
                 for (const auto& [_, tb] : ab.texture_batches){
                     for (const auto& [_, mb] : tb.model_batches){
                         for (uint32_t id : mb.pib_sub_buffer) {
-                            bm->UploadToPrePassTransferBuffer(task, sizeof(uint32_t), &cmd_idx);
+                            bm->UploadToTransferBuffer(task, sizeof(uint32_t), &cmd_idx);
                         }
                         cmd_idx++;
                     }
