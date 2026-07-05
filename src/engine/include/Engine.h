@@ -141,7 +141,11 @@ private:
     };
     PendingUploadTBs pending_upload_tbs[BUFFERING_LEVEL];
 
-
+    // [PROFILE] Момент завершения предыдущего кадра (сигнал render-fence в FenceFunc).
+    // Разница между соседними завершениями = реальный период кадра (1/период = FPS).
+    // Трогает только FenceThread — синхронизация не нужна.
+    std::chrono::steady_clock::time_point last_frame_done_time{};
+    bool last_frame_done_valid = false;
 };
 
 

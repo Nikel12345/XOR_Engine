@@ -1,8 +1,9 @@
 ﻿#include "PCH.h"
 #include "ThreadController.h"
 #include "SlotController.h"
+#include "EngineProfiler.h"
 
-static constexpr bool UPS_priority = false;
+static constexpr bool UPS_priority = true;
 static constexpr bool FPS_NoLimit = false;
 static constexpr bool UPS_NoLimit = false;
 
@@ -60,9 +61,19 @@ void ThreadController::StartThreads()
     }
     running.store(true);
     game_n_prep_iter_thread = std::thread(&ThreadController::SimulationThread, this);
-    upload_thread = std::thread(&ThreadController::UploadThread, this);
-    render_thread = std::thread(&ThreadController::RenderThread, this);
-    fence_thread = std::thread(&ThreadController::FenceThread, this);
+
+    // ДИАГНОСТИКА (config.h): по флагам не поднимаем часть конвейера, чтобы замерить
+    // store без контеншена рендера/аплоада. Sim при этом не встаёт — frame skip
+    // переиспользует слоты (upload сам прокручивает слот в PrepareFuncPrepassUndepended).
+    if (!DISABLE_UPLOAD)
+        upload_thread = std::thread(&ThreadController::UploadThread, this);
+    if (!DISABLE_RENDER) {
+        render_thread = std::thread(&ThreadController::RenderThread, this);
+        fence_thread  = std::thread(&ThreadController::FenceThread, this);
+    }
+    if (DISABLE_RENDER || DISABLE_UPLOAD)
+        SDL_Log("ThreadController: ДИАГ-режим — DISABLE_RENDER=%d DISABLE_UPLOAD=%d",
+                (int)DISABLE_RENDER, (int)DISABLE_UPLOAD);
 }
 
 ThreadController::~ThreadController()
@@ -95,19 +106,31 @@ void ThreadController::SimulationThread()
         // перезаписываются (frame skip), sim никогда не ждёт рендер.
         // UPS_priority=false: рендер первичен — каждый подготовленный кадр обязан
         // быть показан, sim блокируется и UPS проседает до темпа рендера.
-        uint8_t slot = slot_controller->GetFreeSlotIndex(UPS_priority);
-
-        if (!UPS_priority and slot == INVALID_SLOT)
+        // slot_wait: если тут большое время — sim голодает по свободным слотам,
+        // то есть узкое место в РЕНДЕРЕ, а не в подготовке кадра.
+        uint8_t slot;
         {
-            slot = slot_controller->WaitFreeSlotIndex(UPS_priority);
-
+            auto t = Prof::Clock::now();
+            slot = slot_controller->GetFreeSlotIndex(UPS_priority);
+            if (!UPS_priority and slot == INVALID_SLOT)
+            {
+                slot = slot_controller->WaitFreeSlotIndex(UPS_priority);
+            }
+            Prof::Sim().Add("slot_wait (ожидание свободного слота)", Prof::MsSince(t));
         }
 
-        game_iter_callback();
+        {
+            auto t = Prof::Clock::now();
+            game_iter_callback();
+            Prof::Sim().Add("game_iter (Game::MainIterate)", Prof::MsSince(t));
+        }
         if (slot != INVALID_SLOT) {
+            auto t = Prof::Clock::now();
             prepare_callback(slot);
+            Prof::Sim().Add("prepare_total (Engine::PrepareFunc)", Prof::MsSince(t));
         }
         ups_counter->end();
+        Prof::Sim().Frame();
 
         if (UPS_NoLimit)
         {

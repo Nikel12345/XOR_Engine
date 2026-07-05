@@ -7,6 +7,8 @@ struct SceneData;
 struct BufferData;
 struct UploadTask;
 struct ReadBackTask;
+struct Positions;        // для кэша связей иерархии — нужны только указатели
+struct LocalMatrices;
 
 class TransformDataModule
 {
@@ -24,5 +26,19 @@ public:
 private:
 	uint32_t total_size = 0;
 	std::span<const std::byte> size_ptr;
-	std::vector<float> staging_buffer_;
+
+	// Кэш связей иерархии (см. UpdateLocalTransforms). Резолв parent→(Positions*,index)
+	// стоит 3 хэш-поиска в unordered_map на сущность каждый кадр; делаем его ОДИН раз и
+	// переиспользуем, перестраивая только при структурном изменении ECS (dirty-протокол
+	// ObjectManager). Адреса Archetype (std::map) и ComponentArray (unique_ptr) стабильны;
+	// индексы/содержимое векторов меняются лишь на add/delete/load — они и взводят dirty.
+	struct LocalXformLink {
+		Positions*           child_pos;    // куда писать world (Positions ребёнка)
+		const LocalMatrices* local;        // локальная матрица ребёнка
+		const Positions*     parent_pos;   // world родителя
+		size_t child_i;
+		size_t local_i;
+		size_t parent_i;
+	};
+	std::vector<LocalXformLink> local_links_;
 };

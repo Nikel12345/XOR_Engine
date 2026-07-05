@@ -40,6 +40,13 @@ struct SlotData {
     uint32_t frame_id = 0;              // порядковый номер prepare — порядок sim-тиков, не порядок прихода fences
     uint8_t  flags = 0;                 // защищается mutex_ внутри SlotController
     SDL_GPUFence* fence = nullptr;      // upload-fence при UPLOADING, render-fence при RENDERING (взаимоисключающие)
+    // [PROFILE] Момент сабмита командбуфера, чей fence сейчас в поле fence — ОДНО поле
+    // на обе стадии по той же причине, что и сам fence: слот идёт UPLOADING → PREPARED →
+    // RENDERING, поэтому upload- и render-сабмит не пересекаются во времени.
+    //   • пишется в PrepareFuncPrepassUndepended (upload) и в RenderFunc (render), до публикации fence;
+    //   • читается в UploadFunc и в FenceFunc сразу после срабатывания fence.
+    // Разница now() − submit_time = реальная GPU-латентность стадии (submit → сигнал fence).
+    std::chrono::steady_clock::time_point submit_time{};
 };
 
 static constexpr uint8_t INVALID_SLOT = 0xFF;

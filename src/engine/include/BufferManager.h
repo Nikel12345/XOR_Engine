@@ -91,6 +91,11 @@ public:
 
 	// Пишет в transfer-буфер самого таска (task->tbd) — одна функция на все фазы.
 	void UploadToTransferBuffer(UploadTask* task, Uint32 size, const void* data);
+	// Резервирует size байт в transfer-буфере таска (те же проверки и учёт written_size/
+	// used_buffer_size, что у UploadToTransferBuffer) и возвращает указатель для прямой
+	// записи — без промежуточного staging и лишнего memcpy. nullptr при ошибке.
+	// ВНИМАНИЕ: mapped-память может быть write-combined — только писать, не читать.
+	void* AcquireTransferWritePtr(UploadTask* task, Uint32 size);
 	std::span<const std::byte> ReadFromTransferBuffer(ReadBackTask* task, uint32_t size);
 
 	void TrashBuffers();

@@ -2,6 +2,7 @@
 #include "Engine.h"
 #include "TexturesPresets.h"
 #include "ComponentSerializer.h"
+#include "EngineProfiler.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
@@ -256,16 +257,38 @@ void Engine::PrepareFunc(uint8_t slot)
 	// делает это атомарно с выбором, отдельного состояния PREPARING больше нет.
 	buffer_manager->logic_index = slot;
 
-	engine_context->CreateGraphicsPipelines();
-	engine_context->CreateComputePipelines();
+	{
+		auto t = Prof::Clock::now();
+		engine_context->CreateGraphicsPipelines();
+		engine_context->CreateComputePipelines();
+		Prof::Sim().Add(" pipelines (create g+c)", Prof::MsSince(t));
+	}
 
-	texture_manager->PackAtlases();
+	{
+		auto t = Prof::Clock::now();
+		texture_manager->PackAtlases();
+		Prof::Sim().Add(" pack_atlases", Prof::MsSince(t));
+	}
 
-	batch_builder->UpdateRenderBatches(pipe_manager, pass_manager, object_manager, object_manager->GetActiveScene());
-	batch_builder->BuildComputeBatches(pass_manager, pipe_manager, shader_manager);
+	{
+		auto t = Prof::Clock::now();
+		batch_builder->UpdateRenderBatches(pipe_manager, pass_manager, object_manager, object_manager->GetActiveScene());
+		Prof::Sim().Add(" update_render_batches", Prof::MsSince(t));
+	}
+
+	{
+		auto t = Prof::Clock::now();
+		batch_builder->BuildComputeBatches(pass_manager, pipe_manager, shader_manager);
+		Prof::Sim().Add(" build_compute_batches", Prof::MsSince(t));
+	}
+
 	// Prepass отправляет загрузку АСИНХРОННО: слот уйдёт в UPLOADING, а PREPARED его
 	// сделает UploadThread по сигналу upload-fence. Sim здесь больше не ждёт GPU.
-	PrepareFuncPrepassUndepended(slot);
+	{
+		auto t = Prof::Clock::now();
+		PrepareFuncPrepassUndepended(slot);
+		Prof::Sim().Add(" prepass_undepended (submit загрузки)", Prof::MsSince(t));
+	}
 	//PrepareFuncPrepassDepended(slot);
 	//auto r1 = PrepareFuncPrepassDepended_Original(slot);
 	//auto r2 = PrepareFuncPrepassDepended_Optimized(slot);
@@ -285,20 +308,70 @@ void Engine::PrepareFunc(uint8_t slot)
 
 void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 {
+	// ДИАГНОСТИКА (config.h DISABLE_UPLOAD): гоняем ТОЛЬКО store в transfer-буфер, без
+	// отправки на GPU — ни upload-DMA, ни fence. Командный буфер отменяем, TB возвращаем
+	// сразу (GPU его не трогал). Слот прокручиваем RESERVED→UPLOADING→PREPARED вручную,
+	// иначе он застрянет в RESERVED и sim (в skip-режиме) встанет без свободных слотов.
+	if (DISABLE_UPLOAD) {
+		SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
+		SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
+		TransferBufferData* tbd;
+		{
+			auto t = Prof::Clock::now();
+			tbd = buffer_manager->ExecuteUpdateInstructions(cp);   // store; профайлер метит "<buf> .store"
+			Prof::Sim().Add("  exec_update_instructions (всего)", Prof::MsSince(t));
+		}
+		SDL_EndGPUCopyPass(cp);
+		SDL_CancelGPUCommandBuffer(cb);            // на GPU НЕ отправляем
+		transfer_manager->ReleaseTB(tbd);          // GPU буфер не читал — вернуть в пул сразу
+		slot_controller->SetSlotState(slot, UPLOADING);
+		slot_controller->SetSlotState(slot, PREPARED);
+		return;
+	}
+
 	SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
 	SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
-	TransferBufferData* undepended_tbd = buffer_manager->ExecuteUpdateInstructions(cp);
-	buffer_manager->ExecuteUploadTasks(cp, slot);
-	TransferBufferData* texture_tbd = texture_manager->ExecuteUploadTasks(cp);
+
+	// ExecuteUpdateInstructions внутри сам разбивает время по каждому буферу
+	// (метки "<buf> .size" / "<buf> .store", см. BufferManager_Update.cpp).
+	TransferBufferData* undepended_tbd;
+	{
+		auto t = Prof::Clock::now();
+		undepended_tbd = buffer_manager->ExecuteUpdateInstructions(cp);
+		Prof::Sim().Add("  exec_update_instructions (всего)", Prof::MsSince(t));
+	}
+	{
+		auto t = Prof::Clock::now();
+		buffer_manager->ExecuteUploadTasks(cp, slot);
+		Prof::Sim().Add("  exec_upload_tasks (буферы)", Prof::MsSince(t));
+	}
+	TransferBufferData* texture_tbd;
+	{
+		auto t = Prof::Clock::now();
+		texture_tbd = texture_manager->ExecuteUploadTasks(cp);
+		Prof::Sim().Add("  tex_upload_tasks", Prof::MsSince(t));
+	}
 	SDL_EndGPUCopyPass(cp);
-	texture_manager->GenerateMipmaps(cb);
-	SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+	{
+		auto t = Prof::Clock::now();
+		texture_manager->GenerateMipmaps(cb);
+		Prof::Sim().Add("  generate_mipmaps", Prof::MsSince(t));
+	}
+	SDL_GPUFence* fence;
+	{
+		auto t = Prof::Clock::now();
+		fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+		Prof::Sim().Add("  submit_acquire_fence", Prof::MsSince(t));
+	}
 
 	// Fence НЕ ждём: синхронный round-trip (~1 мс на submit+wait) ограничивал UPS
 	// величиной ~1/латентность. Fence и transfer-буферы забирает UploadThread
 	// (Engine::UploadFunc): дождётся, вернёт TB в пул и промоутит слот в PREPARED —
 	// раньше этого кадр рендеру не виден, данные гарантированно на GPU.
 	pending_upload_tbs[slot] = { undepended_tbd, texture_tbd };
+	// Метку сабмита пишем ДО публикации fence — UploadFunc замерит от неё латентность
+	// заливки на GPU (submit UPLOADING -> сигнал upload-fence). Поле общее с render (см. SlotData).
+	slot_controller->GetSlotsData()[slot].submit_time = Prof::Clock::now();
 	slot_controller->SetSlotFence(slot, fence);         // fence ДО флага UPLOADING
 	slot_controller->SetSlotState(slot, UPLOADING);
 }
@@ -314,16 +387,30 @@ void Engine::UploadFunc(uint8_t slot)
 
 	if (!fence) return;
 
+	auto t_wait = Prof::Clock::now();
 	SDL_WaitForGPUFences(dev, true, &fence, 1);
+	double wait_ms = Prof::MsSince(t_wait);
+	// Реальная латентность заливки: от сабмита (PrepareFuncPrepassUndepended) до сигнала fence.
+	double upload_ms = Prof::MsSince(sd.submit_time);
 	SDL_ReleaseGPUFence(dev, fence);
 	sd.fence = nullptr;
 
 	// GPU дочитал transfer-буферы — возвращаем в пул (TransferManager потокобезопасен).
+	auto t_rel = Prof::Clock::now();
 	transfer_manager->ReleaseTB(pending_upload_tbs[slot].buffers_tbd);
 	transfer_manager->ReleaseTB(pending_upload_tbs[slot].textures_tbd);
 	pending_upload_tbs[slot] = {};
+	double release_ms = Prof::MsSince(t_rel);
 
 	slot_controller->SetSlotState(slot, PREPARED);
+
+	// upload_gpu — сколько реально длится заливка на GPU (submit -> fence). fence_wait —
+	// сколько CPU-поток блокировался на ней. Если upload_gpu велик и слотов не хватает,
+	// sim увидит это как рост slot_wait в SIM-отчёте.
+	Prof::Upload().Add("upload_gpu (submit->fence, заливка на GPU)", upload_ms);
+	Prof::Upload().Add("upload_fence_wait (CPU-блок)", wait_ms);
+	Prof::Upload().Add("release_tbs (возврат TB в пул)", release_ms);
+	Prof::Upload().Frame();
 }
 
 //PrepassTimingReport Engine::PrepareFuncPrepassDepended_Original(uint8_t slot)
@@ -477,11 +564,13 @@ void Engine::PrepareFuncPrepassDepended(uint8_t slot)
 
 bool Engine::RenderFunc(uint8_t slot)
 {
+	auto t_frame = Prof::Clock::now();
 	SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
 
 	Uint32 w = 0, h = 0;
 	SDL_GPUTexture* tex = nullptr;
 
+	// Ранний выход (нет свопчейн-текстуры) кадром не считаем — Frame() не зовём.
 	if (!SDL_AcquireGPUSwapchainTexture(cb, win, &tex, &w, &h)) {
 		SDL_CancelGPUCommandBuffer(cb);
 		return false;
@@ -499,33 +588,50 @@ bool Engine::RenderFunc(uint8_t slot)
 		present_rp->renderPassTexsData.SetColorTexture(tex);
 	pass_manager->SetRenderFrame(slot);
 	{
+		auto t = Prof::Clock::now();
 		std::lock_guard<std::mutex> batch_lock(pass_manager->BatchTreeMutex());
 		pass_manager->ExecutePassesSteps(cb, slot);
+		Prof::Render().Add(" execute_passes (запись команд)", Prof::MsSince(t));
 	}
 
-	BeginImGuiFrame();
-	UI_ImGui::Iterate(engine_context);
-	EndImGuiFrame();
-	if (imgui_draw_data && imgui_draw_data->CmdListsCount > 0)
 	{
-		ImGui_ImplSDLGPU3_PrepareDrawData(imgui_draw_data, cb);
+		auto t = Prof::Clock::now();
+		BeginImGuiFrame();
+		UI_ImGui::Iterate(engine_context);
+		EndImGuiFrame();
+		if (imgui_draw_data && imgui_draw_data->CmdListsCount > 0)
+		{
+			ImGui_ImplSDLGPU3_PrepareDrawData(imgui_draw_data, cb);
 
-		SDL_GPUColorTargetInfo imgui_color_target = {};
-		imgui_color_target.texture = tex;
-		imgui_color_target.load_op = SDL_GPU_LOADOP_LOAD;
-		imgui_color_target.store_op = SDL_GPU_STOREOP_STORE;
-		imgui_color_target.cycle = false;
+			SDL_GPUColorTargetInfo imgui_color_target = {};
+			imgui_color_target.texture = tex;
+			imgui_color_target.load_op = SDL_GPU_LOADOP_LOAD;
+			imgui_color_target.store_op = SDL_GPU_STOREOP_STORE;
+			imgui_color_target.cycle = false;
 
-		SDL_GPURenderPass* imgui_rp = SDL_BeginGPURenderPass(cb, &imgui_color_target, 1, nullptr);
-		ImGui_ImplSDLGPU3_RenderDrawData(imgui_draw_data, cb, imgui_rp);
-		SDL_EndGPURenderPass(imgui_rp);
+			SDL_GPURenderPass* imgui_rp = SDL_BeginGPURenderPass(cb, &imgui_color_target, 1, nullptr);
+			ImGui_ImplSDLGPU3_RenderDrawData(imgui_draw_data, cb, imgui_rp);
+			SDL_EndGPURenderPass(imgui_rp);
+		}
+		Prof::Render().Add(" imgui (new frame + UI + draw)", Prof::MsSince(t));
 	}
 
-	SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
-	// IS_RENDERING на слоте уже стоит — его поставил WaitRenderableSlot в момент
-	// выбора (атомарно, чтобы sim не захватил слот до сабмита). Здесь только fence.
-	slot_controller->SetSlotFence(slot, fence);
+	{
+		auto t = Prof::Clock::now();
+		SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+		Prof::Render().Add(" submit_acquire_fence", Prof::MsSince(t));
+		// Метку сабмита пишем ДО публикации fence — FenceFunc замерит от неё
+		// GPU-латентность кадра (submit -> сигнал fence). Поле общее с upload (см. SlotData).
+		slot_controller->GetSlotsData()[slot].submit_time = Prof::Clock::now();
+		// IS_RENDERING на слоте уже стоит — его поставил WaitRenderableSlot в момент
+		// выбора (атомарно, чтобы sim не захватил слот до сабмита). Здесь только fence.
+		slot_controller->SetSlotFence(slot, fence);
+	}
 
+	// ВНИМАНИЕ: это только CPU-время ЗАПИСИ и сабмита командного буфера (доли мс).
+	// Оно НЕ равно времени кадра/FPS: сам кадр исполняется на GPU асинхронно, а его
+	// завершение и РЕАЛЬНЫЙ период кадра замеряет FenceFunc (там же и Frame()).
+	Prof::Render().Add("render_cpu (RenderFunc: запись+submit)", Prof::MsSince(t_frame));
 	return true;
 }
 
@@ -539,7 +645,12 @@ void Engine::FenceFunc(uint8_t slot) {
 	// Блокирующее ожидание вместо опроса: неблокирующий SDL_QueryGPUFence в цикле
 	// FenceThread был busy-poll'ом — ядро выгорало на всё время исполнения кадра GPU,
 	// и CPU-нагрузка росла вместе с GPU-нагрузкой. Kernel-wait спит до сигнала fence.
+	auto t_wait = Prof::Clock::now();
 	SDL_WaitForGPUFences(dev, true, &fence, 1);
+	double wait_ms = Prof::MsSince(t_wait);
+	// Реальная работа GPU над кадром: от сабмита (RenderFunc) до сигнала fence (сейчас).
+	// В отличие от fence_wait это не зависит от того, когда CPU добрался до ожидания.
+	double gpu_ms = Prof::MsSince(sd.submit_time);
 
 	SDL_ReleaseGPUFence(dev, fence);
 	sd.fence = nullptr;
@@ -549,6 +660,22 @@ void Engine::FenceFunc(uint8_t slot) {
 	//slot_controller->RemoveSlotFence(slot);
 	slot_controller->SetSlotState(slot, RENDERED);
 
+	// ── ПРОФАЙЛ завершения кадра. Это НАСТОЯЩАЯ кадровая точка (RenderFunc лишь
+	//    пишет команды и мгновенно возвращается). frame_period — интервал между
+	//    завершениями соседних кадров: его среднее = 1/FPS. Сравнение:
+	//      frame_period ≈ gpu_frame  → упор в GPU;
+	//      frame_period ≫ gpu_frame  → GPU простаивает (упор в sim/синхронизацию/слипы).
+	auto now = Prof::Clock::now();
+	if (last_frame_done_valid) {
+		double period_ms = std::chrono::duration<double, std::milli>(now - last_frame_done_time).count();
+		Prof::Render().Add("frame_period (fence->fence = 1/FPS)", period_ms);
+	}
+	last_frame_done_time = now;
+	last_frame_done_valid = true;
+
+	Prof::Render().Add("gpu_frame (submit->fence, rabota GPU)", gpu_ms);
+	Prof::Render().Add("fence_wait (CPU-blok na GPU)", wait_ms);
+	Prof::Render().Frame();
 }
 
 void Engine::BeginImGuiFrame()

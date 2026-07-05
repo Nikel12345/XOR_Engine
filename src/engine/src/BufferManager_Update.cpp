@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "BufferManager.h"
+#include "EngineProfiler.h"
 
 void BufferManager::CreatePrePassUpdateInstruction(BufferData& buffer_data, UpdateInstructionUpdaterFunc fn = nullptr, UpdateInstructionSizeFunc size_fn = nullptr)
 {
@@ -83,10 +84,17 @@ TransferBufferData* BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* c
     target_task_vector.clear();
     target_task_vector.reserve(target_instr_vector.size());
 
+    // ── ПРОФАЙЛ: фаза 1 — «замер размера» (size_fn) по каждому буферу отдельно.
+    //    Метка "<buf> .size", плюс сам вычисленный размер в байтах (столбец KB).
     for (auto& instr : target_instr_vector) {
         UploadTask task{};
         task.dst_buffer_data = instr.buffer_data;
-        task.size = instr.size_fn ? instr.size_fn() : 0;
+        {
+            auto t = Prof::Clock::now();
+            task.size = instr.size_fn ? instr.size_fn() : 0;
+            const char* nm = instr.buffer_data ? instr.buffer_data->debug_name.c_str() : "?";
+            Prof::Sim().Add((std::string(nm) + " .size").c_str(), Prof::MsSince(t), task.size);
+        }
         task.additional_offset = instr.offset_fn ? instr.offset_fn() : 0;
         if (!instr.updater) {
             task.resize_dst_buf_only = true;
@@ -94,13 +102,25 @@ TransferBufferData* BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* c
         target_task_vector.push_back(task);
     }
 
-    TransferBufferData* tbd = _BuildUploadTasks(cp, target_task_vector);
+    // ── ПРОФАЙЛ: построение задач + аренда TB + EnsureBufferCapacity (пересоздание
+    //    GPU-буферов при росте) — общая для всех буферов стадия.
+    TransferBufferData* tbd;
+    {
+        auto t = Prof::Clock::now();
+        tbd = _BuildUploadTasks(cp, target_task_vector);
+        Prof::Sim().Add("  [build_tasks + ensure_capacity]", Prof::MsSince(t));
+    }
 
+    // ── ПРОФАЙЛ: фаза 2 — «запись» (updater пишет данные в transfer-буфер) по буферам.
+    //    Метка "<buf> .store".
     for (size_t i = 0; i < target_instr_vector.size(); ++i) {
         auto& instr = target_instr_vector[i];
         auto& task = target_task_vector[i];
         if (instr.updater && task.size > 0) {
+            auto t = Prof::Clock::now();
             instr.updater(cp, this, task);
+            const char* nm = instr.buffer_data ? instr.buffer_data->debug_name.c_str() : "?";
+            Prof::Sim().Add((std::string(nm) + " .store").c_str(), Prof::MsSince(t));
         }
     }
     return tbd;
@@ -150,18 +170,18 @@ void BufferManager::_ExecuteUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadT
     target_vector.clear();
 }
 
-void BufferManager::UploadToTransferBuffer(UploadTask* task, Uint32 size, const void* data)
+void* BufferManager::AcquireTransferWritePtr(UploadTask* task, Uint32 size)
 {
     if (!task->tbd || !task->tbd->mapped) {
-        SDL_Log("UploadToTransferBuffer: task has no mapped transfer buffer");
-        return;
+        SDL_Log("AcquireTransferWritePtr: task has no mapped transfer buffer");
+        return nullptr;
     }
 
     uint8_t li = logic_index.load();
 
     if (size > task->size - task->written_size) {
-        SDL_Log("UploadToTransferBuffer: size exceeds task size");
-        return;
+        SDL_Log("AcquireTransferWritePtr: size exceeds task size");
+        return nullptr;
     }
 
     // Проверка границ буфера-назначения с учётом базового смещения (dst_offset уже его включает).
@@ -170,13 +190,12 @@ void BufferManager::UploadToTransferBuffer(UploadTask* task, Uint32 size, const 
         ? task->dst_buffer_data->Static.buffer_size
         : task->dst_buffer_data->Dynamic.buffer_size[li];
     if (task->dst_offset + task->written_size + size > dst_capacity) {
-        SDL_Log("UploadToTransferBuffer: write at offset %u + %u exceeds destination buffer '%s' capacity %u",
+        SDL_Log("AcquireTransferWritePtr: write at offset %u + %u exceeds destination buffer '%s' capacity %u",
             task->dst_offset + task->written_size, size, task->dst_buffer_data->debug_name.c_str(), dst_capacity);
-        return;
+        return nullptr;
     }
 
-    std::byte* base = static_cast<std::byte*>(task->tbd->mapped);
-    SDL_memcpy(base + task->tb_offset + task->written_size, data, size);
+    std::byte* dst = static_cast<std::byte*>(task->tbd->mapped) + task->tb_offset + task->written_size;
     task->written_size += size;
 
     // Использованный объём = базовое смещение + дозаписанное (dst_offset включает базу).
@@ -191,6 +210,15 @@ void BufferManager::UploadToTransferBuffer(UploadTask* task, Uint32 size, const 
         task->dst_buffer_data->Dynamic.used_buffer_size[li] = used;
         break;
     }
+
+    return dst;
+}
+
+void BufferManager::UploadToTransferBuffer(UploadTask* task, Uint32 size, const void* data)
+{
+    void* dst = AcquireTransferWritePtr(task, size);
+    if (!dst) return;
+    SDL_memcpy(dst, data, size);
 }
 
 TransferBufferData* BufferManager::ExecuteReadBackInstructionsSize()

@@ -37,8 +37,8 @@ SDL_AppResult Game::MainInit()
     cameraManager->SetActiveCamera(0);
 
     camera->SetView(
-        glm::vec3(2.0f, 0.7f, 3.5f), // позиция камеры
-        glm::vec3(0.43f, -0.4f, -0.8f), // точка взгляда
+        glm::vec3(-20.0f, 100.7f, 76.5f), // позиция камеры
+        glm::vec3(0.174f, -0.8f, -0.6f), // точка взгляда
         glm::vec3(0.0f, 1.0f, 0.0f)  // вектор вверх
     );
 
@@ -158,11 +158,6 @@ SDL_AppResult Game::MainInit()
     ModelData* model_car = ctx->CreateModel("car", "models/new_car_n_fixed.bin", "models/new_car_n_fixed_i.bin");
 	ModelData* model_ship = ctx->CreateModel("ship", "models/low_poly_ship.bin", "models/low_poly_ship_i.bin");
 
-    // ВАЖНО: развёртка обязана быть ПРАВОсторонней (du × dv = +N), потому что вершинник строит
-    // битангент как cross(N, T) без tangent.w. Старая развёртка (v = 1 - y) была левосторонней →
-    // ось v tangent-пространства инвертировалась: POM марчил по Y в обратную сторону (искажения,
-    // «работает по Y, слабо по X»), а свет по v требовал компенсации G-флипом. v = y — согласовано
-    // со сферой; текстура на кваде отобразится вертикально зеркально (для кирпича неважно).
     ModelData* quad = ctx->CreateModel("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
         v = {
             { 0,0,0,  0,0,  0,0,1,  1,0,0 },
@@ -251,6 +246,53 @@ SDL_AppResult Game::MainInit()
             }
     });
 
+    // --- Процедурные параллелепипеды "cube_0".."cube_(N-1)" для сцены из scene_gen.py ---
+    // ВАЖНО: kCubeVariants должен совпадать с NUM_CUBE_MODELS в scripts/scene_gen.py —
+    // питон-скрипт раздаёт сущностям имена именно из этого диапазона.
+    const int kCubeVariants = 12;
+    for (int ci = 0; ci < kCubeVariants; ++ci) {
+        // Разные пропорции коробки из индекса (детерминированно, полу-размеры 0.3..1.1).
+        const float hx = 0.3f + 0.2f * float((ci * 7)  % 5);
+        const float hy = 0.3f + 0.2f * float((ci * 3)  % 5);
+        const float hz = 0.3f + 0.2f * float((ci * 11) % 5);
+        ctx->CreateModel("cube_" + std::to_string(ci),
+            [hx, hy, hz](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
+            const float H[3] = { hx, hy, hz };
+            // 6 граней. c — угол-начало, U/V — рёбра (в долях полу-размеров, per-axis);
+            // cross(U,V) = ВНЕШНЯЯ нормаль → CCW наружу (как у quad). p0=c, p1=c+U, p2=c+U+V, p3=c+V.
+            struct FaceDef { float c[3], U[3], V[3], N[3]; };
+            static const FaceDef faces[6] = {
+                {{ 1,-1, 1}, { 0, 0,-2}, { 0, 2, 0}, { 1, 0, 0}},  // +X
+                {{-1,-1,-1}, { 0, 0, 2}, { 0, 2, 0}, {-1, 0, 0}},  // -X
+                {{-1, 1, 1}, { 2, 0, 0}, { 0, 0,-2}, { 0, 1, 0}},  // +Y
+                {{-1,-1,-1}, { 2, 0, 0}, { 0, 0, 2}, { 0,-1, 0}},  // -Y
+                {{-1,-1, 1}, { 2, 0, 0}, { 0, 2, 0}, { 0, 0, 1}},  // +Z
+                {{ 1,-1,-1}, {-2, 0, 0}, { 0, 2, 0}, { 0, 0,-1}},  // -Z
+            };
+            const float uv[4][2] = { {0,0}, {1,0}, {1,1}, {0,1} };
+            for (int f = 0; f < 6; ++f) {
+                const FaceDef& fd = faces[f];
+                // Касательная = нормализованное направление U в мировых пропорциях.
+                float tx = fd.U[0]*H[0], ty = fd.U[1]*H[1], tz = fd.U[2]*H[2];
+                float tl = std::sqrt(tx*tx + ty*ty + tz*tz);
+                if (tl > 0.0f) { tx /= tl; ty /= tl; tz /= tl; }
+                const uint32_t vbase = static_cast<uint32_t>(v.size());
+                for (int q = 0; q < 4; ++q) {
+                    PosUVNormal vert{};
+                    vert.x = (fd.c[0] + uv[q][0]*fd.U[0] + uv[q][1]*fd.V[0]) * H[0];
+                    vert.y = (fd.c[1] + uv[q][0]*fd.U[1] + uv[q][1]*fd.V[1]) * H[1];
+                    vert.z = (fd.c[2] + uv[q][0]*fd.U[2] + uv[q][1]*fd.V[2]) * H[2];
+                    vert.u = uv[q][0]; vert.v = uv[q][1];
+                    vert.nx = fd.N[0]; vert.ny = fd.N[1]; vert.nz = fd.N[2];
+                    vert.tx = tx;      vert.ty = ty;      vert.tz = tz;
+                    v.push_back(vert);
+                }
+                idx.push_back(vbase + 0); idx.push_back(vbase + 1); idx.push_back(vbase + 2);
+                idx.push_back(vbase + 0); idx.push_back(vbase + 2); idx.push_back(vbase + 3);
+            }
+        });
+    }
+
 
     //ctx->CreateEntity("main_menu",
     //    SpotLightComponent{ SpotLightComponent::SpotLightData{ 0, 1.0f, 0.0f, 0.0f, 0.18f, 1,\sd   1, 1, 100 } },
@@ -266,7 +308,7 @@ SDL_AppResult Game::MainInit()
     Entity sun = ctx->CreateEntity("main_menu",
         MaterialComponent{ { material_sun } },
         ModelComponent{ sphere },
-        PositionProxy16{ 1,0,0,-2.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
+        PositionProxy16{ 1,0,0,0.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
         ShadowComponent{},
         ColliderComponent{ { Collider::Sphere(1.0f)} },
         DrawComponent{},
@@ -325,11 +367,11 @@ SDL_AppResult Game::MainIterate()
     }
 
     // Энтити с ColliderComponent берут явный радиус; остальные с ModelComponent — модельную сферу.
-    if (SceneData* scene = objectManager->GetActiveScene()) {
-        for (const ContactSystem::Contact& c : ContactSystem::DetectContacts(*objectManager, scene)) {
-            //SDL_Log("contact %u <-> %u (pen %.3f)", c.a, c.b, c.penetration);
-        }
-    }
+    //if (SceneData* scene = objectManager->GetActiveScene()) {
+    //    for (const ContactSystem::Contact& c : ContactSystem::DetectContacts(*objectManager, scene)) {
+    //        //SDL_Log("contact %u <-> %u (pen %.3f)", c.a, c.b, c.penetration);
+    //    }
+    //}
 
     return SDL_APP_CONTINUE;
 }
