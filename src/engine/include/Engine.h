@@ -35,7 +35,6 @@
 #include "TextureLoader.h"
 
 struct PrepassTimingReport;
-static bool UPS_priority = true;
 class Engine
 {
 public:
@@ -65,6 +64,8 @@ public:
 
     //void Iterate();
     void PrepareFunc(uint8_t idx);
+
+    void UploadFunc(uint8_t slot);
 
     bool RenderFunc(uint8_t idx);
 
@@ -129,6 +130,16 @@ private:
 	EngineContext* engine_context;
     std::atomic<bool> running = true;
     ImDrawData* imgui_draw_data = nullptr;
+
+    // Transfer-буферы upload'а, ушедшего в полёт для слота. Вернутся в пул на
+    // UploadThread (Engine::UploadFunc) после сигнала upload-fence. Видимость
+    // между потоками обеспечивает mutex SlotController'а: стеш пишется ДО
+    // SetSlotState(UPLOADING), читается после проверки IsUploadingSlot.
+    struct PendingUploadTBs {
+        TransferBufferData* buffers_tbd = nullptr;
+        TransferBufferData* textures_tbd = nullptr;
+    };
+    PendingUploadTBs pending_upload_tbs[BUFFERING_LEVEL];
 
 
 };

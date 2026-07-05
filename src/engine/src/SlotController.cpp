@@ -17,27 +17,47 @@ SlotController::~SlotController() = default;
 
 uint8_t SlotController::AcquireFreeSlotUnsafe(bool allow_frame_skip)
 {
+    // Два прохода по логической очереди готовности:
+    //   1) слоты без флагов — их содержимое уже показано или дропнуто («вышли из
+    //      очереди»), ничего ценного не теряем;
+    //   2) только при skip'е: САМЫЙ СТАРЫЙ PREPARED — наименее ценный кадр.
+    //      Перезаписать «любой» нельзя: убив свежайший, рендер покажет более
+    //      старый — визуальный откат.
+    uint8_t oldest_prepared = INVALID_SLOT;
+
     for (uint8_t offset = 0; offset < BUFFERING_LEVEL; ++offset) {
         uint8_t i = static_cast<uint8_t>(
             (next_free_slot_index + offset) % BUFFERING_LEVEL);
         uint8_t f = slots_data[i].flags;
 
-        // Нельзя писать в то, что читает GPU: рендерящийся кадр и fallback-источник.
-        if (f & (SLOT_FLAG_RESERVED | SLOT_FLAG_IS_RENDERING))
-            continue;
-        // Без skip'а PREPARED неприкосновенен: каждый подготовленный кадр обязан
-        // отрисоваться, sim ждёт, пока рендер его заберёт (UPS проседает до FPS).
-        if (!allow_frame_skip && (f & SLOT_FLAG_HAS_PREPARED))
+        // Нельзя писать в то, что использует GPU: загрузка в полёте,
+        // рендерящийся кадр и fallback-источник.
+        if (f & (SLOT_FLAG_RESERVED | SLOT_FLAG_IS_UPLOADING | SLOT_FLAG_IS_RENDERING))
             continue;
         if (BUFFERING_LEVEL > 1 && i == last_rendering_slot)
             continue;
 
-        // Со skip'ом PREPARED не препятствие: неотрисованный кадр молча
-        // перезаписывается более свежим. Снятие PREPARED атомарно с резервацией —
-        // рендер не возьмёт слот, пока sim заливает его буферы.
+        if (f & SLOT_FLAG_HAS_PREPARED) {
+            if (allow_frame_skip &&
+                (oldest_prepared == INVALID_SLOT ||
+                 slots_data[i].frame_id < slots_data[oldest_prepared].frame_id))
+                oldest_prepared = i;
+            continue;
+        }
+
+        // Слот без флагов — берём сразу.
         slots_data[i].flags = SLOT_FLAG_RESERVED;
         next_free_slot_index = static_cast<uint8_t>((i + 1) % BUFFERING_LEVEL);
         return i;
+    }
+
+    if (oldest_prepared != INVALID_SLOT) {
+        // Frame skip: неотрисованный кадр молча перезаписывается более свежим.
+        // Снятие PREPARED атомарно с резервацией — рендер не возьмёт слот,
+        // пока sim заливает его буферы.
+        slots_data[oldest_prepared].flags = SLOT_FLAG_RESERVED;
+        next_free_slot_index = static_cast<uint8_t>((oldest_prepared + 1) % BUFFERING_LEVEL);
+        return oldest_prepared;
     }
     return INVALID_SLOT;
 }
@@ -56,29 +76,34 @@ uint8_t SlotController::WaitFreeSlotIndex(bool allow_frame_skip)
         if (slot != INVALID_SLOT)
             return slot;
 
-        // Разбудят HandleRendered (слот вышел из рендера) и MarkRenderingUnsafe
-        // (lr переехал и PREPARED ушёл в рендер — слот стал записываемым).
+        // Разбудят: HandleRendered (слот вышел из рендера), MarkRenderingUnsafe
+        // (lr переехал — старый fallback-слот стал записываемым) и HandlePrepared
+        // (в skip-режиме завершившаяся загрузка — цель для перезаписи).
         cv_free_.wait(lock);
     }
 }
 
 // ====================== Render: выбор кадра ================================
 
-// Самый свежий PREPARED-слот. Более старые кандидаты скипаются насовсем (PREPARED
-// снимается): показывать кадр старее выбранного нельзя, а sim перезапишет их первыми.
-uint8_t SlotController::GetReadySlotUnsafe()
+// latest_wins (skip-режим): СВЕЖАЙШИЙ PREPARED; более старые кандидаты при этом
+// скипаются насовсем (PREPARED снимается) — показывать кадр старее выбранного
+// нельзя, а sim перезапишет их первыми. Без latest_wins (lockstep): СТАРЕЙШИЙ,
+// по порядку и без потерь — каждый подготовленный кадр обязан быть показан.
+uint8_t SlotController::GetReadySlotUnsafe(bool latest_wins)
 {
     uint8_t best = INVALID_SLOT;
     for (uint8_t i = 0; i < BUFFERING_LEVEL; ++i) {
         uint8_t f = slots_data[i].flags;
         if (!(f & SLOT_FLAG_HAS_PREPARED))
             continue;
-        if (f & (SLOT_FLAG_RESERVED | SLOT_FLAG_IS_RENDERING))
+        if (f & (SLOT_FLAG_RESERVED | SLOT_FLAG_IS_UPLOADING | SLOT_FLAG_IS_RENDERING))
             continue;
-        if (best == INVALID_SLOT || slots_data[i].frame_id > slots_data[best].frame_id)
+        if (best == INVALID_SLOT ||
+            ( latest_wins && slots_data[i].frame_id > slots_data[best].frame_id) ||
+            (!latest_wins && slots_data[i].frame_id < slots_data[best].frame_id))
             best = i;
     }
-    if (best != INVALID_SLOT) {
+    if (latest_wins && best != INVALID_SLOT) {
         for (uint8_t i = 0; i < BUFFERING_LEVEL; ++i) {
             if (i == best) continue;
             if ((slots_data[i].flags & SLOT_FLAG_HAS_PREPARED) &&
@@ -95,9 +120,10 @@ uint8_t SlotController::GetRenderableFallbackUnsafe()
     if (lr == INVALID_SLOT)
         return INVALID_SLOT;
 
-    // Пока кадр в полёте, пере-рендерить его слот нельзя. RESERVED на lr невозможен
-    // (sim не берёт lr), проверка защитная.
-    if (slots_data[lr].flags & (SLOT_FLAG_IS_RENDERING | SLOT_FLAG_RESERVED))
+    // Пока кадр в полёте, пере-рендерить его слот нельзя. RESERVED/UPLOADING на lr
+    // невозможны (sim не берёт lr), проверки защитные.
+    if (slots_data[lr].flags &
+        (SLOT_FLAG_IS_RENDERING | SLOT_FLAG_RESERVED | SLOT_FLAG_IS_UPLOADING))
         return INVALID_SLOT;
 
     return lr;
@@ -118,7 +144,7 @@ void SlotController::MarkRenderingUnsafe(uint8_t slot)
     }
 }
 
-uint8_t SlotController::WaitRenderableSlot()
+uint8_t SlotController::WaitRenderableSlot(bool latest_wins)
 {
     std::unique_lock<std::mutex> lock(mutex_);
 
@@ -129,7 +155,7 @@ uint8_t SlotController::WaitRenderableSlot()
 
     for (;;) {
         // 1. Новый готовый кадр — берём сразу.
-        uint8_t slot = GetReadySlotUnsafe();
+        uint8_t slot = GetReadySlotUnsafe(latest_wins);
         if (slot != INVALID_SLOT) {
             MarkRenderingUnsafe(slot);
             return slot;
@@ -140,7 +166,7 @@ uint8_t SlotController::WaitRenderableSlot()
         if (fb != INVALID_SLOT) {
             cv_renderable_.wait_for(lock, SOFT_WAIT);
 
-            slot = GetReadySlotUnsafe();
+            slot = GetReadySlotUnsafe(latest_wins);
             if (slot != INVALID_SLOT) {
                 MarkRenderingUnsafe(slot);
                 return slot;
@@ -155,6 +181,15 @@ uint8_t SlotController::WaitRenderableSlot()
     }
 }
 
+bool SlotController::IsUploadingSlot(uint8_t slot)
+{
+    if (slot == INVALID_SLOT || slot >= BUFFERING_LEVEL)
+        return false;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    return (slots_data[slot].flags & SLOT_FLAG_IS_UPLOADING) != 0;
+}
+
 bool SlotController::IsRenderingSlot(uint8_t slot)
 {
     if (slot == INVALID_SLOT || slot >= BUFFERING_LEVEL)
@@ -166,15 +201,27 @@ bool SlotController::IsRenderingSlot(uint8_t slot)
 
 // ====================== Переходы состояний =================================
 
+void SlotController::HandleUploading(uint8_t slot)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Номер кадра — порядок sim-тиков: ставится при ОТПРАВКЕ загрузки, а не при
+    // её завершении, чтобы приход fences не по порядку не переупорядочил кадры.
+    slots_data[slot].frame_id = ++prepared_seq;
+    slots_data[slot].flags = static_cast<uint8_t>(
+        (slots_data[slot].flags & ~SLOT_FLAG_RESERVED) | SLOT_FLAG_IS_UPLOADING);
+    // Никого не будим: слот стал НЕдоступнее (был RESERVED, стал UPLOADING).
+}
+
 void SlotController::HandlePrepared(uint8_t slot)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    slots_data[slot].frame_id = ++prepared_seq;
     slots_data[slot].flags = static_cast<uint8_t>(
-        (slots_data[slot].flags & ~SLOT_FLAG_RESERVED) | SLOT_FLAG_HAS_PREPARED);
+        (slots_data[slot].flags & ~SLOT_FLAG_IS_UPLOADING) | SLOT_FLAG_HAS_PREPARED);
 
-    cv_renderable_.notify_one();
+    cv_renderable_.notify_one();  // рендеру появился кадр
+    cv_free_.notify_all();        // в skip-режиме готовый кадр — цель для перезаписи
 }
 
 void SlotController::HandleRendered(uint8_t slot)
@@ -195,8 +242,9 @@ void SlotController::SetSlotState(uint8_t slot, SlotState new_state)
         return;
 
     switch (new_state) {
-    case PREPARED: HandlePrepared(slot); break;
-    case RENDERED: HandleRendered(slot); break;
+    case UPLOADING: HandleUploading(slot); break;
+    case PREPARED:  HandlePrepared(slot);  break;
+    case RENDERED:  HandleRendered(slot);  break;
     }
 }
 
@@ -222,10 +270,11 @@ void SlotController::DebugDump(const char* tag)
         const SlotData& sd = slots_data[i];
         uint8_t f = sd.flags;
         SDL_Log(
-            " slot %u: flags=0x%02X [Rsv=%u P=%u R=%u], frame_id=%u, fence=%p",
+            " slot %u: flags=0x%02X [Rsv=%u U=%u P=%u R=%u], frame_id=%u, fence=%p",
             i,
             f,
             (f & SLOT_FLAG_RESERVED) != 0,
+            (f & SLOT_FLAG_IS_UPLOADING) != 0,
             (f & SLOT_FLAG_HAS_PREPARED) != 0,
             (f & SLOT_FLAG_IS_RENDERING) != 0,
             sd.frame_id,

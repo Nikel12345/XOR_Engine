@@ -2,15 +2,15 @@
 #include "ThreadController.h"
 #include "SlotController.h"
 
-static constexpr bool UPS_priority = true;
-static constexpr bool FPS_NoLimit = true;
-static constexpr bool UPS_NoLimit = true;
+static constexpr bool UPS_priority = false;
+static constexpr bool FPS_NoLimit = false;
+static constexpr bool UPS_NoLimit = false;
 
 ThreadController::ThreadController(SlotController* slot_controller)
 {
     this->slot_controller = slot_controller;
-    fps_counter = new AvgRateCounter("FPS", 2000);
-    ups_counter = new AvgRateCounter("UPS", 2000);
+    fps_counter = new AvgRateCounter("FPS", 20);
+    ups_counter = new AvgRateCounter("UPS", 20);
 }
 
 void ThreadController::SetGameIterationCallback(GameIterCallback cb)
@@ -21,6 +21,11 @@ void ThreadController::SetGameIterationCallback(GameIterCallback cb)
 void ThreadController::SetPrepareCallback(PrepareCallback cb)
 {
     prepare_callback = std::move(cb);
+}
+
+void ThreadController::SetUploadCallback(UploadCallback cb)
+{
+    upload_callback = std::move(cb);
 }
 
 void ThreadController::SetRenderCallback(RenderCallback cb)
@@ -35,12 +40,15 @@ void ThreadController::SetFenceCallback(FenceCallback cb)
 
 void ThreadController::StartThreads()
 {
-    if (!game_iter_callback || !prepare_callback || !render_callback || !fence_callback) {
+    if (!game_iter_callback || !prepare_callback || !upload_callback || !render_callback || !fence_callback) {
         if (!game_iter_callback) {
             SDL_Log("No game_iter");
         }
         if (!prepare_callback) {
             SDL_Log("No prep");
+        }
+        if (!upload_callback) {
+            SDL_Log("No upload");
         }
         if (!render_callback) {
             SDL_Log("No render");
@@ -52,6 +60,7 @@ void ThreadController::StartThreads()
     }
     running.store(true);
     game_n_prep_iter_thread = std::thread(&ThreadController::SimulationThread, this);
+    upload_thread = std::thread(&ThreadController::UploadThread, this);
     render_thread = std::thread(&ThreadController::RenderThread, this);
     fence_thread = std::thread(&ThreadController::FenceThread, this);
 }
@@ -61,6 +70,8 @@ ThreadController::~ThreadController()
     running.store(false);
     if (game_n_prep_iter_thread.joinable())
         game_n_prep_iter_thread.join();
+    if (upload_thread.joinable())
+        upload_thread.join();
     if (render_thread.joinable())
         render_thread.join();
     if (fence_thread.joinable())
@@ -115,6 +126,40 @@ void ThreadController::SimulationThread()
 }
 
 
+// Зеркало FenceThread для upload-fences: наблюдает за слотами UPLOADING и по
+// завершении загрузки промоутит их в PREPARED (это делает upload_callback).
+// Sim при этом свободен готовить следующий слот — латентность сабмита спрятана.
+void ThreadController::UploadThread()
+{
+    while (running.load(std::memory_order_relaxed))
+    {
+        bool processed = false;
+
+        for (uint8_t slot = 0; slot < BUFFERING_LEVEL; ++slot)
+        {
+            if (!slot_controller->IsUploadingSlot(slot)) {
+                continue;
+            }
+            // Fence ставится ДО перевода в UPLOADING, но проверка защитная.
+            if (!slot_controller->GetSlotsData()[slot].fence) {
+                continue;
+            }
+
+            // upload_callback(slot) блокирующе ждёт upload-fence (kernel-wait),
+            // возвращает transfer-буферы в пул и зовёт SetSlotState(slot, PREPARED)
+            upload_callback(slot);
+            processed = true;
+        }
+
+        if (!processed)
+        {
+            // Загрузок в полёте нет — опрашивать чаще нет смысла. Пока пайплайн
+            // полон, цикл сюда не попадает (стоит в kernel-wait, не спит).
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
+}
+
 void ThreadController::RenderThread()
 {
     if (!render_callback) {
@@ -127,7 +172,9 @@ void ThreadController::RenderThread()
         auto frame_start = std::chrono::high_resolution_clock::now();
 
 
-        uint8_t slot = slot_controller->WaitRenderableSlot();
+        // Режим определяет конец очереди готовых кадров: при UPS_priority (skip)
+        // берём свежайший (старые умирают), при lockstep — по порядку без потерь.
+        uint8_t slot = slot_controller->WaitRenderableSlot(UPS_priority);
         //slot_controller->DebugDump("RenderThread idle");
         fps_counter->start();
         //auto* slots = slot_controller->GetSlotsData();

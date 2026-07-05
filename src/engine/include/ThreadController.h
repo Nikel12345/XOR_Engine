@@ -11,6 +11,7 @@ class ThreadController {
 public:
     using GameIterCallback = std::function<void()>;
     using PrepareCallback = std::function<void(uint8_t slot)>;
+    using UploadCallback = std::function<void(uint8_t slot)>;
     using RenderCallback = std::function<bool(uint8_t slot)>;
     using FenceCallback = std::function<void(uint8_t slot)>;
 
@@ -22,6 +23,7 @@ public:
 
     void SetGameIterationCallback(GameIterCallback cb);
     void SetPrepareCallback(PrepareCallback cb);
+    void SetUploadCallback(UploadCallback cb);
     void SetRenderCallback(RenderCallback cb);
     void SetFenceCallback(FenceCallback cb);
 
@@ -30,6 +32,7 @@ public:
     AvgRateCounter* ups_counter = nullptr;
 private:
     void SimulationThread();
+    void UploadThread();
     void RenderThread();
     void FenceThread();
 
@@ -38,10 +41,12 @@ private:
 
     GameIterCallback game_iter_callback;
     PrepareCallback prepare_callback;
+    UploadCallback upload_callback;
     RenderCallback render_callback;
     FenceCallback fence_callback;
 
     std::thread game_n_prep_iter_thread;
+    std::thread upload_thread;
     std::thread render_thread;
     std::thread fence_thread;
 

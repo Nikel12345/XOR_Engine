@@ -263,6 +263,8 @@ void Engine::PrepareFunc(uint8_t slot)
 
 	batch_builder->UpdateRenderBatches(pipe_manager, pass_manager, object_manager, object_manager->GetActiveScene());
 	batch_builder->BuildComputeBatches(pass_manager, pipe_manager, shader_manager);
+	// Prepass отправляет загрузку АСИНХРОННО: слот уйдёт в UPLOADING, а PREPARED его
+	// сделает UploadThread по сигналу upload-fence. Sim здесь больше не ждёт GPU.
 	PrepareFuncPrepassUndepended(slot);
 	//PrepareFuncPrepassDepended(slot);
 	//auto r1 = PrepareFuncPrepassDepended_Original(slot);
@@ -279,8 +281,6 @@ void Engine::PrepareFunc(uint8_t slot)
 	//		o.p95 - p.p95, 100.0 * (o.p95 - p.p95) / o.p95,
 	//		g_stat_calls);
 	//}
-
-	slot_controller->SetSlotState(slot, PREPARED);
 }
 
 void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
@@ -294,12 +294,36 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 	texture_manager->GenerateMipmaps(cb);
 	SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
 
+	// Fence НЕ ждём: синхронный round-trip (~1 мс на submit+wait) ограничивал UPS
+	// величиной ~1/латентность. Fence и transfer-буферы забирает UploadThread
+	// (Engine::UploadFunc): дождётся, вернёт TB в пул и промоутит слот в PREPARED —
+	// раньше этого кадр рендеру не виден, данные гарантированно на GPU.
+	pending_upload_tbs[slot] = { undepended_tbd, texture_tbd };
+	slot_controller->SetSlotFence(slot, fence);         // fence ДО флага UPLOADING
+	slot_controller->SetSlotState(slot, UPLOADING);
+}
+
+// Зеркало FenceFunc для upload-fence. Блокирующее ожидание здесь обязательно:
+// порядок сабмитов и барьеры copy-пасса на практике НЕ гарантируют, что данные
+// дошли до GPU к моменту чтения кадром — единственный надёжный сигнал это fence.
+void Engine::UploadFunc(uint8_t slot)
+{
+	SlotData* slots = slot_controller->GetSlotsData();
+	SlotData& sd = slots[slot];
+	SDL_GPUFence* fence = sd.fence;
+
+	if (!fence) return;
+
 	SDL_WaitForGPUFences(dev, true, &fence, 1);
 	SDL_ReleaseGPUFence(dev, fence);
+	sd.fence = nullptr;
 
-	// Fence дождались — GPU дочитал transfer-буферы, возвращаем их в пул.
-	transfer_manager->ReleaseTB(undepended_tbd);
-	transfer_manager->ReleaseTB(texture_tbd);
+	// GPU дочитал transfer-буферы — возвращаем в пул (TransferManager потокобезопасен).
+	transfer_manager->ReleaseTB(pending_upload_tbs[slot].buffers_tbd);
+	transfer_manager->ReleaseTB(pending_upload_tbs[slot].textures_tbd);
+	pending_upload_tbs[slot] = {};
+
+	slot_controller->SetSlotState(slot, PREPARED);
 }
 
 //PrepassTimingReport Engine::PrepareFuncPrepassDepended_Original(uint8_t slot)
@@ -591,6 +615,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	pass_manager->FillRenderPasses();
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});
+	thread_controller->SetUploadCallback([this](uint8_t slot) {this->UploadFunc(slot); });
 	thread_controller->SetRenderCallback(
 		[this](uint8_t slot) {
 			return this->RenderFunc(slot);   // !!! return
