@@ -323,7 +323,7 @@ SDL_AppResult Game::MainInit()
         ShadowCasterComponent{},
         ColliderComponent{}
     );
-    ctx->ExecuteGenerators();
+    //ctx->ExecuteGenerators();
 
     ChangeState(GameState::MAIN_MENU);
 

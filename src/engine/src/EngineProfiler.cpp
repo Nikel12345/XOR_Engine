@@ -2,6 +2,8 @@
 #include "EngineProfiler.h"
 #include <cstdio>
 
+#if ENGINE_PROFILE
+
 void FrameProfiler::Add(const char* name, double ms, uint64_t bytes)
 {
     std::lock_guard<std::mutex> lk(mtx);
@@ -78,6 +80,8 @@ void FrameProfiler::PrintAndReset(double window_ms)
     for (Slot& s : slots) { s.sum_ms = 0.0; s.max_ms = 0.0; s.calls = 0; }
     frames = 0;
 }
+
+#endif // ENGINE_PROFILE
 
 namespace Prof {
     // Период отчёта в мс (реальное время, не кадры). Больше значение — реже вывод.

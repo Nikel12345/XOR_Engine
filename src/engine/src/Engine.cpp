@@ -7,250 +7,6 @@
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
 
-//void Engine::Iterate()
-//{
-//	Uint64 now = SDL_GetTicks();
-//	double elapsed = (double)(now - prevTicks);
-//	if (elapsed < frameTime) {
-//		SDL_Delay((Uint32)(frameTime - elapsed));
-//		now = SDL_GetTicks();
-//	}
-//	prevTicks = now; 
-//
-//	SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
-//
-//	Uint32 w = 0, h = 0;
-//	SDL_GPUTexture* tex = nullptr;
-//
-//	if (!SDL_AcquireGPUSwapchainTexture(cb, win, &tex, &w, &h)) {
-//		SDL_Log("Acquire error: %s", SDL_GetError());
-//		SDL_CancelGPUCommandBuffer(cb);
-//		return;
-//	}
-//	if (!tex) {
-//		SDL_CancelGPUCommandBuffer(cb);
-//
-//		return;
-//	};
-//
-//	pass_manager->UpdateColorTargetInfoTex(tex);
-//
-//	buffer_manager->TrashBuffers();
-//
-//	SceneData* scene = object_manager->GetActiveScene();
-//	buffer_manager->UpdateBuffer("cameraBuffer");
-//	buffer_manager->UpdateBuffer("DefaultTransformBuffer", scene);
-//	buffer_manager->UpdateBuffer("lightBuffer", &allLights);
-//	buffer_manager->UpdateBuffer("DefaultPositionIndexBuffer");
-//	model_manager->UploadModelBuffer(buffer_manager);
-//	buffer_manager->_BuildUploadTasks();
-//
-//	SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
-//	ExecuteCP(cp);
-//	SDL_EndGPUCopyPass(cp);
-//
-//	SDL_GPURenderPass* rp = SDL_BeginGPURenderPass(cb, &pass_manager->colorTargetInfo, 1, &pipe_manager->depthTargetInfo);
-//
-//	pass_manager->ExecutePassesSteps(rp, buffer_manager, 0);
-//	SDL_EndGPURenderPass(rp);
-//
-//	SDL_SubmitGPUCommandBuffer(cb);
-//}
-
-//void Engine::PrepareFunc(uint8_t slot)
-//{
-//	slot_controller->SetSlotState(slot, PREPARING);
-//	buffer_manager->logic_index = slot;
-//
-//	pipe_manager->CreateGraphicsPiplenes(shader_manager);
-//	pipe_manager->CreateComputePipelines(shader_manager);
-//
-//	batch_builder->BuildRenderBatches(pipe_manager, pass_manager, object_manager, object_manager->GetActiveScene());
-//	batch_builder->BuildComputeBatches(pipe_manager, shader_manager);
-//	batch_builder->BuildComputePrepassBatches(pipe_manager, shader_manager);
-//
-//	SDL_GPUCommandBuffer* cb0 = SDL_AcquireGPUCommandBuffer(dev);
-//	SDL_GPUCopyPass* cp0 = SDL_BeginGPUCopyPass(cb0);
-//
-//	buffer_manager->ExecutePrePassUpdateInstruction(cp0);
-//	buffer_manager->ExecutePrePassUploadTasks(cp0, slot);
-//
-//	SDL_EndGPUCopyPass(cp0);
-//
-//	SDL_GPUFence* prepass_task_fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb0);
-//	SDL_WaitForGPUFences(dev, true, &prepass_task_fence, 1);
-//	SDL_ReleaseGPUFence(dev, prepass_task_fence);
-//
-//	SDL_GPUCommandBuffer* cb1 = SDL_AcquireGPUCommandBuffer(dev);
-//	pass_manager->ExecutePrepassesSteps(cb1, slot);
-//	SDL_GPUFence* prepass_fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb1);
-//
-//	SDL_WaitForGPUFences(dev, true, &prepass_fence, 1);
-//	SDL_ReleaseGPUFence(dev, prepass_fence);
-//
-//	buffer_manager->MapUploadTransferBuffer();
-//	buffer_manager->MapReadTransferBuffer();
-//	texture_manager->MapUploadTransferBuffer();
-//
-//	// Полностью CPU логика
-//	SDL_GPUCommandBuffer* cb2 = SDL_AcquireGPUCommandBuffer(dev);
-//	SDL_GPUCopyPass* cp2 = SDL_BeginGPUCopyPass(cb2);
-//
-//	buffer_manager->ExecuteReadBackInstructionsSize();
-//
-//	buffer_manager->ExecuteUpdateInstructions(cp2);
-//	// Не неачинает загрузку до submit, всё ещё CPU
-//	buffer_manager->ExecuteUploadTasks(cp2, slot);
-//	texture_manager->ExecuteUploadTasks(cp2);
-//	buffer_manager->ExecuteDownloadTasks(cp2, slot);
-//
-//	//SDL_WaitForGPUFences(dev, true, &prepass_fence, 1);
-//	//SDL_ReleaseGPUFence(dev, prepass_fence);
-//
-//	SDL_EndGPUCopyPass(cp2);
-//	SDL_GPUFence* upload_download_fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb2);
-//
-//	buffer_manager->UnmapUploadTransferBuffer(); // Загрузок в обычном tb большей нет, анмапим
-//	// buffer_manager->MapPostReadBackUploadTB() // Появится в будущем для post read back UI
-//
-//	SDL_WaitForGPUFences(dev, true, &upload_download_fence, 1);
-//	SDL_ReleaseGPUFence(dev, upload_download_fence); // Ждём и завершения скачивания.
-//
-//
-//	SDL_GPUCommandBuffer* cb3 = SDL_AcquireGPUCommandBuffer(dev);
-//	SDL_GPUCopyPass* cp3 = SDL_BeginGPUCopyPass(cb3);
-//
-//	buffer_manager->ExecuteReadBackInstructionsReader();
-//	// Потом появится тип задача со своим tb, которые для заливки данных в буфер тебуют завершения rb.
-//	// buffer_manager->ExecutePostReadBackUpdateInstructions(cp3); // НУЖЕН CP3!
-//	SDL_EndGPUCopyPass(cp3);
-//
-//	buffer_manager->UnmapReadTransferBuffer();
-//	// buffer_manager->UnmapPostReadTransferBuffer();
-//	texture_manager->UnmapUploadTransferBuffer();
-//
-//	texture_manager->GenerateMipmaps(cb3);
-//
-//	SDL_GPUFence* mip_fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb3);
-//	SDL_WaitForGPUFences(dev, true, &mip_fence, 1);
-//	SDL_ReleaseGPUFence(dev, mip_fence);
-//
-//	slot_controller->SetSlotState(slot, PREPARED);
-//	slot_controller->SetSlotState(slot, UPLOADING);
-//	slot_controller->SetSlotState(slot, UPLOADED);
-//}
-struct FenceWaitResult {
-	int64_t spin_us;
-	int64_t kernel_us;
-	int64_t total_us;
-};
-
-static FenceWaitResult SpinThenWait(SDL_GPUDevice* dev, SDL_GPUFence* fence)
-{
-	using Clock = std::chrono::steady_clock;
-	auto t0 = Clock::now();
-	while (!SDL_QueryGPUFence(dev, fence))
-		_mm_pause();
-	auto t1 = Clock::now();
-	SDL_WaitForGPUFences(dev, true, &fence, 1);
-	auto t2 = Clock::now();
-	return {
-		std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count(),
-		std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count(),
-		std::chrono::duration_cast<std::chrono::microseconds>(t2 - t0).count()
-	};
-}
-
-static FenceWaitResult PlainWait(SDL_GPUDevice* dev, SDL_GPUFence* fence)
-{
-	using Clock = std::chrono::steady_clock;
-	auto t0 = Clock::now();
-	SDL_WaitForGPUFences(dev, true, &fence, 1);
-	auto t1 = Clock::now();
-	int64_t us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
-	return { 0, us, us };
-}
-
-struct PrepassTimingReport {
-	const char* variant;
-	FenceWaitResult fence_prepass_task;
-	FenceWaitResult fence_prepass;
-	FenceWaitResult fence_download;
-	FenceWaitResult fence_postreadback;
-	int64_t total_func_us;
-};
-
-struct FenceStats {
-	std::vector<int64_t> spin, kernel, total;
-
-	void Add(const FenceWaitResult& r) {
-		spin.push_back(r.spin_us);
-		kernel.push_back(r.kernel_us);
-		total.push_back(r.total_us);
-	}
-
-	struct Agg { int64_t avg, p50, p95, max; };
-	static Agg Compute(std::vector<int64_t> v) {
-		std::sort(v.begin(), v.end());
-		int64_t sum = 0; for (auto x : v) sum += x;
-		return { sum / (int64_t)v.size(), v[v.size() * 50 / 100], v[v.size() * 95 / 100], v.back() };
-	}
-
-	void PrintRow(const char* label) const {
-		auto sp = Compute(spin);
-		auto ke = Compute(kernel);
-		auto to = Compute(total);
-		printf("  %-20s  spin  µs: avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", label, sp.avg, sp.p50, sp.p95, sp.max);
-		printf("  %-20s  kernel µs: avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", "", ke.avg, ke.p50, ke.p95, ke.max);
-		printf("  %-20s  total  µs: avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", "", to.avg, to.p50, to.p95, to.max);
-	}
-};
-
-struct VariantStats {
-	const char* variant;
-	bool prepass_eliminated = false;
-	FenceStats fence_prepass_task, fence_prepass, fence_download, fence_postreadback;
-	std::vector<int64_t> total_func;
-	int n = 0;
-
-	void Add(const PrepassTimingReport& r) {
-		++n;
-		fence_prepass_task.Add(r.fence_prepass_task);
-		if (r.fence_prepass.total_us < 0)
-			prepass_eliminated = true;
-		else
-			fence_prepass.Add(r.fence_prepass);
-		fence_download.Add(r.fence_download);
-		fence_postreadback.Add(r.fence_postreadback);
-		total_func.push_back(r.total_func_us);
-	}
-
-	FenceStats::Agg TotalAgg() const { return FenceStats::Compute(total_func); }
-
-	void Print() const {
-		printf("\n┌── [%s]  %d samples ──────────────────────────────────────────\n", variant, n);
-		fence_prepass_task.PrintRow("fence_prepass_task");
-		printf("  ──────────────────────\n");
-		if (prepass_eliminated)
-			printf("  %-20s  [устранён — объединён в cb01]\n", "fence_prepass");
-		else
-			fence_prepass.PrintRow("fence_prepass");
-		printf("  ──────────────────────\n");
-		fence_download.PrintRow("fence_download");
-		printf("  ──────────────────────\n");
-		fence_postreadback.PrintRow("fence_postreadback");
-		printf("  ══════════════════════\n");
-		auto t = TotalAgg();
-		printf("  %-20s         avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", "TOTAL FUNC µs:", t.avg, t.p50, t.p95, t.max);
-		printf("└──────────────────────────────────────────────────────────────\n");
-	}
-};
-
-static VariantStats g_stats_orig{ "ORIGINAL" };
-static VariantStats g_stats_opt{ "OPTIMIZED" };
-static int          g_stat_calls = 0;
-static const int    PRINT_EVERY = 600;
-
 void Engine::PrepareFunc(uint8_t slot)
 {
 	// Слот уже зарезервирован (RESERVED) в момент выдачи — Get/WaitFreeSlotIndex
@@ -258,37 +14,35 @@ void Engine::PrepareFunc(uint8_t slot)
 	buffer_manager->logic_index = slot;
 
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Sim, " pipelines (create g+c)");
 		engine_context->CreateGraphicsPipelines();
 		engine_context->CreateComputePipelines();
-		Prof::Sim().Add(" pipelines (create g+c)", Prof::MsSince(t));
 	}
 
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Sim, " pack_atlases");
 		texture_manager->PackAtlases();
-		Prof::Sim().Add(" pack_atlases", Prof::MsSince(t));
 	}
 
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Sim, " update_render_batches");
 		batch_builder->UpdateRenderBatches(pipe_manager, pass_manager, object_manager, object_manager->GetActiveScene());
-		Prof::Sim().Add(" update_render_batches", Prof::MsSince(t));
 	}
 
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Sim, " build_compute_batches");
 		batch_builder->BuildComputeBatches(pass_manager, pipe_manager, shader_manager);
-		Prof::Sim().Add(" build_compute_batches", Prof::MsSince(t));
 	}
 
 	// Prepass отправляет загрузку АСИНХРОННО: слот уйдёт в UPLOADING, а PREPARED его
 	// сделает UploadThread по сигналу upload-fence. Sim здесь больше не ждёт GPU.
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Sim, " prepass_undepended (submit загрузки)");
 		PrepareFuncPrepassUndepended(slot);
-		Prof::Sim().Add(" prepass_undepended (submit загрузки)", Prof::MsSince(t));
 	}
+	// A/B-прогон префасса (стенд в Engine_PrepassBench.cpp, под ENGINE_BENCH). Оставлено
+	// как есть для восстановления: g_stats_*/_Original/_Optimized сейчас static в bench-TU,
+	// поэтому для реального включения их надо вызвать через один экспорт из стенда.
 	//PrepareFuncPrepassDepended(slot);
 	//auto r1 = PrepareFuncPrepassDepended_Original(slot);
 	//auto r2 = PrepareFuncPrepassDepended_Optimized(slot);
@@ -308,22 +62,17 @@ void Engine::PrepareFunc(uint8_t slot)
 
 void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 {
-	// ДИАГНОСТИКА (config.h DISABLE_UPLOAD): гоняем ТОЛЬКО store в transfer-буфер, без
-	// отправки на GPU — ни upload-DMA, ни fence. Командный буфер отменяем, TB возвращаем
-	// сразу (GPU его не трогал). Слот прокручиваем RESERVED→UPLOADING→PREPARED вручную,
-	// иначе он застрянет в RESERVED и sim (в skip-режиме) встанет без свободных слотов.
 	if (DISABLE_UPLOAD) {
 		SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
 		SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
 		TransferBufferData* tbd;
 		{
-			auto t = Prof::Clock::now();
-			tbd = buffer_manager->ExecuteUpdateInstructions(cp);   // store; профайлер метит "<buf> .store"
-			Prof::Sim().Add("  exec_update_instructions (всего)", Prof::MsSince(t));
+			PROF_SCOPE(Sim, "  exec_update_instructions (всего)");
+			tbd = buffer_manager->ExecuteUpdateInstructions(cp);
 		}
 		SDL_EndGPUCopyPass(cp);
-		SDL_CancelGPUCommandBuffer(cb);            // на GPU НЕ отправляем
-		transfer_manager->ReleaseTB(tbd);          // GPU буфер не читал — вернуть в пул сразу
+		SDL_CancelGPUCommandBuffer(cb);
+		transfer_manager->ReleaseTB(tbd);
 		slot_controller->SetSlotState(slot, UPLOADING);
 		slot_controller->SetSlotState(slot, PREPARED);
 		return;
@@ -332,45 +81,33 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 	SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
 	SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
 
-	// ExecuteUpdateInstructions внутри сам разбивает время по каждому буферу
-	// (метки "<buf> .size" / "<buf> .store", см. BufferManager_Update.cpp).
 	TransferBufferData* undepended_tbd;
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Sim, "  exec_update_instructions (всего)");
 		undepended_tbd = buffer_manager->ExecuteUpdateInstructions(cp);
-		Prof::Sim().Add("  exec_update_instructions (всего)", Prof::MsSince(t));
 	}
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Sim, "  exec_upload_tasks (буферы)");
 		buffer_manager->ExecuteUploadTasks(cp, slot);
-		Prof::Sim().Add("  exec_upload_tasks (буферы)", Prof::MsSince(t));
 	}
 	TransferBufferData* texture_tbd;
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Sim, "  tex_upload_tasks");
 		texture_tbd = texture_manager->ExecuteUploadTasks(cp);
-		Prof::Sim().Add("  tex_upload_tasks", Prof::MsSince(t));
 	}
 	SDL_EndGPUCopyPass(cp);
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Sim, "  generate_mipmaps");
 		texture_manager->GenerateMipmaps(cb);
-		Prof::Sim().Add("  generate_mipmaps", Prof::MsSince(t));
 	}
 	SDL_GPUFence* fence;
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Sim, "  submit_acquire_fence");
 		fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
-		Prof::Sim().Add("  submit_acquire_fence", Prof::MsSince(t));
 	}
 
-	// Fence НЕ ждём: синхронный round-trip (~1 мс на submit+wait) ограничивал UPS
-	// величиной ~1/латентность. Fence и transfer-буферы забирает UploadThread
-	// (Engine::UploadFunc): дождётся, вернёт TB в пул и промоутит слот в PREPARED —
-	// раньше этого кадр рендеру не виден, данные гарантированно на GPU.
+
 	pending_upload_tbs[slot] = { undepended_tbd, texture_tbd };
-	// Метку сабмита пишем ДО публикации fence — UploadFunc замерит от неё латентность
-	// заливки на GPU (submit UPLOADING -> сигнал upload-fence). Поле общее с render (см. SlotData).
 	slot_controller->GetSlotsData()[slot].submit_time = Prof::Clock::now();
 	slot_controller->SetSlotFence(slot, fence);         // fence ДО флага UPLOADING
 	slot_controller->SetSlotState(slot, UPLOADING);
@@ -410,104 +147,8 @@ void Engine::UploadFunc(uint8_t slot)
 	Prof::Upload().Add("upload_gpu (submit->fence, заливка на GPU)", upload_ms);
 	Prof::Upload().Add("upload_fence_wait (CPU-блок)", wait_ms);
 	Prof::Upload().Add("release_tbs (возврат TB в пул)", release_ms);
-	Prof::Upload().Frame();
+	PROF_FRAME(Upload);
 }
-
-//PrepassTimingReport Engine::PrepareFuncPrepassDepended_Original(uint8_t slot)
-//{
-//	using Clock = std::chrono::steady_clock;
-//	PrepassTimingReport r{ "ORIGINAL" };
-//	auto t0 = Clock::now();
-//
-//	buffer_manager->MapPrepassDependedTransferBuffer();
-//	SDL_GPUCommandBuffer* cb0 = SDL_AcquireGPUCommandBuffer(dev);
-//	SDL_GPUCopyPass* cp0 = SDL_BeginGPUCopyPass(cb0);
-//	buffer_manager->ExecutePrePassUpdateInstruction(cp0);
-//	buffer_manager->ExecutePrePassUploadTasks(cp0, slot);
-//	SDL_EndGPUCopyPass(cp0);
-//	buffer_manager->UnmapPrepassDependedTransferBuffer();
-//	SDL_GPUFence* f0 = SDL_SubmitGPUCommandBufferAndAcquireFence(cb0);
-//	r.fence_prepass_task = PlainWait(dev, f0);
-//	SDL_ReleaseGPUFence(dev, f0);
-//
-//	SDL_GPUCommandBuffer* cb1 = SDL_AcquireGPUCommandBuffer(dev);
-//	pass_manager->ExecutePrepassesSteps(cb1, slot);
-//	SDL_GPUFence* f1 = SDL_SubmitGPUCommandBufferAndAcquireFence(cb1);
-//	r.fence_prepass = PlainWait(dev, f1);
-//	SDL_ReleaseGPUFence(dev, f1);
-//
-//	buffer_manager->MapReadTransferBuffer();
-//	SDL_GPUCommandBuffer* cb2 = SDL_AcquireGPUCommandBuffer(dev);
-//	SDL_GPUCopyPass* cp2 = SDL_BeginGPUCopyPass(cb2);
-//	buffer_manager->ExecuteReadBackInstructionsSize();
-//	buffer_manager->ExecuteDownloadTasks(cp2, slot);
-//	SDL_EndGPUCopyPass(cp2);
-//	SDL_GPUFence* f2 = SDL_SubmitGPUCommandBufferAndAcquireFence(cb2);
-//	r.fence_download = PlainWait(dev, f2);
-//	SDL_ReleaseGPUFence(dev, f2);
-//	buffer_manager->ExecuteReadBackInstructionsReader();
-//	buffer_manager->UnmapReadTransferBuffer();
-//
-//	buffer_manager->MapPrepassDependedTransferBuffer();
-//	SDL_GPUCommandBuffer* cb3 = SDL_AcquireGPUCommandBuffer(dev);
-//	SDL_GPUCopyPass* cp3 = SDL_BeginGPUCopyPass(cb3);
-//	buffer_manager->ExecutePostReadbackInstructions(cp3);
-//	buffer_manager->ExecutePostreadBackUploadTasks(cp3, slot);
-//	SDL_EndGPUCopyPass(cp3);
-//	SDL_GPUFence* f3 = SDL_SubmitGPUCommandBufferAndAcquireFence(cb3);
-//	buffer_manager->UnmapPrepassDependedTransferBuffer();
-//	r.fence_postreadback = PlainWait(dev, f3);
-//	SDL_ReleaseGPUFence(dev, f3);
-//
-//	r.total_func_us = std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - t0).count();
-//	return r;
-//}
-//
-//PrepassTimingReport Engine::PrepareFuncPrepassDepended_Optimized(uint8_t slot)
-//{
-//	using Clock = std::chrono::steady_clock;
-//	PrepassTimingReport r{ "OPTIMIZED" };
-//	r.fence_prepass = { -1, -1, -1 };
-//	auto t0 = Clock::now();
-//
-//	buffer_manager->MapPrepassDependedTransferBuffer();
-//	SDL_GPUCommandBuffer* cb01 = SDL_AcquireGPUCommandBuffer(dev);
-//	SDL_GPUCopyPass* cp0 = SDL_BeginGPUCopyPass(cb01);
-//	buffer_manager->ExecutePrePassUpdateInstruction(cp0);
-//	buffer_manager->ExecutePrePassUploadTasks(cp0, slot);
-//	SDL_EndGPUCopyPass(cp0);
-//	buffer_manager->UnmapPrepassDependedTransferBuffer();
-//	pass_manager->ExecutePrepassesSteps(cb01, slot);
-//	SDL_GPUFence* f01 = SDL_SubmitGPUCommandBufferAndAcquireFence(cb01);
-//	r.fence_prepass_task = SpinThenWait(dev, f01);
-//	SDL_ReleaseGPUFence(dev, f01);
-//
-//	buffer_manager->MapReadTransferBuffer();
-//	SDL_GPUCommandBuffer* cb2 = SDL_AcquireGPUCommandBuffer(dev);
-//	SDL_GPUCopyPass* cp2 = SDL_BeginGPUCopyPass(cb2);
-//	buffer_manager->ExecuteReadBackInstructionsSize();
-//	buffer_manager->ExecuteDownloadTasks(cp2, slot);
-//	SDL_EndGPUCopyPass(cp2);
-//	SDL_GPUFence* f2 = SDL_SubmitGPUCommandBufferAndAcquireFence(cb2);
-//	r.fence_download = SpinThenWait(dev, f2);
-//	SDL_ReleaseGPUFence(dev, f2);
-//	buffer_manager->ExecuteReadBackInstructionsReader();
-//	buffer_manager->UnmapReadTransferBuffer();
-//
-//	buffer_manager->MapPrepassDependedTransferBuffer();
-//	SDL_GPUCommandBuffer* cb3 = SDL_AcquireGPUCommandBuffer(dev);
-//	SDL_GPUCopyPass* cp3 = SDL_BeginGPUCopyPass(cb3);
-//	buffer_manager->ExecutePostReadbackInstructions(cp3);
-//	buffer_manager->ExecutePostreadBackUploadTasks(cp3, slot);
-//	SDL_EndGPUCopyPass(cp3);
-//	SDL_GPUFence* f3 = SDL_SubmitGPUCommandBufferAndAcquireFence(cb3);
-//	buffer_manager->UnmapPrepassDependedTransferBuffer();
-//	r.fence_postreadback = SpinThenWait(dev, f3);
-//	SDL_ReleaseGPUFence(dev, f3);
-//
-//	r.total_func_us = std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - t0).count();
-//	return r;
-//}
 
 void Engine::PrepareFuncPrepassDepended(uint8_t slot)
 {
@@ -588,14 +229,13 @@ bool Engine::RenderFunc(uint8_t slot)
 		present_rp->renderPassTexsData.SetColorTexture(tex);
 	pass_manager->SetRenderFrame(slot);
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Render, " execute_passes (запись команд)");
 		std::lock_guard<std::mutex> batch_lock(pass_manager->BatchTreeMutex());
 		pass_manager->ExecutePassesSteps(cb, slot);
-		Prof::Render().Add(" execute_passes (запись команд)", Prof::MsSince(t));
 	}
 
 	{
-		auto t = Prof::Clock::now();
+		PROF_SCOPE(Render, " imgui (new frame + UI + draw)");
 		BeginImGuiFrame();
 		UI_ImGui::Iterate(engine_context);
 		EndImGuiFrame();
@@ -613,7 +253,6 @@ bool Engine::RenderFunc(uint8_t slot)
 			ImGui_ImplSDLGPU3_RenderDrawData(imgui_draw_data, cb, imgui_rp);
 			SDL_EndGPURenderPass(imgui_rp);
 		}
-		Prof::Render().Add(" imgui (new frame + UI + draw)", Prof::MsSince(t));
 	}
 
 	{
@@ -675,7 +314,7 @@ void Engine::FenceFunc(uint8_t slot) {
 
 	Prof::Render().Add("gpu_frame (submit->fence, rabota GPU)", gpu_ms);
 	Prof::Render().Add("fence_wait (CPU-blok na GPU)", wait_ms);
-	Prof::Render().Frame();
+	PROF_FRAME(Render);
 }
 
 void Engine::BeginImGuiFrame()

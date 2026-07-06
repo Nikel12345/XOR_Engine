@@ -89,8 +89,6 @@ ThreadController::~ThreadController()
         fence_thread.join();
 }
 
-//const double TARGET_UPS = 60.0;
-//const double TARGET_FPS = 10.0;
 const double TARGET_UPS = 1000.0 / 60.0;
 const double TARGET_FPS = 1000.0 / 60.0;
 
@@ -110,27 +108,24 @@ void ThreadController::SimulationThread()
         // то есть узкое место в РЕНДЕРЕ, а не в подготовке кадра.
         uint8_t slot;
         {
-            auto t = Prof::Clock::now();
+            PROF_SCOPE(Sim, "slot_wait (ожидание свободного слота)");
             slot = slot_controller->GetFreeSlotIndex(UPS_priority);
             if (!UPS_priority and slot == INVALID_SLOT)
             {
                 slot = slot_controller->WaitFreeSlotIndex(UPS_priority);
             }
-            Prof::Sim().Add("slot_wait (ожидание свободного слота)", Prof::MsSince(t));
         }
 
         {
-            auto t = Prof::Clock::now();
+            PROF_SCOPE(Sim, "game_iter (Game::MainIterate)");
             game_iter_callback();
-            Prof::Sim().Add("game_iter (Game::MainIterate)", Prof::MsSince(t));
         }
         if (slot != INVALID_SLOT) {
-            auto t = Prof::Clock::now();
+            PROF_SCOPE(Sim, "prepare_total (Engine::PrepareFunc)");
             prepare_callback(slot);
-            Prof::Sim().Add("prepare_total (Engine::PrepareFunc)", Prof::MsSince(t));
         }
         ups_counter->end();
-        Prof::Sim().Frame();
+        PROF_FRAME(Sim);
 
         if (UPS_NoLimit)
         {
@@ -194,15 +189,8 @@ void ThreadController::RenderThread()
     {
         auto frame_start = std::chrono::high_resolution_clock::now();
 
-
-        // Режим определяет конец очереди готовых кадров: при UPS_priority (skip)
-        // берём свежайший (старые умирают), при lockstep — по порядку без потерь.
         uint8_t slot = slot_controller->WaitRenderableSlot(UPS_priority);
-        //slot_controller->DebugDump("RenderThread idle");
         fps_counter->start();
-        //auto* slots = slot_controller->GetSlotsData();
-        //SDL_Log("RenderThread: slot=%u, flags=0x%02X, frame_id=%u",
-        //    slot, slots[slot].flags, slots[slot].frame_id);
 
         while (running.load())
         {
