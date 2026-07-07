@@ -37,6 +37,9 @@ public:
 	uint64_t BatchesRevision() const { return batches_revision; }
 	void SetDirtyBatches(bool state) { dirty_batches = state; };
 	uint32_t AskNumCommands();
+	// Число PIB-записей по всем пассам (сумма инстансов всех батчей). Нужен GPU-каллингу
+	// (размер out_pib и диспатч), обновляется вместе с total_commands в FinalizeOffsets.
+	uint32_t AskNumInstances();
 
 	void SetDummyTexture(TextureHandle* dummy) { dummy_texture = dummy; };
 
@@ -69,6 +72,7 @@ private:
 	std::vector<Entity> entities_to_delete; // protected by delta_mutex
 
 	uint32_t total_commands = 0;
+	uint32_t total_instances = 0;
 	uint64_t batches_revision = 0;
 	std::atomic<bool> dirty_batches{ true };
 };

@@ -75,6 +75,13 @@ target_precompile_headers(EngineEcs PRIVATE
 add_library(EngineGpu STATIC)
 target_compile_features(EngineGpu PUBLIC cxx_std_23)
 
+# ENGINE_PROFILE: кадровый профайлер (Prof::/PROF_SCOPE). ON (дев) — замеры активны;
+# OFF (шиппинг) — FrameProfiler::Add/Frame пустеют inline, PROF_SCOPE исчезает, вся
+# стоимость (мьютекс/хэш/строки/печать) уходит. PUBLIC: определение доходит и до
+# Engine (линкует EngineGpu PUBLIC), где Prof:: в Engine.cpp/ThreadController.cpp.
+option(ENGINE_PROFILE "Кадровый профайлер (Prof::/PROF_SCOPE)" ON)
+target_compile_definitions(EngineGpu PUBLIC ENGINE_PROFILE=$<BOOL:${ENGINE_PROFILE}>)
+
 set(ENGINEGPU_SRC
     src/TransferManager.cpp
     src/BufferManager.cpp
@@ -143,6 +150,11 @@ target_precompile_headers(EngineGpu PRIVATE
 add_library(Engine STATIC)
 target_compile_features(Engine PUBLIC cxx_std_23)
 
+# A/B-стенд префасса (Engine_PrepassBench.cpp) — компилируется как пустой TU, пока
+# ENGINE_BENCH=OFF. Включить сравнение: cmake -DENGINE_BENCH=ON. Тело стенда под
+# #if ENGINE_BENCH, боевой Engine.cpp его не тянет.
+option(ENGINE_BENCH "Собирать A/B-стенд замеров префасса" OFF)
+
 set(ENGINE_MANAGERS_SRC
     src/CameraManager.cpp
     src/MaterialManager.cpp
@@ -176,7 +188,6 @@ set(ENGINE_STRUCTS_HDR
 )
 set(ENGINE_DATAMODULES_SRC
     src/BoundSphereDataModule.cpp
-    src/CountBufferDataModule.cpp
     src/IndirectDataModule.cpp
     src/LightDataModule.cpp
     src/PIB_DataModule.cpp
@@ -185,7 +196,6 @@ set(ENGINE_DATAMODULES_SRC
 )
 set(ENGINE_DATAMODULES_HDR
     include/BoundSphereDataModule.h
-    include/CountBufferDataModule.h
     include/IndirectDataModule.h
     include/LightDataModule.h
     include/PIB_DataModule.h
@@ -210,6 +220,7 @@ set(ENGINE_UTILS_HDR
 )
 set(ENGINE_CORE_SRC
     src/Engine.cpp
+    src/Engine_PrepassBench.cpp
     src/DefaultRenderPassSet.cpp
     src/DefaultUpdateSet.cpp
     src/UI_ImGui.cpp
@@ -279,4 +290,8 @@ target_link_libraries(Engine PUBLIC
 )
 target_link_libraries(Engine PRIVATE
     "${CMAKE_SOURCE_DIR}/external/SDL3_image/lib/x64/SDL3_image.lib"  # только TextureLoader
+)
+
+target_compile_definitions(Engine PRIVATE
+    $<$<BOOL:${ENGINE_BENCH}>:ENGINE_BENCH=1>   # тело Engine_PrepassBench.cpp
 )

@@ -1,7 +1,8 @@
 #include "PCH.h"
 #include "ComponentSerializer.h"
-#include <cstdio>     // snprintf
-#include <cstdlib>    // strtof, strtol
+#include <cstdio>     // snprintf (save-путь)
+#include <charconv>   // std::from_chars — парс токенов (string_view) без locale/аллокаций
+#include <string_view>
 
 // ============================================================
 //  Реестр
@@ -40,9 +41,30 @@ const ComponentSerializer* ComponentSerializerRegistry::ByType(std::type_index t
 // ============================================================
 namespace {
 
-float ParseFloat(const std::vector<std::string>& t, size_t k, float fallback = 0.0f)
+// Токены — string_view в исходный буфер; парсим from_chars (без locale, без c_str/аллокаций).
+// На неразобранном токене значение остаётся = fallback (from_chars не трогает out при ошибке).
+float ParseFloat(const std::vector<std::string_view>& t, size_t k, float fallback = 0.0f)
 {
-    return k < t.size() ? std::strtof(t[k].c_str(), nullptr) : fallback;
+    if (k >= t.size()) return fallback;
+    float v = fallback;
+    std::from_chars(t[k].data(), t[k].data() + t[k].size(), v);
+    return v;
+}
+
+uint32_t ParseUint(const std::vector<std::string_view>& t, size_t k, uint32_t fallback = 0u)
+{
+    if (k >= t.size()) return fallback;
+    uint32_t v = fallback;
+    std::from_chars(t[k].data(), t[k].data() + t[k].size(), v);
+    return v;
+}
+
+int ParseInt(const std::vector<std::string_view>& t, size_t k, int fallback = 0)
+{
+    if (k >= t.size()) return fallback;
+    int v = fallback;
+    std::from_chars(t[k].data(), t[k].data() + t[k].size(), v);
+    return v;
 }
 
 // ---- Transform (Positions, SoA: 16 float, row-major x..l) ----
@@ -56,7 +78,7 @@ void SaveTransform(Archetype& arch, size_t i, std::string& out)
         P.e[i], P.f[i], P.g[i], P.h[i], P.i[i], P.j[i], P.k[i], P.l[i]);
     out = b;
 }
-void LoadTransform(Archetype& arch, const std::vector<std::string>& t)
+void LoadTransform(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<Positions>();
     PositionProxy16 p{
@@ -72,12 +94,12 @@ void SaveModel(Archetype& arch, size_t i, std::string& out)
 {
     out = (*arch.get_array<ModelComponent>())[i].name;
 }
-void LoadModel(Archetype& arch, const std::vector<std::string>& t)
+void LoadModel(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<ModelComponent>();
     ModelComponent m;
     m.model = nullptr;                 // указатель восстановит верхний слой по имени
-    m.name  = t.empty() ? std::string{} : t[0];
+    m.name  = t.empty() ? std::string{} : std::string(t[0]);   // из string_view
     arch.get_array<ModelComponent>()->add(m);
 }
 
@@ -90,11 +112,12 @@ void SaveMaterial(Archetype& arch, size_t i, std::string& out)
         out += names[k];
     }
 }
-void LoadMaterial(Archetype& arch, const std::vector<std::string>& t)
+void LoadMaterial(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<MaterialComponent>();
     MaterialComponent mc;
-    mc.names = t;                       // все токены — имена; указатели восстановит верхний слой
+    mc.names.reserve(t.size());         // все токены — имена; указатели восстановит верхний слой
+    for (std::string_view sv : t) mc.names.emplace_back(sv);   // string из string_view
     arch.get_array<MaterialComponent>()->add(mc);
 }
 
@@ -107,19 +130,19 @@ void SaveDraw(Archetype& arch, size_t i, std::string& out)
         d.visible ? 1 : 0, d.alpha, static_cast<unsigned>(d.flags));
     out = b;
 }
-void LoadDraw(Archetype& arch, const std::vector<std::string>& t)
+void LoadDraw(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<DrawComponent>();
     DrawComponent d;
     d.visible = t.empty() || t[0] == "1";
     d.alpha   = ParseFloat(t, 1, 1.0f);
-    d.flags   = t.size() > 2 ? static_cast<uint32_t>(std::strtoul(t[2].c_str(), nullptr, 10)) : 0u;
+    d.flags   = ParseUint(t, 2, 0u);
     arch.get_array<DrawComponent>()->add(d);
 }
 
 // ---- Shadow (тег, без данных) ----
 void SaveShadow(Archetype&, size_t, std::string&) {}
-void LoadShadow(Archetype& arch, const std::vector<std::string>&)
+void LoadShadow(Archetype& arch, const std::vector<std::string_view>&)
 {
     arch.ensure_component<ShadowComponent>();
     arch.get_array<ShadowComponent>()->add(ShadowComponent{});
@@ -136,7 +159,7 @@ void SaveLocalMatrix(Archetype& arch, size_t i, std::string& out)
         L.m8[i], L.m9[i], L.m10[i], L.m11[i], L.m12[i], L.m13[i], L.m14[i], L.m15[i]);
     out = b;
 }
-void LoadLocalMatrix(Archetype& arch, const std::vector<std::string>& t)
+void LoadLocalMatrix(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<LocalMatrices>();
     LocalMatrixProxy16 p{};
@@ -154,18 +177,17 @@ void SaveParent(Archetype& arch, size_t i, std::string& out)
 {
     out = std::to_string((*arch.get_array<ParentComponent>())[i].parent);
 }
-void LoadParent(Archetype& arch, const std::vector<std::string>& t)
+void LoadParent(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<ParentComponent>();
     ParentComponent p;
-    p.parent = t.empty() ? 0u
-        : static_cast<Entity>(std::strtoul(t[0].c_str(), nullptr, 10));
+    p.parent = static_cast<Entity>(ParseUint(t, 0, 0u));
     arch.get_array<ParentComponent>()->add(p);
 }
 
 // ---- ShadowCaster (тег) ----
 void SaveShadowCaster(Archetype&, size_t, std::string&) {}
-void LoadShadowCaster(Archetype& arch, const std::vector<std::string>&)
+void LoadShadowCaster(Archetype& arch, const std::vector<std::string_view>&)
 {
     arch.ensure_component<ShadowCasterComponent>();
     arch.get_array<ShadowCasterComponent>()->add(ShadowCasterComponent{});
@@ -182,7 +204,7 @@ void SaveSpotLight(Archetype& arch, size_t i, std::string& out)
         d.r, d.g, d.b, d.power, d.attenuation);
     out = b;
 }
-void LoadSpotLight(Archetype& arch, const std::vector<std::string>& t)
+void LoadSpotLight(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<SpotLightComponent>();
     SpotLightComponent c;
@@ -203,7 +225,7 @@ void SaveSphereLight(Archetype& arch, size_t i, std::string& out)
         d.source_radius, d.r, d.g, d.b, d.power, d.attenuation);
     out = b;
 }
-void LoadSphereLight(Archetype& arch, const std::vector<std::string>& t)
+void LoadSphereLight(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<SphereLightComponent>();
     SphereLightComponent c;
@@ -226,7 +248,7 @@ void SaveDirectLight(Archetype& arch, size_t i, std::string& out)
         d.cascade_count, d.cascade_ratio);
     out = b;
 }
-void LoadDirectLight(Archetype& arch, const std::vector<std::string>& t)
+void LoadDirectLight(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<DirectLightComponent>();
     DirectLightComponent c;
@@ -236,7 +258,7 @@ void LoadDirectLight(Archetype& arch, const std::vector<std::string>& t)
     d.power = ParseFloat(t, 6, 1);
     d.center_x = ParseFloat(t, 7); d.center_y = ParseFloat(t, 8); d.center_z = ParseFloat(t, 9);
     d.half_extent = ParseFloat(t, 10, 20.0f); d.half_depth = ParseFloat(t, 11, 20.0f);
-    int cc = t.size() > 12 ? std::atoi(t[12].c_str()) : 3;
+    int cc = ParseInt(t, 12, 3);
     if (cc < 1) cc = 1;
     if (cc > DirectLightComponent::DirectLightData::MAX_CASCADES)
         cc = DirectLightComponent::DirectLightData::MAX_CASCADES;
@@ -253,7 +275,7 @@ void SaveMass(Archetype& arch, size_t i, std::string& out)
     std::snprintf(b, sizeof b, "%.7g", (*arch.get_array<MassComponent>())[i].mass);
     out = b;
 }
-void LoadMass(Archetype& arch, const std::vector<std::string>& t)
+void LoadMass(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<MassComponent>();
     MassComponent m{};
@@ -263,7 +285,7 @@ void LoadMass(Archetype& arch, const std::vector<std::string>& t)
 
 // ---- EditorHidden (тег: скрыт из списка UI; персистится как авторское состояние) ----
 void SaveEditorHidden(Archetype&, size_t, std::string&) {}
-void LoadEditorHidden(Archetype& arch, const std::vector<std::string>&)
+void LoadEditorHidden(Archetype& arch, const std::vector<std::string_view>&)
 {
     arch.ensure_component<EditorHiddenComponent>();
     arch.get_array<EditorHiddenComponent>()->add(EditorHiddenComponent{});
@@ -277,7 +299,7 @@ void SaveVelocity(Archetype& arch, size_t i, std::string& out)
     std::snprintf(b, sizeof b, "%.7g %.7g %.7g", V.x[i], V.y[i], V.z[i]);
     out = b;
 }
-void LoadVelocity(Archetype& arch, const std::vector<std::string>& t)
+void LoadVelocity(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<Velocities>();
     VelocityProxy p{ ParseFloat(t, 0), ParseFloat(t, 1), ParseFloat(t, 2) };
@@ -291,7 +313,7 @@ void SaveAcceleration(Archetype& arch, size_t i, std::string& out)
     std::snprintf(b, sizeof b, "%.7g %.7g %.7g", A.x[i], A.y[i], A.z[i]);
     out = b;
 }
-void LoadAcceleration(Archetype& arch, const std::vector<std::string>& t)
+void LoadAcceleration(Archetype& arch, const std::vector<std::string_view>& t)
 {
     arch.ensure_component<Accelerations>();
     AccelerationProxy p{ ParseFloat(t, 0), ParseFloat(t, 1), ParseFloat(t, 2) };

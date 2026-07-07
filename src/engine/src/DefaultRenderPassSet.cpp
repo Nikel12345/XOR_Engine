@@ -4,9 +4,6 @@
 #include "TexturesPresets.h"
 #include "TextureSamplerPresets.h"
 #include "ObjectManager.h"
-#include "TransformDataModule.h"
-#include "LightDataModule.h"
-#include "IndirectDataModule.h"
 #include "BatchBuilder.h"
 #include "EngineContext.h"
 #include "TextureLoader.h"
@@ -89,6 +86,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
 	PassManager* pm = ctx->GetPassManager();
 	BufferManager* bm = ctx->GetBufferManager();
 	ObjectManager* om = ctx->GetObjectManager();
+	BatchBuilder* bb = ctx->GetBatchBuilder();   // num_instances для адресации блоков out_pib
 
     auto shadow_sampler = tm->GetSampler(DefaultSamplersNames::DEFAULT_SHADOW_SAMPLER);
     auto shadow_tci = TexturePresets::GetCreateInfo(TexturePreset::Depth_FlatArray1024_16Layers);
@@ -102,7 +100,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
 
     auto shadowPass = pm->CreateRenderPass(
         SHADOW_PASS,
-        [pm, bm, om, tm, max_layers](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+        [pm, bm, om, tm, bb, max_layers](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
         uint32_t camera_index = 0;
         uint32_t sphere_layer = 0;
@@ -119,8 +117,9 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
 				ShadowPushData push_data{};
 				push_data.camera_index = camera_index;
                 push_data.max_range = light.light_data.GetMaxDistance();
+                push_data.num_instances = bb->AskNumInstances();
                 SDL_PushGPUVertexUniformData(cb, 0, &push_data, sizeof(ShadowPushData));
-                pm->RenderPassStandardBody(cb, &rp, bm, 0, &push_data);
+                pm->RenderPassStandardBody(cb, &rp, bm, (1u + camera_index) * bb->AskNumCommands() * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), &push_data);
 
                 auto cp = SDL_BeginGPUCopyPass(cb);
                 SDL_GPUTextureLocation src = {
@@ -148,9 +147,10 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
                     ShadowPushData push_data{};
 					push_data.camera_index = camera_index;
 					push_data.max_range = light.light_data.GetMaxDistance();
+                    push_data.num_instances = bb->AskNumInstances();
                     SDL_PushGPUVertexUniformData(cb, 0, &push_data, sizeof(ShadowPushData));
 
-                    pm->RenderPassStandardBody(cb, &rp, bm, 0, &push_data);
+                    pm->RenderPassStandardBody(cb, &rp, bm, (1u + camera_index) * bb->AskNumCommands() * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), &push_data);
 
                     auto cp = SDL_BeginGPUCopyPass(cb);
                     SDL_GPUTextureLocation src = {
@@ -181,9 +181,10 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
                     push_data.camera_index = camera_index;
                     push_data.max_range = light.light_data.CascadeFar(c);   // per-cascade far
                     push_data.is_ortho = 1;
+                    push_data.num_instances = bb->AskNumInstances();
                     SDL_PushGPUVertexUniformData(cb, 0, &push_data, sizeof(ShadowPushData));
 
-                    pm->RenderPassStandardBody(cb, &rp, bm, 0, &push_data);
+                    pm->RenderPassStandardBody(cb, &rp, bm, (1u + camera_index) * bb->AskNumCommands() * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), &push_data);
 
                     auto cp = SDL_BeginGPUCopyPass(cb);
                     SDL_GPUTextureLocation src = {
@@ -559,85 +560,24 @@ void DefaultRenderPassNamespace::SetDefaultShadowBlurPass(EngineContext* ctx)
     );
 }
 
-void DefaultRenderPassNamespace::SetDefaultCullingComputeZerosPass(EngineContext* ctx)
+void DefaultRenderPassNamespace::SetDefaultCullingPass(EngineContext* ctx)
 {
     PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
-    auto compute_zeros_pass = pm->CreateComputePrepass(
-        CULLING_ZEROS_PREPASS,
-        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame) 
-        {
-            pm->ComputePassStandardBody(cb, &cp, bm, nullptr, nullptr, pass_frame);
-        },
-    0
-    );
-}
-
-void DefaultRenderPassNamespace::SetDefaultCullingComputeCountPass(EngineContext* ctx, TransformDataModule* tdm, LightDataModule* ldm, IndirectDataModule* idm)
-{
-    PassManager* pm = ctx->GetPassManager();
-    BufferManager* bm = ctx->GetBufferManager();
-    ObjectManager* om = ctx->GetObjectManager();
-
-    auto compute_pass = pm->CreateComputePrepass(
-        CULLING_PREPASS,
-        [pm, bm, om, tdm, ldm, idm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)
-        {
-            ComputeCullingCountUniform data;
-            data.num_instances = tdm->AskNumTransform(om, om->GetActiveScene());
-            data.num_commands = idm->AskNumCommands(pm);
-
-		    pm->ComputePassStandardBody(cb, &cp, bm, &data, nullptr, pass_frame);
-        },
-        10
-		);
-}
-
-void DefaultRenderPassNamespace::SetDefaultCullingOffstPass(EngineContext* ctx)
-{
-    PassManager* pm = ctx->GetPassManager();
-    BufferManager* bm = ctx->GetBufferManager();
-
-    auto compute_pass = pm->CreateComputePrepass(CULLING_OFFSET_PREPASS,
-        [bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame) {
-            pm->ComputePassStandardBody(cb, &cp, bm, nullptr, nullptr, pass_frame);
-        },
-        20
-    );
-}
-
-void DefaultRenderPassNamespace::SetDefaultCullingOutIndirectPass(EngineContext* ctx)
-{
-    PassManager* pm = ctx->GetPassManager();
-    BufferManager* bm = ctx->GetBufferManager();
-
-    pm->CreateComputePrepass(CULLING_OUT_INDIRECT_PREPASS,
-        [bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame) {
-            ComputeCullingOutIndirectUniform data;
-            pm->ComputePassStandardBody(cb, &cp, bm, &data, nullptr, pass_frame);
-        },
-        30
-    );
-}
-
-void DefaultRenderPassNamespace::SetDefaultCullingOutTransformPass(EngineContext* ctx, TransformDataModule* tdm, LightDataModule* ldm, IndirectDataModule* idm)
-{
-    PassManager* pm = ctx->GetPassManager();
-    BufferManager* bm = ctx->GetBufferManager();
-	ObjectManager* om = ctx->GetObjectManager();
-
-    pm->CreateComputePass(
-        CULLING_WRITE_PASS,
-        [pm, bm, om, tdm, ldm, idm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)
-        {
-            ComputeCullingCountUniform data;
-            data.num_instances = tdm->AskNumTransform(om, om->GetActiveScene());
-            data.num_commands = idm->AskNumCommands(pm);
-
-            pm->ComputePassStandardBody(cb, &cp, bm, &data, nullptr, pass_frame);
-        },
-        0
+    // GPU-каллинг (scatter) — PREPASS: Engine::RenderFunc гоняет его в ОТДЕЛЬНОМ cb + fence
+    // ПЕРЕД рендером. Так out_pib и per-camera indirect гарантированно дописаны до чтения их
+    // draw'ами (SDL_GPU не барьерит compute-write -> indirect-read в одном cb; на 1М scatter
+    // медленный от atomic-контеншена, и draw читал недозаполненный индирект → мерцание).
+    pm->CreateComputePrepass(
+        CULLING_PASS,
+        [bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)
+    {
+        CullingPibUniform push{};
+        DummyDispatchData dd{};
+        pm->ComputePassStandardBody(cb, &cp, bm, &push, &dd, pass_frame);
+    },
+        5
     );
 }
 

@@ -6,7 +6,6 @@ class ObjectManager;
 struct SceneData;
 struct BufferData;
 struct UploadTask;
-struct ReadBackTask;
 struct Positions;        // для кэша связей иерархии — нужны только указатели
 struct LocalMatrices;
 
@@ -18,14 +17,8 @@ public:
 	uint32_t CalculateTransformSize(ObjectManager* objectManager, SceneData* scene);
 	void StoreTransforms(BufferManager* bufferManager, UploadTask* task, ObjectManager* objectManager, SceneData* scene);
 	uint32_t AskNumTransform(ObjectManager* objectManager, SceneData* scene);
-
-	uint32_t ReadBackCullingCountSize() { return sizeof(uint32_t); };
-	void ReadBackCullingCountReader(BufferManager* bm, ReadBackTask* task);
-
-	uint32_t CalculateOutTransformSize();
 private:
 	uint32_t total_size = 0;
-	std::span<const std::byte> size_ptr;
 
 	// Кэш связей иерархии (см. UpdateLocalTransforms). Резолв parent→(Positions*,index)
 	// стоит 3 хэш-поиска в unordered_map на сущность каждый кадр; делаем его ОДИН раз и

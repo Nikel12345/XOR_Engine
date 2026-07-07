@@ -43,6 +43,9 @@ private:
 	void MainMenu_Event(SDL_Event* event);
 	void MainMenu_Quit();
 
+	// Гравитация центрального объекта (0,0) в плоскости XZ + интеграция позиций скоростями.
+	void SimulateGravity();
+
 	float width;
 	float height;
 	float mouse_x = 0;

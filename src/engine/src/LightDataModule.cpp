@@ -303,24 +303,31 @@ uint32_t LightDataModule::AskNumLightCameras(ObjectManager* om, SceneData* scene
 {
     uint32_t num_light_cameras = 0;
 
-    om->ForEachArchetype<Positions, SpotLightComponent>(
+    // ОБЯЗАН фильтровать по ShadowCasterComponent — ровно теми же тремя запросами, что
+    // CalculateLightCamerasSize/StoreLightCameras, которые НАПОЛНЯЮТ буфер LightCameras.
+    // Свет без ShadowCaster камеры не порождает. Если считать его здесь, число камер
+    // каллинга разойдётся с буфером: лишние блоки out_pib, OOB-чтение LightCameras и
+    // впустую диспатчатся потоки — отсюда просадка FPS при добавлении даже не-теневого света.
+    om->ForEachArchetype<Positions, SpotLightComponent, ShadowCasterComponent>(
         scene,
         [&](ComponentArray<Positions, void>* posArr,
-            ComponentArray<SpotLightComponent, void>*)
+            ComponentArray<SpotLightComponent, void>*,
+            ComponentArray<ShadowCasterComponent, void>*)
     {
         num_light_cameras += safe_u32(posArr->size());
     }
     );
-    om->ForEachArchetype<Positions, SphereLightComponent>(
+    om->ForEachArchetype<Positions, SphereLightComponent, ShadowCasterComponent>(
         scene,
         [&](ComponentArray<Positions, void>* posArr,
-            ComponentArray<SphereLightComponent, void>*)
+            ComponentArray<SphereLightComponent, void>*,
+            ComponentArray<ShadowCasterComponent, void>*)
     {
         num_light_cameras += safe_u32(posArr->size()) * 6;
     }
     );
-    om->ForEach<DirectLightComponent>(scene,
-        [&](DirectLightComponent& light) {
+    om->ForEach<DirectLightComponent, ShadowCasterComponent>(scene,
+        [&](DirectLightComponent& light, ShadowCasterComponent&) {
             num_light_cameras += safe_u32(light.light_data.cascade_count);
         });
 

@@ -17,15 +17,18 @@ public:
     PIB_DataModule();
     uint32_t CalculatePIBSizes(PassManager* pm, uint64_t revision, uint8_t slot);
     void StorePIB(BufferManager* bm, PassManager* pm, UploadTask* task, ObjectManager* om);
-    uint32_t CalculateEntityToBatch(PassManager* pm, uint64_t revision, uint8_t slot);
-    void StoreEntityToBatch(BufferManager* bm, PassManager* pm, UploadTask* task);
+
+    // entity -> глобальный индекс команды (model_batch), по одному uint на PIB-запись,
+    // в том же обходе, что PIB. scatter-каллинг по нему находит команду записи. Гейт по
+    // ревизии батчей (меняется только со структурой). Индекс сам кодирует проход.
+    uint32_t CalculateEntityToCmd(PassManager* pm, uint64_t revision, uint8_t slot);
+    void StoreEntityToCmd(BufferManager* bm, PassManager* pm, UploadTask* task);
 
 private:
     uint32_t ComputeElementCount(PassManager* pm) const;
 
     uint32_t total_elements = 0;
-    // PIB и entity->batch — два независимых GPU-буфера, поэтому у каждого свой
-    // per-slot счётчик ревизий (у каждого из BUFFERING_LEVEL буферов своя ревизия).
+    // Per-slot счётчики ревизий: у каждого из BUFFERING_LEVEL буферов своя ревизия.
     uint64_t pib_last_revision[BUFFERING_LEVEL];
-    uint64_t e2b_last_revision[BUFFERING_LEVEL];
+    uint64_t e2c_last_revision[BUFFERING_LEVEL];
 };

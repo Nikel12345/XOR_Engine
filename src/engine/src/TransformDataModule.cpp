@@ -105,8 +105,6 @@ void TransformDataModule::UpdateLocalTransforms(ObjectManager* om, SceneData* sc
         // мутируется только стековая копия.
         // world/local — здесь лишь контейнеры на 16 float'ов (column-major); в самом
         // умножении glm-математики нет — MulMat4InPlace работает по сырым указателям.
-        // world/local — здесь лишь контейнеры на 16 float'ов (column-major); в самом
-        // умножении glm-математики нет — MulMat4InPlace работает по сырым указателям.
         glm::mat4 world = LoadPositionMatrix(*r.parent_pos, r.parent_i);
         const glm::mat4 local = LoadLocalMatrix(*r.local, r.local_i);
         MulMat4InPlace(glm::value_ptr(world), glm::value_ptr(local));
@@ -257,104 +255,5 @@ uint32_t TransformDataModule::AskNumTransform(ObjectManager* om, SceneData* scen
     return num_transform;
 }
 
-void TransformDataModule::ReadBackCullingCountReader(BufferManager* bm, ReadBackTask* task)
-{
-    size_ptr = bm->ReadFromTransferBuffer(task, sizeof(uint32_t));
-    std::cout << *reinterpret_cast<const uint32_t*>(size_ptr.data()) << "\n";
-}
 
-uint32_t TransformDataModule::CalculateOutTransformSize()
-{
-    if (size_ptr.size() < sizeof(uint32_t))
-    {
-        SDL_Log("Not enough data in size_ptr for uint32_t");
-        return 0;
-    }
-
-    return *reinterpret_cast<const uint32_t*>(size_ptr.data()) * sizeof(glm::mat4);
-}
-
-
-//void TransformDataModule::StoreTransforms(BufferManager* bufferManager, ObjectManager* objectManager, SceneData* scene)
-//{
-//    UpdateLocalTransforms(objectManager, scene);
-//
-//    auto t0 = std::chrono::high_resolution_clock::now();
-//    bufferManager->BeginWrite(buffer_data);
-//
-//    objectManager->ForEach<Positions>(scene, [&](const Positions& pos) {
-//        Uint32 arr_size = static_cast<Uint32>(pos.size() * sizeof(float));
-//
-//        const f_restrict_pointer soa_ptrs[16] = {
-//            pos.x.data(), pos.y.data(), pos.z.data(), pos.w.data(),
-//            pos.a.data(), pos.b.data(), pos.c.data(), pos.d.data(),
-//            pos.e.data(), pos.f.data(), pos.g.data(), pos.h.data(),
-//            pos.i.data(), pos.j.data(), pos.k.data(), pos.l.data()
-//        };
-//        for (size_t i = 0; i < 16; ++i) {
-//            bufferManager->AppendWrite(soa_ptrs[i], arr_size);
-//            //bm->AppendWrite(ptr, arr_size);
-//            //bm->uploadToGPUBuffer(buffer_data, soa_ptrs[i], arr_size);
-//        }
-//
-//		//std::cout << "Stored " << pos.size() << " transforms.\n";
-//    });
-//
-//    bufferManager->EndWrite();
-//    auto t1 = std::chrono::high_resolution_clock::now();
-//    double seconds = std::chrono::duration<double>(t1 - t0).count();
-//    std::cout << "StoreTransforms taken " << seconds << " s" << "\n";
-//}
-
-//void TransformDataModule::StoreTransforms(BufferManager* bufferManager, UploadTask* task, ObjectManager* objectManager, SceneData* scene)
-//{
-//    UpdateLocalTransforms(objectManager, scene);
-//
-//    chunks.clear();
-//
-//    std::unordered_set<const Positions*> seen;
-//    seen.reserve(256);
-//
-//    objectManager->ForEach<Positions, ModelComponent>(scene,
-//        [&](const Positions& pos, const ModelComponent& /*mod*/)
-//    {
-//        // Если это SoA-контейнер чанка: size() должно отражать кол-во элементов в чанке
-//        if (pos.size() == 0) return;
-//
-//        const Positions* p = &pos;
-//        if (seen.insert(p).second) { // добавили впервые
-//            chunks.push_back(p);
-//        }
-//    });
-//
-//    if (chunks.empty()) return;
-//
-//    auto write_column = [&](auto Positions::* memberPtr) {
-//        for (const Positions* p : chunks) {
-//            const auto& vec = p->*memberPtr;
-//            const Uint32 bytes = static_cast<Uint32>(vec.size() * sizeof(float));
-//            bufferManager->UploadToTransferBuffer(task, bytes, vec.data());
-//        }
-//    };
-//
-//    write_column(&Positions::x);
-//    write_column(&Positions::y);
-//    write_column(&Positions::z);
-//    write_column(&Positions::w);
-//
-//    write_column(&Positions::a);
-//    write_column(&Positions::b);
-//    write_column(&Positions::c);
-//    write_column(&Positions::d);
-//
-//    write_column(&Positions::e);
-//    write_column(&Positions::f);
-//    write_column(&Positions::g);
-//    write_column(&Positions::h);
-//
-//    write_column(&Positions::i);
-//    write_column(&Positions::j);
-//    write_column(&Positions::k);
-//    write_column(&Positions::l);
-//}
 

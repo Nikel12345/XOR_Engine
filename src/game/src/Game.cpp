@@ -36,12 +36,16 @@ SDL_AppResult Game::MainInit()
     Camera* camera = cameraManager->CreateCamera(width, height);
     cameraManager->SetActiveCamera(0);
 
+    //camera->SetView(
+    //    glm::vec3(-20.0f, 100.7f, 76.5f), // позиция камеры
+    //    glm::vec3(0.174f, -0.8f, -0.6f), // точка взгляда
+    //    glm::vec3(0.0f, 1.0f, 0.0f)  // вектор вверх
+    //);
     camera->SetView(
-        glm::vec3(-20.0f, 100.7f, 76.5f), // позиция камеры
-        glm::vec3(0.174f, -0.8f, -0.6f), // точка взгляда
+        glm::vec3(2.0f, 0.7f, 3.5f), // позиция камеры
+        glm::vec3(0.43f, -0.4f, -0.8f), // точка взгляда
         glm::vec3(0.0f, 1.0f, 0.0f)  // вектор вверх
     );
-
     TextureAtlas* atlas = ctx->CreateTextureAtlas("albedo_atlas", TexturePresets::AlbedoAtlas(2048, 3, TexturePresets::FullMipLevels(2048)), DefaultSamplersNames::DEFAULT_SAMPLER);
 	// Мипы обязательны: без них (а) POM-префильтр pomBias — no-op (нет грубых уровней), (б) нормаль
 	// не сглаживается (мерцание, см. заметку про red-shift). FullMipLevels включает мип-цепочку.
@@ -72,7 +76,8 @@ SDL_AppResult Game::MainInit()
         SetTransparentShaderProgram(ctx);
         SetUntexturedShaderProgram(ctx);
         SetDebugColliderProgram(ctx);
-        SetBloomPrograms(ctx); 
+        SetBloomPrograms(ctx);
+        SetCullingPibPrograms(ctx, engine->GetLightDataModule());   // GPU-каллинг: out_pib
     }
     
     auto material_car = ctx->CreateMaterial("car", {
@@ -131,19 +136,19 @@ SDL_AppResult Game::MainInit()
     ctx->SetMaterialParams(ship_material, OpaqueMaterialParams{ { 0.55f, 0.6f, 0.7f, 1.0f } });
 
     auto m_orange = ctx->CreateMaterial("m_orange", {}, { "sp_untextured", "sp_shadow" });
-    ctx->SetMaterialParams(m_orange, OpaqueMaterialParams{ {1.0f, 0.45f, 0.1f, 1.0f} });
+    ctx->SetMaterialParams(m_orange, OpaqueMaterialParams{ {1.0f, 0.45f, 0.1f, 1.0f}, {1.0f, 0.854902f, 0.0f}, 0.171f });
 
     auto m_gray = ctx->CreateMaterial("m_gray", {}, { "sp_untextured", "sp_shadow" });
-    ctx->SetMaterialParams(m_gray, OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f} });
+    ctx->SetMaterialParams(m_gray, OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.552941f, 0.552941f, 0.552941f}, 1.2f });
 
     auto metal1 = ctx->CreateMaterial("metal1", {}, { "sp_untextured", "sp_shadow" });
-    ctx->SetMaterialParams(metal1, OpaqueMaterialParams{ {1.0f, 0.5f, 0.5f, 1.0f}, {0.0f, 0.0f, 0.0f}, 0.0f, 1.0f, 0.96f });
+    ctx->SetMaterialParams(metal1, OpaqueMaterialParams{ {1.0f, 0.5f, 0.5f, 1.0f}, {1.0f, 0.0f, 0.0f}, 0.146f, 1.0f, 0.96f });
 
     auto metal2 = ctx->CreateMaterial("metal2", {}, { "sp_untextured", "sp_shadow" });
     ctx->SetMaterialParams(metal2, OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.0f, 0.0f, 0.0f}, 0.0f, 1.0f, 0.96f });
 
     auto emission = ctx->CreateMaterial("emission", {}, { "sp_untextured", "sp_shadow" });
-    ctx->SetMaterialParams(emission, OpaqueMaterialParams{ {0.0f, 0.0f, 0.0f, 1.0f}, {0.3f, 0.3f, 0.6f}, 1.0f });
+    ctx->SetMaterialParams(emission, OpaqueMaterialParams{ {0.0f, 0.0f, 0.0f, 1.0f}, {0.341176f, 0.341176f, 0.647059f}, 1.7f });
 
 
 
@@ -306,7 +311,7 @@ SDL_AppResult Game::MainInit()
     ctx->LoadScene("main_menu", "saved_scene.scene");
 
     Entity sun = ctx->CreateEntity("main_menu",
-        MaterialComponent{ { material_sun } },
+        MaterialComponent{ { metal2 } },
         ModelComponent{ sphere },
         PositionProxy16{ 1,0,0,0.0f,  0,1,0,0.7f,  0,0,1,0,  0,0,0,1 },
         ShadowComponent{},
@@ -315,15 +320,15 @@ SDL_AppResult Game::MainInit()
         GeneratedComponent{}
     );
 
-    ctx->CreateEntity("main_menu",
-        ParentComponent{ sun },
-        SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
-        LocalMatrixProxy16{},
-        PositionProxy16{},
-        ShadowCasterComponent{},
-        ColliderComponent{}
-    );
-    ctx->ExecuteGenerators();
+    //ctx->CreateEntity("main_menu",
+    //    ParentComponent{ sun },
+    //    SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
+    //    LocalMatrixProxy16{},
+    //    PositionProxy16{},
+    //    ShadowCasterComponent{},
+    //    ColliderComponent{}
+    //);
+    //ctx->ExecuteGenerators();
 
     ChangeState(GameState::MAIN_MENU);
 
@@ -446,6 +451,8 @@ void Game::MainMenu_Iterate()
 
 void Game::MainMenu_Update()
 {
+    SimulateGravity();   // симуляция идёт всегда, до раннего выхода по WantCaptureMouse
+
     ImGuiIO& io = ImGui::GetIO();
     if (io.WantCaptureMouse) return;
 
@@ -498,6 +505,54 @@ void Game::MainMenu_Update()
             P.w[i] += lightMove.x; P.h[i] += lightMove.y; P.d[i] += lightMove.z;
         });
     }
+}
+
+// Гравитация одного центрального объекта в (0,0) плоскости XZ + движение.
+// kGravGM ДОЛЖЕН равняться GRAVITY_CONST * CENTRAL_MASS из scripts/scene_gen/scene_gen.py
+// (сейчас 1 * 50 = 50): скорость круговой орбиты sqrt(GM/r) считает генератор — при другом GM
+// орбиты станут эллиптичными/раскрутятся. Форму орбиты задаёт ТОЛЬКО GM.
+// kSimDt — «скорость времени»: не влияет на форму орбиты, только на темп. У движка нет
+// delta-time (камера/свет — тоже по кадрам), поэтому шаг фиксированный. При радиусах 50..350
+// орбиты долгие — увеличивай kSimDt (или уменьшай радиусы диска в scene_gen.py), чтобы вращение
+// было заметным; слишком большой шаг добавит прецессию/дрожание орбиты.
+// Гравитация ПЛОСКАЯ: ускорение к центру считается по XZ-радиусу и меняет только vx/vz — так y
+// (толщина диска) и vy остаются нулевыми/постоянными, диск не «распухает».
+static constexpr float kGravGM   = 5000.0f;
+static constexpr float kSimDt    = 0.05f;
+static constexpr float kGravSoft = 1e-3f;   // защита от деления на ~0 у самого центра
+
+void Game::SimulateGravity()
+{
+    SceneData* scene = objectManager->GetActiveScene();
+    if (!scene) return;
+
+    // Обходим только сущности с Transform И Velocity (кубы). Когда ВСЕ компоненты — SoA,
+    // ForEach отдаёт целые массивы один раз на архетип (не поэлементно) — цикл по строкам сами.
+    // Позиция — трансляция матрицы: w = x, d = y, h = z (row-major, индексы 3/7/11).
+    objectManager->ForEach<Positions, Velocities>(scene,
+        [](Positions& P, Velocities& V)
+    {
+        const size_t n = P.w.size();
+        for (size_t i = 0; i < n; ++i) {
+            const float x = P.w[i];   // трансляция X
+            const float z = P.h[i];   // трансляция Z
+            const float r2 = x * x + z * z;
+            const float r  = std::sqrt(r2);
+
+            // Полу-неявный Эйлер: сначала скорость (ускорение к центру a = GM/r^2, направление
+            // -(x,z)/r), затем позиция — так орбита устойчивее.
+            if (r > kGravSoft) {
+                const float a = kGravGM / r2;
+                V.x[i] -= (x / r) * a * kSimDt;
+                V.z[i] -= (z / r) * a * kSimDt;
+            }
+
+            // Обновляем координаты позиции (wdh) скоростями (xyz).
+            P.w[i] += V.x[i] * kSimDt;
+            P.d[i] += V.y[i] * kSimDt;
+            P.h[i] += V.z[i] * kSimDt;
+        }
+    });
 }
 
 void Game::MainMenu_Event(SDL_Event* event)

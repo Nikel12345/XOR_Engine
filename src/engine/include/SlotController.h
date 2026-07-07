@@ -56,17 +56,9 @@ public:
     SlotController();
     ~SlotController();
 
-    // Sim: захват слота под запись. Резервация происходит АТОМАРНО с выбором
-    // (под mutex_): ставится RESERVED (при skip'е заодно снимается PREPARED) —
-    // рендер не может взять слот в середине заливки его буферов.
-    uint8_t GetFreeSlotIndex(bool allow_frame_skip);    // неблокирующий: INVALID_SLOT, если писать некуда
-    uint8_t WaitFreeSlotIndex(bool allow_frame_skip);   // блокирующий
+    uint8_t GetFreeSlotIndex(bool allow_frame_skip); 
+    uint8_t WaitFreeSlotIndex(bool allow_frame_skip);
 
-    // Render: PREPARED-слот (latest_wins: свежайший + drop старых / старейший без
-    // потерь), иначе fallback на last_rendering_slot (задел на будущее: пере-рендер
-    // последнего кадра с per-render данными). Возвращаемый слот помечается
-    // IS_RENDERING здесь же, под mutex_ — иначе sim мог бы захватить его в окне
-    // между выбором и сабмитом.
     uint8_t WaitRenderableSlot(bool latest_wins);
 
     bool IsUploadingSlot(uint8_t slot);   // гейт UploadThread

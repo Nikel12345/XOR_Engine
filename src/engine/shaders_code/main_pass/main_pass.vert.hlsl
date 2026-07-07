@@ -20,7 +20,9 @@ struct VSOutput
 
 // GLSL std430 buffer → HLSL StructuredBuffer
 StructuredBuffer<float4x4> ModelMatrixBlock     : register(t0, space0);
-StructuredBuffer<int>      PositionIndexBuffer  : register(t1, space0);
+// out_pib (выход GPU-каллинга): блоками по камерам, блок 0 — камера игрока (смещение 0,
+// индексация как у старого PIB). -1 = инстанс не виден этой камерой.
+StructuredBuffer<int>      OutPib               : register(t1, space0);
 
 // GLSL std140 buffer → HLSL cbuffer
 struct CameraData
@@ -39,10 +41,18 @@ VSOutput main(VSInput input)
 {
     VSOutput output;
 
+    int row = OutPib[input.instanceID];   // строка трансформа = строка инстанс-данных
+    if (row < 0) {
+        // Инстанс отсечён GPU-каллингом: все вершины за одну clip-плоскость → примитив
+        // целиком клипается, фрагментов нет. Голый return нельзя — SV_Position был бы UB.
+        output = (VSOutput)0;
+        output.position = float4(2.0, 2.0, 2.0, 1.0);
+        return output;
+    }
+
     float4x4 view = Camera[0].view;
     float4x4 proj = Camera[0].proj;
 
-    int row = PositionIndexBuffer[input.instanceID];   // строка трансформа = строка инстанс-данных
     float4x4 modelMatrix = ModelMatrixBlock[row];
     float4 worldPos = mul(modelMatrix, float4(input.a_pos, 1.0));
 

@@ -433,6 +433,7 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager)
         }
     }
     total_commands = command_index;
+    total_instances = offset;   // сумма инстансов всех батчей = число PIB-записей
 }
 
 void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm) {
@@ -491,4 +492,9 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
 uint32_t BatchBuilder::AskNumCommands()
 {
     return total_commands;
+}
+
+uint32_t BatchBuilder::AskNumInstances()
+{
+    return total_instances;
 }

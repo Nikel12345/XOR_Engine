@@ -26,7 +26,7 @@ import random
 # ============================================================================
 #  ПАРАМЕТРЫ ГЕНЕРАЦИИ  (правь здесь)
 # ============================================================================
-NUM_CUBES = 200_000            # сколько кубов сгенерировать
+NUM_CUBES = 10_000            # сколько кубов сгенерировать
 
 # --- Объёмный диск (кольцо) ---
 INNER_RADIUS = 50.0         # РАДИУС ВЫРЕЗА по центру: ближе к оси кубов нет
@@ -36,6 +36,16 @@ DISK_THICKNESS = 3.0       # «объём» — полная высота кол
 # --- Масштаб кубов ---
 CUBE_SCALE_MIN = 0.3
 CUBE_SCALE_MAX = 0.9
+
+# --- Орбитальные скорости (круговая орбита вокруг центра сцены (0,0) в плоскости XZ) ---
+# Предполагаем в центре гравитационный объект. Скорость круговой орбиты: v = sqrt(G*M / r),
+# где r — расстояние в плоскости XZ. Настоящая G = 6.674e-11 не нужна: её степень «съедена»
+# массой (работаем сразу с произведением GM), иначе для нормальных скоростей масса была бы
+# астрономической. Крути CENTRAL_MASS (или GRAVITY_CONST), чтобы менять темп вращения.
+GRAVITY_CONST = 1.0          # G без крошечной степени
+CENTRAL_MASS = 5000.0          # масса гравитационного объекта в (0,0)
+GM = GRAVITY_CONST * CENTRAL_MASS   # μ — стандартный гравитационный параметр
+ORBIT_SPEED_SPREAD = 0.35    # индивидуальный разброс скорости, доля (±5%); 0 = идеальные круги
 
 # Фиксированный сид → одна и та же сцена при каждом запуске (None = каждый раз новая).
 RANDOM_SEED = 42
@@ -119,6 +129,24 @@ def random_rotation():
     return _mul3(_mul3(rz, ry), rx)
 
 
+def orbital_velocity(pos):
+    """Вектор скорости для круговой орбиты вокруг (0,0) в плоскости XZ.
+
+    Скорость перпендикулярна радиусу от центра до объекта, модуль = sqrt(GM / r_xz)
+    с индивидуальным разбросом ±ORBIT_SPEED_SPREAD. Компонента по Y нулевая (движение в XZ).
+    """
+    x, _, z = pos
+    r_xz = math.hypot(x, z)
+    if r_xz < 1e-6:
+        return (0.0, 0.0, 0.0)
+    v = math.sqrt(GM / r_xz)
+    v *= 1.0 + random.uniform(-ORBIT_SPEED_SPREAD, ORBIT_SPEED_SPREAD)
+    # Перпендикуляр к радиусу (x,z) в плоскости XZ — касательная к окружности (единый обход).
+    vx = -z / r_xz * v
+    vz = x / r_xz * v
+    return (vx, 0.0, vz)
+
+
 def build_scene():
     if INNER_RADIUS < 0 or OUTER_RADIUS <= INNER_RADIUS:
         raise ValueError("Нужно 0 <= INNER_RADIUS < OUTER_RADIUS")
@@ -130,10 +158,10 @@ def build_scene():
 
     # --- entity 0: направленный свет + кастер теней, площадь теней под размер диска ---
     he = _fmt(OUTER_RADIUS)  # half_extent / half_depth ортопроекции теней = радиус диска
-    lines.append("[entity] 0")
-    lines.append("  ShadowCaster =")
-    lines.append("  DirectLight = 0 -1 -0.7 1 1 1 {p} 0 0 0 {he} {he} 3 3".format(
-        p=_fmt(DIRECT_LIGHT_POWER), he=he))
+    # lines.append("[entity] 0")
+    # lines.append("  ShadowCaster =")
+    # lines.append("  DirectLight = 0 -1 -0.7 1 1 1 {p} 0 0 0 {he} {he} 3 3".format(
+    #     p=_fmt(DIRECT_LIGHT_POWER), he=he))
 
     used_models = set()
 
@@ -147,11 +175,13 @@ def build_scene():
         name = random.choice(CUBE_MODELS)
         used_models.add(name)
         material = random.choice(CUBE_MATERIALS)
+        vel = orbital_velocity(pos)
 
         lines.append("[entity] {}".format(eid))
         lines.append("  Material = {}".format(material))
         lines.append("  Transform = {}".format(" ".join(_fmt(v) for v in transform)))
         lines.append("  Model = {}".format(name))
+        lines.append("  Velocity = {}".format(" ".join(_fmt(c) for c in vel)))
         lines.append("  Shadow =")
         lines.append("  Draw = 1 1 0")
 
@@ -160,7 +190,8 @@ def build_scene():
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    out_path = os.path.join(script_dir, OUTPUT_NAME)
+    scene_folder = "..\\..\\src\\game\\"
+    out_path = os.path.join(script_dir, scene_folder, OUTPUT_NAME)
 
     text, used_models = build_scene()
 
