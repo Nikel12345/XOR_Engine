@@ -104,6 +104,7 @@ void MainMenuMode::Enter()
         SetTransparentShaderProgram(ctx);
         SetDebugColliderProgram(ctx);
         SetBloomPrograms(ctx);   // программы bloom под BLOOM_PASS (проход создаёт engine)
+        SetCullingPibPrograms(ctx, s_.engine->GetLightDataModule());   // GPU-каллинг: out_pib
     }
 
     ModelData* quad = ctx->CreateModel("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {

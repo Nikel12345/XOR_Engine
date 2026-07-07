@@ -21,11 +21,9 @@ namespace DefaultShaderProgramSet
     void SetDebugColliderProgram(EngineContext* ctx);
 
     // Compute shader programs
-    void SetCullingZerosPrograms(EngineContext* ctx);
-    void SetCullingCountPrograms(EngineContext* ctx, LightDataModule* ldm);
-    void SetCullingOffsetPrograms(EngineContext* ctx);
-    void SetCullingOutIndirectPrograms(EngineContext* ctx, LightDataModule* ldm);
-    void SetCullingWritePrograms(EngineContext* ctx, LightDataModule* ldm);
+    // GPU-каллинг (culling_pib.comp): пишет out_pib блоками по камерам (0 — игрок, 1..N — световые).
+    // Проход создаёт engine (SetDefaultCullingPass); здесь программа + её push/dispatch.
+    void SetCullingPibPrograms(EngineContext* ctx, LightDataModule* ldm);
     void SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm);
 
     // Программы bloom-пирамиды (prefilter/down/up/composite), привязка к BLOOM_PASS по имени.

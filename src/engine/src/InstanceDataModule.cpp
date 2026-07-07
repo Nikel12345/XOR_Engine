@@ -30,12 +30,35 @@ uint32_t InstanceDataModule::CalculateInstanceSize(ObjectManager* om, SceneData*
 	return total;
 }
 
-// Заливка по строке на каждую рисуемую энтити, в том же обходе, что StoreTransforms
-// (ForEach<DrawComponent, Positions>) — row совпадает с матрицей.
+// Заливка одной строки InstanceData на рисуемую энтити. ТОТ ЖЕ поархетипный обход,
+// что StoreTransforms (ForEachArchetype<Positions, DrawComponent> — одна map архетипов,
+// индексы 0..n-1), поэтому строка инстанса совпадает со строкой матрицы by construction.
+//
+// Раньше на КАЖДУЮ энтити звался UploadToTransferBuffer — 200k невстраиваемых вызовов
+// с memcpy по 8 байт (это и есть те ~2.7 мс, не сама копия). Теперь, как в StoreTransforms,
+// на архетип берём ОДИН write-ptr прямо в mapped transfer-буфер и пакуем весь блок за
+// один проход — без вызова на энтити. Транспонирования тут нет и SIMD не нужен: источник
+// DrawComponent уже AoS, выход InstanceData — тоже AoS, это strided-упаковка (alpha,flags
+// лежат смежно в 12-байтовом DrawComponent → 8-байтовый InstanceData). Трафик ~4 МБ —
+// упор в call-overhead, а не в полосу памяти; после его снятия копия суб-миллисекундна.
 void InstanceDataModule::StoreInstanceData(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene)
 {
-	om->ForEach<DrawComponent, Positions>(scene, [&](const DrawComponent& draw, SoAElement<Positions>) {
-		InstanceData inst{ draw.alpha, draw.flags };
-		bm->UploadToTransferBuffer(task, sizeof(inst), &inst);
+	om->ForEachArchetype<Positions, DrawComponent>(scene,
+		[&](ComponentArray<Positions, void>*,
+			ComponentArray<DrawComponent, void>* drawArr)
+	{
+		const std::vector<DrawComponent>& D = drawArr->data;
+		const size_t n = D.size();
+		if (n == 0) return;
+
+		InstanceData* dst = static_cast<InstanceData*>(
+			bm->AcquireTransferWritePtr(task, safe_u32(n * sizeof(InstanceData))));
+		if (!dst) return;
+
+		// mapped-память может быть write-combined — только пишем, не читаем.
+		for (size_t e = 0; e < n; ++e) {
+			dst[e].alpha = D[e].alpha;
+			dst[e].flags = D[e].flags;
+		}
 	});
 }

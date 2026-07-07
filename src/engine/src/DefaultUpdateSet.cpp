@@ -7,7 +7,6 @@
 #include "InstanceDataModule.h"
 #include "IndirectDataModule.h"
 #include "BoundSphereDataModule.h"
-#include "CountBufferDataModule.h"
 
 namespace DefaultUpdateSet
 {
@@ -20,6 +19,7 @@ namespace DefaultUpdateSet
     bool light_cameras_update_inited = false;
     bool indirect_update_inited = false;
     bool bound_sphere_update_intited = false;
+    bool out_pib_update_inited = false;
 }
 
 using namespace DefaultBuffersNames;
@@ -224,7 +224,7 @@ void DefaultUpdateSet::SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDa
     light_cameras_update_inited = true;
 }
 
-void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDataModule* idm)
+void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDataModule* idm, LightDataModule* ldm)
 {
     if (indirect_update_inited) {
         SDL_Log("Default indirect updater is already initialized.");
@@ -232,21 +232,42 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
     }
     auto* bm = ctx.GetBufferManager();
     auto* pm = ctx.GetPassManager();
-    auto* bb = ctx.GetBatchBuilder();
+    auto* om = ctx.GetObjectManager();
 
-    // Тот же gate-паттерн, что и у PIB: dirty (ревизия батчей) живёт в модуле, сюда
-    // лишь читаем ревизию и отдаём числом. См. SetDefaultPositionIndexUpdater.
+    // PER-FRAME (без revision-гейта): num_instances у каждой копии обязан быть 0 в начале
+    // кадра (scatter накапливает атомиком). num_cameras = 1 игрок + L световых.
     bm->CreateUpdateInstruction(DEFAULT_INDIRECT_BUFFER,
-        [pm, idm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+        [pm, idm, om, ldm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
-        idm->StoreIndirect(bm, pm, &task);
+        uint32_t nc = 1 + ldm->AskNumLightCameras(om, om->GetActiveScene());
+        idm->StoreIndirect(bm, pm, &task, nc);
     },
-        [pm, idm, bb, bm]() -> uint32_t
+        [pm, idm, om, ldm]() -> uint32_t
     {
-        return idm->CalculateIndirectSize(pm, bb->BatchesRevision(), bm->logic_index.load());
+        uint32_t nc = 1 + ldm->AskNumLightCameras(om, om->GetActiveScene());
+        return idm->CalculateIndirectSize(pm, nc);
     }
     );
     indirect_update_inited = true;
+}
+
+void DefaultUpdateSet::SetDefaultEntityToCmdUpdater(EngineContext& ctx, PIB_DataModule* pib_dm)
+{
+    auto* bm = ctx.GetBufferManager();
+    auto* pm = ctx.GetPassManager();
+    auto* bb = ctx.GetBatchBuilder();
+
+    // Гейт по ревизии батчей (меняется только со структурой), как у PIB.
+    bm->CreateUpdateInstruction(DEFAULT_ENTITY_TO_CMD_BUFFER,
+        [pm, pib_dm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+    {
+        pib_dm->StoreEntityToCmd(bm, pm, &task);
+    },
+        [pm, pib_dm, bb, bm]() -> uint32_t
+    {
+        return pib_dm->CalculateEntityToCmd(pm, bb->BatchesRevision(), bm->logic_index.load());
+    }
+    );
 }
 
 void DefaultUpdateSet::SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSphereDataModule* bdm)
@@ -256,106 +277,43 @@ void DefaultUpdateSet::SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSph
         return;
     }
     auto* bm = ctx.GetBufferManager();
-    auto* pm = ctx.GetPassManager();
-    auto* mm = ctx.GetModelManager();
-    bm->CreatePrePassUpdateInstruction(DEFAULT_BOUND_SPHERE_BUFFER,
-        [pm, bdm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+    auto* om = ctx.GetObjectManager();
+    auto* bb = ctx.GetBatchBuilder();
+
+    // Сферы по строкам трансформов для GPU-каллинга. Тот же gate-паттерн, что у PIB:
+    // ревизия батчей per-slot (создание/удаление энтити двигает строки).
+    bm->CreateUpdateInstruction(DEFAULT_BOUND_SPHERE_BUFFER,
+        [om, bdm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
-        bdm->StoreSpheres(bm, &task, pm);
+        bdm->StoreSpheres(bm, &task, om);
     },
-        [pm, mm, bdm]() -> uint32_t
+        [om, bdm, bb, bm]() -> uint32_t
     {
-        return bdm->CalculateSphereSize(pm, mm);
+        return bdm->CalculateSphereSize(om, bb->BatchesRevision(), bm->logic_index.load());
     }
     );
     bound_sphere_update_intited = true;
 }
 
-void DefaultUpdateSet::SetDefaultCountBufferUpdater(EngineContext& ctx, CountBufferDataModule* cdm, LightDataModule* ldm)
+void DefaultUpdateSet::SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModule* ldm)
 {
+    if (out_pib_update_inited) {
+        SDL_Log("Default out pib updater is already initialized.");
+        return;
+    }
     auto* bm = ctx.GetBufferManager();
     auto* om = ctx.GetObjectManager();
     auto* bb = ctx.GetBatchBuilder();
-    bm->CreatePrePassUpdateInstruction(DEFAULT_COUNT_BUFFER,
-        nullptr,
-        [om, cdm, ldm, bb]() -> uint32_t
-    {
-        return cdm->CountBufferSize(om, om->GetActiveScene(), bb, ldm);
-    }
-    );
-}
 
-void DefaultUpdateSet::SetDefaultOffsetBufferUpdater(EngineContext& ctx, CountBufferDataModule* cdm, LightDataModule* ldm)
-{
-    auto* bm = ctx.GetBufferManager();
-    auto* om = ctx.GetObjectManager();
-    auto* bb = ctx.GetBatchBuilder();
-    bm->CreatePrePassUpdateInstruction(DEFAULT_OFFSET_BUFFER,
-        nullptr,
-        [om, cdm, ldm, bb]() -> uint32_t
-    {
-        return cdm->CountBufferSize(om, om->GetActiveScene(), bb, ldm) - 1;
-    }
-    );
-}
-
-void DefaultUpdateSet::SetDefaultEntityToBatchUpdater(EngineContext& ctx, PIB_DataModule* pdm)
-{
-    auto* bm = ctx.GetBufferManager();
-    auto* pm = ctx.GetPassManager();
-    auto* bb = ctx.GetBatchBuilder();
-
-    // Тот же gate-паттерн, что и у PIB (entity->batch меняется только со структурой батчей).
-    bm->CreatePrePassUpdateInstruction(DEFAULT_ENTITY_TO_BATCH_BUFFER,
-        [pdm, pm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
-    {
-        pdm->StoreEntityToBatch(bm, pm, &task);
-    },
-        [pm, bb, pdm, bm]() -> uint32_t
-    {
-        return pdm->CalculateEntityToBatch(pm, bb->BatchesRevision(), bm->logic_index.load());
-    }
-    );
-}
-
-void DefaultUpdateSet::SetDefaultOutTransformUpdater(EngineContext& ctx, TransformDataModule* tdm)
-{
-    auto* bm = ctx.GetBufferManager();
-    bm->CreatePostReadbackUpdateInstruction(DEFAULT_OUT_TRANSFORM_BUFFER,
-        nullptr,
-        [tdm]() -> uint32_t
-    {
-        return tdm->CalculateOutTransformSize();
-    }
-    );
-}
-
-void DefaultUpdateSet::SetDefaultOutIndirectUpldater(EngineContext& ctx, LightDataModule* ldm)
-{
-    auto* bm = ctx.GetBufferManager();
-    auto* om = ctx.GetObjectManager();
-    auto* bb = ctx.GetBatchBuilder();
-    bm->CreatePrePassUpdateInstruction(DEFAULT_OUT_INDIRECT_BUFFER,
+    // Только ресайз (updater = nullptr): содержимое пишет scatter-каллинг каждый кадр
+    // (компактно). Блок int'ов на камеру (N = число PIB-записей): блок 0 — камера игрока.
+    bm->CreateUpdateInstruction(DEFAULT_OUT_PIB_BUFFER,
         nullptr,
         [om, bb, ldm]() -> uint32_t
     {
         uint32_t num_cameras_total = ldm->AskNumLightCameras(om, om->GetActiveScene()) + 1;
-        return num_cameras_total * bb->AskNumCommands() * sizeof(SDL_GPUIndexedIndirectDrawCommand);
+        return num_cameras_total * bb->AskNumInstances() * sizeof(int32_t);
     }
     );
-}
-
-void DefaultUpdateSet::SetDefaultCountReader(EngineContext& ctx, TransformDataModule* tdm)
-{
-    auto* bm = ctx.GetBufferManager();
-    bm->CreateReadBackInstruction(DEFAULT_COUNT_BUFFER,
-        [tdm](BufferManager* bm, ReadBackTask& task)
-    {
-        tdm->ReadBackCullingCountReader(bm, &task);
-    },
-        [tdm]() -> uint32_t
-    {
-        return tdm->ReadBackCullingCountSize();
-    }
-    );
+    out_pib_update_inited = true;
 }

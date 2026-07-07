@@ -23,13 +23,17 @@ namespace DefaultBuffersNames {
 	inline constexpr const char* DEFAULT_INSTANCE_BUFFER = "_DefaultInstanceBuffer";
 	inline constexpr const char* DEFAULT_LIGHT_CAMERA_BUFFER = "DefaultLightCameraBuffer";
 
+	// Индиректы: теперь ПО-КАМЕРНО — num_cameras копий команд, num_instances у каждой
+	// копии заполняет scatter-каллинг атомиком (компактный счётчик выживших). Блок 0 —
+	// камера игрока, 1..L — световые. Draw читает свой блок через additional_offset.
 	inline constexpr const char* DEFAULT_INDIRECT_BUFFER = "DefaultIndirectBuffer";
-	inline constexpr const char* DEFAULT_ENTITY_TO_BATCH_BUFFER = "DefaultEntityToBatchBuffer";
 	inline constexpr const char* DEFAULT_BOUND_SPHERE_BUFFER = "DefaultBoundSphereBuffer";
-	inline constexpr const char* DEFAULT_COUNT_BUFFER = "DefaultCountBuffer";
-	inline constexpr const char* DEFAULT_OFFSET_BUFFER = "DefaultOffsetBuffer";
-	inline constexpr const char* DEFAULT_OUT_TRANSFORM_BUFFER = "DefaultOutTransformBuffer";
-	inline constexpr const char* DEFAULT_OUT_INDIRECT_BUFFER = "DefaultOutIndirectBuffer";
+	// Выход scatter-каллинга: КОМПАКТНЫЙ pib. num_cameras блоков по N int; внутри каждого
+	// блока выжившие каждой команды упакованы в начало её диапазона [firstInstance, …).
+	inline constexpr const char* DEFAULT_OUT_PIB_BUFFER = "DefaultOutPibBuffer";
+	// entity -> глобальный индекс команды (model_batch) для scatter. Индекс сам кодирует
+	// проход (команды сгруппированы по проходам; shadow первый → [0,S)). Гейт по ревизии.
+	inline constexpr const char* DEFAULT_ENTITY_TO_CMD_BUFFER = "DefaultEntityToCmdBuffer";
 };
 
 struct PendingDestroy {

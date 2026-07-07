@@ -127,12 +127,10 @@ void Engine::UploadFunc(uint8_t slot)
 	auto t_wait = Prof::Clock::now();
 	SDL_WaitForGPUFences(dev, true, &fence, 1);
 	double wait_ms = Prof::MsSince(t_wait);
-	// Реальная латентность заливки: от сабмита (PrepareFuncPrepassUndepended) до сигнала fence.
 	double upload_ms = Prof::MsSince(sd.submit_time);
 	SDL_ReleaseGPUFence(dev, fence);
 	sd.fence = nullptr;
 
-	// GPU дочитал transfer-буферы — возвращаем в пул (TransferManager потокобезопасен).
 	auto t_rel = Prof::Clock::now();
 	transfer_manager->ReleaseTB(pending_upload_tbs[slot].buffers_tbd);
 	transfer_manager->ReleaseTB(pending_upload_tbs[slot].textures_tbd);
@@ -141,9 +139,6 @@ void Engine::UploadFunc(uint8_t slot)
 
 	slot_controller->SetSlotState(slot, PREPARED);
 
-	// upload_gpu — сколько реально длится заливка на GPU (submit -> fence). fence_wait —
-	// сколько CPU-поток блокировался на ней. Если upload_gpu велик и слотов не хватает,
-	// sim увидит это как рост slot_wait в SIM-отчёте.
 	Prof::Upload().Add("upload_gpu (submit->fence, заливка на GPU)", upload_ms);
 	Prof::Upload().Add("upload_fence_wait (CPU-блок)", wait_ms);
 	Prof::Upload().Add("release_tbs (возврат TB в пул)", release_ms);
@@ -231,6 +226,21 @@ bool Engine::RenderFunc(uint8_t slot)
 	{
 		PROF_SCOPE(Render, " execute_passes (запись команд)");
 		std::lock_guard<std::mutex> batch_lock(pass_manager->BatchTreeMutex());
+
+		// GPU-каллинг (scatter) в ОТДЕЛЬНОМ cb + fence ПЕРЕД рендером. SDL_GPU не барьерит
+		// compute-write -> indirect-read внутри одного cb (на 1М scatter из-за atomic-контеншена
+		// медленный, и draw читал недозаполненный индирект → мерцание). Отдельный cb + fence
+		// гарантирует, что out_pib/indirect дописаны. Fence вдобавок ТРОТТЛИТ рендер-поток под
+		// темп GPU: без него (просто сабмит) рендер убегает вперёд, копит бэклог GPU и пейсинг
+		// ХУЖЕ (50мс-спайки). Под тем же batch-замком — дерево консистентно для scatter и draw.
+		{
+			SDL_GPUCommandBuffer* cull_cb = SDL_AcquireGPUCommandBuffer(dev);
+			pass_manager->ExecutePrepassesSteps(cull_cb, slot);
+			SDL_GPUFence* cull_fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cull_cb);
+			SDL_WaitForGPUFences(dev, true, &cull_fence, 1);
+			SDL_ReleaseGPUFence(dev, cull_fence);
+		}
+
 		pass_manager->ExecutePassesSteps(cb, slot);
 	}
 
@@ -259,19 +269,91 @@ bool Engine::RenderFunc(uint8_t slot)
 		auto t = Prof::Clock::now();
 		SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
 		Prof::Render().Add(" submit_acquire_fence", Prof::MsSince(t));
-		// Метку сабмита пишем ДО публикации fence — FenceFunc замерит от неё
-		// GPU-латентность кадра (submit -> сигнал fence). Поле общее с upload (см. SlotData).
 		slot_controller->GetSlotsData()[slot].submit_time = Prof::Clock::now();
-		// IS_RENDERING на слоте уже стоит — его поставил WaitRenderableSlot в момент
-		// выбора (атомарно, чтобы sim не захватил слот до сабмита). Здесь только fence.
 		slot_controller->SetSlotFence(slot, fence);
 	}
 
-	// ВНИМАНИЕ: это только CPU-время ЗАПИСИ и сабмита командного буфера (доли мс).
-	// Оно НЕ равно времени кадра/FPS: сам кадр исполняется на GPU асинхронно, а его
-	// завершение и РЕАЛЬНЫЙ период кадра замеряет FenceFunc (там же и Frame()).
 	Prof::Render().Add("render_cpu (RenderFunc: запись+submit)", Prof::MsSince(t_frame));
 	return true;
+}
+
+// [DEBUG] Проверка GPU-каллинга: раз в ~60 кадров скачиваем первые 10 значений out_pib
+// слота (блок 0 = камера игрока) и печатаем. Зовётся из FenceFunc ПОСЛЕ render-fence
+// (compute уже записал буфер) и ДО перевода слота в RENDERED (слот не переиспользуется,
+// пока идёт синхронный download). Временный код — удалить после проверки.
+// [DEBUG] Скачивает регион GPU-буфера в CPU-вектор (синхронно, свой cb+fence). Только дебаг.
+static std::vector<uint32_t> DbgDownload(SDL_GPUDevice* dev, SDL_GPUBuffer* buf, uint32_t byte_off, uint32_t byte_len)
+{
+	std::vector<uint32_t> out(byte_len / 4);
+	SDL_GPUTransferBufferCreateInfo ci{};
+	ci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+	ci.size = byte_len;
+	SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(dev, &ci);
+	if (!tb) return out;
+	SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
+	SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
+	SDL_GPUBufferRegion src{ buf, byte_off, byte_len };
+	SDL_GPUTransferBufferLocation dst{ tb, 0 };
+	SDL_DownloadFromGPUBuffer(cp, &src, &dst);
+	SDL_EndGPUCopyPass(cp);
+	SDL_GPUFence* f = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+	SDL_WaitForGPUFences(dev, true, &f, 1);
+	SDL_ReleaseGPUFence(dev, f);
+	const void* p = SDL_MapGPUTransferBuffer(dev, tb, false);
+	if (p) { memcpy(out.data(), p, byte_len); SDL_UnmapGPUTransferBuffer(dev, tb); }
+	SDL_ReleaseGPUTransferBuffer(dev, tb);
+	return out;
+}
+
+// [DEBUG] ПРОВЕРКА КОМПАКТАЦИИ: на первой РИСУЕМОЙ команде блока 0 читаем её диапазон out_pib
+// [first_instance, first_instance+num_instances) и ищем -1 и ДУБЛИКАТЫ строк. Их наличие = out_pib
+// битый (баг scatter/компактации). Чисто = out_pib корректен → артефакт в другом (трансформ/слот).
+// Читается пост-кадрово (в FenceFunc, fence слота прошёл) → показывает то, что scatter реально записал.
+void Engine::DebugReadbackOutPib(uint8_t slot)
+{
+	static int frame_counter = 0;
+	if (++frame_counter % 20 != 0) return;
+
+	uint32_t tc = batch_builder->AskNumCommands();
+	uint32_t N  = batch_builder->AskNumInstances();
+	if (tc == 0 || N == 0) return;
+	uint32_t num_cameras = 1 + light_data_module->AskNumLightCameras(object_manager, object_manager->GetActiveScene());
+
+	BufferData* ind_bd = buffer_manager->GetBufferData(DefaultBuffersNames::DEFAULT_INDIRECT_BUFFER);
+	BufferData* pib_bd = buffer_manager->GetBufferData(DefaultBuffersNames::DEFAULT_OUT_PIB_BUFFER);
+	if (!ind_bd || !pib_bd) return;
+	SDL_GPUBuffer* ind_buf = buffer_manager->_GetGPUBufferForFrame(ind_bd, slot);
+	SDL_GPUBuffer* pib_buf = buffer_manager->_GetGPUBufferForFrame(pib_bd, slot);
+	if (!ind_buf || !pib_buf) return;
+
+	// Проверяем блок 0 (игрок) и блок 1 (первая световая камера, если есть) — обе scatter-программы.
+	uint32_t blocks_to_check = num_cameras < 2u ? num_cameras : 2u;
+	for (uint32_t c = 0; c < blocks_to_check; ++c) {
+		// Индирект блока c: tc команд по 5 uint (num_indices, num_instances, first_index, vertex_offset, first_instance).
+		std::vector<uint32_t> ind = DbgDownload(dev, ind_buf, c * tc * 20u, tc * 20u);
+		uint32_t cmdK = 0xFFFFFFFFu, firstInst = 0, numInst = 0;   // КРУПНЕЙШАЯ команда блока
+		for (uint32_t k = 0; k < tc; ++k) {
+			uint32_t num_indices   = ind[k * 5 + 0];
+			uint32_t num_instances = ind[k * 5 + 1];
+			if (num_indices > 0 && num_instances > numInst) { cmdK = k; numInst = num_instances; firstInst = ind[k * 5 + 4]; }
+		}
+		if (cmdK == 0xFFFFFFFFu) { SDL_Log("[VERIFY out_pib] slot=%u block=%u — пусто", slot, c); continue; }
+
+		uint32_t cap = numInst < 300000u ? numInst : 300000u;
+		std::vector<uint32_t> pib = DbgDownload(dev, pib_buf, (c * N + firstInst) * 4u, cap * 4u);
+
+		int neg1 = 0, oob = 0, dups = 0;
+		std::unordered_set<int32_t> seen;
+		seen.reserve(cap * 2);
+		for (uint32_t i = 0; i < cap; ++i) {
+			int32_t r = static_cast<int32_t>(pib[i]);
+			if (r < 0) { neg1++; continue; }
+			if ((uint32_t)r >= N) { oob++; continue; }
+			if (!seen.insert(r).second) dups++;
+		}
+		SDL_Log("[VERIFY out_pib] slot=%u block=%u cmd=%u num=%u checked=%u | neg1=%d oob=%d dups=%d %s",
+			slot, c, cmdK, numInst, cap, neg1, oob, dups, (neg1 || oob || dups) ? "<<< БИТО" : "ok");
+	}
 }
 
 void Engine::FenceFunc(uint8_t slot) {
@@ -281,29 +363,23 @@ void Engine::FenceFunc(uint8_t slot) {
 
 	if (!fence) return;
 
-	// Блокирующее ожидание вместо опроса: неблокирующий SDL_QueryGPUFence в цикле
-	// FenceThread был busy-poll'ом — ядро выгорало на всё время исполнения кадра GPU,
-	// и CPU-нагрузка росла вместе с GPU-нагрузкой. Kernel-wait спит до сигнала fence.
 	auto t_wait = Prof::Clock::now();
 	SDL_WaitForGPUFences(dev, true, &fence, 1);
 	double wait_ms = Prof::MsSince(t_wait);
-	// Реальная работа GPU над кадром: от сабмита (RenderFunc) до сигнала fence (сейчас).
-	// В отличие от fence_wait это не зависит от того, когда CPU добрался до ожидания.
+
 	double gpu_ms = Prof::MsSince(sd.submit_time);
 
 	SDL_ReleaseGPUFence(dev, fence);
 	sd.fence = nullptr;
 	buffer_manager->TrashBuffers();
-	texture_manager->TrashTextures();   // отложенное удаление текстур — та же кадровая точка, что и буферы
+	texture_manager->TrashTextures();
+
+	//DebugReadbackOutPib(slot);   // [DEBUG] выключен; проверка out_pib на -1/oob/дубли (см. функцию)
 
 	//slot_controller->RemoveSlotFence(slot);
 	slot_controller->SetSlotState(slot, RENDERED);
 
-	// ── ПРОФАЙЛ завершения кадра. Это НАСТОЯЩАЯ кадровая точка (RenderFunc лишь
-	//    пишет команды и мгновенно возвращается). frame_period — интервал между
-	//    завершениями соседних кадров: его среднее = 1/FPS. Сравнение:
-	//      frame_period ≈ gpu_frame  → упор в GPU;
-	//      frame_period ≫ gpu_frame  → GPU простаивает (упор в sim/синхронизацию/слипы).
+
 	auto now = Prof::Clock::now();
 	if (last_frame_done_valid) {
 		double period_ms = std::chrono::duration<double, std::milli>(now - last_frame_done_time).count();
@@ -370,7 +446,6 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	light_data_module = new LightDataModule();
 	indirect_data_module = new IndirectDataModule();
 	bound_sphere_data_module = new BoundSphereDataModule();
-	count_data_module = new CountBufferDataModule();
 
 	engine_context = new EngineContext(buffer_manager, texture_manager, pass_manager, material_manager, object_manager, shader_manager, model_manager, camera_manager, pipe_manager, batch_builder, texture_loader);
 	engine_context->SetInputManager(input_manager);
@@ -420,27 +495,22 @@ void Engine::InitDefaultBufferUpdaters()
 	SetDefaultVertexUpdater(*engine_context);
 	SetDefaultIndexUpdater(*engine_context);
 	SetDefaultLightCamerasUpdater(*engine_context, light_data_module);
-	SetDefaultIndirectUpdater(*engine_context, indirect_data_module);
+	SetDefaultIndirectUpdater(*engine_context, indirect_data_module, light_data_module);
 
-	//SetDefaultCountBufferUpdater(buffer_manager, object_manager, count_data_module, light_data_module, batch_builder);
-	//SetDefaultBoundSphereUpdater(buffer_manager, pass_manager, model_manager, bound_sphere_data_module);
-	//SetDefaultEntityToBatchUpdater(buffer_manager, object_manager, pass_manager, batch_builder, pib_data_module);
-	//SetDefaultOutTransformUpdater(buffer_manager, transform_data_module);
-	//SetDefaultOffsetBufferUpdater(buffer_manager, object_manager, count_data_module, light_data_module, batch_builder);
-	//SetDefaultOutIndirectUpldater(buffer_manager, object_manager, batch_builder, light_data_module);
-	//SetDefaultCountReader(buffer_manager, transform_data_module);
-
+	// GPU-каллинг с компактацией: сферы по строкам + entity->cmd (ревизия батчей) +
+	// ресайз out_pib (компактно пишет scatter-каллинг). Индирект — per-frame выше.
+	SetDefaultBoundSphereUpdater(*engine_context, bound_sphere_data_module);
+	SetDefaultEntityToCmdUpdater(*engine_context, pib_data_module);
+	SetDefaultOutPibUpdater(*engine_context, light_data_module);
 }
 
 void Engine::InitPasses()
 {
 	using namespace DefaultRenderPassNamespace;
-	//SetDefaultCullingComputeZerosPass(pass_manager, buffer_manager);
-	//SetDefaultCullingComputeCountPass(pass_manager, buffer_manager, object_manager, transform_data_module, light_data_module, indirect_data_module);
-	//SetDefaultCullingOutIndirectPass(pass_manager, buffer_manager);
 
 	{
 		_SetDefaultCommonResources(engine_context, safe_f_u32(width), safe_f_u32(height));
+		SetDefaultCullingPass(engine_context);     // GPU-каллинг: out_pib до SHADOW_PASS (индекс 5)
 		SetDefaultShadowPCFRenderPass(engine_context);
 		SetDefaultMainRenderPass(engine_context);
 		SetTransparentPass(engine_context);
@@ -451,9 +521,6 @@ void Engine::InitPasses()
 	//SetDefaultShadowVSMRenderPass(pass_manager, texture_manager, buffer_manager, object_manager, batch_builder);
 	//SetDefaultShadowBlurPass(pass_manager, buffer_manager); // ДЛЯ VSM
 	//SetDefaultMainRenderPass(pass_manager, texture_manager, buffer_manager);
-
-	//SetDefaultCullingOffstPass(pass_manager, buffer_manager);
-	//SetDefaultCullingOutTransformPass(pass_manager, buffer_manager, object_manager, transform_data_module, light_data_module, indirect_data_module);
 }
 
 void Engine::InitUICommands()

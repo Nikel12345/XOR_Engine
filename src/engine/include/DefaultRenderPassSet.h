@@ -1,9 +1,6 @@
 #pragma once
 #include "TextureData.h"
 class EngineContext;
-class TransformDataModule;
-class LightDataModule;
-class IndirectDataModule;
 namespace DefaultRenderPassNamespace
 {
     inline constexpr const char* DEPTH_PASS = "_DefaultDepthRenderPass";
@@ -16,11 +13,7 @@ namespace DefaultRenderPassNamespace
     // Число уровней bloom-пирамиды (bloom_0 = ½ окна, каждый следующий ещё вдвое меньше).
     inline constexpr uint32_t BLOOM_LEVELS = 4;
     inline constexpr const char* SHADOW_PASS = "_DefaultShadowRenderPass";
-    inline constexpr const char* CULLING_PREPASS = "_DefaultCullingComputePass";
-    inline constexpr const char* CULLING_ZEROS_PREPASS = "_DefaultCullingZerosComputePass";
-    inline constexpr const char* CULLING_OFFSET_PREPASS = "_DefaultCullingOffsetComputePass";
-    inline constexpr const char* CULLING_OUT_INDIRECT_PREPASS = "_DefaultCullingOutIndirectComputePass";
-    inline constexpr const char* CULLING_WRITE_PASS = "_DefaultCullingWritePass";
+    inline constexpr const char* CULLING_PASS = "_DefaultCullingPass";
     inline constexpr const char* SHADOW_BLUR_PASS = "_DefaultBlurPass";
     inline const std::string SHADOW_DEPTH_FLAT_ARRAY = "shadow_depth_flat_array";
 
@@ -32,6 +25,9 @@ namespace DefaultRenderPassNamespace
         // 1 — directional (ortho): в карту пишется линейная осевая глубина -viewZ/far.
         // 0 — spot/sphere (perspective): евклидова дистанция length(viewPos)/far.
         Uint32 is_ortho;
+        // Размер одного камерного блока out_pib (= число PIB-записей). Вершиннику
+        // shadow_pass нужен для адреса блока: (1 + camera_index) * num_instances.
+        Uint32 num_instances;
     };
     void SetDefaultShadowPCFRenderPass(EngineContext* ctx);
     void SetDefaultShadowVSMRenderPass(EngineContext* ctx);
@@ -75,24 +71,21 @@ namespace DefaultRenderPassNamespace
     // scene_hdr. Должна вызываться ПОСЛЕ main/transparent/debug (читает их результат) и до present.
     void SetDefaultBloomPass(EngineContext* ctx);
 
-    void SetDefaultCullingComputeZerosPass(EngineContext* ctx);
-
-    struct ComputeCullingCountUniform {
-        uint32_t num_instances;
-        uint32_t num_commands;
-        uint32_t num_cameras;
-        uint32_t cmd_offset;
+    // GPU-каллинг с компактацией (culling_pib.comp = scatter). Одна программа на группу камер:
+    // раскладка = CullParams шейдера. Никакого is_shadow — группу задаёт push + камерный буфер.
+    struct alignas(16) CullingPibUniform {
+        uint32_t range_start;      // первая PIB-запись программы (диапазон прохода)
+        uint32_t range_count;      // сколько записей (= размер диспатча)
+        uint32_t block_base;       // первый камерный блок (0 игрок, 1 свет, …)
+        uint32_t num_blocks;       // число камер группы
+        uint32_t block_stride;     // N — всего PIB-записей (страйд блока out_pib)
+        uint32_t total_commands;   // TC — команд на камеру (страйд блока индиректа)
     };
-    void SetDefaultCullingComputeCountPass(EngineContext* ctx, TransformDataModule* tdm, LightDataModule* ldm, IndirectDataModule* idm);
-    void SetDefaultCullingOffstPass(EngineContext* ctx);
-
-    struct ComputeCullingOutIndirectUniform {
-        uint32_t num_commands;
-        uint32_t num_cameras;
-        uint32_t cmd_offset;
+    // culling_clear.comp: обнуляет num_instances всех (камера,команда) перед scatter.
+    struct alignas(16) CullingClearUniform {
+        uint32_t total_slots;      // (1+L) * total_commands
     };
-    void SetDefaultCullingOutIndirectPass(EngineContext* ctx);
-    void SetDefaultCullingOutTransformPass(EngineContext* ctx, TransformDataModule* tdm, LightDataModule* ldm, IndirectDataModule* idm);
+    void SetDefaultCullingPass(EngineContext* ctx);
 
     inline const std::string SHADOW_MOMENTS_ARRAY = "shadow_moments_array";
     inline const std::string SHADOW_MOMENTS_BLUR_TEMP = "shadow_moments_single_temp";

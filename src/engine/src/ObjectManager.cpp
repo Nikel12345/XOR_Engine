@@ -3,9 +3,11 @@
 #include "TextureData.h"
 #include "ModelData.h"
 #include "ComponentSerializer.h"
-#include <algorithm>   // std::remove для отцепления ребёнка из обратного индекса
-#include <sstream>     // разбор текста сцены построчно
-#include <cstdlib>     // strtoul — разбор id сущности/родителя
+#include "EngineProfiler.h"   // Prof::Clock/MsSince — тайминг фаз парса (без GPU-зависимостей, безопасно для ECS-ядра)
+#include <algorithm>   // std::remove (отцепление ребёнка), std::sort/std::unique (сигнатура)
+#include <charconv>    // std::from_chars — быстрый парс id сущности/родителя без locale
+#include <cstring>     // memchr/memcmp — посимвольный сканер текста сцены
+#include <string_view> // токены-срезы в исходный буфер (без копий)
 // RenderManager.h/PipeManager.h не использовались — убраны, чтобы ECS-ядро
 // (EngineEcs) не тянуло GPU-заголовки.
 
@@ -127,22 +129,6 @@ SceneData* ObjectManager::GetScene(const SceneName& name)
 // ============================================================
 //  Сериализация сцены
 // ============================================================
-namespace {
-    void Trim(std::string& s) {
-        size_t a = s.find_first_not_of(" \t\r\n");
-        size_t b = s.find_last_not_of(" \t\r\n");
-        if (a == std::string::npos) { s.clear(); return; }
-        s = s.substr(a, b - a + 1);
-    }
-    std::vector<std::string> Tokenize(const std::string& s) {
-        std::vector<std::string> out;
-        std::istringstream ss(s);
-        std::string tok;
-        while (ss >> tok) out.push_back(tok);
-        return out;
-    }
-}
-
 std::string ObjectManager::SaveScene(SceneData* scene)
 {
     std::string out;
@@ -188,67 +174,159 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
                                                   : CreateScene(scene_name);
     auto& reg = ComponentSerializerRegistry::Get();
 
-    // Накопленные компоненты текущей сущности — собираем ВЕСЬ набор до создания
-    // (нужна полная сигнатура архетипа), затем одна вставка (как CreateEntity).
-    struct Pending { const ComponentSerializer* h; std::vector<std::string> tokens; };
+    // Пул компонентов текущей сущности. Переиспользуется между сущностями: n_comps
+    // сбрасывается в 0 (а не clear()), поэтому внутренние векторы токенов сохраняют
+    // ёмкость — на группе одинаковых архетипов аллокаций почти нет. Токены — это
+    // string_view В ИСХОДНЫЙ text (жив всю функцию), без копий строк.
+    struct Pending { const ComponentSerializer* h = nullptr; std::vector<std::string_view> tokens; };
     std::vector<Pending> comps;
+    size_t   n_comps = 0;
     uint32_t cur_id = 0;
     bool     have_block = false;
     uint32_t synthetic = 0xFFFF0000u;                    // id для блоков без явного (back-compat)
 
+    // Кэш «последняя сигнатура → архетип». В файле сущности идут ГРУППАМИ своего
+    // архетипа, поэтому подряд идущие дают тот же набор типов. Пока сигнатура не
+    // сменилась — переиспользуем указатель, минуя пересборку std::set и поиск в
+    // std::map (это и был главный пожиратель pass1). Указатель на Archetype стабилен:
+    // узлы std::map не переезжают при вставке новых архетипов (как и в остальном ECS).
+    std::vector<std::type_index> last_sig;               // отсортирован; сравнивается с текущим
+    std::vector<std::type_index> cur_sig;
+    Archetype* last_arch = nullptr;
+
     std::unordered_map<uint32_t, Entity> old_to_new;     // id из файла → новый Entity
     std::vector<Entity> created;
 
+    // Предпроход: считаем заголовки (строки, начинающиеся с '[') — точная оценка числа
+    // сущностей. Резервируем карты/векторы, чтобы 200k вставок не давали ре-хэшей.
+    // Один линейный проход по 43 МБ ≈ единицы мс на фоне парса.
+    size_t est_entities = 0;
+    {
+        const char* c = text.data();
+        const char* e = c + text.size();
+        bool bol = true;
+        for (; c < e; ++c) {
+            if (bol && *c == '[') ++est_entities;
+            bol = (*c == '\n');
+        }
+    }
+    created.reserve(est_entities);
+    old_to_new.reserve(est_entities * 2);
+    scene->entity_to_archetype.reserve(scene->entity_to_archetype.size() + est_entities);
+    scene->entity_to_index.reserve(scene->entity_to_index.size() + est_entities);
+
     auto flush = [&]() {
-        if (!have_block) { comps.clear(); return; }
+        if (!have_block) { n_comps = 0; return; }
         have_block = false;
-        if (comps.empty()) return;
+        if (n_comps == 0) return;
 
-        std::set<std::type_index> sig;
-        for (auto& p : comps) sig.insert(p.h->sig_type);
+        // Сигнатура = отсортированный уникальный набор sig_type компонентов.
+        cur_sig.clear();
+        for (size_t i = 0; i < n_comps; ++i) cur_sig.push_back(comps[i].h->sig_type);
+        std::sort(cur_sig.begin(), cur_sig.end());
+        cur_sig.erase(std::unique(cur_sig.begin(), cur_sig.end()), cur_sig.end());
 
-        Archetype& arch = scene->archetypes[sig];
+        Archetype* arch;
+        if (last_arch && cur_sig == last_sig) {
+            arch = last_arch;                              // та же группа — без set/map
+        }
+        else {
+            std::set<std::type_index> sig(cur_sig.begin(), cur_sig.end());
+            arch = &scene->archetypes[sig];
+            last_sig = cur_sig;
+            last_arch = arch;
+        }
+
         Entity e = scene->next_entity_id++;
-        arch.entities.push_back(e);
-        for (auto& p : comps) p.h->load(arch, p.tokens);   // ensure_component<T> + дописать
-        scene->entity_to_archetype[e] = &arch;
-        scene->entity_to_index[e] = arch.entities.size() - 1;
+        arch->entities.push_back(e);
+        for (size_t i = 0; i < n_comps; ++i)
+            comps[i].h->load(*arch, comps[i].tokens);      // ensure_component<T> + дописать
+        scene->entity_to_archetype[e] = arch;
+        scene->entity_to_index[e] = arch->entities.size() - 1;
 
         old_to_new[cur_id] = e;
         created.push_back(e);
-        comps.clear();
+        n_comps = 0;
     };
 
-    std::istringstream in(text);
-    std::string line;
-    while (std::getline(in, line)) {
-        Trim(line);
-        if (line.empty() || line[0] == '#') continue;
+    // Взять/переиспользовать слот компонента (векторы токенов сохраняют ёмкость).
+    auto push_comp = [&](const ComponentSerializer* h) -> std::vector<std::string_view>& {
+        if (n_comps == comps.size()) comps.emplace_back();
+        Pending& pc = comps[n_comps++];
+        pc.h = h;
+        pc.tokens.clear();
+        return pc.tokens;
+    };
 
-        if (line.rfind("[entity]", 0) == 0) {            // заголовок: [entity] <id>
+    auto is_space = [](char c) { return c == ' ' || c == '\t' || c == '\r'; };
+
+    const auto t_pass1 = Prof::Clock::now();   // фаза 1: парс текста + сборка архетипов
+
+    // Однопроходный посимвольный сканер по всему буферу — без istringstream/getline,
+    // без substr и без промежуточных std::string. Строки ограничиваем memchr('\n').
+    const char* p   = text.data();
+    const char* end = p + text.size();
+    while (p < end) {
+        const char* nl       = static_cast<const char*>(std::memchr(p, '\n', end - p));
+        const char* line_end = nl ? nl : end;
+        const char* next     = nl ? nl + 1 : end;
+
+        // Trim строки → [a, b).
+        const char* a = p;
+        const char* b = line_end;
+        while (a < b && is_space(*a)) ++a;
+        while (b > a && is_space(b[-1])) --b;
+        p = next;
+
+        if (a == b) continue;                 // пустая
+        if (*a == '#') continue;              // комментарий
+
+        // Заголовок сущности: "[entity] <id>"
+        if (b - a >= 8 && std::memcmp(a, "[entity]", 8) == 0) {
             flush();
-            std::vector<std::string> htoks = Tokenize(line.substr(8));
-            cur_id = htoks.empty() ? synthetic++
-                : static_cast<uint32_t>(std::strtoul(htoks[0].c_str(), nullptr, 10));
+            const char* q = a + 8;
+            while (q < b && is_space(*q)) ++q;
+            if (q < b) {
+                uint32_t id = 0;
+                std::from_chars(q, b, id);
+                cur_id = id;
+            }
+            else {
+                cur_id = synthetic++;
+            }
             have_block = true;
             continue;
         }
 
         if (!have_block) continue;
 
-        const size_t eq = line.find('=');
-        std::string name = (eq == std::string::npos) ? line : line.substr(0, eq);
-        std::string rhs  = (eq == std::string::npos) ? std::string{} : line.substr(eq + 1);
-        Trim(name);
-        const ComponentSerializer* h = reg.ByName(name);
-        if (!h) continue;                                // незнакомый компонент — пропускаем
-        comps.push_back({ h, Tokenize(rhs) });
+        // Строка компонента: "<Name> = <tokens...>"
+        const char* eq       = static_cast<const char*>(std::memchr(a, '=', b - a));
+        const char* name_end = eq ? eq : b;
+        while (name_end > a && is_space(name_end[-1])) --name_end;   // trim имени справа
+
+        const ComponentSerializer* h = reg.ByName(std::string(a, name_end));  // имя короткое → SSO
+        if (!h) continue;                                                     // незнакомый компонент
+
+        std::vector<std::string_view>& toks = push_comp(h);
+        if (eq) {
+            const char* q = eq + 1;
+            while (q < b) {
+                while (q < b && is_space(*q)) ++q;
+                if (q >= b) break;
+                const char* ts = q;
+                while (q < b && !is_space(*q)) ++q;
+                toks.emplace_back(ts, static_cast<size_t>(q - ts));
+            }
+        }
     }
     flush();
+    const double pass1_ms = Prof::MsSince(t_pass1);
 
     // Проход 2: ParentComponent сейчас держит СТАРЫЙ id из файла. Ремапим в новый Entity
     // и заполняем обратный индекс scene->children (CreateEntity делает это при создании —
     // здесь путь иной, поэтому вручную). Родитель уже создан: все сущности есть после прохода 1.
+    const auto t_pass2 = Prof::Clock::now();   // фаза 2: ремап родителей + обратный индекс
     for (Entity e : created) {
         if (!Has<ParentComponent>(scene, e)) continue;
         ParentComponent& pc = GetComponent<ParentComponent>(scene, e);
@@ -263,6 +341,10 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
         pc.parent = it->second;
         scene->children[pc.parent].push_back(e);
     }
+    const double pass2_ms = Prof::MsSince(t_pass2);
+
+    SDL_Log("  ObjectManager::LoadScene: pass1(parse+build)=%.1f  pass2(parent remap)=%.1f ms  [%zu ent, %zu archetypes]",
+        pass1_ms, pass2_ms, created.size(), scene->archetypes.size());
 
     dirty_entity = true;
     return created;

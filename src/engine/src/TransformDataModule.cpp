@@ -255,20 +255,5 @@ uint32_t TransformDataModule::AskNumTransform(ObjectManager* om, SceneData* scen
     return num_transform;
 }
 
-void TransformDataModule::ReadBackCullingCountReader(BufferManager* bm, ReadBackTask* task)
-{
-    size_ptr = bm->ReadFromTransferBuffer(task, sizeof(uint32_t));
-}
-
-uint32_t TransformDataModule::CalculateOutTransformSize()
-{
-    if (size_ptr.size() < sizeof(uint32_t))
-    {
-        SDL_Log("Not enough data in size_ptr for uint32_t");
-        return 0;
-    }
-
-    return *reinterpret_cast<const uint32_t*>(size_ptr.data()) * sizeof(glm::mat4);
-}
 
 

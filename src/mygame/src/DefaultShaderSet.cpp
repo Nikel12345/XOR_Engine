@@ -5,6 +5,24 @@
 #include "DefaultRenderPassSet.h"
 #include "PositionStructure.h"
 #include "EngineContext.h"
+#include "RenderManager.h"   // PassManager + RenderPassStep (счёт теневых команд для scatter)
+
+namespace {
+    // shadow_pib = сумма инстансов теневых команд = ГРАНИЦА PIB между теневыми [0, shadow_pib) и
+    // остальными [shadow_pib, N). Она же first_instance первой не-теневой команды (shadow первый).
+    // Идёт под BatchTreeMutex (push в ExecutePrepassesSteps).
+    uint32_t CountShadowInstances(PassManager* pm)
+    {
+        uint32_t s = 0;
+        if (RenderPassStep* rp = pm->GetRenderPassStep(DefaultRenderPassNamespace::SHADOW_PASS))
+            for (auto& [_, sb] : rp->shader_batches)
+                for (auto& [_, ab] : sb.atlases_batches)
+                    for (auto& [_, tb] : ab.texture_batches)
+                        for (auto& [_, mb] : tb.model_batches)
+                            s += mb.instanceCount;
+        return s;
+    }
+}
 
 namespace DefaultShaderProgramSet
 {
@@ -15,11 +33,7 @@ namespace DefaultShaderProgramSet
     bool debug_collider_inited = false;
 
     // compute
-    bool culling_zeros_inited = false;
-    bool culling_count_inited = false;
-    bool culling_offset_inited = false;
-    bool culling_out_indirect_inited = false;
-    bool culling_write_inited = false;
+    bool culling_pib_inited = false;
 
     bool shadow_blur_inited = false;
 
@@ -58,7 +72,7 @@ void DefaultShaderProgramSet::SetMainShaderProgram(EngineContext* ctx)
         ;
 
     ctx->CreateShaderProgram("sp", spd_main, DefaultRenderPassNamespace::MAIN_PASS,
-        vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+        vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
         fs, { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
         // Порядок ДОЛЖЕН совпадать с textures[] в прологе: albedo, normal, orm, emissive.
         { TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive }
@@ -102,7 +116,7 @@ void DefaultShaderProgramSet::SetDefaultShadowShaderProgram(EngineContext* ctx)
         ->WithDepthBias(shadow_rsbp)
 		;
 	ShaderProgram* sp_shadow = ctx->CreateShaderProgram("sp_shadow", spd_shadow, DefaultRenderPassNamespace::SHADOW_PASS,
-        vs_2, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+        vs_2, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
         fs_2, {},
         {}
 	);
@@ -133,7 +147,7 @@ void DefaultShaderProgramSet::SetTransparentShaderProgram(EngineContext* ctx)
 
     // Без shadow-байндингов: только albedo+normal (2 сэмплера) и буфер света (storage t2).
     ctx->CreateShaderProgram("sp_transparent", spd_transparent, DefaultRenderPassNamespace::TRANSPARENT_PASS,
-        vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
+        vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
         fs, { DEFAULT_LIGHT_BUFFER },
         { TextureSlotRole::Albedo, TextureSlotRole::Normal }
     );
@@ -164,7 +178,7 @@ void DefaultShaderProgramSet::SetDebugColliderProgram(EngineContext* ctx)
 
     ShaderProgram* sp = ctx->CreateShaderProgram("sp_debug_collider", spd,
         DefaultRenderPassNamespace::DEBUG_PASS,
-        vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER },
+        vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
         fs, {},
         {});
 
@@ -176,175 +190,92 @@ void DefaultShaderProgramSet::SetDebugColliderProgram(EngineContext* ctx)
     debug_collider_inited = true;
 }
 
-void DefaultShaderProgramSet::SetCullingZerosPrograms(EngineContext* ctx)
+void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDataModule* ldm)
 {
     using namespace DefaultBuffersNames;
-    if (culling_zeros_inited) {
-        SDL_Log("Culling zeros programs already initialized.");
+    if (culling_pib_inited) {
+        SDL_Log("Culling PIB program already initialized.");
         return;
     }
 
-    ComputeShaderData csd_zeros = ctx->CreateComputeShader("../engine/shaders/culling_clear.comp.spv");
-
-    ctx->CreateComputeShaderProgram("csp_zeros", csd_zeros,
-        { DEFAULT_COUNT_BUFFER },   // rw_storage_buffers
-        {},                          // ro_storage_buffers
-        {}, {}, {},                  // rw_tex, ro_tex, samplers
-        DefaultRenderPassNamespace::CULLING_ZEROS_PREPASS);
-
-    culling_zeros_inited = true;
-}
-
-void DefaultShaderProgramSet::SetCullingCountPrograms(
-    EngineContext* ctx, LightDataModule* ldm)
-{
-    using namespace DefaultBuffersNames;
-    if (culling_count_inited) {
-        SDL_Log("Culling count programs already initialized.");
-        return;
-    }
-
+    namespace RP = DefaultRenderPassNamespace;
     ObjectManager* om = ctx->GetObjectManager();
-    ComputeShaderData csd = ctx->CreateComputeShader("../engine/shaders/culling_count.comp.spv");
-	BatchBuilder* bb = ctx->GetBatchBuilder();
+    PassManager*   pm = ctx->GetPassManager();
+    BatchBuilder*  bb = ctx->GetBatchBuilder();
 
-    ComputeShaderProgram* cs_main = ctx->CreateComputeShaderProgram("compute_sp_main", csd,
-        { DEFAULT_COUNT_BUFFER },                                                    // rw
-        { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_BATCH_BUFFER,
-          DEFAULT_BOUND_SPHERE_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER }, // ro
-        {}, {}, {},
-        DefaultRenderPassNamespace::CULLING_PREPASS);
-
-    cs_main->BindPushConstants<DefaultRenderPassNamespace::ComputeCullingCountUniform>(
-        [](const PushConstantBinder& binder, DefaultRenderPassNamespace::ComputeCullingCountUniform data) {
-        data.num_cameras = 1;
-        data.cmd_offset = 0;
+    // (1) CLEAR — обнуляет num_instances ВСЕХ (камера,команда) перед scatter. Создаётся ПЕРВОЙ →
+    // shader_batch[0] в CULLING_PASS, SDL барьерит между compute-пассами → scatter видит нули.
+    ComputeShaderData csd_clear = ctx->CreateComputeShader("../engine/shaders_code/comp/culling_clear.comp.hlsl");
+    ComputeShaderProgram* csp_clear = ctx->CreateComputeShaderProgram("csp_culling_clear", csd_clear,
+        { DEFAULT_INDIRECT_BUFFER },   // rw (u0)
+        {}, {}, {}, {},
+        RP::CULLING_PASS);
+    csp_clear->BindPushConstants<RP::CullingClearUniform>(
+        [ldm, om, bb](const PushConstantBinder& binder, RP::CullingClearUniform data) {
+        data.total_slots = (1 + ldm->AskNumLightCameras(om, om->GetActiveScene())) * bb->AskNumCommands();
         binder.Push(0, data);
     });
-
-    ComputeShaderProgram* cs_light = ctx->CreateComputeShaderProgram("compute_sp_light", csd,
-        { DEFAULT_COUNT_BUFFER },
-        { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_BATCH_BUFFER,
-          DEFAULT_BOUND_SPHERE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },
-        {}, {}, {},
-        DefaultRenderPassNamespace::CULLING_PREPASS);
-
-    cs_light->BindPushConstants<DefaultRenderPassNamespace::ComputeCullingCountUniform>(
-        [ldm, om, bb](const PushConstantBinder& binder, DefaultRenderPassNamespace::ComputeCullingCountUniform data) {
-        data.num_cameras = ldm->AskNumLightCameras(om, om->GetActiveScene());
-        data.cmd_offset = bb->AskNumCommands() * 1;
-        binder.Push(0, data);
+    csp_clear->BindDispatch<RP::DummyDispatchData>(
+        [ldm, om, bb](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+        binder.element_count = { (1 + ldm->AskNumLightCameras(om, om->GetActiveScene())) * bb->AskNumCommands(), 1, 1 };
     });
 
-    culling_count_inited = true;
-}
+    // Общий шейдер scatter'а для всех групп камер (разные программы = разные камерные буферы).
+    ComputeShaderData csd = ctx->CreateComputeShader("../engine/shaders_code/comp/culling_pib.comp.hlsl");
 
-void DefaultShaderProgramSet::SetCullingOffsetPrograms(EngineContext* ctx)
-{
-    using namespace DefaultBuffersNames;
-    if (culling_offset_inited) {
-        SDL_Log("Culling offset programs already initialized.");
-        return;
-    }
-
-    ComputeShaderData csd_offset = ctx->CreateComputeShader("../engine/shaders/culling_offsets.comp.spv");
-
-    ctx->CreateComputeShaderProgram("csp_offsets", csd_offset,
-        { DEFAULT_OFFSET_BUFFER },   // rw
-        { DEFAULT_COUNT_BUFFER },    // ro
+    // (2) ИГРОК — камера игрока (блок 0, num_blocks=1), main-записи [shadow_pib, N). Cameras=CAMERA_BUFFER (t3).
+    ComputeShaderProgram* csp_player = ctx->CreateComputeShaderProgram("csp_cull_player", csd,
+        { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
+        { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
+          DEFAULT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4 (Cameras = игрок)
         {}, {}, {},
-        DefaultRenderPassNamespace::CULLING_OFFSET_PREPASS);
-
-    culling_offset_inited = true;
-}
-
-void DefaultShaderProgramSet::SetCullingOutIndirectPrograms(
-    EngineContext* ctx, LightDataModule* ldm)
-{
-    using namespace DefaultBuffersNames;
-    if (culling_out_indirect_inited) {
-        SDL_Log("Culling out indirect programs already initialized.");
-        return;
-    }
-
-    ObjectManager* om = ctx->GetObjectManager();
-    ComputeShaderData csd_out = ctx->CreateComputeShader("../engine/shaders/culling_out_indirect.comp.spv");
-	BatchBuilder* bb = ctx->GetBatchBuilder();
-
-    ComputeShaderProgram* csp_out_main = ctx->CreateComputeShaderProgram("csp_out_indirect", csd_out,
-        { DEFAULT_OUT_INDIRECT_BUFFER },                                       // rw
-        { DEFAULT_INDIRECT_BUFFER, DEFAULT_COUNT_BUFFER, DEFAULT_OFFSET_BUFFER }, // ro
-        {}, {}, {},
-        DefaultRenderPassNamespace::CULLING_OUT_INDIRECT_PREPASS);
-
-    csp_out_main->BindPushConstants<DefaultRenderPassNamespace::ComputeCullingOutIndirectUniform>(
-        [bb](const PushConstantBinder& binder, DefaultRenderPassNamespace::ComputeCullingOutIndirectUniform data) {
-        data.num_commands = bb->AskNumCommands();
-        data.num_cameras = 1;
-        data.cmd_offset = 0;
+        RP::CULLING_PASS);
+    csp_player->BindPushConstants<RP::CullingPibUniform>(
+        [pm, bb](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+        uint32_t sp = CountShadowInstances(pm);
+        uint32_t N  = bb->AskNumInstances();
+        data.range_start = sp;
+        data.range_count = (N > sp) ? (N - sp) : 0u;
+        data.block_base = 0u;
+        data.num_blocks = 1u;
+        data.block_stride = N;
+        data.total_commands = bb->AskNumCommands();
         binder.Push(0, data);
     });
-
-    ComputeShaderProgram* csp_out_light = ctx->CreateComputeShaderProgram("csp_out_indirect_lights", csd_out,
-        { DEFAULT_OUT_INDIRECT_BUFFER },
-        { DEFAULT_INDIRECT_BUFFER, DEFAULT_COUNT_BUFFER, DEFAULT_OFFSET_BUFFER },
-        {}, {}, {},
-        DefaultRenderPassNamespace::CULLING_OUT_INDIRECT_PREPASS);
-
-    csp_out_light->BindPushConstants<DefaultRenderPassNamespace::ComputeCullingOutIndirectUniform>(
-        [ldm, om, bb](const PushConstantBinder& binder, DefaultRenderPassNamespace::ComputeCullingOutIndirectUniform data) {
-        data.num_commands = bb->AskNumCommands();
-        data.num_cameras = ldm->AskNumLightCameras(om, om->GetActiveScene());
-        data.cmd_offset = bb->AskNumCommands() * 1;
-        binder.Push(0, data);
+    csp_player->BindDispatch<RP::DummyDispatchData>(
+        [pm, bb](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+        uint32_t sp = CountShadowInstances(pm);
+        uint32_t N  = bb->AskNumInstances();
+        binder.element_count = { (N > sp) ? (N - sp) : 0u, 1, 1 };
     });
 
-    culling_out_indirect_inited = true;
-}
-
-void DefaultShaderProgramSet::SetCullingWritePrograms(
-    EngineContext* ctx, LightDataModule* ldm)
-{
-    using namespace DefaultBuffersNames;
-
-	BatchBuilder* bb = ctx->GetBatchBuilder();
-    if (culling_write_inited) {
-        SDL_Log("Culling write programs already initialized.");
-        return;
-    }
-
-    ObjectManager* om = ctx->GetObjectManager();
-    ComputeShaderData csd_write = ctx->CreateComputeShader("../engine/shaders/culling_write.comp.spv");
-
-    ComputeShaderProgram* csp_main = ctx->CreateComputeShaderProgram("csp_culling_write_main", csd_write,
-        { DEFAULT_OFFSET_BUFFER, DEFAULT_OUT_TRANSFORM_BUFFER },                  // rw
-        { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_BATCH_BUFFER,
-          DEFAULT_BOUND_SPHERE_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER }, // ro
+    // (3) СВЕТ — световые камеры (блоки 1..L, num_blocks=L), теневые записи [0, shadow_pib).
+    // Cameras=LIGHT_CAMERA_BUFFER (t3). При L=0 диспатч 0 → пропуск.
+    ComputeShaderProgram* csp_light = ctx->CreateComputeShaderProgram("csp_cull_light", csd,
+        { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
+        { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
+          DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4 (Cameras = свет)
         {}, {}, {},
-        DefaultRenderPassNamespace::CULLING_WRITE_PASS);
-
-    csp_main->BindPushConstants<DefaultRenderPassNamespace::ComputeCullingCountUniform>(
-        [](const PushConstantBinder& binder, DefaultRenderPassNamespace::ComputeCullingCountUniform data) {
-        data.num_cameras = 1;
-        data.cmd_offset = 0;
+        RP::CULLING_PASS);
+    csp_light->BindPushConstants<RP::CullingPibUniform>(
+        [ldm, om, pm, bb](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+        uint32_t L  = ldm->AskNumLightCameras(om, om->GetActiveScene());
+        uint32_t sp = CountShadowInstances(pm);
+        data.range_start = 0u;
+        data.range_count = (L > 0) ? sp : 0u;
+        data.block_base = 1u;
+        data.num_blocks = L;
+        data.block_stride = bb->AskNumInstances();
+        data.total_commands = bb->AskNumCommands();
         binder.Push(0, data);
     });
-
-    ComputeShaderProgram* csp_light = ctx->CreateComputeShaderProgram("csp_culling_write_light", csd_write,
-        { DEFAULT_OFFSET_BUFFER, DEFAULT_OUT_TRANSFORM_BUFFER },
-        { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_BATCH_BUFFER,
-          DEFAULT_BOUND_SPHERE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },
-        {}, {}, {},
-        DefaultRenderPassNamespace::CULLING_WRITE_PASS);
-
-    csp_light->BindPushConstants<DefaultRenderPassNamespace::ComputeCullingCountUniform>(
-        [ldm, om, bb](const PushConstantBinder& binder, DefaultRenderPassNamespace::ComputeCullingCountUniform data) {
-        data.num_cameras = ldm->AskNumLightCameras(om, om->GetActiveScene());
-        data.cmd_offset = bb->AskNumCommands() * 1;
-        binder.Push(0, data);
+    csp_light->BindDispatch<RP::DummyDispatchData>(
+        [ldm, om, pm](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+        uint32_t L  = ldm->AskNumLightCameras(om, om->GetActiveScene());
+        binder.element_count = { (L > 0) ? CountShadowInstances(pm) : 0u, 1, 1 };
     });
 
-    culling_write_inited = true;
+    culling_pib_inited = true;
 }
 
 void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm)

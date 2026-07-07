@@ -27,7 +27,6 @@
 #include "DefaultRenderPassSet.h"
 #include "IndirectDataModule.h"
 #include "BoundSphereDataModule.h"
-#include "CountBufferDataModule.h"
 #include "config.h"
 #include "UI_ImGui.h"
 #include "EngineContext.h"
@@ -70,6 +69,9 @@ public:
     bool RenderFunc(uint8_t idx);
 
     void FenceFunc(uint8_t slot);
+
+    // [DEBUG] Дебаг-ридбек первых значений out_pib (см. Engine.cpp). Временный.
+    void DebugReadbackOutPib(uint8_t slot);
 
     void BeginImGuiFrame();
 
@@ -125,7 +127,6 @@ private:
 	LightDataModule* light_data_module = nullptr;
 	IndirectDataModule* indirect_data_module = nullptr;
     BoundSphereDataModule* bound_sphere_data_module = nullptr;
-    CountBufferDataModule* count_data_module = nullptr;
 
 	EngineContext* engine_context;
     std::atomic<bool> running = true;

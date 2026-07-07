@@ -232,21 +232,13 @@ RenderPassStep* PassManager::GetRenderPassStep(const RenderPassName& name)
 ComputePassStep* PassManager::GetComputePassStep(const ComputePassName& name)
 {
 	auto it = compute_steps.find(name);
-	if (it != compute_steps.end()) {
-		return it->second.get();
-	}
-	SDL_Log("RenderManager::Compute pass '%s' not found", name.c_str());
-	return nullptr;
+	return (it != compute_steps.end()) ? it->second.get() : nullptr;
 }
 
 ComputePassStep* PassManager::GetComputePrepassStep(const ComputePrepassName& name)
 {
 	auto it = compute_prepass_steps.find(name);
-	if (it != compute_prepass_steps.end()) {
-		return it->second.get();
-	}
-	SDL_Log("Compute prepass '%s' not found", name.c_str());
-	return nullptr;
+	return (it != compute_prepass_steps.end()) ? it->second.get() : nullptr;
 }
 
 PassManager::~PassManager()

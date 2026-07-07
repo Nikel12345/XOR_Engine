@@ -5,6 +5,7 @@
 // пара функций {save, load}, замкнутых на конкретный T. Открытая регистрация: движок
 // регистрирует свои компоненты здесь, верхние слои (физика/игра) могут добавить свои.
 #include <string>
+#include <string_view>
 #include <vector>
 #include <typeindex>
 #include <unordered_map>
@@ -17,7 +18,8 @@ struct ComponentSerializer {
     // Память → файл: прочитать строку i архетипа, дописать токены полезной нагрузки в out.
     void (*save)(Archetype& arch, size_t i, std::string& out);
     // Файл → память: распарсить токены, ensure_component<T> на архетипе и дописать значение.
-    void (*load)(Archetype& arch, const std::vector<std::string>& tokens);
+    // Токены — string_view В ИСХОДНЫЙ буфер сцены (жив на всё время загрузки): без копий строк.
+    void (*load)(Archetype& arch, const std::vector<std::string_view>& tokens);
 };
 
 class ComponentSerializerRegistry {

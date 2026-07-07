@@ -3,7 +3,7 @@
 #include "SlotController.h"
 #include "EngineProfiler.h"
 
-static constexpr bool UPS_priority = true;
+static constexpr bool UPS_priority = false;
 static constexpr bool FPS_NoLimit = false;
 static constexpr bool UPS_NoLimit = false;
 
@@ -173,7 +173,7 @@ void ThreadController::UploadThread()
         {
             // Загрузок в полёте нет — опрашивать чаще нет смысла. Пока пайплайн
             // полон, цикл сюда не попадает (стоит в kernel-wait, не спит).
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));
         }
     }
 }
@@ -199,7 +199,7 @@ void ThreadController::RenderThread()
                 fps_counter->end();
                 break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));
         }
 
         if (FPS_NoLimit)
@@ -247,7 +247,7 @@ void ThreadController::FenceThread()
         {
             // Ждать нечего (никто не рендерится или кадр ещё не сабмитнут) —
             // опрашивать чаще нет смысла.
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 }

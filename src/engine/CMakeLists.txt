@@ -188,7 +188,6 @@ set(ENGINE_STRUCTS_HDR
 )
 set(ENGINE_DATAMODULES_SRC
     src/BoundSphereDataModule.cpp
-    src/CountBufferDataModule.cpp
     src/IndirectDataModule.cpp
     src/LightDataModule.cpp
     src/PIB_DataModule.cpp
@@ -197,7 +196,6 @@ set(ENGINE_DATAMODULES_SRC
 )
 set(ENGINE_DATAMODULES_HDR
     include/BoundSphereDataModule.h
-    include/CountBufferDataModule.h
     include/IndirectDataModule.h
     include/LightDataModule.h
     include/PIB_DataModule.h

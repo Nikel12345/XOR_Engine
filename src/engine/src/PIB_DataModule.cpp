@@ -8,7 +8,7 @@
 PIB_DataModule::PIB_DataModule()
 {
     for (uint64_t& r : pib_last_revision) r = ~0ull;
-    for (uint64_t& r : e2b_last_revision) r = ~0ull;
+    for (uint64_t& r : e2c_last_revision) r = ~0ull;
 }
 
 uint32_t PIB_DataModule::ComputeElementCount(PassManager* rm) const
@@ -60,6 +60,10 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
                             auto arch_it = scene->entity_to_archetype.find(entity);
                             if (arch_it == scene->entity_to_archetype.end()) {
                                 SDL_Log("StorePIB: entity %u not in scene (stale pib slot)", entity);
+                                // -1, а НЕ пропуск: пропуск сдвинул бы все последующие записи
+                                // относительно firstInstance батчей. -1 понимают и culling-шейдер
+                                // (прокидывает дальше), и вершинник (вырожденная позиция).
+                                combined.push_back(0xFFFFFFFFu);
                                 continue;
                             }
                             uint32_t row = arch_it->second->render_instance_base
@@ -70,31 +74,30 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
     bm->UploadToTransferBuffer(task, safe_u32(combined.size()) * sizeof(uint32_t), combined.data());
 }
 
-uint32_t PIB_DataModule::CalculateEntityToBatch(PassManager* pm, uint64_t revision, uint8_t slot)
+uint32_t PIB_DataModule::CalculateEntityToCmd(PassManager* rm, uint64_t revision, uint8_t slot)
 {
-    if (revision == e2b_last_revision[slot]) return 0;
-
-    // entity->batch заливает по одному uint32 на инстанс — тот же размер, что и PIB.
-    e2b_last_revision[slot] = revision;
-
-    return ComputeElementCount(pm) * sizeof(uint32_t);
+    if (revision == e2c_last_revision[slot]) return 0;
+    e2c_last_revision[slot] = revision;
+    // Один uint на PIB-запись — тот же размер, что PIB.
+    return ComputeElementCount(rm) * sizeof(uint32_t);
 }
 
-void PIB_DataModule::StoreEntityToBatch(BufferManager* bm, PassManager* pm, UploadTask* task)
+void PIB_DataModule::StoreEntityToCmd(BufferManager* bm, PassManager* rm, UploadTask* task)
 {
+    // Тот же обход, что StorePIB/StoreIndirect/FinalizeOffsets: команды нумеруются подряд
+    // по проходам (cmd_idx++ на model_batch), а каждая запись получает индекс своей команды.
+    std::vector<uint32_t> combined;
+    combined.reserve(total_elements);
     uint32_t cmd_idx = 0;
-    for (RenderPassStep* rp : pm->GetOrderedRenderPasses()){
-        for (const auto& [_, sb] : rp->shader_batches){
-            for (const auto& [_, ab] : sb.atlases_batches){
-                for (const auto& [_, tb] : ab.texture_batches){
-                    for (const auto& [_, mb] : tb.model_batches){
-                        for (uint32_t id : mb.pib_sub_buffer) {
-                            bm->UploadToTransferBuffer(task, sizeof(uint32_t), &cmd_idx);
-                        }
+    for (RenderPassStep* rp : rm->GetOrderedRenderPasses())
+        for (const auto& [_, sb] : rp->shader_batches)
+            for (const auto& [_, ab] : sb.atlases_batches)
+                for (const auto& [_, tb] : ab.texture_batches)
+                    for (const auto& [_, mb] : tb.model_batches) {
+                        for (size_t n = 0; n < mb.pib_sub_buffer.size(); ++n)
+                            combined.push_back(cmd_idx);
                         cmd_idx++;
                     }
-                }
-            }
-        }
-    }
+
+    bm->UploadToTransferBuffer(task, safe_u32(combined.size()) * sizeof(uint32_t), combined.data());
 }

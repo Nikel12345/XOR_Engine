@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "EngineContext.h"
 #include "TextureLoader.h"
+#include "EngineProfiler.h"   // Prof::Clock/MsSince — тайминг фаз загрузки (реальны при любом ENGINE_PROFILE)
 #include <fstream>
 #include <sstream>
 
@@ -240,18 +241,35 @@ void EngineContext::SaveScene(const SceneName& scene_name, const std::string& pa
 
 void EngineContext::LoadScene(const SceneName& scene_name, const std::string& path)
 {
-	std::ifstream f(path, std::ios::binary);
+	// ── Тайминг фаз загрузки (диагностика 5-секундной загрузки 100k). Load — событие
+	// разовое, поэтому не через кадровый Prof, а прямым SDL_Log сразу после. ──
+	const auto t_read = Prof::Clock::now();
+	std::ifstream f(path, std::ios::binary | std::ios::ate);   // ate: сразу в конец — узнать размер
 	if (!f) { SDL_Log("LoadScene: cannot open '%s'", path.c_str()); return; }
-	std::stringstream ss; ss << f.rdbuf();
+	// Читаем ФАЙЛ ОДНОЙ аллокацией прямо в строку (без stringstream → без тройной копии
+	// 43 МБ: rdbuf-буфер + ss.str()). Одна аллокация точного размера + один read.
+	const std::streamoff sz = f.tellg();
+	std::string text;
+	if (sz > 0) {
+		text.resize(static_cast<size_t>(sz));
+		f.seekg(0);
+		f.read(text.data(), sz);
+		text.resize(static_cast<size_t>(f.gcount()));          // усечь до реально прочитанного
+	}
+	const double read_ms = Prof::MsSince(t_read);
 
 	// Replace-on-load: сносим прежнее содержимое сцены ДО наполнения — иначе загрузка
 	// дописала бы поверх (дубликаты сущностей). Делаем это только после успешного
 	// открытия файла, чтобы кривой путь не обнулял текущую сцену.
+	const auto t_clear = Prof::Clock::now();
 	ClearScene(scene_name);
+	const double clear_ms = Prof::MsSince(t_clear);
 
 	// ECS-часть: текст → сущности (указатели на ассеты пока пустые, только имена).
 	// Возвращает ИМЕННО созданные этой загрузкой сущности.
-	std::vector<Entity> loaded = object_manager->LoadScene(scene_name, ss.str());
+	const auto t_ecs = Prof::Clock::now();
+	std::vector<Entity> loaded = object_manager->LoadScene(scene_name, text);
+	const double ecs_ms = Prof::MsSince(t_ecs);
 
 	SceneData* scene = object_manager->GetScene(scene_name);
 	if (!scene) return;
@@ -261,6 +279,7 @@ void EngineContext::LoadScene(const SceneName& scene_name, const std::string& pa
 	// производные сущности (напр. дебаг-коллайдеры) держат живые указатели без имён —
 	// их трогать нельзя. Незаполнённое/неизвестное имя оставляет nullptr; сборщик батчей
 	// такие сущности пропускает (см. BatchBuilder::AddEntityToBatches), но логируем.
+	const auto t_ptr = Prof::Clock::now();
 	for (Entity e : loaded) {
 		if (object_manager->Has<ModelComponent>(scene, e)) {
 			ModelComponent& m = object_manager->GetComponent<ModelComponent>(scene, e);
@@ -280,10 +299,15 @@ void EngineContext::LoadScene(const SceneName& scene_name, const std::string& pa
 		}
 	}
 
+	const double ptr_ms = Prof::MsSince(t_ptr);
+
 	object_manager->SetSceneState(scene_name, true);
 
 	batch_builder->SetDirtyBatches(true);
 	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), path.c_str());
+	SDL_Log("LoadScene TIMING [%zu ent, %.1f MB]: read=%.1f  clear=%.1f  ecs=%.1f  ptr_restore=%.1f  | total=%.1f ms",
+		loaded.size(), text.size() / (1024.0 * 1024.0),
+		read_ms, clear_ms, ecs_ms, ptr_ms, read_ms + clear_ms + ecs_ms + ptr_ms);
 }
 
 void EngineContext::ExecuteGenerators()
