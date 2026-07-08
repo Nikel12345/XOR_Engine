@@ -5,22 +5,18 @@
 #include "DefaultRenderPassSet.h"
 #include "PositionStructure.h"
 #include "EngineContext.h"
-#include "RenderManager.h"   // PassManager + RenderPassStep (счёт теневых команд для scatter)
+#include "RenderManager.h"    // PassManager + RenderPassStep (ordinal теневого прохода)
+#include "BatchBuilder.h"     // AskLayout/AskNum*(slot) — слепок раскладки слота
+#include "RenderSnapshot.h"   // RenderSnap::BatchLayout
 
 namespace {
-    // shadow_pib = сумма инстансов теневых команд = ГРАНИЦА PIB между теневыми [0, shadow_pib) и
-    // остальными [shadow_pib, N). Она же first_instance первой не-теневой команды (shadow первый).
-    // Идёт под BatchTreeMutex (push в ExecutePrepassesSteps).
-    uint32_t CountShadowInstances(PassManager* pm)
+    // shadow_pib слота = сумма инстансов SHADOW_PASS в СЛЕПКЕ раскладки слота = граница PIB
+    // между теневыми записями [0, sp) и остальными [sp, N). Она же first_instance первой
+    // не-теневой команды (FinalizeOffsets нумерует по проходам, shadow первый по pass_index).
+    uint32_t ShadowPib(const RenderSnap::BatchLayout* layout, uint32_t shadow_ordinal)
     {
-        uint32_t s = 0;
-        if (RenderPassStep* rp = pm->GetRenderPassStep(DefaultRenderPassNamespace::SHADOW_PASS))
-            for (auto& [_, sb] : rp->shader_batches)
-                for (auto& [_, ab] : sb.atlases_batches)
-                    for (auto& [_, tb] : ab.texture_batches)
-                        for (auto& [_, mb] : tb.model_batches)
-                            s += mb.instanceCount;
-        return s;
+        if (!layout || shadow_ordinal >= layout->passes.size()) return 0u;
+        return layout->passes[shadow_ordinal].num_instances;
     }
 }
 
@@ -199,9 +195,13 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
     }
 
     namespace RP = DefaultRenderPassNamespace;
-    ObjectManager* om = ctx->GetObjectManager();
     PassManager*   pm = ctx->GetPassManager();
     BatchBuilder*  bb = ctx->GetBatchBuilder();
+
+    // Ordinal теневого прохода в слепке раскладки (стабилен после FillRenderPasses) —
+    // ключ для ShadowPib. Все лямбды ниже читают ТОЛЬКО слепки слота binder.slot.
+    RenderPassStep* shadow_rp = pm->GetRenderPassStep(RP::SHADOW_PASS);
+    const uint32_t shadow_ord = shadow_rp ? shadow_rp->ordinal : 0xFFFFFFFFu;
 
     // (1) CLEAR — обнуляет num_instances ВСЕХ (камера,команда) перед scatter. Создаётся ПЕРВОЙ →
     // shader_batch[0] в CULLING_PASS, SDL барьерит между compute-пассами → scatter видит нули.
@@ -211,13 +211,13 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
         {}, {}, {}, {},
         RP::CULLING_PASS);
     csp_clear->BindPushConstants<RP::CullingClearUniform>(
-        [ldm, om, bb](const PushConstantBinder& binder, RP::CullingClearUniform data) {
-        data.total_slots = (1 + ldm->AskNumLightCameras(om, om->GetActiveScene())) * bb->AskNumCommands();
+        [ldm, bb](const PushConstantBinder& binder, RP::CullingClearUniform data) {
+        data.total_slots = (1 + ldm->AskNumLightCameras(binder.slot)) * bb->AskNumCommands(binder.slot);
         binder.Push(0, data);
     });
     csp_clear->BindDispatch<RP::DummyDispatchData>(
-        [ldm, om, bb](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-        binder.element_count = { (1 + ldm->AskNumLightCameras(om, om->GetActiveScene())) * bb->AskNumCommands(), 1, 1 };
+        [ldm, bb](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+        binder.element_count = { (1 + ldm->AskNumLightCameras(binder.slot)) * bb->AskNumCommands(binder.slot), 1, 1 };
     });
 
     // Общий шейдер scatter'а для всех групп камер (разные программы = разные камерные буферы).
@@ -231,21 +231,23 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
         {}, {}, {},
         RP::CULLING_PASS);
     csp_player->BindPushConstants<RP::CullingPibUniform>(
-        [pm, bb](const PushConstantBinder& binder, RP::CullingPibUniform data) {
-        uint32_t sp = CountShadowInstances(pm);
-        uint32_t N  = bb->AskNumInstances();
+        [bb, shadow_ord](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+        const RenderSnap::BatchLayout* lo = bb->AskLayout(binder.slot);
+        uint32_t sp = ShadowPib(lo, shadow_ord);
+        uint32_t N  = lo ? lo->num_instances : 0u;
         data.range_start = sp;
         data.range_count = (N > sp) ? (N - sp) : 0u;
         data.block_base = 0u;
         data.num_blocks = 1u;
         data.block_stride = N;
-        data.total_commands = bb->AskNumCommands();
+        data.total_commands = lo ? lo->num_commands : 0u;
         binder.Push(0, data);
     });
     csp_player->BindDispatch<RP::DummyDispatchData>(
-        [pm, bb](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-        uint32_t sp = CountShadowInstances(pm);
-        uint32_t N  = bb->AskNumInstances();
+        [bb, shadow_ord](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+        const RenderSnap::BatchLayout* lo = bb->AskLayout(binder.slot);
+        uint32_t sp = ShadowPib(lo, shadow_ord);
+        uint32_t N  = lo ? lo->num_instances : 0u;
         binder.element_count = { (N > sp) ? (N - sp) : 0u, 1, 1 };
     });
 
@@ -258,21 +260,22 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
         {}, {}, {},
         RP::CULLING_PASS);
     csp_light->BindPushConstants<RP::CullingPibUniform>(
-        [ldm, om, pm, bb](const PushConstantBinder& binder, RP::CullingPibUniform data) {
-        uint32_t L  = ldm->AskNumLightCameras(om, om->GetActiveScene());
-        uint32_t sp = CountShadowInstances(pm);
+        [ldm, bb, shadow_ord](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+        const RenderSnap::BatchLayout* lo = bb->AskLayout(binder.slot);
+        uint32_t L  = ldm->AskNumLightCameras(binder.slot);
+        uint32_t sp = ShadowPib(lo, shadow_ord);
         data.range_start = 0u;
         data.range_count = (L > 0) ? sp : 0u;
         data.block_base = 1u;
         data.num_blocks = L;
-        data.block_stride = bb->AskNumInstances();
-        data.total_commands = bb->AskNumCommands();
+        data.block_stride = lo ? lo->num_instances : 0u;
+        data.total_commands = lo ? lo->num_commands : 0u;
         binder.Push(0, data);
     });
     csp_light->BindDispatch<RP::DummyDispatchData>(
-        [ldm, om, pm](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-        uint32_t L  = ldm->AskNumLightCameras(om, om->GetActiveScene());
-        binder.element_count = { (L > 0) ? CountShadowInstances(pm) : 0u, 1, 1 };
+        [ldm, bb, shadow_ord](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+        uint32_t L = ldm->AskNumLightCameras(binder.slot);
+        binder.element_count = { (L > 0) ? ShadowPib(bb->AskLayout(binder.slot), shadow_ord) : 0u, 1, 1 };
     });
 
     culling_pib_inited = true;
@@ -285,8 +288,6 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
         SDL_Log("Shadow blur programs already initialized.");
         return;
     }
-
-    ObjectManager* om = ctx->GetObjectManager();
 
     ComputeShaderData csd_h = ctx->CreateComputeShader("../engine/shaders_code/comp/shadow_blur_h.comp.hlsl");
     ComputeShaderData csd_v = ctx->CreateComputeShader("../engine/shaders_code/comp/shadow_blur_v.comp.hlsl");
@@ -311,8 +312,8 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
             binder.Push(0, data);
         });
         csp_h->BindDispatch<DummyDispatchData>(
-            [L, om, blur_temp_atlas, ldm](DispatchSizeBinder& binder, DummyDispatchData) {
-            if (ldm->IsShadowLayerDirty(om, L))
+            [L, blur_temp_atlas, ldm](DispatchSizeBinder& binder, DummyDispatchData) {
+            if (ldm->IsShadowLayerDirty(binder.slot, L))
                 binder.element_count = { blur_temp_atlas->width, blur_temp_atlas->height, 1 };
             else
                 binder.element_count = { 0, 0, 0 };
@@ -328,8 +329,8 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
             SHADOW_BLUR_PASS);
 
         csp_v->BindDispatch<DummyDispatchData>(
-            [L, om, moments_atlas, ldm](DispatchSizeBinder& binder, DummyDispatchData) {
-            if (ldm->IsShadowLayerDirty(om, L))
+            [L, moments_atlas, ldm](DispatchSizeBinder& binder, DummyDispatchData) {
+            if (ldm->IsShadowLayerDirty(binder.slot, L))
                 binder.element_count = { moments_atlas->width, moments_atlas->height, 1 };
             else
                 binder.element_count = { 0, 0, 0 };

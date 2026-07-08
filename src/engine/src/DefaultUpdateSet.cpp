@@ -207,6 +207,9 @@ void DefaultUpdateSet::SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDa
     }
     auto* bm = ctx.GetBufferManager();
     auto* om = ctx.GetObjectManager();
+    // ИНВАРИАНТ ПОРЯДКА: эта инструкция обязана регистрироваться РАНЬШЕ indirect/out_pib —
+    // её size-фаза пишет слепок теневых камер слота (CalculateLightCamerasSize), который
+    // они читают через AskNumLightCameras(slot) в своих size-фазах того же прохода.
     bm->CreateUpdateInstruction(DEFAULT_LIGHT_CAMERA_BUFFER,
         [om, ldm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
@@ -214,11 +217,11 @@ void DefaultUpdateSet::SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDa
         if (!scene) return;
         ldm->StoreLightCameras(bm, &task, om, scene);
     },
-        [om, ldm]() -> uint32_t
+        [om, ldm, bm]() -> uint32_t
     {
-        SceneData* scene = om->GetActiveScene();
-        if (!scene) return 0;
-        return ldm->CalculateLightCamerasSize(om, scene);
+        // Size-фаза выполняется всегда (store при size==0 скипается) → слепок слота
+        // никогда не остаётся стейлым, даже если последний теневой свет удалили.
+        return ldm->CalculateLightCamerasSize(om, om->GetActiveScene(), bm->logic_index.load());
     }
     );
     light_cameras_update_inited = true;
@@ -232,19 +235,19 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
     }
     auto* bm = ctx.GetBufferManager();
     auto* pm = ctx.GetPassManager();
-    auto* om = ctx.GetObjectManager();
 
     // PER-FRAME (без revision-гейта): num_instances у каждой копии обязан быть 0 в начале
-    // кадра (scatter накапливает атомиком). num_cameras = 1 игрок + L световых.
+    // кадра (scatter накапливает атомиком). num_cameras = 1 игрок + L световых — из слепка
+    // слота (его уже записала size-фаза LIGHT_CAMERA_BUFFER, см. инвариант порядка там).
     bm->CreateUpdateInstruction(DEFAULT_INDIRECT_BUFFER,
-        [pm, idm, om, ldm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+        [pm, idm, ldm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
-        uint32_t nc = 1 + ldm->AskNumLightCameras(om, om->GetActiveScene());
+        uint32_t nc = 1 + ldm->AskNumLightCameras(bm->logic_index.load());
         idm->StoreIndirect(bm, pm, &task, nc);
     },
-        [pm, idm, om, ldm]() -> uint32_t
+        [pm, idm, ldm, bm]() -> uint32_t
     {
-        uint32_t nc = 1 + ldm->AskNumLightCameras(om, om->GetActiveScene());
+        uint32_t nc = 1 + ldm->AskNumLightCameras(bm->logic_index.load());
         return idm->CalculateIndirectSize(pm, nc);
     }
     );
@@ -302,17 +305,19 @@ void DefaultUpdateSet::SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModu
         return;
     }
     auto* bm = ctx.GetBufferManager();
-    auto* om = ctx.GetObjectManager();
     auto* bb = ctx.GetBatchBuilder();
 
     // Только ресайз (updater = nullptr): содержимое пишет scatter-каллинг каждый кадр
     // (компактно). Блок int'ов на камеру (N = число PIB-записей): блок 0 — камера игрока.
+    // Оба множителя — из слепков слота (камеры пишет size-фаза LIGHT_CAMERA_BUFFER выше,
+    // раскладку батчей — StampLayoutSnapshot в PrepareFunc до апдейтеров).
     bm->CreateUpdateInstruction(DEFAULT_OUT_PIB_BUFFER,
         nullptr,
-        [om, bb, ldm]() -> uint32_t
+        [bb, ldm, bm]() -> uint32_t
     {
-        uint32_t num_cameras_total = ldm->AskNumLightCameras(om, om->GetActiveScene()) + 1;
-        return num_cameras_total * bb->AskNumInstances() * sizeof(int32_t);
+        uint8_t slot = bm->logic_index.load();
+        uint32_t num_cameras_total = ldm->AskNumLightCameras(slot) + 1;
+        return num_cameras_total * bb->AskNumInstances(slot) * sizeof(int32_t);
     }
     );
     out_pib_update_inited = true;

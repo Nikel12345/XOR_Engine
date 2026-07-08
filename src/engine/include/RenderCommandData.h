@@ -77,6 +77,9 @@ struct RenderPassStep {
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function;
     std::vector<SDL_GPUTextureSamplerBinding> global_texture_bindings;
     int pass_index = -1;
+    // Порядковый номер в ordered_passes (ставит FillRenderPasses) — индекс прохода в
+    // RenderSnap::BatchLayout::passes. Стабилен после старта.
+    uint32_t ordinal = 0;
 };
 
 

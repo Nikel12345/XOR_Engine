@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "EngineContext.h"
 #include "TextureLoader.h"
+#include "RenderManager.h"    // PassManager (создание проходов, GetRenderPassStep)
 #include "EngineProfiler.h"   // Prof::Clock/MsSince — тайминг фаз загрузки (реальны при любом ENGINE_PROFILE)
 #include <fstream>
 #include <sstream>
@@ -221,10 +222,11 @@ void EngineContext::ClearScene(const SceneName& scene_name)
 	// Полное удаление контента: архетипы + индексы + иерархия (next_entity_id→0).
 	// Генераторы НЕ трогаем — они навешены однократно и должны пережить перезагрузку
 	// (см. SceneData::clear). Батчи не правим точечно: ставим флаг полной пересборки —
-	// BuildRenderBatches сам сбросит дерево, entity_slots и очереди дельт под локом и
-	// отстроит от (теперь пустой) сцены, так что висячих ссылок на удалённые сущности
-	// не останется (см. BatchBuilder::BuildRenderBatches).
-	// std::lock_guard<std::mutex> lock(object_manager->EcsMutex());   // ДИАГНОСТИКА гонки — ВРЕМЕННО СНЯТО
+	// BuildRenderBatches сам сбросит дерево, entity_slots и очереди дельт и отстроит от
+	// (теперь пустой) сцены, так что висячих ссылок на удалённые сущности не останется.
+	// Замок не нужен: рендер-проходы/каллинг читают пер-слотовые СЛЕПКИ, а не ECS.
+	// Единственный живой читатель ECS на рендер-потоке — UI (осознанный компромисс,
+	// см. Engine::RenderFunc).
 	scene->clear();
 	batch_builder->SetDirtyBatches(true);
 }
@@ -263,47 +265,54 @@ void EngineContext::LoadScene(const SceneName& scene_name, const std::string& pa
 	// Replace-on-load: сносим прежнее содержимое сцены ДО наполнения — иначе загрузка
 	// дописала бы поверх (дубликаты сущностей). Делаем это только после успешного
 	// открытия файла, чтобы кривой путь не обнулял текущую сцену.
-	const auto t_clear = Prof::Clock::now();
-	ClearScene(scene_name);
-	const double clear_ms = Prof::MsSince(t_clear);
+	//
+	// Замок на ECS-swap не нужен: рендер-проходы/каллинг читают пер-слотовые слепки, а не
+	// ECS. Единственный живой читатель ECS на рендер-потоке — UI (осознанный компромисс,
+	// см. Engine::RenderFunc; правильное закрытие — UI-слепок или построение UI в sim).
+	double clear_ms = 0.0, ecs_ms = 0.0, ptr_ms = 0.0;
+	std::vector<Entity> loaded;
+	{
+		const auto t_clear = Prof::Clock::now();
+		if (SceneData* prev = object_manager->GetScene(scene_name)) prev->clear();
+		clear_ms = Prof::MsSince(t_clear);
 
-	// ECS-часть: текст → сущности (указатели на ассеты пока пустые, только имена).
-	// Возвращает ИМЕННО созданные этой загрузкой сущности.
-	const auto t_ecs = Prof::Clock::now();
-	std::vector<Entity> loaded = object_manager->LoadScene(scene_name, text);
-	const double ecs_ms = Prof::MsSince(t_ecs);
+		// ECS-часть: текст → сущности (указатели на ассеты пока пустые, только имена).
+		// Возвращает ИМЕННО созданные этой загрузкой сущности.
+		const auto t_ecs = Prof::Clock::now();
+		loaded = object_manager->LoadScene(scene_name, text);
+		ecs_ms = Prof::MsSince(t_ecs);
 
-	SceneData* scene = object_manager->GetScene(scene_name);
-	if (!scene) return;
-
-	// Чиним указатели на ассеты по сохранённым именам — это знает только верхний слой.
-	// Обходим ТОЛЬКО загруженные сущности (не всю сцену): уже существовавшие в ней
-	// производные сущности (напр. дебаг-коллайдеры) держат живые указатели без имён —
-	// их трогать нельзя. Незаполнённое/неизвестное имя оставляет nullptr; сборщик батчей
-	// такие сущности пропускает (см. BatchBuilder::AddEntityToBatches), но логируем.
-	const auto t_ptr = Prof::Clock::now();
-	for (Entity e : loaded) {
-		if (object_manager->Has<ModelComponent>(scene, e)) {
-			ModelComponent& m = object_manager->GetComponent<ModelComponent>(scene, e);
-			m.model = m.name.empty() ? nullptr : (*model_manager)[m.name];
-			if (!m.model)
-				SDL_Log("LoadScene: model '%s' not resolved (entity will not render)", m.name.c_str());
-		}
-		if (object_manager->Has<MaterialComponent>(scene, e)) {
-			MaterialComponent& mc = object_manager->GetComponent<MaterialComponent>(scene, e);
-			mc.materials.clear();
-			mc.materials.reserve(mc.names.size());
-			for (const auto& n : mc.names) {
-				Material* mat = material_manager->GetMaterial(n);
-				if (!mat) SDL_Log("LoadScene: material '%s' not resolved", n.c_str());
-				mc.materials.push_back(mat);
+		SceneData* scene = object_manager->GetScene(scene_name);
+		if (scene) {
+			// Чиним указатели на ассеты по сохранённым именам — это знает только верхний слой.
+			// Обходим ТОЛЬКО загруженные сущности (не всю сцену): уже существовавшие в ней
+			// производные сущности (напр. дебаг-коллайдеры) держат живые указатели без имён —
+			// их трогать нельзя. Незаполнённое/неизвестное имя оставляет nullptr; сборщик батчей
+			// такие сущности пропускает (см. BatchBuilder::AddEntityToBatches), но логируем.
+			const auto t_ptr = Prof::Clock::now();
+			for (Entity e : loaded) {
+				if (object_manager->Has<ModelComponent>(scene, e)) {
+					ModelComponent& m = object_manager->GetComponent<ModelComponent>(scene, e);
+					m.model = m.name.empty() ? nullptr : (*model_manager)[m.name];
+					if (!m.model)
+						SDL_Log("LoadScene: model '%s' not resolved (entity will not render)", m.name.c_str());
+				}
+				if (object_manager->Has<MaterialComponent>(scene, e)) {
+					MaterialComponent& mc = object_manager->GetComponent<MaterialComponent>(scene, e);
+					mc.materials.clear();
+					mc.materials.reserve(mc.names.size());
+					for (const auto& n : mc.names) {
+						Material* mat = material_manager->GetMaterial(n);
+						if (!mat) SDL_Log("LoadScene: material '%s' not resolved", n.c_str());
+						mc.materials.push_back(mat);
+					}
+				}
 			}
+			ptr_ms = Prof::MsSince(t_ptr);
+
+			object_manager->SetSceneState(scene_name, true);
 		}
 	}
-
-	const double ptr_ms = Prof::MsSince(t_ptr);
-
-	object_manager->SetSceneState(scene_name, true);
 
 	batch_builder->SetDirtyBatches(true);
 	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), path.c_str());

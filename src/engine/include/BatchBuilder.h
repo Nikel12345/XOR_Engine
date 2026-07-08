@@ -1,9 +1,13 @@
 #pragma once
 #include <vector>
 #include <unordered_map>
-#include <mutex>
+#include <memory>
 #include <atomic>
+#include <mutex>
 #include <cstdint>
+#include "config.h"   // BUFFERING_LEVEL — пер-слотовые слепки раскладки
+
+namespace RenderSnap { struct BatchLayout; }
 
 class ObjectManager;
 class PipeManager;
@@ -38,11 +42,23 @@ public:
 	// the last revision it processed and re-uploads only when this differs — so the
 	// engine never has to push dirtiness to a specific data module.
 	uint64_t BatchesRevision() const { return batches_revision; }
+	// Эпоха ПОЛНЫХ пересборок дерева (в отличие от batches_revision, инкремент её НЕ двигает).
+	// SlotController клеймит ею слоты: после редкого ребилда рендер держит кадр, пока
+	// перестроенный слот не готов, вместо мерцания старой раскладкой indirect/out_pib.
+	uint64_t RebuildEpoch() const { return rebuild_epoch; }
 	void SetDirtyBatches(bool state) { dirty_batches = state; };
-	uint32_t AskNumCommands();
-	// Число PIB-записей по всем пассам (сумма инстансов всех батчей). Нужен GPU-каллингу
-	// (размер out_pib и диспатч), обновляется вместе с total_commands в FinalizeOffsets.
-	uint32_t AskNumInstances();
+
+	// ── Слепок раскладки батчей (RenderSnap::BatchLayout) ──
+	// Пересобирается в FinalizeOffsets при изменении дерева; слоту присваивается в
+	// StampLayoutSnapshot (PrepareFunc, ПЕРЕД заливкой буферов слота) — O(1), shared_ptr.
+	// Ask*(slot) — ЕДИНСТВЕННЫЙ доступ рендера к раскладке: слепок слота гарантированно
+	// совпадает с indirect_buffer[slot], живое дерево приватно для sim.
+	void StampLayoutSnapshot(uint8_t slot);
+	const RenderSnap::BatchLayout* AskLayout(uint8_t slot) const { return slot_layouts[slot].get(); }
+	uint32_t AskNumCommands(uint8_t slot) const;
+	// Число PIB-записей по всем пассам (сумма инстансов всех батчей) в раскладке слота.
+	// Нужен GPU-каллингу (размер out_pib и диспатч) и адресации камерных блоков out_pib.
+	uint32_t AskNumInstances(uint8_t slot) const;
 
 	void SetDummyTexture(TextureHandle* dummy) { dummy_texture = dummy; };
 
@@ -76,8 +92,13 @@ private:
 	std::vector<Entity> entities_to_create; // protected by delta_mutex
 	std::vector<Entity> entities_to_delete; // protected by delta_mutex
 
-	uint32_t total_commands = 0;
-	uint32_t total_instances = 0;
+	// Текущая раскладка (двойник дерева после FinalizeOffsets) и её пер-слотовые стампы.
+	// current_layout пишет только sim (prepare); слоты берут shared_ptr — старый слот
+	// в полёте продолжает держать свою версию, пока не переиспользован.
+	std::shared_ptr<const RenderSnap::BatchLayout> current_layout;
+	std::shared_ptr<const RenderSnap::BatchLayout> slot_layouts[BUFFERING_LEVEL];
+
 	uint64_t batches_revision = 0;
+	uint64_t rebuild_epoch = 0;   // ++ только на полном ребилде (не на инкременте)
 	std::atomic<bool> dirty_batches{ true };
 };

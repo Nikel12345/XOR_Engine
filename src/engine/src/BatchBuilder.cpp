@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "BatchBuilder.h"
 #include "RenderCommandData.h"
+#include "RenderSnapshot.h"   // BatchLayout — слепок раскладки, который строит FinalizeOffsets
 #include "ObjectManager.h"
 #include "PipeManager.h"
 #include "RenderManager.h"
@@ -290,15 +291,15 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
 
     // Either a full rebuild (scene activation) or an incremental delta — never
     // both. exchange(false) consumes the rebuild request atomically.
+    // Замок дерева больше не нужен: рендер живое дерево не читает (рисует по слепку
+    // раскладки слота — см. FinalizeOffsets/AskLayout), дерево приватно для sim.
     bool changed = false;
     if (dirty_batches.exchange(false)) {
-        // Полная пересборка СНОСИТ узлы дерева (shader_batches.clear()) — единственная
-        // операция, опасная для параллельного render'а. Держим замок дерева на ребилд +
-        // его FinalizeOffsets (он проставляет indirect_command_index, который читает
-        // render). Инкремент ниже узлы не трогает и идёт без замка.
-        std::lock_guard<std::mutex> lock(pass_manager->BatchTreeMutex());
         BuildRenderBatches(pm, pass_manager, om, tm, sm, scene);
         FinalizeOffsets(pass_manager);
+        // Полная пересборка переклеила ВСЮ раскладку (indirect_command_index, firstInstance).
+        // Бампим эпоху — слоты, залитые под старой раскладкой, рендер больше не покажет.
+        ++rebuild_epoch;
         changed = true;
     }
     else if (ApplyIncremental(pm, pass_manager, om, tm, sm, scene)) {
@@ -411,15 +412,44 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager)
     uint32_t offset = 0;
     uint32_t command_index = 0;
 
+    // Одним обходом: проставляем офсеты в ДЕРЕВЕ (его читают sim-модули — indirect/PIB
+    // при заливке буферов) и строим НОВУЮ версию СЛЕПКА раскладки (RenderSnap::BatchLayout) —
+    // значения-двойник дерева для рендера. Слоты получают её в StampLayoutSnapshot: рендер
+    // слота k рисует ровно по раскладке, под которую залит его indirect_buffer[k].
+    auto layout = std::make_shared<RenderSnap::BatchLayout>();
+    layout->passes.reserve(pass_manager->GetOrderedRenderPasses().size());
+
     for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses())
     {
+        RenderSnap::PassDrawList pass_list;
+        pass_list.first_instance = offset;
+        pass_list.shaders.reserve(rp->shader_batches.size());
+
         for (auto& [shader_key, shader_batch] : rp->shader_batches)
         {
+            RenderSnap::ShaderGroup sg;
+            sg.pipeline = shader_batch.pipeline;
+            sg.push_func = shader_batch.push_func;
+            sg.vertexStorageBuffers = shader_batch.vertexStorageBuffers;
+            sg.fragmentStorageBuffers = shader_batch.fragmentStorageBuffers;
+            sg.frag_uniform_count = shader_batch.frag_uniform_count;
+            sg.atlases.reserve(shader_batch.atlases_batches.size());
+
             for (auto& [atlas_key, atlas_batch] : shader_batch.atlases_batches)
             {
+                RenderSnap::AtlasGroup ag;
+                ag.texture_binding = atlas_batch.texture_binding;
+                ag.draws.reserve(atlas_batch.texture_batches.size());
+
                 for (auto& [texture_key, texture_batch] : atlas_batch.texture_batches)
                 {
                     texture_batch.indirect_command_index = command_index;
+
+                    RenderSnap::TextureDraw td;
+                    td.texture_uvl = texture_batch.texture_uvl;
+                    td.params = texture_batch.params;   // невладеющий, адрес стабилен (см. RenderSnapshot.h)
+                    td.indirect_command_index = command_index;
+                    td.draw_count = safe_u32(texture_batch.model_batches.size());
 
                     for (auto& [model_key, model_batch] : texture_batch.model_batches)
                     {
@@ -427,12 +457,40 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager)
                         offset += model_batch.instanceCount;
                         command_index++;
                     }
+                    ag.draws.push_back(std::move(td));
                 }
+                sg.atlases.push_back(std::move(ag));
             }
+            pass_list.shaders.push_back(std::move(sg));
         }
+        // Сумма инстансов прохода: у SHADOW_PASS (первый по pass_index) это shadow_pib —
+        // граница PIB между теневыми [0, sp) и остальными [sp, N) записями для каллинга.
+        pass_list.num_instances = offset - pass_list.first_instance;
+        layout->passes.push_back(std::move(pass_list));
     }
-    total_commands = command_index;
-    total_instances = offset;   // сумма инстансов всех батчей = число PIB-записей
+    layout->num_commands = command_index;
+    layout->num_instances = offset;   // сумма инстансов всех батчей = число PIB-записей
+    current_layout = std::move(layout);
+}
+
+// Слепок раскладки слоту — O(1). Зовётся в PrepareFunc СРАЗУ после UpdateRenderBatches,
+// до заливки буферов слота: всё, что prepare зальёт (indirect/PIB/out_pib), соответствует
+// именно этой версии раскладки.
+void BatchBuilder::StampLayoutSnapshot(uint8_t slot)
+{
+    slot_layouts[slot] = current_layout;
+}
+
+uint32_t BatchBuilder::AskNumCommands(uint8_t slot) const
+{
+    const RenderSnap::BatchLayout* l = slot_layouts[slot].get();
+    return l ? l->num_commands : 0u;
+}
+
+uint32_t BatchBuilder::AskNumInstances(uint8_t slot) const
+{
+    const RenderSnap::BatchLayout* l = slot_layouts[slot].get();
+    return l ? l->num_instances : 0u;
 }
 
 void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm) {
@@ -441,10 +499,10 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
     // биндинги — в ComputePassStandardBody. Поэтому ресайз (пересоздание текстур) ребилда НЕ требует.
     if (!sm || !sm->IsDirtyComputeBatches()) return;
 
-    // clear() сносит узлы — опасно для параллельного render'а. Берём тот же замок, что он держит
-    // в ExecutePassesSteps, на время clear+rebuild (происходит редко: старт + ресайзы).
-    std::lock_guard<std::mutex> lock(pass_manager->BatchTreeMutex());
-
+    // Без замка: пересборка случается только при СОЗДАНИИ compute-программ, а все программы
+    // создаются на инициализации, до старта потоков — параллельного рендера ещё нет.
+    // (Если программы когда-то начнут создаваться в рантайме — список нужно будет отдавать
+    // версией через shared_ptr, как BatchLayout.)
     for (auto& rp : pass_manager->GetOrderedComputePasses()) {
         rp->shader_batches.clear();
     }
@@ -484,16 +542,4 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         cmp->shader_batches.push_back(std::move(new_batch));
     }
     sm->SetDirtyComputeBatches(false);
-}
-
-
-
-uint32_t BatchBuilder::AskNumCommands()
-{
-    return total_commands;
-}
-
-uint32_t BatchBuilder::AskNumInstances()
-{
-    return total_instances;
 }

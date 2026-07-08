@@ -50,6 +50,9 @@ using namespace ShaderBase;
 
 struct PushConstantBinder {
     SDL_GPUCommandBuffer* cb;
+    // Слот кадра (pass_frame/render_frame) — ключ пер-слотовых слепков: push-лямбды берут
+    // данные ТОЛЬКО через Ask*(binder.slot), живые ECS/дерево батчей из них запрещены.
+    uint8_t slot = 0;
     mutable Uint32 vert_count = 0;
     mutable Uint32 frag_count = 0;
 
@@ -68,6 +71,8 @@ struct PushConstantBinder {
 
 struct DispatchSizeBinder {
     glm::uvec3 element_count{ 0, 0, 0 };
+    // Слот кадра — тот же контракт, что у PushConstantBinder::slot (см. выше).
+    uint8_t slot = 0;
 
     void Dispatch(uint32_t x, uint32_t y = 1, uint32_t z = 1) {
         element_count = { x, y, z };
