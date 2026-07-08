@@ -111,6 +111,8 @@ public:
 	};
 	// Имя→хэндл (для UI-браузера ассетов: перечисление плиток текстур). Владение не отдаём.
 	const std::unordered_map<std::string, std::shared_ptr<TextureHandle>>& GetTextureHandles() const { return handles_data; }
+	// Имя→атлас (для UI: дропдаун выбора атласа при создании текстуры).
+	const std::unordered_map<std::string, std::unique_ptr<TextureAtlas>>& GetAtlases() const { return atlases_data; }
 	TextureAtlas* GetTextureAtlas(const std::string& name) {
 		auto it = atlases_data.find(name);
 		if (it != atlases_data.end()) {

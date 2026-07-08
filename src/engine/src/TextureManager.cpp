@@ -135,7 +135,9 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, const std:
         return nullptr;
 	}
 	TextureAtlas* atlas = atlas_it->second.get();
-	return CreateTexture(name, atlas, w, h, std::move(pixels));
+	TextureHandle* th = CreateTexture(name, atlas, w, h, std::move(pixels));
+	if (th) th->atlas_name = atlas_name;   // самоописание: имя атласа для редактора/сериализации
+	return th;
 }
 
 TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels)

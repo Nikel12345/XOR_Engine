@@ -95,6 +95,9 @@ private:
 	void InitDefaultBufferUpdaters();
     void InitPasses();
     void InitUICommands();
+    // Движковые дефолтные текстуры (albedo/normal/orm/emissive) в _FallbackAtlas — чтобы редактор
+    // мог создавать материалы и заполнять слоты по ролям без ассетов игры.
+    void InitDefaultResources();
 
     PrepassTimingReport PrepareFuncPrepassDepended_Original(uint8_t slot);
     PrepassTimingReport PrepareFuncPrepassDepended_Optimized(uint8_t slot);

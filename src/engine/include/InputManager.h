@@ -21,8 +21,38 @@ enum class CommandId : uint32_t {
     LoadScene,    // payload: SceneIOCmd* на куче; грузить сцену можно только в sim-потоке
     SetMaterialTexture, // payload: SetMaterialTextureCmd* на куче (материал+слот+текстура);
                         // sim-поток правит Material::textures[role] + взводит пересборку батчей
+    UpsertTexture,      // payload: UpsertTextureCmd* на куче (имя+атлас+путь). Создать/заменить
+                        // текстуру: delete-if-exists + CreateTextureFromFile (edit=create, name-based)
+    CreateMaterial,       // payload: CreateMaterialCmd* (имя из UI). Новый материал с sp "sp" + дефолты
+    AddMaterialShader,    // payload: MaterialShaderCmd* — добавить sp материалу (+ дефолты НОВЫХ ролей)
+    RemoveMaterialShader, // payload: MaterialShaderCmd* — убрать sp у материала
+    RenameMaterial,       // payload: RenameMaterialCmd* — ре-кей материала в словаре + пересборка
 
     COUNT
+};
+
+// Имя нового материала считает UI (свободное material_N) — чтобы сразу выбрать созданный.
+struct CreateMaterialCmd { std::string name; };
+
+// Переименование материала (delete+create на уровне словаря). Валидность (непусто/иное/свободно)
+// проверяет UI (галочка активна только тогда); менеджер повторно защищается сам.
+struct RenameMaterialCmd { std::string oldName; std::string newName; };
+
+// Добавить/убрать sp у материала. Слоты диктует объединение required_slots его sp; роль ШАРИТСЯ
+// между sp (одна карта material->textures). Строки на куче, функтор удалит.
+struct MaterialShaderCmd {
+    std::string material;
+    std::string shader;
+};
+
+// Создание/замена текстуры из формы редактора. Один путь и для «создать», и для «редактировать»:
+// удаляем хэндл с этим именем (no-op, если нет) и грузим заново из файла в атлас. Материалы держат
+// текстуру по имени → сами перепривяжутся на пересборке. Строки на куче, функтор удалит.
+struct UpsertTextureCmd {
+    std::string name;
+    std::string atlas;
+    std::string path;
+    uint32_t    conv = 0;   // ChannelConvention как uint32_t (без завязки заголовка на TextureData.h)
 };
 
 // Смена текстуры слота материала. Материал ссылается на текстуру ПО ИМЕНИ (name-based), поэтому

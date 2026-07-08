@@ -117,7 +117,7 @@ void BatchBuilder::QueueDelete(Entity entity)
     entities_to_delete.push_back(entity);
 }
 
-void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
+void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureManager* tm, ShaderManager* sm,
     const MaterialComponent& material_component, const ModelComponent& model_component) {
 
     // Защита от незаполненных ссылок: сущность из загрузки сцены, чьё имя ассета не
@@ -147,7 +147,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
         for (const ShaderName& sp_name : material->shader_programs)
         {
             // name-based ссылка: имя sp → указатель на сборке батча (промах → пропуск, будет dummy-эффект)
-            ShaderProgram* sp = shader_manager ? shader_manager->GetShaderProgram(sp_name) : nullptr;
+            ShaderProgram* sp = sm ? sm->GetShaderProgram(sp_name) : nullptr;
             if (!sp) {
                 SDL_Log("BatchBuilder::Material references non existing shader program '%s'", sp_name.c_str());
                 continue;
@@ -171,7 +171,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
 
             ShaderBatchData& sb = shader_map[sp_key];
 
-            AtlasBatchKey atlas_key = sp->required_slots.empty() ? 0 : HashAtlasBatchKey(material, texture_manager);
+            AtlasBatchKey atlas_key = sp->required_slots.empty() ? 0 : HashAtlasBatchKey(material, tm);
 
             auto& atlas_map = sb.atlases_batches;
             auto atlas_it = atlas_map.find(atlas_key);
@@ -182,8 +182,8 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
 
                 for (const auto& role : sp->required_slots) {
                     auto it = material->textures.find(role);
-                    TextureHandle* h = (it != material->textures.end() && texture_manager)
-                        ? texture_manager->GetTextureHandle(it->second) : nullptr;
+                    TextureHandle* h = (it != material->textures.end() && tm)
+                        ? tm->GetTextureHandle(it->second) : nullptr;
                     if (!h || !h->atlas) {   // нет слота / имя не резолвится (удалена/переименована) / нет атласа
                         SDL_Log("BuildBatches:: Material is missing required atlas for shader slot");
                         texture_handle = dummy_texture;
@@ -215,8 +215,8 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm,
                 new_texb.texture_uvl.reserve(material->textures.size());
                 for (const auto& role : sp->required_slots) {
                     auto it = material->textures.find(role);
-                    TextureHandle* texture_handle = (it != material->textures.end() && texture_manager)
-                        ? texture_manager->GetTextureHandle(it->second) : nullptr;
+                    TextureHandle* texture_handle = (it != material->textures.end() && tm)
+                        ? tm->GetTextureHandle(it->second) : nullptr;
                     if (!texture_handle) {   // нет слота / имя не резолвится (удалена/переименована)
                         SDL_Log("BuildBatches:: Material is missing required texture_data for shader slot");
                         texture_handle = dummy_texture;
@@ -280,7 +280,8 @@ void BatchBuilder::RemoveEntityFromBatches(Entity entity)
     entity_slots.erase(it);
 }
 
-void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene)
+void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
+    TextureManager* tm, ShaderManager* sm, SceneData* scene)
 {
     if (!scene) {
         SDL_Log("UpdateRenderBatches called with null scene!");
@@ -296,11 +297,11 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
         // его FinalizeOffsets (он проставляет indirect_command_index, который читает
         // render). Инкремент ниже узлы не трогает и идёт без замка.
         std::lock_guard<std::mutex> lock(pass_manager->BatchTreeMutex());
-        BuildRenderBatches(pm, pass_manager, om, scene);
+        BuildRenderBatches(pm, pass_manager, om, tm, sm, scene);
         FinalizeOffsets(pass_manager);
         changed = true;
     }
-    else if (ApplyIncremental(pm, pass_manager, om, scene)) {
+    else if (ApplyIncremental(pm, pass_manager, om, tm, sm, scene)) {
         FinalizeOffsets(pass_manager);
         changed = true;
     }
@@ -326,7 +327,8 @@ inline void RecalculateInstanceOffsets(SceneData* scene)
     }
 }
 
-void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene)
+void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
+    TextureManager* tm, ShaderManager* sm, SceneData* scene)
 {
     for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses()) {
         rp->shader_batches.clear();
@@ -354,14 +356,15 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
             return;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
         const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
-        AddEntityToBatches(entity, pm, material_component, model_component);
+        AddEntityToBatches(entity, pm, tm, sm, material_component, model_component);
     }
     );
 
     RecalculateInstanceOffsets(scene);
 }
 
-bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene)
+bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
+    TextureManager* tm, ShaderManager* sm, SceneData* scene)
 {
     // Atomically take + clear the queues, then work on the local copies outside
     // the lock so we never hold delta_mutex while mutating the batch tree.
@@ -393,7 +396,7 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
             continue;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
         const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
-        AddEntityToBatches(entity, pm, material_component, model_component);
+        AddEntityToBatches(entity, pm, tm, sm, material_component, model_component);
     }
     for (Entity entity : deletes) {
         RemoveEntityFromBatches(entity);

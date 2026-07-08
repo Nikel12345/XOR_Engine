@@ -2,6 +2,8 @@
 #include "Engine.h"
 #include "TexturesPresets.h"
 #include "ComponentSerializer.h"
+#include "MaterialParams.h"           // Opaque/TransparentMaterialParams — билтин-типы params
+#include "MaterialParamsRegistry.h"   // реестр типов params (дропдаун Kind)
 #include "EngineProfiler.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
@@ -26,7 +28,7 @@ void Engine::PrepareFunc(uint8_t slot)
 
 	{
 		PROF_SCOPE(Sim, " update_render_batches");
-		batch_builder->UpdateRenderBatches(pipe_manager, pass_manager, object_manager, object_manager->GetActiveScene());
+		batch_builder->UpdateRenderBatches(pipe_manager, pass_manager, object_manager, texture_manager, shader_manager, object_manager->GetActiveScene());
 	}
 
 	{
@@ -453,6 +455,33 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	InitPasses();
 	InitUICommands();
 	RegisterBuiltinComponentSerializers();   // сериалайзеры компонентов для save/load сцены
+
+	// Билтин-типы params для UI-дропдауна Kind. Пользователь дорегистрирует свои из кода игры
+	// (MaterialParamsRegistry::Get().Register{...}) — движок трогать не надо.
+	{
+		auto& r = MaterialParamsRegistry::Get();
+		// None: applyDefault чистит блоб; edit пустой (нечего рисовать).
+		r.Register({ MaterialParamsKind::None, "None",
+			[](EngineContext*, Material* m){ m->params.clear(); m->params_kind = MaterialParamsKind::None; } });
+		r.Register({ MaterialParamsKind::Opaque, "Opaque",
+			[](EngineContext* ctx, Material* m){ ctx->SetMaterialParams(m, OpaqueMaterialParams{}); },
+			[](Material* m){
+				if (m->params.size() < sizeof(OpaqueMaterialParams)) return;   // защита от рассинхрона kind/блоба
+				auto* p = reinterpret_cast<OpaqueMaterialParams*>(m->params.data());
+				ImGui::ColorEdit3("Base Color", p->baseColor);
+				ImGui::ColorEdit3("Emissive", p->emissive);
+				ImGui::SliderFloat("Emissive Strength", &p->emissiveStrength, 0.0f, 8.0f);
+				ImGui::SliderFloat("Metallic", &p->metallic, 0.0f, 1.0f);
+				ImGui::SliderFloat("Roughness", &p->roughness, 0.0f, 1.0f);
+			} });
+		r.Register({ MaterialParamsKind::Transparent, "Transparent",
+			[](EngineContext* ctx, Material* m){ ctx->SetMaterialParams(m, TransparentMaterialParams{}); },
+			[](Material* m){
+				if (m->params.size() < sizeof(TransparentMaterialParams)) return;
+				auto* p = reinterpret_cast<TransparentMaterialParams*>(m->params.data());
+				ImGui::SliderFloat("Alpha", &p->alpha, 0.0f, 1.0f);
+			} });
+	}
 	pass_manager->FillRenderPasses();
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});
@@ -482,7 +511,18 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	TextureHandle* dummy = engine_context->CreateTextureFromFile("_NoTextureDummy", "_FallbackAtlas", "../engine/textures/dummy.png");
 
 	batch_builder->SetDummyTexture(dummy);
-	batch_builder->SetResolvers(texture_manager, shader_manager);   // name-based ссылки материала → указатели на сборке
+	InitDefaultResources();
+}
+
+void Engine::InitDefaultResources()
+{
+	// Все material-атласы — BGRA8 UNORM (движок без sRGB-форматов), поэтому дефолты кладём в один
+	// движковый _FallbackAtlas: цвет читается как есть, нормаль тоже (без sRGB-декода). Пиксели —
+	// BGRA (все каналы равны → порядок неважен). Материалы ссылаются по имени, атлас безразличен.
+	texture_manager->CreateTexture("default_albedo",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0xFF }));   // белый
+	texture_manager->CreateTexture("default_normal",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0x80 }));   // 128,128,128,128 (высота в альфе)
+	texture_manager->CreateTexture("default_orm",      "_FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
+	texture_manager->CreateTexture("default_emissive", "_FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
 }
 
 void Engine::InitDefaultBufferUpdaters()
@@ -523,6 +563,18 @@ void Engine::InitPasses()
 	//SetDefaultShadowVSMRenderPass(pass_manager, texture_manager, buffer_manager, object_manager, batch_builder);
 	//SetDefaultShadowBlurPass(pass_manager, buffer_manager); // ДЛЯ VSM
 	//SetDefaultMainRenderPass(pass_manager, texture_manager, buffer_manager);
+}
+
+// Дефолтная текстура по роли слота (движковые из InitDefaultResources). Custom* → dummy.
+static const char* DefaultTextureForRole(TextureSlotRole r)
+{
+	switch (r) {
+	case TextureSlotRole::Albedo:   return "default_albedo";
+	case TextureSlotRole::Normal:   return "default_normal";
+	case TextureSlotRole::ORM:      return "default_orm";
+	case TextureSlotRole::Emissive: return "default_emissive";
+	default:                        return "_NoTextureDummy";   // Custom* и прочее
+	}
 }
 
 void Engine::InitUICommands()
@@ -597,6 +649,78 @@ void Engine::InitUICommands()
 			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material))
 				m->textures[static_cast<TextureSlotRole>(c->role)] = c->texture;
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			delete c;
+		});
+
+	// Upsert текстуры — в sim-потоке: delete-if-exists + загрузка из файла (edit=create, без ветвлений).
+	// Ребилд батчей: материалы, ссылающиеся на это имя, перепривяжутся к новому хэндлу.
+	input_manager->RegisterCommand(CommandId::UpsertTexture,
+		[](EngineContext* ctx, const void* data)
+		{
+			const UpsertTextureCmd* c = static_cast<const UpsertTextureCmd*>(data);
+			if (!c->name.empty() && !c->atlas.empty() && !c->path.empty()) {
+				ctx->GetTextureManager()->DeleteTextureHandle(c->name);   // no-op, если имени нет
+				ctx->CreateTextureFromFile(c->name, c->atlas, c->path.c_str(), static_cast<ChannelConvention>(c->conv));
+				ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			}
+			delete c;
+		});
+
+	// Новый материал: sp "sp" (main) + дефолт-текстуры по его required_slots + дефолт-params.
+	// Имя приходит из UI (уже свободное); если вдруг занято — CreateMaterial вернёт существующий.
+	input_manager->RegisterCommand(CommandId::CreateMaterial,
+		[](EngineContext* ctx, const void* data)
+		{
+			const CreateMaterialCmd* c = static_cast<const CreateMaterialCmd*>(data);
+			ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram("sp");
+			std::vector<std::pair<TextureSlotRole, TextureName>> texs;
+			if (sp) for (TextureSlotRole role : sp->required_slots) texs.emplace_back(role, DefaultTextureForRole(role));
+			Material* m = ctx->GetMaterialManager()->CreateMaterial(c->name, std::move(texs), std::vector<ShaderName>{ "sp" });
+			if (m) ctx->SetMaterialParams(m, OpaqueMaterialParams{});   // sp несёт MaterialBlock → нужен блоб
+			ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			delete c;
+		});
+
+	// Добавить sp материалу: дописать имя (если ещё нет) + добрать дефолтами ТОЛЬКО новые роли
+	// (общие с другими sp не трогаем — текстура роли шарится).
+	input_manager->RegisterCommand(CommandId::AddMaterialShader,
+		[](EngineContext* ctx, const void* data)
+		{
+			const MaterialShaderCmd* c = static_cast<const MaterialShaderCmd*>(data);
+			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
+				bool present = false;
+				for (auto& s : m->shader_programs) if (s == c->shader) { present = true; break; }
+				if (!present) {
+					m->shader_programs.push_back(c->shader);
+					if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader))
+						for (TextureSlotRole role : sp->required_slots)
+							if (!m->textures.count(role)) m->textures[role] = DefaultTextureForRole(role);
+					ctx->GetBatchBuilder()->SetDirtyBatches(true);
+				}
+			}
+			delete c;
+		});
+
+	// Убрать sp у материала (leftover-роли в textures не чистим — безвредны, просто не используются).
+	input_manager->RegisterCommand(CommandId::RemoveMaterialShader,
+		[](EngineContext* ctx, const void* data)
+		{
+			const MaterialShaderCmd* c = static_cast<const MaterialShaderCmd*>(data);
+			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
+				auto& sps = m->shader_programs;
+				for (size_t i = 0; i < sps.size(); ++i) if (sps[i] == c->shader) { sps.erase(sps.begin() + i); break; }
+				ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			}
+			delete c;
+		});
+
+	// Переименование материала — ре-кей в словаре + пересборка (материалы резолвятся по имени).
+	input_manager->RegisterCommand(CommandId::RenameMaterial,
+		[](EngineContext* ctx, const void* data)
+		{
+			const RenameMaterialCmd* c = static_cast<const RenameMaterialCmd*>(data);
+			if (ctx->GetMaterialManager()->RenameMaterial(c->oldName, c->newName))
+				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
 		});
 }

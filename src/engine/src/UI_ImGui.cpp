@@ -4,20 +4,25 @@
 #include "EngineContext.h"
 #include "InputManager.h"
 #include "MaterialParams.h"   // раскладки факторов: разбор params по полям в инспекторе материала
+#include "MaterialParamsRegistry.h"   // реестр типов params для дропдауна Kind
 #include "ImGuizmo.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <cstring>            // memcpy матрицы в payload команды
 #include <algorithm>          // std::max / std::sort
 #include <vector>             // списки имён для комбобоксов/плиток
+#include <mutex>              // потокобезопасный приём пути из файл-диалога
+#include <atomic>
+#include <SDL3/SDL_dialog.h>  // нативный SDL_ShowOpenFileDialog
 
 namespace {
     // ---- Выделение редактора: что сейчас показывает Inspector ----
     // Раньше выбор был только Entity (g_selected). Теперь общий: клик в Hierarchy или по
     // плитке ассета кладёт сюда «вид + идентификатор», а Inspector по нему решает, что рисовать.
-    enum class SelKind { None, Entity, Light, Camera, Material, Texture, Model };
+    // Свет НЕ отдельный вид: он такая же сущность (Entity). Виды — только «сущность vs ресурс».
+    enum class SelKind { None, Entity, Camera, Material, Texture, Model };
     struct Selection {
         SelKind kind = SelKind::None;
-        Entity  entity = static_cast<Entity>(-1);  // для Entity / Light (свет — тоже сущность)
+        Entity  entity = static_cast<Entity>(-1);  // для Entity (включая свет)
         int     index = -1;                        // для Camera (порядковый)
         std::string name;                          // для Material / Texture / Model
     };
@@ -26,6 +31,11 @@ namespace {
     constexpr Entity GIZMO_NONE = static_cast<Entity>(-1);
     // Полупрозрачный фон панелей (пустые места не глухо-чёрные, сквозь чуть видно сцену).
     constexpr float kPanelBgAlpha = 0.0f;
+
+    // Общий тумблер показа служебных ассетов (имена на "_", напр. "_NoTextureDummy"). Делят
+    // браузер ассетов и дропдауны текстур в инспекторе — одна галочка на всё.
+    bool g_show_internal = false;
+    bool IsInternalName(const std::string& n) { return !n.empty() && n[0] == '_'; }
 
     // Текущий режим стрелок. Переключается радиокнопками в Inspector.
     ImGuizmo::OPERATION g_gizmo_op   = ImGuizmo::TRANSLATE;
@@ -79,57 +89,78 @@ namespace {
         }
     }
 
+    // ChannelConvention (enum) → строка для дропдауна конвенции каналов текстуры.
+    const char* ConvName(ChannelConvention c)
+    {
+        switch (c) {
+        case ChannelConvention::AsIs:              return "AsIs";
+        case ChannelConvention::SmoothnessInGreen: return "SmoothnessInGreen";
+        case ChannelConvention::DepthInAlpha:      return "DepthInAlpha";
+        default:                                   return "AsIs";
+        }
+    }
+
     // ================= Inspector-блоки (перенос существующих виджетов как есть) =================
 
+    // Пред-объявления: InspectEntity дёргает свет-редакторы, определённые ниже.
+    void InspectSpotLight(Positions&, size_t, SpotLightComponent&);
+    void InspectSphereLight(Positions&, size_t, SphereLightComponent&);
+    void InspectDirectLight(DirectLightComponent&);
+
+    // Единый инспектор сущности: свет — такая же сущность, отдельного «типа выбора» нет. Показываем
+    // то, что есть по компонентам: удаление (всегда) + трансформ (если Positions) + коллайдеры + свет.
     void InspectEntity(EngineContext* ctx, ObjectManager* om, SceneData* scene, Entity e)
     {
-        if (!om->Has<Positions>(scene, e)) { ImGui::TextUnformatted("Entity has no transform."); return; }
-        SoAElement<Positions> el = om->GetComponent<Positions>(scene, e);
-        Positions& P = el.container();
-        size_t i = el.i();
-
         ImGui::Text("Entity %u", static_cast<unsigned>(e));
 
-        float pos[3] = { P.w[i], P.d[i], P.h[i] };
-        if (ImGui::DragFloat3("Offset", pos, 0.05f))
-        {
-            P.w[i] = pos[0]; P.d[i] = pos[1]; P.h[i] = pos[2];
-        }
-
+        // Удаление — всегда (в т.ч. у directional-света без трансформа).
         ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.70f, 0.15f, 0.15f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.20f, 0.20f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.55f, 0.10f, 0.10f, 1.0f));
-        if (ImGui::Button("Delete", ImVec2(120.0f, 0.0f)))
-        {
-            // UI сам ECS не мутирует — кладёт команду в очередь (Entity пакуется прямо в указатель),
-            // sim-поток исполнит в MainIterate. После удаления снимаем выбор.
+        const bool del = ImGui::Button("Delete", ImVec2(120.0f, 0.0f));
+        ImGui::PopStyleColor(3);
+        if (del) {
             ctx->GetInputManager()->PushCommand(CommandId::DeleteEntity,
                 reinterpret_cast<const void*>(static_cast<uintptr_t>(e)));
             g_sel = Selection{};
+            return;
         }
-        ImGui::PopStyleColor(3);
 
-        // Дети владельца — debug-рамки коллайдеров (помечены EditorHiddenComponent, потому в списки
-        // не попадают). Галочка visible каждого: снятие прячет рамку из рендера, НЕ удаляя энтити.
+        // Трансформ — только если есть Positions.
+        if (om->Has<Positions>(scene, e)) {
+            SoAElement<Positions> el = om->GetComponent<Positions>(scene, e);
+            Positions& P = el.container(); size_t i = el.i();
+            float pos[3] = { P.w[i], P.d[i], P.h[i] };
+            if (ImGui::DragFloat3("Offset", pos, 0.05f)) { P.w[i] = pos[0]; P.d[i] = pos[1]; P.h[i] = pos[2]; }
+        }
+
+        // Debug-рамки коллайдеров (дети): галочка visible → HideEntity.
         auto kids_it = scene->children.find(e);
-        if (kids_it != scene->children.end() && !kids_it->second.empty())
-        {
+        if (kids_it != scene->children.end() && !kids_it->second.empty()) {
             ImGui::SeparatorText("Debug colliders");
-            for (Entity c : kids_it->second)
-            {
+            for (Entity c : kids_it->second) {
                 if (!om->Has<DrawComponent>(scene, c)) continue;
                 bool visible = om->GetComponent<DrawComponent>(scene, c).visible;
-
-                char clabel[40];
-                snprintf(clabel, sizeof(clabel), "visible (collider %u)", static_cast<unsigned>(c));
-                if (ImGui::Checkbox(clabel, &visible))
-                {
+                char clabel[40]; snprintf(clabel, sizeof(clabel), "visible (collider %u)", static_cast<unsigned>(c));
+                if (ImGui::Checkbox(clabel, &visible)) {
                     const uintptr_t packed = static_cast<uintptr_t>(c)
                         | (visible ? (static_cast<uintptr_t>(1) << 32) : static_cast<uintptr_t>(0));
-                    ctx->GetInputManager()->PushCommand(CommandId::HideEntity,
-                        reinterpret_cast<const void*>(packed));
+                    ctx->GetInputManager()->PushCommand(CommandId::HideEntity, reinterpret_cast<const void*>(packed));
                 }
             }
+        }
+
+        // Свет — по наличию компонента (тип выбора не нужен).
+        if (om->Has<SpotLightComponent>(scene, e) && om->Has<Positions>(scene, e)) {
+            SoAElement<Positions> el = om->GetComponent<Positions>(scene, e);
+            InspectSpotLight(el.container(), el.i(), om->GetComponent<SpotLightComponent>(scene, e));
+        }
+        else if (om->Has<SphereLightComponent>(scene, e) && om->Has<Positions>(scene, e)) {
+            SoAElement<Positions> el = om->GetComponent<Positions>(scene, e);
+            InspectSphereLight(el.container(), el.i(), om->GetComponent<SphereLightComponent>(scene, e));
+        }
+        else if (om->Has<DirectLightComponent>(scene, e)) {
+            InspectDirectLight(om->GetComponent<DirectLightComponent>(scene, e));
         }
     }
 
@@ -137,96 +168,112 @@ namespace {
     {
         if (!mat) { ImGui::TextUnformatted("Material not found."); return; }
 
-        // ---- Слоты текстур: свап через КОМАНДУ (правит имя в Material::textures[role]) +
-        //      пересборку батчей. НЕ in-place: в батч запечён разрешённый UVL, его надо пересчитать.
-        ImGui::SeparatorText("Textures");
-        std::vector<std::string> texNames;                       // значения комбобокса — по алфавиту
-        for (auto& [n, h] : ctx->GetTextureManager()->GetTextureHandles()) texNames.push_back(n);
-        std::sort(texNames.begin(), texNames.end());
+        ShaderManager* sm = ctx->GetShaderManager();
+        InputManager*  im = ctx->GetInputManager();
 
-        std::vector<TextureSlotRole> roles;                      // слоты материала в стабильном порядке
-        for (auto& [role, name] : mat->textures) roles.push_back(role);
-        std::sort(roles.begin(), roles.end(),
-            [](TextureSlotRole a, TextureSlotRole b){ return static_cast<uint32_t>(a) < static_cast<uint32_t>(b); });
-
-        for (TextureSlotRole role : roles) {
-            const std::string current = mat->textures[role];
-            ImGui::PushID(static_cast<int>(role));
-            if (ImGui::BeginCombo(RoleName(role), current.c_str())) {   // RoleName: enum слота → строка
-                for (const std::string& tn : texNames) {
-                    bool is_cur = (tn == current);
-                    if (ImGui::Selectable(tn.c_str(), is_cur) && !is_cur)
-                        ctx->GetInputManager()->PushCommand(CommandId::SetMaterialTexture,
-                            new SetMaterialTextureCmd{ matName, static_cast<uint32_t>(role), tn });
-                    if (is_cur) ImGui::SetItemDefaultFocus();
-                }
-                ImGui::EndCombo();
+        // ---- Имя + переименование: галочка кликабельна ТОЛЬКО когда имя изменено, непусто и свободно.
+        //      Переименование = ре-кей в словаре (delete+create). Ссылки по старому имени (энтити) после
+        //      этого не резолвятся — переименовывай до назначения материала. ----
+        static char nameBuf[128] = "";
+        static std::string nameFor = "\x01";                 // сентинел → синк буфера на смену выбора
+        if (matName != nameFor) { nameFor = matName; std::snprintf(nameBuf, sizeof nameBuf, "%s", matName.c_str()); }
+        ImGui::InputText("Name", nameBuf, sizeof nameBuf);
+        ImGui::SameLine();
+        const bool nameChanged = nameBuf[0] && (matName != nameBuf)
+            && !ctx->GetMaterialManager()->GetMaterials().count(nameBuf);
+        {
+            const ImVec2 p0 = ImGui::GetCursorScreenPos();
+            const float  sz = ImGui::GetFrameHeight();
+            ImGui::BeginDisabled(!nameChanged);
+            const bool apply = ImGui::Button("##rename", ImVec2(sz, sz));
+            ImGui::EndDisabled();
+            ImDrawList* dl = ImGui::GetWindowDrawList();      // галочку рисуем сами (в шрифте ImGui её нет)
+            const ImU32 col = ImGui::GetColorU32(nameChanged ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+            dl->AddLine({ p0.x + sz*0.24f, p0.y + sz*0.52f }, { p0.x + sz*0.42f, p0.y + sz*0.70f }, col, 2.0f);
+            dl->AddLine({ p0.x + sz*0.42f, p0.y + sz*0.70f }, { p0.x + sz*0.78f, p0.y + sz*0.30f }, col, 2.0f);
+            if (apply) {
+                im->PushCommand(CommandId::RenameMaterial, new RenameMaterialCmd{ matName, nameBuf });
+                g_sel.name = nameBuf;                          // выбор следует за переименованием
             }
-            ImGui::PopID();
         }
 
-        // ---- Params ----
-        // Смена ТИПА params (kind) = SetMaterialParams<T> с дефолтным блобом, ровно как в коде.
-        // IN-PLACE, без ребилда: RenderManager читает params->data()/size() ЖИВО по указателю на
-        // вектор (адрес &Material::params стабилен при resize). Kind — фиксированный enum, перечисляем
-        // напрямую. ВНИМАНИЕ: тип должен совпадать с раскладкой MaterialBlock шейдера материала —
-        // иначе в cbuffer уедет чужой блоб (позиционное доверие). Меняй осознанно под шейдер.
+        // ================= Params (сверху) =================
+        // Смена ТИПА params (kind) = SetMaterialParams<T> с дефолт-блобом (IN-PLACE, без ребилда:
+        // RenderManager читает params->data()/size() живо; kind — фиксированный enum из реестра).
         ImGui::SeparatorText("Params");
-        struct KindOpt { MaterialParamsKind kind; const char* label; };
-        static const KindOpt kKinds[] = {
-            { MaterialParamsKind::None,        "None" },
-            { MaterialParamsKind::Opaque,      "Opaque" },
-            { MaterialParamsKind::Transparent, "Transparent" },
-        };
-        const char* curLabel = "?";
-        for (auto& k : kKinds) if (k.kind == mat->params_kind) curLabel = k.label;
-        if (ImGui::BeginCombo("Kind", curLabel)) {
-            for (auto& k : kKinds) {
-                bool is_cur = (k.kind == mat->params_kind);
-                if (ImGui::Selectable(k.label, is_cur) && !is_cur) {
-                    switch (k.kind) {
-                    case MaterialParamsKind::Opaque:      ctx->SetMaterialParams(mat, OpaqueMaterialParams{}); break;
-                    case MaterialParamsKind::Transparent: ctx->SetMaterialParams(mat, TransparentMaterialParams{}); break;
-                    default: mat->params.clear(); mat->params_kind = MaterialParamsKind::None; break;
-                    }
-                }
+        const auto& kinds = MaterialParamsRegistry::Get().All();
+        const MaterialParamsTypeDesc* cur = nullptr;
+        for (auto& d : kinds) if (d.kind == mat->params_kind) { cur = &d; break; }
+        if (ImGui::BeginCombo("Kind", cur ? cur->label.c_str() : "?")) {
+            for (auto& d : kinds) {
+                bool is_cur = (d.kind == mat->params_kind);
+                if (ImGui::Selectable(d.label.c_str(), is_cur) && !is_cur) d.applyDefault(ctx, mat);
                 if (is_cur) ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();
         }
-
-        // Значения текущего типа (тоже IN-PLACE).
-        if (mat->params.empty()) { ImGui::TextDisabled("(no params)"); return; }
-        switch (mat->params_kind)
-        {
-        case MaterialParamsKind::Opaque:
-        {
-            auto* p = reinterpret_cast<OpaqueMaterialParams*>(mat->params.data());
-            ImGui::ColorEdit3("Base Color", p->baseColor);
-            ImGui::ColorEdit3("Emissive", p->emissive);
-            ImGui::SliderFloat("Emissive Strength", &p->emissiveStrength, 0.0f, 8.0f);
-            ImGui::SliderFloat("Metallic", &p->metallic, 0.0f, 1.0f);
-            ImGui::SliderFloat("Roughness", &p->roughness, 0.0f, 1.0f);
-            break;
-        }
-        case MaterialParamsKind::Transparent:
-        {
-            auto* p = reinterpret_cast<TransparentMaterialParams*>(mat->params.data());
-            ImGui::SliderFloat("Alpha", &p->alpha, 0.0f, 1.0f);
-            break;
-        }
-        default:
-        {
-            float* f = reinterpret_cast<float*>(mat->params.data());
+        if (mat->params.empty()) ImGui::TextDisabled("(no params)");
+        else if (cur && cur->edit) cur->edit(mat);   // тип сам рисует свои поля (registry-driven)
+        else {
+            float* f = reinterpret_cast<float*>(mat->params.data());   // фолбэк: сырые float
             const size_t n = mat->params.size() / sizeof(float);
-            for (size_t k = 0; k < n; ++k)
-            {
-                char l[16];
-                snprintf(l, sizeof(l), "p%u", static_cast<unsigned>(k));
+            for (size_t k = 0; k < n; ++k) {
+                char l[16]; snprintf(l, sizeof(l), "p%u", static_cast<unsigned>(k));
                 ImGui::SliderFloat(l, &f[k], 0.0f, 1.0f);
             }
-            break;
         }
+
+        // ================= Шейдеры + слоты (снизу) =================
+        // Материал = набор sp (проходов). Слоты диктует required_slots КАЖДОГО sp, но текстура берётся
+        // из ОБЩЕЙ material->textures[role] (роль шарится между sp): правка под одним sp видна под другим.
+        ImGui::SeparatorText("Shaders");
+
+        std::vector<std::string> texNames;                   // значения комбобокса текстур — по алфавиту
+        for (auto& [n, h] : ctx->GetTextureManager()->GetTextureHandles())
+            if (g_show_internal || !IsInternalName(n)) texNames.push_back(n);
+        std::sort(texNames.begin(), texNames.end());
+
+        for (size_t si = 0; si < mat->shader_programs.size(); ++si) {
+            const std::string spName = mat->shader_programs[si];
+            ImGui::PushID(static_cast<int>(si));
+
+            if (ImGui::SmallButton("x"))                       // убрать этот sp
+                im->PushCommand(CommandId::RemoveMaterialShader, new MaterialShaderCmd{ matName, spName });
+            ImGui::SameLine();
+            ImGui::TextUnformatted(spName.c_str());
+
+            // Слоты этого sp; значение — из общей карты по роли (правка отражается во всех sp с этой ролью).
+            if (ShaderProgram* sp = sm->GetShaderProgram(spName))
+                for (TextureSlotRole role : sp->required_slots) {
+                    auto it = mat->textures.find(role);
+                    const std::string current = (it != mat->textures.end()) ? it->second : std::string();
+                    ImGui::PushID(static_cast<int>(role));
+                    if (ImGui::BeginCombo(RoleName(role), current.c_str())) {   // RoleName: enum слота → строка
+                        for (const std::string& tn : texNames) {
+                            bool is_cur = (tn == current);
+                            if (ImGui::Selectable(tn.c_str(), is_cur) && !is_cur)
+                                im->PushCommand(CommandId::SetMaterialTexture,
+                                    new SetMaterialTextureCmd{ matName, static_cast<uint32_t>(role), tn });
+                            if (is_cur) ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+                    ImGui::PopID();
+                }
+            ImGui::PopID();
+            ImGui::Separator();
+        }
+
+        // Добавить sp (перечень graphics sp, ещё не добавленных материалу).
+        if (ImGui::BeginCombo("+ Shader", "(add)")) {
+            for (auto& [spn, spp] : sm->GetShaderPrograms()) {
+                bool present = false;
+                for (auto& s : mat->shader_programs) if (s == spn) { present = true; break; }
+                if (present) continue;
+                if (ImGui::Selectable(spn.c_str()))
+                    im->PushCommand(CommandId::AddMaterialShader, new MaterialShaderCmd{ matName, spn });
+            }
+            ImGui::EndCombo();
         }
     }
 
@@ -325,6 +372,99 @@ namespace {
             cam->SetPosition(pos);
         if (ImGui::DragFloat3("Cam Target", &tgt.x, 0.05f))
             cam->SetView(pos, tgt, glm::vec3(0.0f, 1.0f, 0.0f));
+    }
+
+    // --- Приём пути из нативного файл-диалога. Колбэк SDL может прийти из ДРУГОГО потока,
+    //     поэтому кладём через мьютекс+atomic, а UI забирает у себя на кадре. ---
+    std::mutex        g_pick_mtx;
+    std::string       g_picked_path;
+    std::atomic<bool> g_picked_ready{ false };
+
+    void SDLCALL OnFilePicked(void*, const char* const* filelist, int)
+    {
+        if (filelist && filelist[0]) {                 // пусто = отмена, nullptr = ошибка
+            std::lock_guard<std::mutex> lk(g_pick_mtx);
+            g_picked_path = filelist[0];
+            g_picked_ready.store(true, std::memory_order_release);
+        }
+    }
+
+    // Форма создания/редактирования текстуры (одна и та же — см. upsert delete+create). Ничего не
+    // происходит по-символьно: правки копятся в буферах, действие только по кнопке.
+    void TextureEditor(EngineContext* ctx)
+    {
+        static char        nameBuf[128] = "";
+        static char        pathBuf[512] = "";
+        static std::string atlasSel;
+        static ChannelConvention convSel = ChannelConvention::AsIs;
+        static std::string syncedFor = "\x01";   // сентинел ≠ любому имени → синк на первый заход
+
+        // Имя подтягиваем из выбора (клик по плитке = редактировать её; "New" = пустое имя).
+        // atlas/path НЕ сбрасываем — удобно заливать серию текстур в тот же атлас.
+        if (g_sel.name != syncedFor) {
+            syncedFor = g_sel.name;
+            std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
+            if (!g_sel.name.empty()) {
+                // Ресурс самоописываем: тянем атлас/путь прямо из хэндла (см. TextureHandle).
+                if (TextureHandle* h = ctx->GetTextureManager()->GetTextureHandle(g_sel.name)) {
+                    atlasSel = h->atlas_name;
+                    std::snprintf(pathBuf, sizeof pathBuf, "%s", h->source_path.c_str());
+                    convSel = h->conv;
+                }
+            }
+            else pathBuf[0] = '\0';   // "New" — путь чистим (атлас оставляем для серии)
+        }
+
+        // Забрать путь, выбранный в диалоге (возможно, из другого потока).
+        if (g_picked_ready.exchange(false, std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> lk(g_pick_mtx);
+            std::snprintf(pathBuf, sizeof pathBuf, "%s", g_picked_path.c_str());
+        }
+
+        ImGui::TextDisabled("Texture (create / edit)");
+        ImGui::InputText("Name", nameBuf, sizeof nameBuf);
+
+        // Атлас — дропдаун существующих (общий фильтр служебных с браузером).
+        if (ImGui::BeginCombo("Atlas", atlasSel.empty() ? "(select)" : atlasSel.c_str())) {
+            for (auto& [an, a] : ctx->GetTextureManager()->GetAtlases()) {
+                if (!g_show_internal && IsInternalName(an)) continue;
+                bool sel = (an == atlasSel);
+                if (ImGui::Selectable(an.c_str(), sel)) atlasSel = an;
+                if (sel) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::InputText("Path", pathBuf, sizeof pathBuf);
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...")) {
+            static const SDL_DialogFileFilter filters[] = {
+                { "Images", "png;jpg;jpeg;bmp;tga" }, { "All files", "*" }
+            };
+            // SDL требует вызов с main-потока; результат принимаем потокобезопасно (g_picked_*).
+            // window=nullptr — модальность к окну опущена (не все платформы её поддерживают).
+            SDL_ShowOpenFileDialog(OnFilePicked, nullptr, nullptr, filters, 2, nullptr, false);
+        }
+
+        // Конвенция каналов исходника (enum → switch, см. ConvName).
+        static const ChannelConvention kConvs[] = {
+            ChannelConvention::AsIs, ChannelConvention::SmoothnessInGreen, ChannelConvention::DepthInAlpha
+        };
+        if (ImGui::BeginCombo("Channels", ConvName(convSel))) {
+            for (ChannelConvention c : kConvs) {
+                bool sel = (c == convSel);
+                if (ImGui::Selectable(ConvName(c), sel)) convSel = c;
+                if (sel) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+
+        const bool ready = nameBuf[0] && !atlasSel.empty() && pathBuf[0];
+        ImGui::BeginDisabled(!ready);
+        if (ImGui::Button("Create / Update", ImVec2(160, 0)))
+            ctx->GetInputManager()->PushCommand(CommandId::UpsertTexture,
+                new UpsertTextureCmd{ nameBuf, atlasSel, pathBuf, static_cast<uint32_t>(convSel) });   // delete+create в sim-потоке
+        ImGui::EndDisabled();
     }
 }
 
@@ -432,30 +572,30 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
             [&](Entity e, SoAElement<Positions>, SpotLightComponent&)
         {
             char label[32]; snprintf(label, sizeof(label), "Spot (e%u)", static_cast<unsigned>(e));
-            bool selected = (g_sel.kind == SelKind::Light && g_sel.entity == e);
+            bool selected = (g_sel.kind == SelKind::Entity && g_sel.entity == e);
             if (ImGui::Selectable(label, selected)) {
                 if (selected) g_sel = Selection{};
-                else { g_sel = Selection{}; g_sel.kind = SelKind::Light; g_sel.entity = e; }
+                else { g_sel = Selection{}; g_sel.kind = SelKind::Entity; g_sel.entity = e; }
             }
         });
         om->ForEach<Positions, SphereLightComponent>(scene,
             [&](Entity e, SoAElement<Positions>, SphereLightComponent&)
         {
             char label[32]; snprintf(label, sizeof(label), "Sphere (e%u)", static_cast<unsigned>(e));
-            bool selected = (g_sel.kind == SelKind::Light && g_sel.entity == e);
+            bool selected = (g_sel.kind == SelKind::Entity && g_sel.entity == e);
             if (ImGui::Selectable(label, selected)) {
                 if (selected) g_sel = Selection{};
-                else { g_sel = Selection{}; g_sel.kind = SelKind::Light; g_sel.entity = e; }
+                else { g_sel = Selection{}; g_sel.kind = SelKind::Entity; g_sel.entity = e; }
             }
         });
         om->ForEach<DirectLightComponent>(scene,
             [&](Entity e, DirectLightComponent&)
         {
             char label[32]; snprintf(label, sizeof(label), "Directional (e%u)", static_cast<unsigned>(e));
-            bool selected = (g_sel.kind == SelKind::Light && g_sel.entity == e);
+            bool selected = (g_sel.kind == SelKind::Entity && g_sel.entity == e);
             if (ImGui::Selectable(label, selected)) {
                 if (selected) g_sel = Selection{};
-                else { g_sel = Selection{}; g_sel.kind = SelKind::Light; g_sel.entity = e; }
+                else { g_sel = Selection{}; g_sel.kind = SelKind::Entity; g_sel.entity = e; }
             }
         });
     }
@@ -481,42 +621,26 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
     ObjectManager* om = ctx->GetObjectManager();
     SceneData* scene = om->GetActiveScene();
 
-    // Панелька гизмо — глобальный режим стрелок (относится к выбранной сущности).
-    ImGui::TextUnformatted("Gizmo:");
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Move",    g_gizmo_op == ImGuizmo::TRANSLATE)) g_gizmo_op = ImGuizmo::TRANSLATE;
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Rotate",  g_gizmo_op == ImGuizmo::ROTATE))    g_gizmo_op = ImGuizmo::ROTATE;
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Scale",   g_gizmo_op == ImGuizmo::SCALE))     g_gizmo_op = ImGuizmo::SCALE;
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Uniform", g_gizmo_op == ImGuizmo::SCALEU))    g_gizmo_op = ImGuizmo::SCALEU;
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Deselect")) g_sel = Selection{};
-    ImGui::Separator();
+    // Режим гизмо — только если у выбранной сущности есть Positions (иначе двигать нечего).
+    if (g_sel.kind == SelKind::Entity && scene && om->Has<Positions>(scene, g_sel.entity)) {
+        ImGui::TextUnformatted("Gizmo:");
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Move",    g_gizmo_op == ImGuizmo::TRANSLATE)) g_gizmo_op = ImGuizmo::TRANSLATE;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Rotate",  g_gizmo_op == ImGuizmo::ROTATE))    g_gizmo_op = ImGuizmo::ROTATE;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Scale",   g_gizmo_op == ImGuizmo::SCALE))     g_gizmo_op = ImGuizmo::SCALE;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Uniform", g_gizmo_op == ImGuizmo::SCALEU))    g_gizmo_op = ImGuizmo::SCALEU;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Deselect")) g_sel = Selection{};
+        ImGui::Separator();
+    }
 
     switch (g_sel.kind)
     {
     case SelKind::Entity:
-        if (scene) InspectEntity(ctx, om, scene, g_sel.entity);
-        break;
-
-    case SelKind::Light:
-        if (scene) {
-            Entity e = g_sel.entity;
-            if (om->Has<SpotLightComponent>(scene, e) && om->Has<Positions>(scene, e)) {
-                SoAElement<Positions> el = om->GetComponent<Positions>(scene, e);
-                InspectSpotLight(el.container(), el.i(), om->GetComponent<SpotLightComponent>(scene, e));
-            }
-            else if (om->Has<SphereLightComponent>(scene, e) && om->Has<Positions>(scene, e)) {
-                SoAElement<Positions> el = om->GetComponent<Positions>(scene, e);
-                InspectSphereLight(el.container(), el.i(), om->GetComponent<SphereLightComponent>(scene, e));
-            }
-            else if (om->Has<DirectLightComponent>(scene, e)) {
-                InspectDirectLight(om->GetComponent<DirectLightComponent>(scene, e));
-            }
-            else ImGui::TextUnformatted("Light no longer exists.");
-        }
+        if (scene) InspectEntity(ctx, om, scene, g_sel.entity);   // трансформ/удаление/коллайдеры + свет по компонентам
         break;
 
     case SelKind::Camera:
@@ -524,14 +648,11 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         break;
 
     case SelKind::Material:
-        ImGui::Text("Material: %s", g_sel.name.c_str());
-        ImGui::Separator();
         InspectMaterial(ctx, g_sel.name, ctx->GetMaterialManager()->GetMaterial(g_sel.name));
         break;
 
     case SelKind::Texture:
-        ImGui::Text("Texture: %s", g_sel.name.c_str());
-        ImGui::TextDisabled("(editing not implemented yet)");
+        TextureEditor(ctx);
         break;
 
     case SelKind::Model:
@@ -552,9 +673,9 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
     ImGui::SetNextWindowBgAlpha(kPanelBgAlpha);
     ImGui::Begin("Assets");
 
-    // Фильтр служебных ассетов: имена на "_" (напр. "_NoTextureDummy") прячем по умолчанию.
-    static bool show_internal = false;
-    ImGui::Checkbox("Show internal (_)", &show_internal);
+    // Фильтр служебных ассетов: общий флаг (см. g_show_internal) — та же галочка действует и на
+    // дропдауны текстур в инспекторе.
+    ImGui::Checkbox("Show internal (_)", &g_show_internal);
     ImGui::Separator();
 
     const float tile = 64.0f, pad = 8.0f;
@@ -562,39 +683,67 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
     if (ImGui::BeginTabBar("AssetTabs"))
     {
         // Общая раскладка плиток: переносим ряд, когда следующая не влезает по ширине.
-        auto tiles = [&](SelKind kind, auto&& for_each_name)
+        auto tiles = [&](SelKind kind, bool withNew, auto&& onNew, auto&& for_each_name)
         {
             float avail = ImGui::GetContentRegionAvail().x;
             int per_row = std::max(1, static_cast<int>(avail / (tile + pad)));
             int col = 0;
+            auto step = [&]{ if (++col % per_row != 0) ImGui::SameLine(); };
+
+            if (withNew) {
+                // Плитка-«плюс» того же размера, что превью. Действие — за onNew (у текстур форма,
+                // у материалов сразу команда создания).
+                ImGui::BeginGroup();
+                ImGui::PushID("##new");
+                ImVec2 p0 = ImGui::GetCursorScreenPos();
+                if (ImGui::Button("##new", ImVec2(tile, tile))) onNew();
+                // «+» рисуем сами почти во весь квадрат (кнопочный текст "+" был бы крохотным).
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                const float cx = p0.x + tile * 0.5f, cy = p0.y + tile * 0.5f;
+                const float arm = tile * 0.35f, th = tile * 0.076f;   // толщина на ~5% меньше
+                const ImU32 col = ImGui::GetColorU32(ImGuiCol_Text);
+                dl->AddRectFilled(ImVec2(cx - th, cy - arm), ImVec2(cx + th, cy + arm), col);   // вертикаль
+                dl->AddRectFilled(ImVec2(cx - arm, cy - th), ImVec2(cx + arm, cy + th), col);   // горизонталь
+                ImGui::TextUnformatted("New");
+                ImGui::PopID();
+                ImGui::EndGroup();
+                step();
+            }
+
             for_each_name([&](const std::string& name)
             {
-                if (!show_internal && !name.empty() && name[0] == '_') return;   // фильтр служебных
+                if (!g_show_internal && IsInternalName(name)) return;   // фильтр служебных
                 bool selected = (g_sel.kind == kind && g_sel.name == name);
                 if (AssetTile(name.c_str(), selected, tile)) {
                     if (selected) g_sel = Selection{};                                 // повторный клик — снять
                     else { g_sel = Selection{}; g_sel.kind = kind; g_sel.name = name; }
                 }
-                if (++col % per_row != 0) ImGui::SameLine();
+                step();
             });
         };
 
         if (ImGui::BeginTabItem("Materials")) {
-            tiles(SelKind::Material, [&](auto&& emit) {
-                for (auto& [name, mat] : ctx->GetMaterialManager()->GetMaterials()) emit(name);
-            });
+            tiles(SelKind::Material, true,
+                [&]{
+                    // Свободное имя считаем в UI → сразу ставим выбор на создаваемый материал.
+                    auto& mats = ctx->GetMaterialManager()->GetMaterials();
+                    std::string nm = "material";
+                    for (int i = 1; mats.count(nm); ++i) nm = "material_" + std::to_string(i);
+                    g_sel = Selection{}; g_sel.kind = SelKind::Material; g_sel.name = nm;
+                    ctx->GetInputManager()->PushCommand(CommandId::CreateMaterial, new CreateMaterialCmd{ nm });
+                },
+                [&](auto&& emit) { for (auto& [name, mat] : ctx->GetMaterialManager()->GetMaterials()) emit(name); });
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Textures")) {
-            tiles(SelKind::Texture, [&](auto&& emit) {
-                for (auto& [name, h] : ctx->GetTextureManager()->GetTextureHandles()) emit(name);
-            });
+            tiles(SelKind::Texture, true,
+                [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Texture; g_sel.name = ""; },   // + = форма новой текстуры
+                [&](auto&& emit) { for (auto& [name, h] : ctx->GetTextureManager()->GetTextureHandles()) emit(name); });
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Models")) {
-            tiles(SelKind::Model, [&](auto&& emit) {
-                for (auto& [name, m] : ctx->GetModelManager()->GetModels()) emit(name);
-            });
+            tiles(SelKind::Model, false, []{},
+                [&](auto&& emit) { for (auto& [name, m] : ctx->GetModelManager()->GetModels()) emit(name); });
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
@@ -605,6 +754,7 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
 
 void UI_ImGui::DrawGizmo(EngineContext* ctx)
 {
+    // Гизмо — для выбранной сущности (свет = тоже сущность). Для материала/текстуры/… нет.
     if (g_sel.kind != SelKind::Entity) return;
     Entity selected = g_sel.entity;
 
@@ -612,8 +762,8 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
     SceneData* scene = om->GetActiveScene();
     if (!scene) return;
 
-    // Сущность могли удалить через очередь команд — снимаем выбор и выходим.
-    if (!om->Has<Positions>(scene, selected)) { g_sel = Selection{}; return; }
+    // Нет трансформа (directional-свет без Positions либо удалённая сущность) → просто без гизмо.
+    if (!om->Has<Positions>(scene, selected)) return;
 
     Camera* cam = ctx->GetCameraManager()->GetActiveCamera();
     if (!cam) return;

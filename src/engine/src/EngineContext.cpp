@@ -73,7 +73,9 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 			img.pixels[i] = std::byte{ static_cast<unsigned char>(255 - std::to_integer<int>(img.pixels[i])) };
 	}
 
-	return texture_manager->CreateTexture(name, atlas, img.width, img.height, std::move(img.pixels));
+	TextureHandle* h = texture_manager->CreateTexture(name, atlas, img.width, img.height, std::move(img.pixels));
+	if (h) { h->atlas_name = atlas_name; h->source_path = path; h->conv = conv; }   // самоописание для редактора/сериализации
+	return h;
 }
 
 TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, const AtlasName& atlas_name, const char* path) {

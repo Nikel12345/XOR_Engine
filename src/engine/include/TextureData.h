@@ -2,6 +2,7 @@
 #include <SDL3/SDL_gpu.h>
 #include <vector>
 #include <memory>
+#include <string>
 
 // Конвенция упаковки ИСХОДНОГО файла текстуры. Канон движка: G = linear roughness (ORM),
 // A нормал-карты = HEIGHT (яркое = выше; POM марчит depth = 1 - A).
@@ -55,6 +56,13 @@ struct TextureHandle : std::enable_shared_from_this<TextureHandle> {
 	                              // адрес стабилен (handles_data держит shared_ptr<TextureHandle>).
 	uint32_t width = 0;   // нативный размер картинки в пикселях, пишется при загрузке
 	uint32_t height = 0;  // (точный исходник, без round-trip через unorm16 uv_packed_scale)
+
+	// Авторские данные (для редактора/сериализации): ресурс самоописываем — знает, откуда и как
+	// загружен, чтобы форма правки заполнялась, а сцена могла его сохранить и переинициализировать.
+	// source_path ПУСТ у текстур из сырых пикселей (сгенерированы кодом) — из файла не пересоздаются.
+	std::string       atlas_name;
+	std::string       source_path;
+	ChannelConvention conv = ChannelConvention::AsIs;
 };
 
 class TextureManager;

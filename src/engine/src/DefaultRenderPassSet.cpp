@@ -57,7 +57,7 @@ namespace DefaultRenderPassNamespace
             TextureAtlas* cube = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(200), env_sampler);
 
             // Путь — ассет игры (CWD = src/game); временно здесь, позже окружение задаёт игра.
-            if (cube && ctx->CreateCubeMapTexture("env_skybox", "env_skybox", "textures/assets/skybox.png"))
+            if (cube && ctx->CreateCubeMapTexture("_env_skybox", "env_skybox", "../engine/textures/skybox.png"))
                 default_env_atlas = cube;
 
             if (!default_env_atlas) {
@@ -89,7 +89,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
 	BatchBuilder* bb = ctx->GetBatchBuilder();   // num_instances для адресации блоков out_pib
 
     auto shadow_sampler = tm->GetSampler(DefaultSamplersNames::DEFAULT_SHADOW_SAMPLER);
-    auto shadow_tci = TexturePresets::GetCreateInfo(TexturePreset::Depth_FlatArray1024_16Layers);
+    auto shadow_tci = TexturePresets::GetCreateInfo(TexturePreset::Depth_FlatArray1024_8Layers);
     uint32_t max_layers = shadow_tci.layer_count_or_depth;
 
     shadow_depth_flat_array = tm->CreateTextureAtlas(SHADOW_DEPTH_FLAT_ARRAY, shadow_tci, shadow_sampler);

@@ -23,7 +23,10 @@ public:
 	BatchBuilder();
 	// Brings the batch tree up to date: full rebuild when dirty, otherwise applies
 	// the queued create/delete delta. Bumps the revision when the tree changed.
-	void UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene);
+	// Резолверы name-based ссылок материала (имя текстуры/sp → указатель на сборке) передаются
+	// параметром, а не хранятся полем: системы движка не держат указатели друг на друга.
+	void UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
+		TextureManager* tm, ShaderManager* sm, SceneData* scene);
 	void BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm);
 	void BuildComputePrepassBatches(PipeManager* pm, ShaderManager* sm);
 
@@ -42,9 +45,6 @@ public:
 	uint32_t AskNumInstances();
 
 	void SetDummyTexture(TextureHandle* dummy) { dummy_texture = dummy; };
-	// Резолверы name-based ссылок материала: имя текстуры/sp → указатель на сборке батча.
-	// Устанавливаются один раз при инициализации движка (Engine::Init).
-	void SetResolvers(TextureManager* tm, ShaderManager* sm) { texture_manager = tm; shader_manager = sm; };
 
 private:
 	// One place an entity lives inside a ModelBatchData::pib_sub_buffer.
@@ -53,22 +53,21 @@ private:
 		uint32_t        slot_index = 0; // index into model_batch->pib_sub_buffer
 	};
 
-	void BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene);
+	void BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
+		TextureManager* tm, ShaderManager* sm, SceneData* scene);
 	// Drains the queues and applies them to the batch tree. Returns true if any
 	// delta was applied.
-	bool ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om, SceneData* scene);
+	bool ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
+		TextureManager* tm, ShaderManager* sm, SceneData* scene);
 	void FinalizeOffsets(PassManager* pass_manager);
 
 	// Find-or-create the batch nodes for a single entity and record its slots.
 	// Shared by full rebuild and incremental add.
-	void AddEntityToBatches(Entity entity, PipeManager* pm,
+	void AddEntityToBatches(Entity entity, PipeManager* pm, TextureManager* tm, ShaderManager* sm,
 		const MaterialComponent& material_component, const ModelComponent& model_component);
 	void RemoveEntityFromBatches(Entity entity);
 
 	TextureHandle* dummy_texture = nullptr;
-	// Невладеющие: резолв имён текстур/sp материала в указатели на сборке батчей (name-based ссылки).
-	TextureManager* texture_manager = nullptr;
-	ShaderManager*  shader_manager = nullptr;
 	// Reverse index: entity -> all its slots across model batches. Rebuilt on full
 	// rebuild, mutated incrementally by AddEntityToBatches/RemoveEntityFromBatches.
 	std::unordered_map<Entity, std::vector<PibSlot>> entity_slots;

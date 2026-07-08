@@ -62,8 +62,7 @@ SDL_AppResult Game::MainInit()
     ctx->CreateTextureFromFile("texture_asphalt_orm", "orm_atlas", "textures/blocks/brick_orm.png", ChannelConvention::SmoothnessInGreen);
     ctx->CreateTextureFromFile("wood_norm", "normal_atlas", "textures/blocks/brick_normal_h.png", ChannelConvention::AsIs);
 
-	textureManager->CreateTexture("default_orm",      "orm_atlas",      2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
-	textureManager->CreateTexture("default_emissive", "emissive_atlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
+	// default_albedo/normal/orm/emissive теперь движковые (Engine::InitDefaultResources → _FallbackAtlas).
 
     TextureHandle* texture_car = ctx->CreateTextureFromFile("new_car", "albedo_atlas", "textures/assets/new_car.png");
 	TextureHandle* ground = ctx->CreateTextureFromFile("new_car_ground", "albedo_atlas", "textures/assets/new_car_ground.png");
