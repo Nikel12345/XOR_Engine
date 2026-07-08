@@ -18,17 +18,8 @@ ShaderManager::ShaderManager(SDL_GPUDevice* device) {
     SDL_free((void*)base);
 };
 
-ShaderProgramDescription* ShaderManager::CreateShaderProgramDescription(const std::string& name) {
-    auto it = shader_program_descriptions.find(name);
-    if (it != shader_program_descriptions.end()) return it->second.get();
-    auto desc = std::make_unique<ShaderProgramDescription>();
-    auto* raw = desc.get();
-    shader_program_descriptions.emplace(name, std::move(desc));
-    return raw;
-}
-
 ShaderProgram* ShaderManager::CreateShaderProgram(
-    const std::string& name, ShaderProgramDescription* spd, RenderPassStep* associated_pass,
+    const std::string& name, const ShaderProgramDescription& spd, RenderPassStep* associated_pass,
     VertexShaderData vs, std::vector<BufferData*> vertex_shader_buffers,
     FragmentShaderData fs, std::vector<BufferData*> fragment_shader_buffers,
     std::initializer_list<TextureSlotRole> texture_slots)
@@ -88,15 +79,6 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     dirty_compute_pipelines = true;
     dirty_compute_batches = true;
     return ptr;
-}
-
-ShaderProgramDescription* ShaderManager::GetShaderProgramDescription(const std::string& name)
-{
-    auto it = shader_program_descriptions.find(name);
-    if (it != shader_program_descriptions.end())
-        return it->second.get();
-    SDL_Log("Shader program description '%s' not found", name.c_str());
-	return nullptr;
 }
 
 ShaderProgram* ShaderManager::GetShaderProgram(const std::string& name)

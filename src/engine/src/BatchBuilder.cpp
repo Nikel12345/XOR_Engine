@@ -147,11 +147,14 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
 
         for (const ShaderName& sp_name : material->shader_programs)
         {
-            // name-based ссылка: имя sp → указатель на сборке батча (промах → пропуск, будет dummy-эффект)
+            // name-based ссылка: имя sp → указатель на сборке батча. Промах (sp удалена) → fallback-sp
+            // (аналог textureless), а если и его нет — пропуск.
             ShaderProgram* sp = sm ? sm->GetShaderProgram(sp_name) : nullptr;
             if (!sp) {
-                SDL_Log("BatchBuilder::Material references non existing shader program '%s'", sp_name.c_str());
-                continue;
+                // sp удалена → fallback ПО ИМЕНИ (резолвим как обычную sp; удалён и он → пустой рендер, без краша).
+                SDL_Log("BatchBuilder::Material references deleted shader program '%s' — using fallback", sp_name.c_str());
+                sp = (sm && !fallback_shader_name.empty()) ? sm->GetShaderProgram(fallback_shader_name) : nullptr;
+                if (!sp) continue;
             }
             RenderPassStep* rp = sp->associated_render_pass;
             if (!rp) continue;

@@ -4,6 +4,7 @@
 #include "ComponentSerializer.h"
 #include "MaterialParams.h"           // Opaque/TransparentMaterialParams — билтин-типы params
 #include "MaterialParamsRegistry.h"   // реестр типов params (дропдаун Kind)
+#include "PositionStructure.h"        // FMT_PosUVNormal — раскладка вершин для fallback-sp
 #include "EngineProfiler.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
@@ -390,6 +391,7 @@ void Engine::FenceFunc(uint8_t slot) {
 	sd.fence = nullptr;
 	buffer_manager->TrashBuffers();
 	texture_manager->TrashTextures();
+	pipe_manager->TrashPipelines();   // отложенное удаление пайплайнов удалённых/правленых sp
 
 	//DebugReadbackOutPib(slot);   // [DEBUG] выключен; проверка out_pib на -1/oob/дубли (см. функцию)
 
@@ -538,6 +540,23 @@ void Engine::InitDefaultResources()
 	texture_manager->CreateTexture("default_normal",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0x80 }));   // 128,128,128,128 (высота в альфе)
 	texture_manager->CreateTexture("default_orm",      "_FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
 	texture_manager->CreateTexture("default_emissive", "_FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF }));
+
+	// Fallback-sp: материал с УДАЛЁННОЙ sp рисуется им (аналог textureless — цвет из params, без
+	// текстур). Буферы (InitDefaultBufferUpdaters) и MAIN_PASS (InitPasses) к этому моменту готовы.
+	{
+		using namespace DefaultBuffersNames;
+		VertexShaderData vs = engine_context->CreateVertexShader(
+			"../engine/shaders_code/main_pass/main_pass.vert.hlsl",
+			{ { DEFAULT_VERTEX_BUFFER, &FMT_PosUVNormal, { POSITION, UV, NORMAL, TANGENT } } });
+		FragmentShaderData fs = engine_context->CreateFragmentShader("../engine/shaders_code/main_pass/untextured/surface.hlsl");
+		ShaderProgramDescription spd;
+		spd.BehavesAsOpaqueGeometry()->DoesNotCull();
+		engine_context->CreateShaderProgram("_FallbackShader", spd, DefaultRenderPassNamespace::MAIN_PASS,
+			vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			fs, { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
+			{ });   // текстур нет
+		batch_builder->SetFallbackShader("_FallbackShader");   // ПО ИМЕНИ: удаление fallback → промах → пустой рендер
+	}
 }
 
 void Engine::InitDefaultBufferUpdaters()
@@ -674,10 +693,22 @@ void Engine::InitUICommands()
 		{
 			const UpsertTextureCmd* c = static_cast<const UpsertTextureCmd*>(data);
 			if (!c->name.empty() && !c->atlas.empty() && !c->path.empty()) {
-				ctx->GetTextureManager()->DeleteTextureHandle(c->name);   // no-op, если имени нет
+				if (!c->old_name.empty() && c->old_name != c->name)
+					ctx->GetTextureManager()->DeleteTextureHandle(c->old_name);   // переименование → снять старую
+				ctx->GetTextureManager()->DeleteTextureHandle(c->name);           // replace под новым именем (no-op, если нет)
 				ctx->CreateTextureFromFile(c->name, c->atlas, c->path.c_str(), static_cast<ChannelConvention>(c->conv));
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
+			delete c;
+		});
+
+	// Удаление текстуры — снять хэндл (материалы по имени → dummy) + пересборка.
+	input_manager->RegisterCommand(CommandId::DeleteTexture,
+		[](EngineContext* ctx, const void* data)
+		{
+			const DeleteTextureCmd* c = static_cast<const DeleteTextureCmd*>(data);
+			ctx->GetTextureManager()->DeleteTextureHandle(c->name);
+			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
 		});
 
@@ -747,6 +778,34 @@ void Engine::InitUICommands()
 			if (!c->name.empty() && !c->model_path.empty() && !c->index_path.empty()) {
 				ctx->GetModelManager()->LoadModelFromFile(c->name, c->model_path, c->index_path,
 					static_cast<AnchorShift>(c->anchor));
+				ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			}
+			delete c;
+		});
+
+	// Применить правку spd шейдера: сбросить его пайплайн + взвести пересоздание пайплайнов и
+	// пересборку батчей (батч кэширует указатель пайплайна). spd уже поправлен в UI in-place.
+	input_manager->RegisterCommand(CommandId::RebuildShaderPipeline,
+		[](EngineContext* ctx, const void* data)
+		{
+			const RebuildShaderPipelineCmd* c = static_cast<const RebuildShaderPipelineCmd*>(data);
+			if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader)) {
+				ctx->GetPipeManager()->InvalidatePipeline(sp);
+				ctx->GetShaderManager()->SetDirtyGraphicsPipelines(true);   // CreateGraphicsPiplenes пересоздаст
+				ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			}
+			delete c;
+		});
+
+	// Удаление sp: пайплайн — в отложенное удаление, затем erase sp (шейдеры релизятся по refcount:
+	// неиспользуемые освобождаются, общие живут). Материалы с этой sp → fallback (см. BatchBuilder).
+	input_manager->RegisterCommand(CommandId::DeleteShader,
+		[](EngineContext* ctx, const void* data)
+		{
+			const RebuildShaderPipelineCmd* c = static_cast<const RebuildShaderPipelineCmd*>(data);
+			if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader)) {
+				ctx->GetPipeManager()->InvalidatePipeline(sp);           // сперва пайплайн (кэш по sp*)
+				ctx->GetShaderManager()->DeleteShaderProgram(c->shader); // затем сам sp
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 			delete c;

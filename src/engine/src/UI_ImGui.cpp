@@ -19,7 +19,8 @@ namespace {
     // Раньше выбор был только Entity (g_selected). Теперь общий: клик в Hierarchy или по
     // плитке ассета кладёт сюда «вид + идентификатор», а Inspector по нему решает, что рисовать.
     // Свет НЕ отдельный вид: он такая же сущность (Entity). Виды — только «сущность vs ресурс».
-    enum class SelKind { None, Entity, Camera, Material, Texture, Model };
+    // Shader = graphics sp, Compute = compute sp (2 типа, отдельные вкладки-фильтры).
+    enum class SelKind { None, Entity, Camera, Material, Texture, Model, Shader, Compute };
     struct Selection {
         SelKind kind = SelKind::None;
         Entity  entity = static_cast<Entity>(-1);  // для Entity (включая свет)
@@ -488,10 +489,26 @@ namespace {
 
         const bool ready = nameBuf[0] && !atlasSel.empty() && pathBuf[0];
         ImGui::BeginDisabled(!ready);
-        if (ImGui::Button("Create / Update", ImVec2(160, 0)))
+        if (ImGui::Button("Create / Update", ImVec2(160, 0))) {
+            // old_name = выбранная текстура: если имя изменили — переименование (старую снять в команде).
             ctx->GetInputManager()->PushCommand(CommandId::UpsertTexture,
-                new UpsertTextureCmd{ nameBuf, atlasSel, pathBuf, static_cast<uint32_t>(convSel) });   // delete+create в sim-потоке
+                new UpsertTextureCmd{ nameBuf, atlasSel, pathBuf, static_cast<uint32_t>(convSel), g_sel.name });
+            g_sel = Selection{}; g_sel.kind = SelKind::Texture; g_sel.name = nameBuf;   // выбор следует за именем
+        }
         ImGui::EndDisabled();
+
+        // Удаление существующей текстуры (материалы по её имени → dummy на пересборке).
+        if (!g_sel.name.empty()) {
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.70f, 0.15f, 0.15f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.20f, 0.20f, 1.0f));
+            const bool del = ImGui::Button("Delete");
+            ImGui::PopStyleColor(2);
+            if (del) {
+                ctx->GetInputManager()->PushCommand(CommandId::DeleteTexture, new DeleteTextureCmd{ g_sel.name });
+                g_sel = Selection{};
+            }
+        }
     }
 
     // Форма создания/редактирования модели (аналог TextureEditor). Upsert = перезагрузка in-place
@@ -563,6 +580,59 @@ namespace {
             ctx->GetInputManager()->PushCommand(CommandId::UpsertModel,
                 new UpsertModelCmd{ nameBuf, modelBuf, indexBuf, static_cast<uint32_t>(anchorSel) });
         ImGui::EndDisabled();
+    }
+
+    // Инспектор graphics-sp: параметры spd (живут В sp) как галочки/списки. Взаимоисключающие
+    // (cull/fill/primitive) — списки, булевы — галочки. Push/dispatch в UI НЕ идут (это код).
+    // Правка — in-place в sp->spd; при изменении шлём команду пересоздать пайплайн (строится из spd).
+    void ShaderInspector(EngineContext* ctx, const std::string& spName)
+    {
+        ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(spName);
+        if (!sp) { ImGui::TextUnformatted("Shader not found."); return; }
+        ImGui::Text("Shader: %s", spName.c_str());
+
+        // Удаление sp: пайплайн в отложенное удаление, шейдеры релизятся по refcount, материалы → fallback.
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.70f, 0.15f, 0.15f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.20f, 0.20f, 1.0f));
+        const bool del = ImGui::Button("Delete shader");
+        ImGui::PopStyleColor(2);
+        if (del) {
+            ctx->GetInputManager()->PushCommand(CommandId::DeleteShader, new RebuildShaderPipelineCmd{ spName });
+            g_sel = Selection{};
+            return;
+        }
+
+        ImGui::SeparatorText("Pipeline state (spd)");
+
+        ShaderProgramDescription& d = sp->spd;
+        bool changed = false;
+
+        // Взаимоисключающие enum'ы — списки.
+        { const char* names[] = { "None", "Front", "Back" }; int v = static_cast<int>(d.cull_mode);
+          if (ImGui::Combo("Cull mode", &v, names, 3)) { d.cull_mode = static_cast<SDL_GPUCullMode>(v); changed = true; } }
+        { const char* names[] = { "Fill", "Wireframe" }; int v = static_cast<int>(d.fill_mode);
+          if (ImGui::Combo("Fill mode", &v, names, 2)) { d.fill_mode = static_cast<SDL_GPUFillMode>(v); changed = true; } }
+        { const char* names[] = { "TriangleList", "TriangleStrip", "LineList", "LineStrip", "PointList" };
+          int v = static_cast<int>(d.primitive_type);
+          if (ImGui::Combo("Primitive", &v, names, 5)) { d.primitive_type = static_cast<SDL_GPUPrimitiveType>(v); changed = true; } }
+
+        // Булевы — галочки.
+        changed |= ImGui::Checkbox("Depth test",   &d.depth_test);
+        changed |= ImGui::Checkbox("Depth write",  &d.depth_write);
+        changed |= ImGui::Checkbox("Stencil test", &d.stencil_test);
+        changed |= ImGui::Checkbox("Color blend",  &d.color_blend);
+
+        // Depth bias — галочка + поля (показываем поля только когда включён).
+        changed |= ImGui::Checkbox("Depth bias", &d.rasterizer_bias.enable_depth_bias);
+        if (d.rasterizer_bias.enable_depth_bias) {
+            changed |= ImGui::DragFloat("Bias constant", &d.rasterizer_bias.depth_bias_constant_factor, 0.05f);
+            changed |= ImGui::DragFloat("Bias slope",    &d.rasterizer_bias.depth_bias_slope_factor, 0.05f);
+            changed |= ImGui::DragFloat("Bias clamp",    &d.rasterizer_bias.depth_bias_clamp, 0.05f);
+        }
+
+        if (changed)   // spd уже поправлен in-place; команда пересоздаёт пайплайн + пересобирает батчи
+            ctx->GetInputManager()->PushCommand(CommandId::RebuildShaderPipeline,
+                new RebuildShaderPipelineCmd{ spName });
     }
 }
 
@@ -757,6 +827,15 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         ModelEditor(ctx);
         break;
 
+    case SelKind::Shader:
+        ShaderInspector(ctx, g_sel.name);
+        break;
+
+    case SelKind::Compute:
+        ImGui::Text("Compute: %s", g_sel.name.c_str());
+        ImGui::TextDisabled("(no editable pipeline state; push/dispatch are code)");
+        break;
+
     default:
         ImGui::TextDisabled("Nothing selected.");
         break;
@@ -842,6 +921,16 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
             tiles(SelKind::Model, true,
                 [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Model; g_sel.name = ""; },   // + = форма новой модели
                 [&](auto&& emit) { for (auto& [name, m] : ctx->GetModelManager()->GetModels()) emit(name); });
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Shaders")) {                                        // graphics sp (создание — код)
+            tiles(SelKind::Shader, false, []{},
+                [&](auto&& emit) { for (auto& [name, sp] : ctx->GetShaderManager()->GetShaderPrograms()) emit(name); });
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Compute")) {                                        // compute sp
+            tiles(SelKind::Compute, false, []{},
+                [&](auto&& emit) { for (auto& csp : ctx->GetShaderManager()->GetComputeShaderPrograms()) emit(csp->debug_name); });
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

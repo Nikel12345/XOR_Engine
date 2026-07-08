@@ -18,8 +18,7 @@ public:
 
 	FragmentShaderData CreateFragmentShader(const char* hlsl_path);
 	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout);
-	ShaderProgramDescription* CreateShaderProgramDescription(const std::string& name);
-	ShaderProgram* CreateShaderProgram(const std::string& name, ShaderProgramDescription* spd, const RenderPassName& associated_pass_name,
+	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 		VertexShaderData vs, std::initializer_list<BufferDataName> vertex_shader_buffers,
 		FragmentShaderData fs, std::initializer_list<BufferDataName> fragment_shader_buffers,
 		std::initializer_list<TextureSlotRole> texture_slots);

@@ -62,9 +62,8 @@ void DefaultShaderProgramSet::SetMainShaderProgram(EngineContext* ctx)
     }
     VertexShaderData vs = GetMainPassVertexShader(ctx);
     FragmentShaderData fs = ctx->CreateFragmentShader("../engine/shaders_code/main_pass/surface.hlsl");
-    ShaderProgramDescription* spd_main =
-        ctx->CreateShaderProgramDescription("spd")
-        ->BehavesAsOpaqueGeometry()->DoesNotCull()
+    ShaderProgramDescription spd_main;
+    spd_main.BehavesAsOpaqueGeometry()->DoesNotCull()
         ;
 
     ctx->CreateShaderProgram("sp", spd_main, DefaultRenderPassNamespace::MAIN_PASS,
@@ -106,9 +105,8 @@ void DefaultShaderProgramSet::SetDefaultShadowShaderProgram(EngineContext* ctx)
     shadow_rsbp.depth_bias_constant_factor = 1.0f;   // подбираешь
     shadow_rsbp.depth_bias_slope_factor = 2.0f;   // подбираешь
     shadow_rsbp.depth_bias_clamp = 0.0f;
-    ShaderProgramDescription* spd_shadow =
-        ctx->CreateShaderProgramDescription("spd_shadow")
-        ->BehavesAsShadowCaster()->DoesNotCull()
+    ShaderProgramDescription spd_shadow;
+    spd_shadow.BehavesAsShadowCaster()->DoesNotCull()
 		;
 	ShaderProgram* sp_shadow = ctx->CreateShaderProgram("sp_shadow", spd_shadow, DefaultRenderPassNamespace::SHADOW_PASS,
         vs_2, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
@@ -136,9 +134,8 @@ void DefaultShaderProgramSet::SetTransparentShaderProgram(EngineContext* ctx)
     FragmentShaderData fs = ctx->CreateFragmentShader("../engine/shaders_code/transparent_pass/surface.hlsl");
 
     // Блендинг + depth-test без записи (см. BehavesAsTransparentGeometry).
-    ShaderProgramDescription* spd_transparent =
-        ctx->CreateShaderProgramDescription("spd_transparent")
-        ->BehavesAsTransparentGeometry()->DoesNotCull();
+    ShaderProgramDescription spd_transparent;
+    spd_transparent.BehavesAsTransparentGeometry()->DoesNotCull();
 
     // Без shadow-байндингов: только albedo+normal (2 сэмплера) и буфер света (storage t2).
     ctx->CreateShaderProgram("sp_transparent", spd_transparent, DefaultRenderPassNamespace::TRANSPARENT_PASS,
@@ -162,9 +159,8 @@ void DefaultShaderProgramSet::SetUntexturedShaderProgram(EngineContext* ctx)
 
     // Opaque-геометрия, но БЕЗ текстур → required_slots {}; params потребляет (явный флаг,
     // т.к. прокси по текстурам тут не сработал бы — текстур нет).
-    ShaderProgramDescription* spd =
-        ctx->CreateShaderProgramDescription("spd_untextured")
-        ->BehavesAsOpaqueGeometry()->DoesNotCull();
+    ShaderProgramDescription spd;
+    spd.BehavesAsOpaqueGeometry()->DoesNotCull();
 
     ctx->CreateShaderProgram("sp_untextured", spd, DefaultRenderPassNamespace::MAIN_PASS,
         vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
@@ -192,9 +188,8 @@ void DefaultShaderProgramSet::SetDebugColliderProgram(EngineContext* ctx)
     // Рамки рисуем ПОВЕРХ геометрии (IgnoresDepth — без depth-теста): debug-коллайдеры
     // видны целиком, без вендор-зависимого z-fighting. Топология — line-list через spd
     // (AsLineList); spd сохраняет эту возможность, рамки её используют.
-    ShaderProgramDescription* spd =
-        ctx->CreateShaderProgramDescription("spd_debug_collider")
-        ->DoesNotCull()->IgnoresDepth()->AsLineList();
+    ShaderProgramDescription spd;
+    spd.DoesNotCull()->IgnoresDepth()->AsLineList();
 
     ShaderProgram* sp = ctx->CreateShaderProgram("sp_debug_collider", spd,
         DefaultRenderPassNamespace::DEBUG_PASS,

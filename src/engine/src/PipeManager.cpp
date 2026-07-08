@@ -8,6 +8,18 @@ PipeManager::PipeManager(SDL_GPUDevice* dev, SDL_Window* win) {
     this->dev = dev;
 }
 
+void PipeManager::TrashPipelines()
+{
+    auto it = pipeline_trash.begin();
+    while (it != pipeline_trash.end()) {
+        if (it->frame_ready <= 0) {
+            SDL_ReleaseGPUGraphicsPipeline(dev, it->pipe);
+            it = pipeline_trash.erase(it);
+        }
+        else { it->frame_ready--; ++it; }
+    }
+}
+
 void PipeManager::CreateGraphicsPiplenes(std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& shader_programs)
 {
     for (auto& pair : shader_programs) {
@@ -46,24 +58,24 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp)
     pci.vertex_shader = sp->vs.shader_data.shader.get();
     pci.fragment_shader = sp->fs.shader_data.shader.get();
 
-    pci.primitive_type = sp->spd->primitive_type; 
-    pci.rasterizer_state.fill_mode = sp->spd->fill_mode;
-    pci.rasterizer_state.cull_mode = sp->spd->cull_mode;
+    pci.primitive_type = sp->spd.primitive_type; 
+    pci.rasterizer_state.fill_mode = sp->spd.fill_mode;
+    pci.rasterizer_state.cull_mode = sp->spd.cull_mode;
     pci.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
 
-    pci.rasterizer_state.enable_depth_bias = sp->spd->rasterizer_bias.enable_depth_bias;
-    pci.rasterizer_state.depth_bias_constant_factor = sp->spd->rasterizer_bias.depth_bias_constant_factor;
-    pci.rasterizer_state.depth_bias_slope_factor = sp->spd->rasterizer_bias.depth_bias_slope_factor;
-    pci.rasterizer_state.depth_bias_clamp = sp->spd->rasterizer_bias.depth_bias_clamp;
+    pci.rasterizer_state.enable_depth_bias = sp->spd.rasterizer_bias.enable_depth_bias;
+    pci.rasterizer_state.depth_bias_constant_factor = sp->spd.rasterizer_bias.depth_bias_constant_factor;
+    pci.rasterizer_state.depth_bias_slope_factor = sp->spd.rasterizer_bias.depth_bias_slope_factor;
+    pci.rasterizer_state.depth_bias_clamp = sp->spd.rasterizer_bias.depth_bias_clamp;
 
     pci.vertex_input_state.num_vertex_buffers = safe_u32(sp->vs.vbs.size());
     pci.vertex_input_state.vertex_buffer_descriptions = sp->vs.vbs.data();
     pci.vertex_input_state.num_vertex_attributes = safe_u32(sp->vs.attributes.size());
     pci.vertex_input_state.vertex_attributes = sp->vs.attributes.data();
 
-    pci.depth_stencil_state.enable_depth_test = sp->spd->depth_test;
-    pci.depth_stencil_state.enable_depth_write = sp->spd->depth_write;
-    pci.depth_stencil_state.enable_stencil_test = sp->spd->stencil_test;
+    pci.depth_stencil_state.enable_depth_test = sp->spd.depth_test;
+    pci.depth_stencil_state.enable_depth_write = sp->spd.depth_write;
+    pci.depth_stencil_state.enable_stencil_test = sp->spd.stencil_test;
     pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
 
 
@@ -79,8 +91,8 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp)
         else {
             ctd = MakeDefaultColorTarget();
         }
-        ctd.blend_state.enable_blend = sp->spd->color_blend;
-        if (sp->spd->color_blend) {
+        ctd.blend_state.enable_blend = sp->spd.color_blend;
+        if (sp->spd.color_blend) {
             ctd.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
             ctd.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
             ctd.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
@@ -207,6 +219,10 @@ SDL_GPUComputePipeline* PipeManager::GetComputePipeline(ComputeShaderProgram* sp
 
 PipeManager::~PipeManager()
 {
+    for (auto& pending : pipeline_trash)   // дочищаем отложенные
+        if (pending.pipe) SDL_ReleaseGPUGraphicsPipeline(dev, pending.pipe);
+    pipeline_trash.clear();
+
     for (auto& pair : graphics_pipelines) {
         if (pair.second) {
             SDL_ReleaseGPUGraphicsPipeline(dev, pair.second);

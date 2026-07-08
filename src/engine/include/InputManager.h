@@ -21,16 +21,25 @@ enum class CommandId : uint32_t {
     LoadScene,    // payload: SceneIOCmd* на куче; грузить сцену можно только в sim-потоке
     SetMaterialTexture, // payload: SetMaterialTextureCmd* на куче (материал+слот+текстура);
                         // sim-поток правит Material::textures[role] + взводит пересборку батчей
-    UpsertTexture,      // payload: UpsertTextureCmd* на куче (имя+атлас+путь). Создать/заменить
-                        // текстуру: delete-if-exists + CreateTextureFromFile (edit=create, name-based)
+    UpsertTexture,      // payload: UpsertTextureCmd* на куче (имя+атлас+путь+old_name). Создать/заменить
+                        // текстуру; если old_name != name — это переименование, старую снимаем
+    DeleteTexture,      // payload: DeleteTextureCmd* — удалить текстуру (материалы по имени → dummy)
     CreateMaterial,       // payload: CreateMaterialCmd* (имя из UI). Новый материал с sp "sp" + дефолты
     AddMaterialShader,    // payload: MaterialShaderCmd* — добавить sp материалу (+ дефолты НОВЫХ ролей)
     RemoveMaterialShader, // payload: MaterialShaderCmd* — убрать sp у материала
     RenameMaterial,       // payload: RenameMaterialCmd* — ре-кей материала в словаре + пересборка
     UpsertModel,          // payload: UpsertModelCmd* — создать/перезагрузить модель из файла (in-place)
+    RebuildShaderPipeline,// payload: RebuildShaderPipelineCmd* — spd правится in-place, тут инвалидация
+                          // кэша пайплайна sp + пересборка (пайплайн строится из spd)
+    DeleteShader,         // payload: RebuildShaderPipelineCmd* (то же поле shader) — удалить sp:
+                          // пайплайн в отложенное удаление + erase sp (шейдеры релизятся по refcount)
 
     COUNT
 };
+
+// Применить изменённый spd шейдера: sp->spd уже поправлен в UI in-place, здесь сбрасываем
+// кэшированный пайплайн (строится из spd) и взводим его пересоздание + пересборку батчей.
+struct RebuildShaderPipelineCmd { std::string shader; };
 
 // Создание/замена модели из файла (аналог UpsertTexture). Существующую перезагружает В ТОТ ЖЕ
 // объект (указатель у энтити жив; старая геометрия в буфере остаётся — reclaim'а нет). Процедурные
@@ -63,8 +72,12 @@ struct UpsertTextureCmd {
     std::string name;
     std::string atlas;
     std::string path;
-    uint32_t    conv = 0;   // ChannelConvention как uint32_t (без завязки заголовка на TextureData.h)
+    uint32_t    conv = 0;    // ChannelConvention как uint32_t (без завязки заголовка на TextureData.h)
+    std::string old_name;    // ранее выбранная текстура; != name → переименование (старую снять)
 };
+
+// Удаление текстуры. Материалы, ссылавшиеся на неё по имени, на пересборке дадут dummy.
+struct DeleteTextureCmd { std::string name; };
 
 // Смена текстуры слота материала. Материал ссылается на текстуру ПО ИМЕНИ (name-based), поэтому
 // правка = замена строки в Material::textures[role]. Обязателен ребилд батчей: в батче лежит уже

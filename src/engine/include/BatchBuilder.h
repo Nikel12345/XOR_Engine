@@ -4,6 +4,7 @@
 #include <memory>
 #include <atomic>
 #include <mutex>
+#include <string>
 #include <cstdint>
 #include "config.h"   // BUFFERING_LEVEL — пер-слотовые слепки раскладки
 
@@ -19,6 +20,7 @@ struct ModelBatchData;
 struct MaterialComponent;
 struct ModelComponent;
 struct TextureHandle;
+struct ShaderProgram;
 
 using Entity = uint32_t;
 
@@ -61,6 +63,9 @@ public:
 	uint32_t AskNumInstances(uint8_t slot) const;
 
 	void SetDummyTexture(TextureHandle* dummy) { dummy_texture = dummy; };
+	// Fallback-sp ПО ИМЕНИ для материалов, чья sp удалена. Резолвится на сборке как обычная sp,
+	// поэтому удаление самого fallback = промах → пустой рендер (без висячего указателя).
+	void SetFallbackShader(const std::string& name) { fallback_shader_name = name; };
 
 private:
 	// One place an entity lives inside a ModelBatchData::pib_sub_buffer.
@@ -84,6 +89,7 @@ private:
 	void RemoveEntityFromBatches(Entity entity);
 
 	TextureHandle* dummy_texture = nullptr;
+	std::string fallback_shader_name;   // sp по имени для материала с удалённой sp (см. SetFallbackShader)
 	// Reverse index: entity -> all its slots across model batches. Rebuilt on full
 	// rebuild, mutated incrementally by AddEntityToBatches/RemoveEntityFromBatches.
 	std::unordered_map<Entity, std::vector<PibSlot>> entity_slots;

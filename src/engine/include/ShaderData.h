@@ -182,7 +182,7 @@ struct ShaderProgram {
             fn(b, *static_cast<const T*>(raw));
         };
     }
-	ShaderProgramDescription* spd;
+	ShaderProgramDescription spd;   // ПО ЗНАЧЕНИЮ: параметры пайплайна живут в самом sp (не в словаре)
     RenderPassStep* associated_render_pass = nullptr;
 
 };

@@ -98,8 +98,7 @@ public:
 
 	FragmentShaderData CreateFragmentShader(const char* hlsl_path);
 	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout);
-	ShaderProgramDescription* CreateShaderProgramDescription(const std::string& name);
-	ShaderProgram* CreateShaderProgram(const std::string& name, ShaderProgramDescription* spd, const RenderPassName& associated_pass_name,
+	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 		VertexShaderData vs, std::initializer_list<BufferDataName> vertex_shader_buffers,
 		FragmentShaderData fs, std::initializer_list<BufferDataName> fragment_shader_buffers,
 		std::initializer_list<TextureSlotRole> texture_slots);
@@ -122,6 +121,7 @@ public:
 	ObjectManager* GetObjectManager() const { return object_manager; }
 	CameraManager* GetCameraManager() const { return camera_manager; }
 	MaterialManager* GetMaterialManager() const { return material_manager; }
+	PipeManager* GetPipeManager() const { return pipe_manager; }
 
 	BatchBuilder* GetBatchBuilder() const { return batch_builder; }
 	TextureLoader* GetTextureLoader() const { return texture_loader; }

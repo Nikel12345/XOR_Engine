@@ -14,12 +14,11 @@ class ShaderManager
 {
 public:
 	ShaderManager(SDL_GPUDevice* device);
-	ShaderProgramDescription* CreateShaderProgramDescription(const std::string& name);
 	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> bindings);
 	FragmentShaderData CreateFragmentShader(const char* path);
 
 	ShaderProgram* CreateShaderProgram(
-		const std::string& name, ShaderProgramDescription* spd, RenderPassStep* associated_pass,
+		const std::string& name, const ShaderProgramDescription& spd, RenderPassStep* associated_pass,
 		VertexShaderData vs, std::vector<BufferData*> vertex_shader_buffers,
 		FragmentShaderData fs, std::vector<BufferData*> fragment_shader_buffers,
 		std::initializer_list<TextureSlotRole> texture_slots);
@@ -39,8 +38,12 @@ public:
 	FragmentShaderData CreateFragmentShaderFromSPV(const char* spv_path);
 	ComputeShaderData CreateComputeShaderFromSPV(const char* spv_path);
 
-	ShaderProgramDescription* GetShaderProgramDescription(const std::string& name);
 	ShaderProgram* GetShaderProgram(const std::string& name);
+	// Удаление sp: erase из словаря разрушает ShaderProgram → отпускает его ShaderData
+	// (shared_ptr<SDL_GPUShader>). Шейдеры релизятся ПО REFCOUNT: неиспользуемые — освобождаются,
+	// переиспользуемые (общий vs) — живут. Пайплайн sp освобождает вызывающий (PipeManager,
+	// отложенно) ДО этого erase (кэш пайплайнов ключуется по sp*).
+	void DeleteShaderProgram(const std::string& name) { shader_programs.erase(name); }
 
 	ComputeShaderProgram* GetComputeShaderProgram(const std::string& name);
 
@@ -79,7 +82,6 @@ private:
 
 	std::string m_cacheBasePath;
 
-	std::unordered_map<std::string, std::unique_ptr<ShaderProgramDescription>> shader_program_descriptions;
 	std::unordered_map<std::string, std::unique_ptr<ShaderProgram>> shader_programs;
 	
 	std::vector<std::unique_ptr<ComputeShaderProgram>> compute_shader_programs;

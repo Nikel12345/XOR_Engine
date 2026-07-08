@@ -360,11 +360,7 @@ VertexShaderData EngineContext::CreateVertexShader(const char* hlsl_path, std::i
 	return gpu_ctx.CreateVertexShader(hlsl_path, vertex_buffer_layout);
 }
 
-ShaderProgramDescription* EngineContext::CreateShaderProgramDescription(const std::string& name) {
-	return gpu_ctx.CreateShaderProgramDescription(name);
-}
-
-ShaderProgram* EngineContext::CreateShaderProgram(const std::string& name, ShaderProgramDescription* spd, const RenderPassName& associated_pass_name,
+ShaderProgram* EngineContext::CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 	VertexShaderData vs, std::initializer_list<BufferDataName> vertex_shader_buffers,
 	FragmentShaderData fs, std::initializer_list<BufferDataName> fragment_shader_buffers,
 	std::initializer_list<TextureSlotRole> texture_slots) {
