@@ -103,6 +103,29 @@ ModelData* ModelManager::CreateModel(const std::string& name, const std::string&
     auto model_data = std::make_unique<ModelData>();
     ModelData* ptr = model_data.get();
     models_data[name] = std::move(model_data);
+    return _LoadModelFile(ptr, path_vert, path_ind, anchor);
+}
+
+// Upsert: существующий перезагружаем В ТОТ ЖЕ объект (указатель у энтити жив), новый — создаём.
+ModelData* ModelManager::LoadModelFromFile(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor)
+{
+    ModelData* ptr;
+    auto it = models_data.find(name);
+    if (it != models_data.end()) {
+        ptr = it->second.get();            // reload в существующий (старая геометрия остаётся в буфере)
+    }
+    else {
+        auto model_data = std::make_unique<ModelData>();
+        ptr = model_data.get();
+        models_data[name] = std::move(model_data);
+    }
+    return _LoadModelFile(ptr, path_vert, path_ind, anchor);
+}
+
+ModelData* ModelManager::_LoadModelFile(ModelData* ptr, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor)
+{
+    ptr->model_path = path_vert;   // self-describing: рецепт для редактора/сериализации
+    ptr->index_path = path_ind;
 
     // Жадное чтение: submeshes готовы сразу после возврата (CreateModel всегда на prep-потоке,
     // гонок с общим staging нет). Отложена только заливка на GPU — staging копит данные

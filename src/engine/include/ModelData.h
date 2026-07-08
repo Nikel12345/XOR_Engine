@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <string>
 #include <SDL3/SDL_stdinc.h>   // Uint32
 #include <glm/glm.hpp>         // glm::vec4 (раньше приходили из PCH)
 
@@ -27,4 +28,9 @@ struct ModelData {
     // Как сдвинут пивот. Читается только в момент запекания (CreateModel);
     // дальше — информативная метка, рендер её не использует.
     AnchorShift anchor = AnchorShift::Keep;
+
+    // Авторские данные (для редактора/сериализации): ресурс самоописываем. ПУСТЫ у процедурных
+    // моделей (сгенерированы кодом) — из файла не пересоздаются, редактором не трогаются.
+    std::string model_path;
+    std::string index_path;
 };

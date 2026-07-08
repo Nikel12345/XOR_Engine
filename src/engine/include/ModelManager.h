@@ -28,6 +28,12 @@ public:
 	// Процедурная модель: геометрию выдаёт generator (вызывается жадно, как и чтение с диска).
 	ModelData* CreateModel(const std::string& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep);
 
+	// Upsert из файла (для редактора): существующий перезагружает В ТОТ ЖЕ объект ModelData —
+	// указатель у энтити (ModelComponent.model) остаётся жив, сабмеши пересчитываются на
+	// заново-аппендженную геометрию. Старая геометрия остаётся в GPU-буфере (reclaim'а нет —
+	// приемлемо для редактора). Новое имя — создаёт. Пересборку батчей взводит вызывающий.
+	ModelData* LoadModelFromFile(const std::string& name, const std::string& path, const std::string& path_ind, AnchorShift anchor = AnchorShift::Keep);
+
 	uint32_t CalculateModelsVerticesSize();
 	uint32_t CalculateModelsIndicesSize();
 
@@ -49,6 +55,10 @@ public:
 	~ModelManager();
 
 private:
+	// Общая загрузка файловой модели В переданный ptr (читает staging, пересчитывает submeshes,
+	// пишет self-describing пути). Разделяют CreateModel(file) и LoadModelFromFile.
+	ModelData* _LoadModelFile(ModelData* ptr, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor);
+
 	std::unordered_map<std::string, std::unique_ptr<ModelData>> models_data;
 
 	// CPU-буферы накопления: данные моделей, ещё не залитые на GPU. Очищаются после заливки.

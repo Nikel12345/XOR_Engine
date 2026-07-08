@@ -723,6 +723,19 @@ void Engine::InitUICommands()
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
 		});
+
+	// Upsert модели из файла — перезагрузка in-place (указатель у энтити жив) + пересборка батчей.
+	input_manager->RegisterCommand(CommandId::UpsertModel,
+		[](EngineContext* ctx, const void* data)
+		{
+			const UpsertModelCmd* c = static_cast<const UpsertModelCmd*>(data);
+			if (!c->name.empty() && !c->model_path.empty() && !c->index_path.empty()) {
+				ctx->GetModelManager()->LoadModelFromFile(c->name, c->model_path, c->index_path,
+					static_cast<AnchorShift>(c->anchor));
+				ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			}
+			delete c;
+		});
 }
 
 

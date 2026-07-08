@@ -27,8 +27,19 @@ enum class CommandId : uint32_t {
     AddMaterialShader,    // payload: MaterialShaderCmd* — добавить sp материалу (+ дефолты НОВЫХ ролей)
     RemoveMaterialShader, // payload: MaterialShaderCmd* — убрать sp у материала
     RenameMaterial,       // payload: RenameMaterialCmd* — ре-кей материала в словаре + пересборка
+    UpsertModel,          // payload: UpsertModelCmd* — создать/перезагрузить модель из файла (in-place)
 
     COUNT
+};
+
+// Создание/замена модели из файла (аналог UpsertTexture). Существующую перезагружает В ТОТ ЖЕ
+// объект (указатель у энтити жив; старая геометрия в буфере остаётся — reclaim'а нет). Процедурные
+// модели (сгенерированы кодом) редактор не трогает: у них пустые пути. Строки на куче, функтор удалит.
+struct UpsertModelCmd {
+    std::string name;
+    std::string model_path;
+    std::string index_path;
+    uint32_t    anchor = 0;   // AnchorShift как uint32_t (без завязки заголовка на ModelData.h)
 };
 
 // Имя нового материала считает UI (свободное material_N) — чтобы сразу выбрать созданный.

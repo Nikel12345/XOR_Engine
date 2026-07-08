@@ -100,6 +100,24 @@ namespace {
         }
     }
 
+    // AnchorShift (enum пивота модели) → строка для дропдауна.
+    const char* AnchorName(AnchorShift a)
+    {
+        switch (a) {
+        case AnchorShift::Keep:   return "Keep";
+        case AnchorShift::Center: return "Center";
+        case AnchorShift::LBB:    return "LBB";
+        case AnchorShift::RBB:    return "RBB";
+        case AnchorShift::LTB:    return "LTB";
+        case AnchorShift::RTB:    return "RTB";
+        case AnchorShift::LBF:    return "LBF";
+        case AnchorShift::RBF:    return "RBF";
+        case AnchorShift::LTF:    return "LTF";
+        case AnchorShift::RTF:    return "RTF";
+        default:                  return "Keep";
+        }
+    }
+
     // ================= Inspector-блоки (перенос существующих виджетов как есть) =================
 
     // Пред-объявления: InspectEntity дёргает свет-редакторы, определённые ниже.
@@ -374,8 +392,11 @@ namespace {
             cam->SetView(pos, tgt, glm::vec3(0.0f, 1.0f, 0.0f));
     }
 
-    // --- Приём пути из нативного файл-диалога. Колбэк SDL может прийти из ДРУГОГО потока,
-    //     поэтому кладём через мьютекс+atomic, а UI забирает у себя на кадре. ---
+    // --- Приём пути из нативного файл-диалога. Колбэк SDL может прийти из ДРУГОГО потока, поэтому
+    //     кладём через мьютекс+atomic, а UI забирает у себя на кадре. g_pick_target помечает, КАКОЕ
+    //     поле заполнять (у формы модели два пути) — активная форма забирает только «своё». ---
+    enum class PickTarget { None, TexPath, ModelVert, ModelIndex };
+    PickTarget        g_pick_target = PickTarget::None;
     std::mutex        g_pick_mtx;
     std::string       g_picked_path;
     std::atomic<bool> g_picked_ready{ false };
@@ -387,6 +408,13 @@ namespace {
             g_picked_path = filelist[0];
             g_picked_ready.store(true, std::memory_order_release);
         }
+    }
+
+    // Открыть нативный диалог, пометив целевое поле (SDL требует main-поток; результат — потокобезопасно).
+    void OpenFileDialog(PickTarget target, const SDL_DialogFileFilter* filters, int nfilters)
+    {
+        g_pick_target = target;
+        SDL_ShowOpenFileDialog(OnFilePicked, nullptr, nullptr, filters, nfilters, nullptr, false);
     }
 
     // Форма создания/редактирования текстуры (одна и та же — см. upsert delete+create). Ничего не
@@ -415,10 +443,11 @@ namespace {
             else pathBuf[0] = '\0';   // "New" — путь чистим (атлас оставляем для серии)
         }
 
-        // Забрать путь, выбранный в диалоге (возможно, из другого потока).
-        if (g_picked_ready.exchange(false, std::memory_order_acquire)) {
+        // Забрать путь, выбранный в диалоге (только если он для нашего поля).
+        if (g_pick_target == PickTarget::TexPath && g_picked_ready.exchange(false, std::memory_order_acquire)) {
             std::lock_guard<std::mutex> lk(g_pick_mtx);
             std::snprintf(pathBuf, sizeof pathBuf, "%s", g_picked_path.c_str());
+            g_pick_target = PickTarget::None;
         }
 
         ImGui::TextDisabled("Texture (create / edit)");
@@ -441,9 +470,7 @@ namespace {
             static const SDL_DialogFileFilter filters[] = {
                 { "Images", "png;jpg;jpeg;bmp;tga" }, { "All files", "*" }
             };
-            // SDL требует вызов с main-потока; результат принимаем потокобезопасно (g_picked_*).
-            // window=nullptr — модальность к окну опущена (не все платформы её поддерживают).
-            SDL_ShowOpenFileDialog(OnFilePicked, nullptr, nullptr, filters, 2, nullptr, false);
+            OpenFileDialog(PickTarget::TexPath, filters, 2);
         }
 
         // Конвенция каналов исходника (enum → switch, см. ConvName).
@@ -464,6 +491,77 @@ namespace {
         if (ImGui::Button("Create / Update", ImVec2(160, 0)))
             ctx->GetInputManager()->PushCommand(CommandId::UpsertTexture,
                 new UpsertTextureCmd{ nameBuf, atlasSel, pathBuf, static_cast<uint32_t>(convSel) });   // delete+create в sim-потоке
+        ImGui::EndDisabled();
+    }
+
+    // Форма создания/редактирования модели (аналог TextureEditor). Upsert = перезагрузка in-place
+    // (ModelManager::LoadModelFromFile). Процедурные модели имеют пустые пути → форма пуста, а кнопка
+    // (нужны оба пути) не активна — их создание только в коде.
+    void ModelEditor(EngineContext* ctx)
+    {
+        static char        nameBuf[128] = "";
+        static char        modelBuf[512] = "";
+        static char        indexBuf[512] = "";
+        static AnchorShift anchorSel = AnchorShift::Keep;
+        static std::string syncedFor = "\x01";
+
+        if (g_sel.name != syncedFor) {                        // синк из выбранной модели (self-describing)
+            syncedFor = g_sel.name;
+            std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
+            if (!g_sel.name.empty()) {
+                auto& models = ctx->GetModelManager()->GetModels();
+                auto it = models.find(g_sel.name);
+                if (it != models.end()) {
+                    std::snprintf(modelBuf, sizeof modelBuf, "%s", it->second->model_path.c_str());
+                    std::snprintf(indexBuf, sizeof indexBuf, "%s", it->second->index_path.c_str());
+                    anchorSel = it->second->anchor;
+                }
+            }
+            else { modelBuf[0] = '\0'; indexBuf[0] = '\0'; }
+        }
+
+        // Забрать путь из диалога в нужное из двух полей.
+        if ((g_pick_target == PickTarget::ModelVert || g_pick_target == PickTarget::ModelIndex)
+            && g_picked_ready.exchange(false, std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> lk(g_pick_mtx);
+            char* dst = (g_pick_target == PickTarget::ModelVert) ? modelBuf : indexBuf;
+            std::snprintf(dst, 512, "%s", g_picked_path.c_str());
+            g_pick_target = PickTarget::None;
+        }
+
+        static const SDL_DialogFileFilter filters[] = { { "Model (.bin)", "bin" }, { "All files", "*" } };
+
+        ImGui::TextDisabled("Model (create / edit)");
+        ImGui::InputText("Name", nameBuf, sizeof nameBuf);
+
+        ImGui::InputText("Vertices", modelBuf, sizeof modelBuf);
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...##v")) OpenFileDialog(PickTarget::ModelVert, filters, 2);
+
+        ImGui::InputText("Indices", indexBuf, sizeof indexBuf);
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...##i")) OpenFileDialog(PickTarget::ModelIndex, filters, 2);
+
+        // Пивот (anchor) — enum → дропдаун (см. AnchorName).
+        static const AnchorShift kAnchors[] = {
+            AnchorShift::Keep, AnchorShift::Center, AnchorShift::LBB, AnchorShift::RBB,
+            AnchorShift::LTB, AnchorShift::RTB, AnchorShift::LBF, AnchorShift::RBF,
+            AnchorShift::LTF, AnchorShift::RTF
+        };
+        if (ImGui::BeginCombo("Anchor", AnchorName(anchorSel))) {
+            for (AnchorShift a : kAnchors) {
+                bool sel = (a == anchorSel);
+                if (ImGui::Selectable(AnchorName(a), sel)) anchorSel = a;
+                if (sel) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+
+        const bool ready = nameBuf[0] && modelBuf[0] && indexBuf[0];
+        ImGui::BeginDisabled(!ready);
+        if (ImGui::Button("Create / Update", ImVec2(160, 0)))
+            ctx->GetInputManager()->PushCommand(CommandId::UpsertModel,
+                new UpsertModelCmd{ nameBuf, modelBuf, indexBuf, static_cast<uint32_t>(anchorSel) });
         ImGui::EndDisabled();
     }
 }
@@ -656,8 +754,7 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         break;
 
     case SelKind::Model:
-        ImGui::Text("Model: %s", g_sel.name.c_str());
-        ImGui::TextDisabled("(editing not implemented yet)");
+        ModelEditor(ctx);
         break;
 
     default:
@@ -742,7 +839,8 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Models")) {
-            tiles(SelKind::Model, false, []{},
+            tiles(SelKind::Model, true,
+                [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Model; g_sel.name = ""; },   // + = форма новой модели
                 [&](auto&& emit) { for (auto& [name, m] : ctx->GetModelManager()->GetModels()) emit(name); });
             ImGui::EndTabItem();
         }
