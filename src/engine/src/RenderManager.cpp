@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "RenderManager.h"
 #include "BufferManager.h"   // DefaultBuffersNames + BufferManager (через параметр)
+#include "RenderSnapshot.h"  // header-only типы слепков (линковку не расширяет)
 // MaterialManager/PipeManager/ObjectManager/ModelData здесь не использовались — убраны,
 // чтобы PassManager не тянул render/model/object на уровне линковки (нужно для EngineGpu).
 
@@ -113,6 +114,12 @@ void PassManager::FillRenderPasses()
 		[](const ComputePassStep* a, const ComputePassStep* b) {
 		return a->pass_index < b->pass_index;
 	});
+
+	// Ordinal = индекс прохода в BatchLayout::passes (слепок строится обходом ordered_passes
+	// в этом же порядке). Ставится один раз — проходы после старта не добавляются.
+	for (size_t i = 0; i < ordered_passes.size(); ++i)
+		ordered_passes[i]->ordinal = safe_u32(i);
+
 	passes_filled = true;
 }
 
@@ -165,6 +172,7 @@ void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassS
 		glm::uvec3 elements{ 1, 1, 1 };
 		if (shader_batch.dispatch_func) {
 			DispatchSizeBinder dispatch_binder{};
+			dispatch_binder.slot = pass_frame;   // ключ пер-слотовых слепков для Ask*(slot)
 			shader_batch.dispatch_func(dispatch_binder, dispatch_data_raw);
 			elements = dispatch_binder.element_count;
 		}
@@ -172,7 +180,7 @@ void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassS
 		if (elements.x == 0 || elements.y == 0 || elements.z == 0) continue;
 
 		if (shader_batch.push_func) {
-			PushConstantBinder binder{ cb };
+			PushConstantBinder binder{ cb, pass_frame };
 			shader_batch.push_func(binder, push_data_raw);
 		}
 
@@ -246,10 +254,16 @@ PassManager::~PassManager()
 	render_steps.clear();
 }
 
+// Рисует по СЛЕПКУ раскладки рендеримого слота (render_layout), не по живому дереву:
+// офсеты/uvl/draw_count гарантированно соответствуют indirect_buffer[render_frame],
+// залитому тем же prepare, а sim может свободно перестраивать дерево параллельно.
 inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPURenderPass* rp, const RenderPassStep& render_pass_step, BufferManager* bm, uint32_t additional_offset, const void* push_data_raw)
 {
+	if (!render_layout || render_pass_step.ordinal >= render_layout->passes.size()) return;
+	const RenderSnap::PassDrawList& pass_list = render_layout->passes[render_pass_step.ordinal];
+
 	int draw_calls = 0;
-	for (auto& [_, shader_batch] : render_pass_step.shader_batches)
+	for (const RenderSnap::ShaderGroup& shader_batch : pass_list.shaders)
 	{
 		SDL_BindGPUGraphicsPipeline(rp, shader_batch.pipeline);
 		SDL_BindGPUFragmentSamplers(rp, 0, render_pass_step.global_texture_bindings.data(), safe_u32(render_pass_step.global_texture_bindings.size()));
@@ -257,7 +271,7 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 		bm->BindGPUVertexBuffer(rp, 0, 0);
 		bm->BindGPUIndexBuffer(rp, 0);
 
-		PushConstantBinder binder{ cb };
+		PushConstantBinder binder{ cb, render_frame };
 		if (shader_batch.push_func) {
 			shader_batch.push_func(binder, push_data_raw);
 		}
@@ -276,11 +290,11 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 			//SDL_Log("No fragment storage buffers found for render command");
 		}
 
-		for (auto& [_, atlas_batch] : shader_batch.atlases_batches) {
+		for (const RenderSnap::AtlasGroup& atlas_batch : shader_batch.atlases) {
 			if (!atlas_batch.texture_binding.empty()) {
 				SDL_BindGPUFragmentSamplers(rp, safe_u32(render_pass_step.global_texture_bindings.size()), atlas_batch.texture_binding.data(), safe_u32(atlas_batch.texture_binding.size()));
 			}
-			for (auto& [_, texture_batch] : atlas_batch.texture_batches) {
+			for (const RenderSnap::TextureDraw& texture_batch : atlas_batch.draws) {
 				if (!texture_batch.texture_uvl.empty()) {
 					SDL_PushGPUFragmentUniformData(cb, uvl_slot,
 						texture_batch.texture_uvl.data(),
@@ -298,11 +312,11 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 					bm->_GetGPUBufferForFrame(bm->GetBufferData(DefaultBuffersNames::DEFAULT_INDIRECT_BUFFER), render_frame),
 					safe_u32(additional_offset +
 						texture_batch.indirect_command_index * sizeof(SDL_GPUIndexedIndirectDrawCommand)),
-					safe_u32(texture_batch.model_batches.size())
+					texture_batch.draw_count
 				);
 				draw_calls++;
 
-				
+
 			}
 		}
 	}

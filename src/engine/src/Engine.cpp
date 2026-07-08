@@ -31,6 +31,16 @@ void Engine::PrepareFunc(uint8_t slot)
 		batch_builder->UpdateRenderBatches(pipe_manager, pass_manager, object_manager, texture_manager, shader_manager, object_manager->GetActiveScene());
 	}
 
+	// Клеймим слоту текущую эпоху ребилда (до заливки его буферов ниже). Если этот prepare
+	// был полным ребилдом — планка в SlotController поднимется, и рендер не покажет слоты со
+	// старой раскладкой indirect/out_pib (короткий hold вместо мерцания). Иначе — инертно.
+	slot_controller->StampSlotEpoch(slot, batch_builder->RebuildEpoch());
+
+	// Слепок раскладки батчей слоту (O(1), shared_ptr): всё, что prepare зальёт в буферы
+	// слота ниже, соответствует именно этой версии раскладки — рендер рисует по ней же
+	// (AskLayout/AskNum*(slot)), живое дерево ему не нужно.
+	batch_builder->StampLayoutSnapshot(slot);
+
 	{
 		PROF_SCOPE(Sim, " build_compute_batches");
 		batch_builder->BuildComputeBatches(pass_manager, pipe_manager, shader_manager);
@@ -224,17 +234,19 @@ bool Engine::RenderFunc(uint8_t slot)
 
 	if (RenderPassStep* present_rp = pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::PRESENT_PASS))
 		present_rp->renderPassTexsData.SetColorTexture(tex);
-	pass_manager->SetRenderFrame(slot);
+	// Слот + его слепок раскладки: scatter и draw ниже читают ТОЛЬКО пер-слотовые слепки
+	// (BatchLayout, таблица теневых камер) — живые ECS/дерево батчей рендеру не нужны,
+	// замков нет, sim свободно мутирует своё параллельно.
+	pass_manager->SetRenderFrame(slot, batch_builder->AskLayout(slot));
 	{
 		PROF_SCOPE(Render, " execute_passes (запись команд)");
-		std::lock_guard<std::mutex> batch_lock(pass_manager->BatchTreeMutex());
 
 		// GPU-каллинг (scatter) в ОТДЕЛЬНОМ cb + fence ПЕРЕД рендером. SDL_GPU не барьерит
 		// compute-write -> indirect-read внутри одного cb (на 1М scatter из-за atomic-контеншена
 		// медленный, и draw читал недозаполненный индирект → мерцание). Отдельный cb + fence
 		// гарантирует, что out_pib/indirect дописаны. Fence вдобавок ТРОТТЛИТ рендер-поток под
 		// темп GPU: без него (просто сабмит) рендер убегает вперёд, копит бэклог GPU и пейсинг
-		// ХУЖЕ (50мс-спайки). Под тем же batch-замком — дерево консистентно для scatter и draw.
+		// ХУЖЕ (50мс-спайки). Консистентность scatter↔draw даёт общий слепок слота.
 		{
 			SDL_GPUCommandBuffer* cull_cb = SDL_AcquireGPUCommandBuffer(dev);
 			pass_manager->ExecutePrepassesSteps(cull_cb, slot);
@@ -249,6 +261,9 @@ bool Engine::RenderFunc(uint8_t slot)
 	{
 		PROF_SCOPE(Render, " imgui (new frame + UI + draw)");
 		BeginImGuiFrame();
+		// UI читает живую сцену (иерархия/инспектор/гизмо) с рендер-потока БЕЗ замка —
+		// осознанный компромисс (на тестах стабильно; мутации UI гонит через очередь
+		// команд в sim). Правильное закрытие — UI-слепок или построение UI в sim-потоке.
 		UI_ImGui::Iterate(engine_context);
 		EndImGuiFrame();
 		if (imgui_draw_data && imgui_draw_data->CmdListsCount > 0)
@@ -316,10 +331,10 @@ void Engine::DebugReadbackOutPib(uint8_t slot)
 	static int frame_counter = 0;
 	if (++frame_counter % 20 != 0) return;
 
-	uint32_t tc = batch_builder->AskNumCommands();
-	uint32_t N  = batch_builder->AskNumInstances();
+	uint32_t tc = batch_builder->AskNumCommands(slot);
+	uint32_t N  = batch_builder->AskNumInstances(slot);
 	if (tc == 0 || N == 0) return;
-	uint32_t num_cameras = 1 + light_data_module->AskNumLightCameras(object_manager, object_manager->GetActiveScene());
+	uint32_t num_cameras = 1 + light_data_module->AskNumLightCameras(slot);
 
 	BufferData* ind_bd = buffer_manager->GetBufferData(DefaultBuffersNames::DEFAULT_INDIRECT_BUFFER);
 	BufferData* pib_bd = buffer_manager->GetBufferData(DefaultBuffersNames::DEFAULT_OUT_PIB_BUFFER);
@@ -553,7 +568,7 @@ void Engine::InitPasses()
 	{
 		_SetDefaultCommonResources(engine_context, safe_f_u32(width), safe_f_u32(height));
 		SetDefaultCullingPass(engine_context);     // GPU-каллинг: out_pib до SHADOW_PASS (индекс 5)
-		SetDefaultShadowPCFRenderPass(engine_context);
+		SetDefaultShadowPCFRenderPass(engine_context, light_data_module);
 		SetDefaultMainRenderPass(engine_context);
 		SetTransparentPass(engine_context);
 		SetDebugColliderPass(engine_context);

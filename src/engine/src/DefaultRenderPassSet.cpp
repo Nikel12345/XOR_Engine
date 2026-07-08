@@ -7,6 +7,7 @@
 #include "BatchBuilder.h"
 #include "EngineContext.h"
 #include "TextureLoader.h"
+#include "LightDataModule.h"   // слепок теневых камер слота (AskShadowCameras)
 
 namespace DefaultRenderPassNamespace
 {
@@ -76,7 +77,7 @@ namespace DefaultRenderPassNamespace
 
 
 
-void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ctx)
+void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ctx, LightDataModule* ldm)
 {
     if (shadow_pass_inited) {
         SDL_Log("Default shadow render pass is already initialized.");
@@ -85,8 +86,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
 	TextureManager* tm = ctx->GetTextureManager();
 	PassManager* pm = ctx->GetPassManager();
 	BufferManager* bm = ctx->GetBufferManager();
-	ObjectManager* om = ctx->GetObjectManager();
-	BatchBuilder* bb = ctx->GetBatchBuilder();   // num_instances для адресации блоков out_pib
+	BatchBuilder* bb = ctx->GetBatchBuilder();   // слепок раскладки: num_commands/num_instances слота
 
     auto shadow_sampler = tm->GetSampler(DefaultSamplersNames::DEFAULT_SHADOW_SAMPLER);
     auto shadow_tci = TexturePresets::GetCreateInfo(TexturePreset::Depth_FlatArray1024_8Layers);
@@ -100,106 +100,45 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
 
     auto shadowPass = pm->CreateRenderPass(
         SHADOW_PASS,
-        [pm, bm, om, tm, bb, max_layers](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+        [pm, bm, tm, bb, ldm, max_layers](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
-        uint32_t camera_index = 0;
-        uint32_t sphere_layer = 0;
+        // Всё — из слепков рендеримого СЛОТА: таблица камер (LightDataModule) и счётчики
+        // раскладки (BatchBuilder). ECS отсюда не читается; camera_index совпадает с
+        // LIGHT_CAMERA_BUFFER слота по построению слепка (один проход в prepare пишет оба).
+        const uint8_t slot = pm->RenderFrame();
+        const std::vector<RenderSnap::ShadowCam>& cams = ldm->AskShadowCameras(slot);
+        const uint32_t num_commands = bb->AskNumCommands(slot);
+        const uint32_t num_instances = bb->AskNumInstances(slot);
 
         auto flat_array = tm->GetTextureAtlas(SHADOW_DEPTH_FLAT_ARRAY);
 
-        om->ForEach<Positions, SpotLightComponent, ShadowCasterComponent>(om->GetActiveScene(),
-            [&](Positions& pos_el, SpotLightComponent& light, ShadowCasterComponent& sc) {
-            //SDL_Log("Shadow pass: camera_index=%u, spotLayer=%u", camera_index, spotLayer);
-            if (camera_index >= max_layers) {
-                return;
-            }
-            if (light.needsUpdate) {
-				ShadowPushData push_data{};
-				push_data.camera_index = camera_index;
-                push_data.max_range = light.light_data.GetMaxDistance();
-                push_data.num_instances = bb->AskNumInstances();
-                SDL_PushGPUVertexUniformData(cb, 0, &push_data, sizeof(ShadowPushData));
-                pm->RenderPassStandardBody(cb, &rp, bm, (1u + camera_index) * bb->AskNumCommands() * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), &push_data);
+        uint32_t num_cams = safe_u32(cams.size());
+        if (num_cams > max_layers) num_cams = max_layers;
 
-                auto cp = SDL_BeginGPUCopyPass(cb);
-                SDL_GPUTextureLocation src = {
-                    .texture = rp.renderPassTexsData.depthTargetInfo.texture,
-                    .layer = 0
-                };
-                SDL_GPUTextureLocation dst = {
-                    .texture = flat_array->texture_binding.texture,
-                    .layer = camera_index
-                };
-                SDL_CopyGPUTextureToTexture(cp, &src, &dst, flat_array->width, flat_array->height, 1, false);
-                SDL_EndGPUCopyPass(cp);
+        for (uint32_t camera_index = 0; camera_index < num_cams; ++camera_index) {
+            const RenderSnap::ShadowCam& cam = cams[camera_index];
+            if (!cam.needs_render) continue;
+
+            ShadowPushData push_data{};
+            push_data.camera_index = camera_index;
+            push_data.max_range = cam.max_range;         // spot/sphere: max distance, direct: per-cascade far
+            push_data.is_ortho = cam.is_ortho;           // 1 → линейная осевая глубина (directional)
+            push_data.num_instances = num_instances;
+            SDL_PushGPUVertexUniformData(cb, 0, &push_data, sizeof(ShadowPushData));
+            pm->RenderPassStandardBody(cb, &rp, bm, (1u + camera_index) * num_commands * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), &push_data);
+
+            auto cp = SDL_BeginGPUCopyPass(cb);
+            SDL_GPUTextureLocation src = {
+                .texture = rp.renderPassTexsData.depthTargetInfo.texture,
+                .layer = 0
             };
-            camera_index++;
+            SDL_GPUTextureLocation dst = {
+                .texture = flat_array->texture_binding.texture,
+                .layer = camera_index
+            };
+            SDL_CopyGPUTextureToTexture(cp, &src, &dst, flat_array->width, flat_array->height, 1, false);
+            SDL_EndGPUCopyPass(cp);
         }
-        );
-
-        om->ForEach<Positions, SphereLightComponent, ShadowCasterComponent>(om->GetActiveScene(),
-            [&](Positions& pos_el, SphereLightComponent& light, ShadowCasterComponent& sc) {
-            for (int face = 0; face < 6; ++face) {
-                if (camera_index >= max_layers) {
-                    return;
-                }
-                if (light.needsUpdate) {
-                    ShadowPushData push_data{};
-					push_data.camera_index = camera_index;
-					push_data.max_range = light.light_data.GetMaxDistance();
-                    push_data.num_instances = bb->AskNumInstances();
-                    SDL_PushGPUVertexUniformData(cb, 0, &push_data, sizeof(ShadowPushData));
-
-                    pm->RenderPassStandardBody(cb, &rp, bm, (1u + camera_index) * bb->AskNumCommands() * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), &push_data);
-
-                    auto cp = SDL_BeginGPUCopyPass(cb);
-                    SDL_GPUTextureLocation src = {
-                        .texture = rp.renderPassTexsData.depthTargetInfo.texture
-                    };
-                    SDL_GPUTextureLocation dst = {
-                        .texture = flat_array->texture_binding.texture,
-                        .layer = camera_index
-                    };
-                    SDL_CopyGPUTextureToTexture(cp, &src, &dst, flat_array->width, flat_array->height, 1, false);
-                    SDL_EndGPUCopyPass(cp);
-                }
-                camera_index++;
-            }
-            sphere_layer++;
-        });
-
-        // Directional: тот же порядок spot→sphere→direct, что в StoreLightCameras —
-        // camera_index обязан совпадать. is_ortho=1 → shadow frag пишет линейную осевую глубину.
-        om->ForEach<DirectLightComponent, ShadowCasterComponent>(om->GetActiveScene(),
-            [&](DirectLightComponent& light, ShadowCasterComponent& sc) {
-            for (int c = 0; c < light.light_data.cascade_count; ++c) {
-                if (camera_index >= max_layers) {
-                    return;
-                }
-                if (light.needsUpdate) {
-                    ShadowPushData push_data{};
-                    push_data.camera_index = camera_index;
-                    push_data.max_range = light.light_data.CascadeFar(c);   // per-cascade far
-                    push_data.is_ortho = 1;
-                    push_data.num_instances = bb->AskNumInstances();
-                    SDL_PushGPUVertexUniformData(cb, 0, &push_data, sizeof(ShadowPushData));
-
-                    pm->RenderPassStandardBody(cb, &rp, bm, (1u + camera_index) * bb->AskNumCommands() * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), &push_data);
-
-                    auto cp = SDL_BeginGPUCopyPass(cb);
-                    SDL_GPUTextureLocation src = {
-                        .texture = rp.renderPassTexsData.depthTargetInfo.texture
-                    };
-                    SDL_GPUTextureLocation dst = {
-                        .texture = flat_array->texture_binding.texture,
-                        .layer = camera_index
-                    };
-                    SDL_CopyGPUTextureToTexture(cp, &src, &dst, flat_array->width, flat_array->height, 1, false);
-                    SDL_EndGPUCopyPass(cp);
-                }
-                camera_index++;
-            }
-        });
     },
         std::move(shadow_rptd),
         10
@@ -469,7 +408,7 @@ void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
     );
 }
 
-void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ctx)
+void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ctx, LightDataModule* ldm)
 {
     if (shadow_pass_inited) {
         SDL_Log("Default shadow render pass is already initialized.");
@@ -478,8 +417,6 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
     PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 	TextureManager* tm = ctx->GetTextureManager();
-	ObjectManager* om = ctx->GetObjectManager();
-	BatchBuilder* bb = ctx->GetBatchBuilder();
 
     auto shadow_sampler = tm->GetSampler(DefaultSamplersNames::VSM_SAMPLER);
     auto vsm_sampler = tm->GetSampler(DefaultSamplersNames::VSM_SAMPLER);
@@ -494,41 +431,22 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
 
     auto shadowPass = pm->CreateRenderPass(
         SHADOW_PASS,
-        [pm, bm, om, tm, bb](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+        [pm, bm, tm, ldm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
-        Uint32 camera_index = 0;      // общий для всех типов света
-        Uint32 sphere_layer = 0;      // только для sphere
+        // Тот же слепок камер, что у PCF-варианта: итерируем таблицу слота, не ECS.
+        const uint8_t slot = pm->RenderFrame();
+        const std::vector<RenderSnap::ShadowCam>& cams = ldm->AskShadowCameras(slot);
 
         auto flat_array = tm->GetTextureAtlas(SHADOW_MOMENTS_ARRAY);
-        uint32_t commands_byte_offset = bb->AskNumCommands() * sizeof(SDL_GPUIndexedIndirectDrawCommand);
-        om->ForEach<Positions, SpotLightComponent, ShadowCasterComponent>(om->GetActiveScene(),
-            [&](Positions& pos_el, SpotLightComponent& light, ShadowCasterComponent& sc) {
-            //SDL_Log("Shadow pass: camera_index=%u, spotLayer=%u", camera_index, spotLayer);
-            uint32_t byte_offset = (1 + camera_index) * commands_byte_offset;
-            if (light.needsUpdate) {
-                SDL_PushGPUVertexUniformData(cb, 0, &camera_index, sizeof(Uint32));
-                rp.renderPassTexsData.SetColorTargetInfoLayer(camera_index, 0);
-                pm->RenderPassStandardBody(cb, &rp, bm, 0, &camera_index);
-            };
-            camera_index++;
+        Uint32 num_cams = safe_u32(cams.size());
+        if (num_cams > flat_array->layers) num_cams = flat_array->layers;
+
+        for (Uint32 camera_index = 0; camera_index < num_cams; ++camera_index) {
+            if (!cams[camera_index].needs_render) continue;
+            SDL_PushGPUVertexUniformData(cb, 0, &camera_index, sizeof(Uint32));
+            rp.renderPassTexsData.SetColorTargetInfoLayer(camera_index, 0);
+            pm->RenderPassStandardBody(cb, &rp, bm, 0, &camera_index);
         }
-        );
-
-        om->ForEach<Positions, SphereLightComponent, ShadowCasterComponent>(om->GetActiveScene(),
-            [&](Positions& pos_el, SphereLightComponent& light, ShadowCasterComponent& sc) {
-            for (int face = 0; face < 6; ++face) {
-                uint32_t byte_offset = (1 + camera_index) * commands_byte_offset;
-                if (light.needsUpdate) {
-                    SDL_PushGPUVertexUniformData(cb, 0, &camera_index, sizeof(Uint32));
-
-                    rp.renderPassTexsData.SetColorTargetInfoLayer(camera_index, 0);
-                    pm->RenderPassStandardBody(cb, &rp, bm, 0, &camera_index);
-                }
-                camera_index++;
-            }
-
-            sphere_layer++;
-        });
     },
         std::move(shadow_rptd),
         10

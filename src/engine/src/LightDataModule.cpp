@@ -161,33 +161,37 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
         });
 }
 
-uint32_t LightDataModule::CalculateLightCamerasSize(ObjectManager* om, SceneData* scene)
+// Размер буфера LightCameras слота + СЛЕПОК его теневых камер (snapshots[slot]) одним
+// перечислением. ОБЯЗАН идти теми же тремя запросами (фильтр ShadowCasterComponent) и в том
+// же порядке spot→sphere→direct, что StoreLightCameras: индекс в cams = camera_index =
+// позиция камеры в буфере. Совпадение больше не инвариант «трёх одинаковых ForEach по
+// файлам» — теневой проход и каллинг читают эту таблицу, а не ECS.
+uint32_t LightDataModule::CalculateLightCamerasSize(ObjectManager* om, SceneData* scene, uint8_t slot)
 {
-    uint32_t cameraCount = 0;
+    std::vector<RenderSnap::ShadowCam>& cams = snapshots[slot].cams;
+    cams.clear();   // capacity переживает кадры — аллокаций в steady state нет
+    if (!scene) return 0;
 
-    om->ForEachArchetype<Positions, SpotLightComponent, ShadowCasterComponent>(scene,
-        [&](ComponentArray<Positions, void>* posArr,
-            ComponentArray<SpotLightComponent, void>*,
-            ComponentArray<ShadowCasterComponent, void>*)
-        {
-            cameraCount += safe_u32(posArr->size());
-        }
-	);
-    om->ForEachArchetype<Positions, SphereLightComponent, ShadowCasterComponent>(scene,
-        [&](ComponentArray<Positions, void>* posArr,
-            ComponentArray<SphereLightComponent, void>*,
-            ComponentArray<ShadowCasterComponent, void>*)
-        {
-            cameraCount += safe_u32(posArr->size()) * 6;
-        }
-    );
+    om->ForEach<Positions, SpotLightComponent, ShadowCasterComponent>(scene,
+        [&](SoAElement<Positions>, SpotLightComponent& light, ShadowCasterComponent) {
+            cams.push_back({ light.light_data.GetMaxDistance(), 0,
+                             static_cast<uint8_t>(light.needsUpdate ? 1 : 0) });
+        });
+    om->ForEach<Positions, SphereLightComponent, ShadowCasterComponent>(scene,
+        [&](SoAElement<Positions>, SphereLightComponent& light, ShadowCasterComponent) {
+            for (int face = 0; face < 6; ++face)
+                cams.push_back({ light.light_data.GetMaxDistance(), 0,
+                                 static_cast<uint8_t>(light.needsUpdate ? 1 : 0) });
+        });
     // Directional: cascade_count ortho-камер на источник (per-instance, т.к. число каскадов
-    // у разных источников может отличаться).
+    // у разных источников может отличаться). max_range — per-cascade far.
     om->ForEach<DirectLightComponent, ShadowCasterComponent>(scene,
         [&](DirectLightComponent& light, ShadowCasterComponent&) {
-            cameraCount += safe_u32(light.light_data.cascade_count);
+            for (int c = 0; c < light.light_data.cascade_count; ++c)
+                cams.push_back({ light.light_data.CascadeFar(c), 1,
+                                 static_cast<uint8_t>(light.needsUpdate ? 1 : 0) });
         });
-    return cameraCount * sizeof(LightCamera);
+    return safe_u32(cams.size()) * safe_u32(sizeof(LightCamera));
 }
 
 inline void StoreSpotLightCamera(BufferManager* bm, UploadTask* task, Positions& P, size_t i, SpotLightComponent::SpotLightData& light) {
@@ -299,37 +303,3 @@ void LightDataModule::StoreLightCameras(BufferManager* bm, UploadTask* task, Obj
         });
 }
 
-uint32_t LightDataModule::AskNumLightCameras(ObjectManager* om, SceneData* scene)
-{
-    uint32_t num_light_cameras = 0;
-
-    // ОБЯЗАН фильтровать по ShadowCasterComponent — ровно теми же тремя запросами, что
-    // CalculateLightCamerasSize/StoreLightCameras, которые НАПОЛНЯЮТ буфер LightCameras.
-    // Свет без ShadowCaster камеры не порождает. Если считать его здесь, число камер
-    // каллинга разойдётся с буфером: лишние блоки out_pib, OOB-чтение LightCameras и
-    // впустую диспатчатся потоки — отсюда просадка FPS при добавлении даже не-теневого света.
-    om->ForEachArchetype<Positions, SpotLightComponent, ShadowCasterComponent>(
-        scene,
-        [&](ComponentArray<Positions, void>* posArr,
-            ComponentArray<SpotLightComponent, void>*,
-            ComponentArray<ShadowCasterComponent, void>*)
-    {
-        num_light_cameras += safe_u32(posArr->size());
-    }
-    );
-    om->ForEachArchetype<Positions, SphereLightComponent, ShadowCasterComponent>(
-        scene,
-        [&](ComponentArray<Positions, void>* posArr,
-            ComponentArray<SphereLightComponent, void>*,
-            ComponentArray<ShadowCasterComponent, void>*)
-    {
-        num_light_cameras += safe_u32(posArr->size()) * 6;
-    }
-    );
-    om->ForEach<DirectLightComponent, ShadowCasterComponent>(scene,
-        [&](DirectLightComponent& light, ShadowCasterComponent&) {
-            num_light_cameras += safe_u32(light.light_data.cascade_count);
-        });
-
-    return num_light_cameras;
-}

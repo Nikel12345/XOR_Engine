@@ -37,7 +37,11 @@ constexpr uint8_t SLOT_FLAG_HAS_PREPARED = 1u << 2;
 constexpr uint8_t SLOT_FLAG_IS_RENDERING = 1u << 3;
 
 struct SlotData {
-    uint32_t frame_id = 0;              // порядковый номер prepare — порядок sim-тиков, не порядок прихода fences
+    uint64_t frame_id = 0;              // порядковый номер prepare — порядок sim-тиков, не порядок прихода fences
+    // Эпоха ПОЛНОГО ребилда дерева батчей, под которой готовились буферы слота. Рендер не
+    // берёт слот (и не откатывается на fallback), если его epoch != required_epoch_ — так после
+    // редкой пересборки дерева не показывается кадр со старой раскладкой indirect/out_pib.
+    uint64_t epoch = 0;
     uint8_t  flags = 0;                 // защищается mutex_ внутри SlotController
     SDL_GPUFence* fence = nullptr;      // upload-fence при UPLOADING, render-fence при RENDERING (взаимоисключающие)
     // [PROFILE] Момент сабмита командбуфера, чей fence сейчас в поле fence — ОДНО поле
@@ -69,6 +73,12 @@ public:
     void SetSlotState(uint8_t slot, SlotState new_state);
     void SetSlotFence(uint8_t slot, SDL_GPUFence* fence);
 
+    // Клеймит слоту эпоху ребилда, под которой залиты его буферы, и поднимает планку
+    // required_epoch_ до неё. Зовётся каждый prepare (на не-ребилд-кадрах эпоха та же —
+    // инертно). На полном ребилде эпоха скакнула → рендер держит кадр, пока перестроенный
+    // слот не дозальётся, вместо мерцания старой раскладкой.
+    void StampSlotEpoch(uint8_t slot, uint64_t epoch);
+
     void DebugDump(const char* tag = nullptr);
 
 private:
@@ -79,7 +89,11 @@ private:
     uint8_t last_rendering_slot;
 
     uint8_t  next_free_slot_index = 0;
-    uint32_t prepared_seq = 0;
+    uint64_t prepared_seq = 0;
+
+    // Планка эпохи: рендер показывает только слоты с epoch == required_epoch_. Поднимается
+    // в StampSlotEpoch (монотонно, вслед за rebuild_epoch дерева). Инертна, пока нет ребилда.
+    uint64_t required_epoch_ = 0;
 
     std::mutex mutex_;
     std::condition_variable cv_free_;        // sim ждёт записываемый слот

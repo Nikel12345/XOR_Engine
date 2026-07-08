@@ -3,7 +3,6 @@
 #include <SDL3/SDL.h>
 #include <string_view>
 #include <vector>
-#include <mutex>
 //#include "ShaderManager.h"
 #include "TextureData.h"
 #include "BufferManager.h"
@@ -11,6 +10,7 @@
 #include "Aliases.h"
 
 struct Material;
+namespace RenderSnap { struct BatchLayout; }
 
 class MaterialManager;
 class PipeManager;
@@ -35,7 +35,11 @@ public:
 	// Starts and end SDL_GPUComputePass
 	void ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassStep* compute_pass, BufferManager* bm, const void* push_data_raw, const void* dispatch_data_raw, uint8_t pass_frame);
 
-	void SetRenderFrame(uint8_t frame) { render_frame = frame; }
+	// Слот кадра + его слепок раскладки батчей (BatchBuilder::AskLayout(slot)) — ставится
+	// Engine::RenderFunc перед записью команд. ExecuteRenderBatches рисует ТОЛЬКО по слепку:
+	// живое дерево shader_batches рендер-поток не читает (оно приватно для sim).
+	void SetRenderFrame(uint8_t frame, const RenderSnap::BatchLayout* layout) { render_frame = frame; render_layout = layout; }
+	uint8_t RenderFrame() const { return render_frame; }
 	RenderPassStep* GetRenderPassStep(const RenderPassName& name);
 	ComputePassStep* GetComputePassStep(const ComputePassName& name);
 	ComputePassStep* GetComputePrepassStep(const ComputePrepassName& name);
@@ -43,9 +47,6 @@ public:
 	const std::vector<RenderPassStep*>& GetOrderedRenderPasses() { return ordered_passes; }
 	const std::vector<ComputePassStep*>& GetOrderedComputePasses() { return ordered_compute_steps; }
 	const std::vector<ComputePassStep*>& GetOrderedComputePrepasses() { return ordered_compute_prepass_steps; }
-
-	// Ставится только на полную пересборку батчей
-	std::mutex& BatchTreeMutex() { return batch_tree_mutex_; }
 
 	~PassManager();
 
@@ -60,8 +61,7 @@ private:
 	std::vector<ComputePassStep*> ordered_compute_prepass_steps;
 
 	uint8_t render_frame = 0;
+	const RenderSnap::BatchLayout* render_layout = nullptr;   // слепок раскладки рендеримого слота
 
 	bool passes_filled = false;
-
-	std::mutex batch_tree_mutex_;   // см. BatchTreeMutex() — замок на полную пересборку дерева
 };

@@ -1,6 +1,7 @@
 #pragma once
 #include "TextureData.h"
 class EngineContext;
+class LightDataModule;
 namespace DefaultRenderPassNamespace
 {
     inline constexpr const char* DEPTH_PASS = "_DefaultDepthRenderPass";
@@ -29,8 +30,10 @@ namespace DefaultRenderPassNamespace
         // shadow_pass нужен для адреса блока: (1 + camera_index) * num_instances.
         Uint32 num_instances;
     };
-    void SetDefaultShadowPCFRenderPass(EngineContext* ctx);
-    void SetDefaultShadowVSMRenderPass(EngineContext* ctx);
+    // ldm — источник слепка теневых камер (AskShadowCameras(slot)): проход итерирует его
+    // таблицу, а не ECS, поэтому camera_index совпадает с LIGHT_CAMERA_BUFFER слота.
+    void SetDefaultShadowPCFRenderPass(EngineContext* ctx, LightDataModule* ldm);
+    void SetDefaultShadowVSMRenderPass(EngineContext* ctx, LightDataModule* ldm);
 
     struct ShadowBlurUniform { uint32_t layerIndex; };
     struct DummyDispatchData {};

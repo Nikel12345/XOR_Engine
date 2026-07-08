@@ -98,6 +98,10 @@ uint8_t SlotController::GetReadySlotUnsafe(bool latest_wins)
             continue;
         if (f & (SLOT_FLAG_RESERVED | SLOT_FLAG_IS_UPLOADING | SLOT_FLAG_IS_RENDERING))
             continue;
+        // Слот старой эпохи ребилда: его indirect/out_pib собраны под прежней раскладкой
+        // дерева, а рендер читает уже перестроенное дерево → не показываем (ждём свежий).
+        if (slots_data[i].epoch != required_epoch_)
+            continue;
         if (best == INVALID_SLOT ||
             ( latest_wins && slots_data[i].frame_id > slots_data[best].frame_id) ||
             (!latest_wins && slots_data[i].frame_id < slots_data[best].frame_id))
@@ -124,6 +128,11 @@ uint8_t SlotController::GetRenderableFallbackUnsafe()
     // невозможны (sim не берёт lr), проверки защитные.
     if (slots_data[lr].flags &
         (SLOT_FLAG_IS_RENDERING | SLOT_FLAG_RESERVED | SLOT_FLAG_IS_UPLOADING))
+        return INVALID_SLOT;
+
+    // Тот же эпохо-гейт, что и для свежего кадра: пере-рендер последнего слота со старой
+    // раскладкой на новом дереве дал бы то самое мерцание — лучше короткий hold.
+    if (slots_data[lr].epoch != required_epoch_)
         return INVALID_SLOT;
 
     return lr;
@@ -255,6 +264,21 @@ void SlotController::SetSlotFence(uint8_t slot, SDL_GPUFence* fence)
 
     std::lock_guard<std::mutex> lock(mutex_);
     slots_data[slot].fence = fence;
+}
+
+void SlotController::StampSlotEpoch(uint8_t slot, uint64_t epoch)
+{
+    if (slot == INVALID_SLOT || slot >= BUFFERING_LEVEL)
+        return;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    slots_data[slot].epoch = epoch;
+    // Монотонно двигаем планку: на ребилде epoch > required_epoch_ → старые слоты выпадают
+    // из выдачи (и из fallback), рендер держит кадр до готовности этого слота. Пробуждать
+    // никого не надо — планка лишь СУЖАЕТ множество отдаваемых кадров; свежий слот разбудит
+    // рендер сам через HandlePrepared, когда дозальётся.
+    if (epoch > required_epoch_)
+        required_epoch_ = epoch;
 }
 
 // ====================== Отладка ============================================

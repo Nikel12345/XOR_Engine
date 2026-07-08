@@ -3,7 +3,6 @@
 #include <set>
 #include <string>
 #include <memory>        // std::unique_ptr (scenes_data)
-#include <mutex>         // ДИАГНОСТИКА гонки: грубый lock ECS (см. EcsMutex)
 #include <type_traits>   // std::conditional_t/std::is_same_v/std::decay_t в шаблонах
 #include <unordered_map>
 #include "BaseComponents.h"
@@ -80,20 +79,12 @@ public:
 
     SceneData* operator[](const std::string& name);
 
-    // ДИАГНОСТИКА: проверяем гипотезу гонки UI(render-поток)↔мутации ECS(sim-поток).
-    // Грубый общий замок: писатели (Create/Delete/Load/Clear) лочат на уровне листовых
-    // методов, читатель (UI_ImGui::Iterate) — на весь проход. Если краши пропали —
-    // это была гонка. Потом заменим на снапшот.
-    std::mutex& EcsMutex() { return ecs_mutex_; }
-
-
 private:
     template<typename... Components>
     void add_components(Archetype& arch, Components&&... comps);
 
     std::unordered_map<SceneName, std::unique_ptr<SceneData>> scenes_data;
 	bool dirty_entity = false;
-    std::mutex ecs_mutex_;   // см. EcsMutex() — диагностический замок ECS
 };
 
 #include "ObjectManager.inl"
