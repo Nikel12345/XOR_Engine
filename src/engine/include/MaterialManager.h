@@ -9,9 +9,10 @@
 class MaterialManager {
 public:
 	MaterialManager();
-	// ����� ��� TextureSlotRole, TextureHandle* ������ ��������� � ������ required_slots � ������ ShaderProgram* �� shader_programs. ������� �� �����, �� ��� ���� �� required_slots ������ ���� ������������ � textures.
-	// TextureSlotRole, TextureHandle* count must match the number of required_slots in each ShaderProgram* in shader_programs. The order does not matter, but all roles from required_slots must be represented in textures.
-	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, TextureHandle*>>& textures, std::vector<ShaderProgram*>& shader_programs);
+	// Материал хранит ссылки ПО ИМЕНИ (текстуры по роли, sp). Резолв и валидация required_slots —
+	// у вызывающего (EngineContext::CreateMaterial): сюда приходят уже готовые имена, менеджер их
+	// просто складывает. Пустой/несуществующий на данный момент — допустим (резолвится на сборке батча).
+	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, TextureName>> textures, std::vector<ShaderName> shaders);
 	std::vector<Material*> GetAllMaterials();
 	Material* GetMaterial(const std::string& name);
 	// Имя→материал (для UI/инспектора). Pointee не const — params можно крутить на лету.

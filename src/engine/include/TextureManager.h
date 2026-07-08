@@ -109,6 +109,8 @@ public:
 			return nullptr;
 		}
 	};
+	// Имя→хэндл (для UI-браузера ассетов: перечисление плиток текстур). Владение не отдаём.
+	const std::unordered_map<std::string, std::shared_ptr<TextureHandle>>& GetTextureHandles() const { return handles_data; }
 	TextureAtlas* GetTextureAtlas(const std::string& name) {
 		auto it = atlases_data.find(name);
 		if (it != atlases_data.end()) {
@@ -127,8 +129,9 @@ private:
 	// gutter'ит пиксели и заполняет task.dst. См. TextureManager.cpp.
 	bool _PlaceTask(UploadTaskTexture& task);
 	std::unordered_map<std::string, std::unique_ptr<TextureAtlas>> atlases_data;
-	// shared_ptr — единственный СИЛЬНЫЙ владелец хэндла; материалы держат weak_ptr. Поэтому
-	// DeleteTextureHandle = просто erase: хэндл освобождается, а все weak_ptr сами протухают.
+	// shared_ptr — владелец хэндла; материалы ссылаются на текстуру ПО ИМЕНИ (не держат указатель).
+	// Поэтому DeleteTextureHandle = просто erase: хэндл освобождается, а материалы на следующей
+	// сборке батча не найдут имя → подставят dummy (и перепривяжутся, если имя пересоздадут).
 	std::unordered_map<std::string, std::shared_ptr<TextureHandle>> handles_data;
 	std::unordered_map<std::string, SDL_GPUSampler*> samplers_data;
 	std::unordered_map<TextureAtlas*, std::unique_ptr<AtlasPacker>> atlas_packers;  // персистентное состояние упаковки

@@ -44,6 +44,8 @@ public:
 	bool CheckDirtySpheres() const { return dirty_spheres; };
 	void CommitSpheres() { dirty_spheres = false; };
 	ModelData* operator[](const std::string& name);
+	// Имя→модель (для UI-браузера ассетов: перечисление плиток). Владение не отдаём.
+	const std::unordered_map<std::string, std::unique_ptr<ModelData>>& GetModels() const { return models_data; }
 	~ModelManager();
 
 private:

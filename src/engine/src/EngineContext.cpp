@@ -110,27 +110,27 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 
 Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders)
 {
-	std::vector<ShaderProgram*> shader_programs;
-	shader_programs.reserve(shaders.size());
-	for (const auto& shader_name : shaders) {
+	// Материал хранит ИМЕНА (name-based ссылки, резолв отложен на сборку батча). Здесь sp резолвим
+	// лишь для авторской валидации: у каждого required_slot шейдера должна быть текстура в материале.
+	// Проверка best-effort (варнинг, не отказ): текстуру могут добавить/создать позже.
+	std::vector<std::pair<TextureSlotRole, TextureName>> texture_names(textures.begin(), textures.end());
+	std::vector<ShaderName> shader_names(shaders.begin(), shaders.end());
+
+	for (const auto& shader_name : shader_names) {
 		ShaderProgram* sp = shader_manager->GetShaderProgram(shader_name);
 		if (!sp) {
-			SDL_Log("EngineContext::Creating material with non existing shader program");
+			SDL_Log("EngineContext::Material '%s' references non existing shader program '%s'", name.c_str(), shader_name.c_str());
 			continue;
 		}
-		shader_programs.push_back(sp);
-	}
-	std::vector<std::pair<TextureSlotRole, TextureHandle*>> texture_handles;
-	texture_handles.reserve(textures.size());
-	for (const auto& [role, texture_name] : textures) {
-		TextureHandle* handle = texture_manager->GetTextureHandle(texture_name);
-		if (!handle) {
-			SDL_Log("EngineContext::Creating material with non existing texture '%s'", texture_name.c_str());
-			continue;
+		for (const auto& required_role : sp->required_slots) {
+			bool found = false;
+			for (const auto& [role, tex_name] : texture_names)
+				if (role == required_role) { found = true; break; }
+			if (!found)
+				SDL_Log("Material '%s': missing texture for required slot %d", name.c_str(), static_cast<int>(required_role));
 		}
-		texture_handles.emplace_back(role, handle);
 	}
-	return material_manager->CreateMaterial(name, texture_handles, shader_programs);
+	return material_manager->CreateMaterial(std::move(name), std::move(texture_names), std::move(shader_names));
 }
 
 ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor)

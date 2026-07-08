@@ -42,6 +42,9 @@ public:
 	uint32_t AskNumInstances();
 
 	void SetDummyTexture(TextureHandle* dummy) { dummy_texture = dummy; };
+	// Резолверы name-based ссылок материала: имя текстуры/sp → указатель на сборке батча.
+	// Устанавливаются один раз при инициализации движка (Engine::Init).
+	void SetResolvers(TextureManager* tm, ShaderManager* sm) { texture_manager = tm; shader_manager = sm; };
 
 private:
 	// One place an entity lives inside a ModelBatchData::pib_sub_buffer.
@@ -63,6 +66,9 @@ private:
 	void RemoveEntityFromBatches(Entity entity);
 
 	TextureHandle* dummy_texture = nullptr;
+	// Невладеющие: резолв имён текстур/sp материала в указатели на сборке батчей (name-based ссылки).
+	TextureManager* texture_manager = nullptr;
+	ShaderManager*  shader_manager = nullptr;
 	// Reverse index: entity -> all its slots across model batches. Rebuilt on full
 	// rebuild, mutated incrementally by AddEntityToBatches/RemoveEntityFromBatches.
 	std::unordered_map<Entity, std::vector<PibSlot>> entity_slots;

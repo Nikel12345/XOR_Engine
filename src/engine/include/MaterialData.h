@@ -1,12 +1,9 @@
 #pragma once
-#include <unordered_set>
 #include <unordered_map>
 #include <vector>
-#include <memory>
 #include <cstdint>
 #include "ShaderData.h"
-
-struct TextureHandle;
+#include "Aliases.h"
 
 // Тег раскладки params — ТОЛЬКО для тулинга (UI/инспектор). Рендер params не интерпретирует
 // (непрозрачный блоб), но UI по тегу выбирает рукописный разбор полей. None → неизвестно
@@ -14,11 +11,13 @@ struct TextureHandle;
 enum class MaterialParamsKind : uint32_t { None = 0, Opaque, Transparent };
 
 struct Material {
-    // weak_ptr, а не сырой указатель: текстуру могут удалить независимо от материала
-    // (TextureManager::DeleteTextureHandle). weak_ptr::lock() → nullptr для удалённой → BatchBuilder
-    // подставит dummy. Так «висячий указатель» невозможен by design, без ручной инвалидации.
-    std::unordered_map<TextureSlotRole, std::weak_ptr<TextureHandle>> textures;
-    std::unordered_set<ShaderProgram*> shader_programs;
+    // Пользовательский ресурс ссылается на другой ТОЛЬКО по имени (правило редактора): не
+    // указатель/weak_ptr, а имя, резолвится лениво в BatchBuilder на сборке батчей (TextureManager
+    // по имени → TextureHandle). Промах (текстура удалена/переименована/ещё не создана) → nullptr →
+    // dummy в батче. В отличие от weak_ptr, имя ПЕРЕЖИВАЕТ delete+recreate под тем же именем: ссылка
+    // перепривязывается на новый хэндл при следующей пересборке, без ручной инвалидации.
+    std::unordered_map<TextureSlotRole, TextureName> textures;
+    std::vector<ShaderName> shader_programs;   // имена sp (материал может жить в нескольких пассах)
 
     // Непрозрачный блоб per-material факторов (alpha, baseColorFactor, metallic, ...). Layout
     // задаёт автор шейдера (его cbuffer); движок видит только байты и пушит их как есть.

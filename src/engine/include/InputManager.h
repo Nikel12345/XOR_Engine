@@ -19,8 +19,19 @@ enum class CommandId : uint32_t {
                   // освобождается функтором после применения (см. InitUICommands)
     SaveScene,    // payload: SceneIOCmd* на куче (имя сцены + путь), освобождает функтор
     LoadScene,    // payload: SceneIOCmd* на куче; грузить сцену можно только в sim-потоке
+    SetMaterialTexture, // payload: SetMaterialTextureCmd* на куче (материал+слот+текстура);
+                        // sim-поток правит Material::textures[role] + взводит пересборку батчей
 
     COUNT
+};
+
+// Смена текстуры слота материала. Материал ссылается на текстуру ПО ИМЕНИ (name-based), поэтому
+// правка = замена строки в Material::textures[role]. Обязателен ребилд батчей: в батче лежит уже
+// РАЗРЕШЁННЫЙ UVL текстуры, его надо пересчитать. Строки в указатель не паковать → куча, функтор удалит.
+struct SetMaterialTextureCmd {
+    std::string material;
+    uint32_t    role;      // TextureSlotRole как uint32_t (без завязки заголовка на ShaderData.h)
+    std::string texture;
 };
 
 // Нагрузка save/load: строки в указатель не упаковать, поэтому продьюсер (UI) выделяет

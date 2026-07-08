@@ -320,14 +320,14 @@ SDL_AppResult Game::MainInit()
         GeneratedComponent{}
     );
 
-    ctx->CreateEntity("main_menu",
-        ParentComponent{ sun },
-        SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
-        LocalMatrixProxy16{},
-        PositionProxy16{},
-        ShadowCasterComponent{},
-        ColliderComponent{}
-    );
+    //ctx->CreateEntity("main_menu",
+    //    ParentComponent{ sun },
+    //    SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
+    //    LocalMatrixProxy16{},
+    //    PositionProxy16{},
+    //    ShadowCasterComponent{},
+    //    ColliderComponent{}
+    //);
 
     //ctx->ExecuteGenerators();
     ChangeState(GameState::MAIN_MENU);

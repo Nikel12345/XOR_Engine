@@ -22,7 +22,7 @@ MaterialManager::MaterialManager()
 //	}
 //}
 
-Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, TextureHandle*>>& textures, std::vector<ShaderProgram*>& shader_programs)
+Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, TextureName>> textures, std::vector<ShaderName> shaders)
 {
 	auto it = materials.find(name);
 	if (it != materials.end()) {
@@ -30,33 +30,12 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 		return it->second.get();
 	}
 
-	for (auto shader_program : shader_programs) {
-		if (!shader_program) {
-			SDL_Log("MaterialManager::Creating material with non existing shader program");
-			continue;
-		}
-		// ��������� ��� ��� required_slots ������� ����������� textures
-		for (const auto& required_role : shader_program->required_slots) {
-			bool found = false;
-			for (const auto& [role, handle] : textures) {
-				if (role == required_role) {
-					found = true;
-					break;
-				}
-			}
-			if (!found) {
-				SDL_Log("Material '%s': missing texture for required slot %d",
-					name.c_str(), static_cast<int>(required_role));
-				return nullptr; // ��� assert, ��� throw
-			}
-		}
-	}
+	// Материал держит только имена; резолв в указатели и проверку required_slots уже сделал
+	// EngineContext::CreateMaterial. Здесь — чистое хранение (см. правило name-based ссылок).
 	auto data = std::make_unique<Material>();
-	data->shader_programs.insert(shader_programs.begin(), shader_programs.end());
-	for (const auto& [role, handle] : textures) {
-		// Сырой хэндл → weak_ptr (владелец shared_ptr — TextureManager::handles_data). Пустой weak
-		// для отсутствующей текстуры; удаление хэндла позже сделает weak протухшим → dummy в батче.
-		data->textures[role] = handle ? handle->weak_from_this() : std::weak_ptr<TextureHandle>{};
+	data->shader_programs = std::move(shaders);
+	for (auto& [role, tex_name] : textures) {
+		data->textures[role] = std::move(tex_name);
 	}
 	materials[name] = std::move(data);
 	return materials[name].get();

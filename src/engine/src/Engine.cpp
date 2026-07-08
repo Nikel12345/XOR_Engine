@@ -468,6 +468,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	ImGui::CreateContext();
 	ImGuiIO& io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;   // docking-ветка ImGui: окна можно стыковать (см. будущий DockSpace)
 
 	ImGui_ImplSDL3_InitForSDLGPU(window);
 
@@ -481,6 +482,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	TextureHandle* dummy = engine_context->CreateTextureFromFile("_NoTextureDummy", "_FallbackAtlas", "../engine/textures/dummy.png");
 
 	batch_builder->SetDummyTexture(dummy);
+	batch_builder->SetResolvers(texture_manager, shader_manager);   // name-based ссылки материала → указатели на сборке
 }
 
 void Engine::InitDefaultBufferUpdaters()
@@ -583,6 +585,18 @@ void Engine::InitUICommands()
 		{
 			const SceneIOCmd* c = static_cast<const SceneIOCmd*>(data);
 			ctx->LoadScene(c->scene, c->path);
+			delete c;
+		});
+
+	// Смена текстуры слота материала — в sim-потоке: правим имя в Material::textures[role]
+	// (name-based ссылка) и взводим ПЕРЕСБОРКУ батчей (в батче запечён разрешённый UVL текстуры).
+	input_manager->RegisterCommand(CommandId::SetMaterialTexture,
+		[](EngineContext* ctx, const void* data)
+		{
+			const SetMaterialTextureCmd* c = static_cast<const SetMaterialTextureCmd*>(data);
+			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material))
+				m->textures[static_cast<TextureSlotRole>(c->role)] = c->texture;
+			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
 		});
 }
