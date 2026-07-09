@@ -6,6 +6,7 @@
 #include <memory>
 #include <SDL3/SDL_gpu.h>
 #include <glm/glm.hpp>   // DispatchSizeBinder использует glm::uvec3 (раньше приходил из PCH)
+#include "Aliases.h"     // BufferDataName — имя storage-буфера в ссылках sp
 
 struct BufferData;
 struct RenderPassStep;
@@ -30,7 +31,8 @@ namespace ShaderBase {
         }
     };
     struct VertexBufferBinding {
-        const char* buffer;
+        // Имени буфера тут нет: слот позиционный (порядок биндингов), а какой реальный
+        // GPU-буфер идёт в слот — решает бинд-шаг рендера (BufferManager::BindGPUVertexBuffer).
         const VertexFormat* format;
         std::vector<VertexSemantic> pull;
     };
@@ -172,11 +174,17 @@ enum class TextureSlotRole {
 };
 
 struct ShaderProgram {
-    VertexShaderData vs;
-    std::vector<BufferData*> vertex_shader_buffers;
+    // vs/fs — ССЫЛКИ ПО ИМЕНИ на именованные VertexShaderData/FragmentShaderData в реестрах
+    // ShaderManager (не по значению): один GPU-шейдер шарится между sp, правка sp не пересобирает
+    // шейдер, удаление sp не трогает шейдер. Резолв — на сборке пайплайна/батча (как текстуры материала).
+    std::string vs_name;
+    // Storage-буферы стадий — ССЫЛКИ ПО ИМЕНИ (BufferDataName = ключ реестра BufferManager, как
+    // vs_name/fs_name), порядок = слоты бинда. Резолв в BufferData* — на сборке батча через
+    // GetBufferData (по идентичности указателя-ключа, как и все прочие обращения к буферам).
+    std::vector<BufferDataName> vertex_shader_buffer_names;
 
-    FragmentShaderData fs;
-    std::vector<BufferData*> fragment_shader_buffers;
+    std::string fs_name;
+    std::vector<BufferDataName> fragment_shader_buffer_names;
 
     // ��������� ���� (�� ����������) ������� ��� ����� �������. ��������, ���� � ������� ���� uniform sampler2D u_albedoTexture, �� � required_slots ����� TextureSlotRole::Albedo.
 	// Expected texture types (by role) for this shader. For example, if the shader has a uniform sampler2D u_albedoTexture, then required_slots will contain TextureSlotRole::Albedo.
@@ -205,7 +213,7 @@ struct ComputeShaderProgram {
         Uint32 mip_level = 0;
         Uint32 layer = 0;
     };
-    ComputeShaderData cs;
+    std::string cs_name;   // ссылка по имени на ComputeShaderData в реестре ShaderManager (см. ShaderProgram)
     std::vector<BufferData*> rw_storage_buffers;
     std::vector<BufferData*> ro_storage_buffers;
     std::vector<ComputeRWTextureBinding> rw_storage_textures;

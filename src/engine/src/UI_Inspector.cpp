@@ -93,6 +93,9 @@ namespace {
     void InspectSpotLight(Positions&, size_t, SpotLightComponent&);
     void InspectSphereLight(Positions&, size_t, SphereLightComponent&);
     void InspectDirectLight(DirectLightComponent&);
+    // ShaderInspector дёргает редакторы списков буферов/слот-ролей, определённые ниже (рядом с формами SD).
+    void BufferListEditor(const char* label, std::vector<BufferDataName>& list, const std::vector<BufferDataName>& avail);
+    void RoleListEditor(std::vector<TextureSlotRole>& list);
 
     // Единый инспектор сущности: свет — такая же сущность, отдельного «типа выбора» нет. Показываем
     // то, что есть по компонентам: удаление (всегда) + трансформ (если Positions) + коллайдеры + свет.
@@ -359,7 +362,7 @@ namespace {
     // --- Приём пути из нативного файл-диалога. Колбэк SDL может прийти из ДРУГОГО потока, поэтому
     //     кладём через мьютекс+atomic, а UI забирает у себя на кадре. g_pick_target помечает, КАКОЕ
     //     поле заполнять (у формы модели два пути) — активная форма забирает только «своё». ---
-    enum class PickTarget { None, TexPath, ModelVert, ModelIndex, ShaderVert, ShaderFrag };
+    enum class PickTarget { None, TexPath, ModelVert, ModelIndex, ShaderVert, ShaderFrag, ShaderComp };
     PickTarget        g_pick_target = PickTarget::None;
     std::mutex        g_pick_mtx;
     std::string       g_picked_path;
@@ -542,115 +545,399 @@ namespace {
         ImGui::EndDisabled();
     }
 
-    // Инспектор graphics-sp. Шапка (имя + пути vs/fs) правится ПЕРЕСОЗДАНИЕМ по кнопке (delete+create,
-    // как upsert текстуры/модели). Проход — дропдаун, spd — галочки/списки: то и другое МОМЕНТАЛЬНО
-    // (пайплайн пересобирается, сама программа не пересоздаётся). Push/dispatch в UI НЕ идут (это код).
+    // Инспектор/создатель graphics-sp. Одна форма и для правки, и для создания (как текстуры/модели):
+    // пустое имя выбора (плитка «+») → sp == nullptr, кнопка «Create»; иначе правка ПЕРЕСОЗДАНИЕМ
+    // (delete+create). vs/fs/буферы/слоты/проход/spd копятся в буферах, коммит — одной кнопкой.
+    // Push/dispatch в UI НЕ идут (это код) — у sp, созданной из UI, push-констант нет.
     void ShaderInspector(EngineContext* ctx, const std::string& spName)
     {
-        ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(spName);
-        if (!sp) { ImGui::TextUnformatted("Shader not found."); return; }
+        // Пустое имя (плитка «+») = создание: НЕ зовём GetShaderProgram (он логирует промах каждый кадр).
+        ShaderProgram* sp = spName.empty() ? nullptr : ctx->GetShaderManager()->GetShaderProgram(spName);
+        const bool creating = (sp == nullptr);
         InputManager* im = ctx->GetInputManager();
-        ImGui::Text("Shader: %s", spName.c_str());
+        if (creating) ImGui::TextUnformatted("Shader: (new)");
+        else          ImGui::Text("Shader: %s", spName.c_str());
 
-        // ================= Шапка: имя + пути (пересоздание по кнопке) =================
+        // ================= Шапка: имя + выбор vs/fs по имени (пересоздание по кнопке) =================
         // Правки копятся в буферах, действие — только по кнопке (delete старой sp + create новой).
+        // vs/fs — ИМЕНА из реестров ShaderManager (сами шейдер-данные кодовые, тут только композиция).
+        ShaderManager* smgr = ctx->GetShaderManager();
         static char        nameBuf[128] = "";
-        static char        vsBuf[512] = "";
-        static char        fsBuf[512] = "";
+        static std::string vsSel, fsSel, passSel;
+        static std::vector<BufferDataName> vsBufSel, fsBufSel;   // storage-буферы стадий (ключи реестра)
+        static std::vector<TextureSlotRole> slotsSel;           // required_slots (взаимоисключающие роли)
+        static ShaderProgramDescription spdBuf;
         static std::string syncedFor = "\x01";   // сентинел → синк буферов на смену выбора
 
-        if (spName != syncedFor) {                // синк из выбранной sp (self-describing: пути на ней)
+        if (spName != syncedFor) {                // синк из выбранной sp (или сброс на дефолты при создании)
             syncedFor = spName;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", spName.c_str());
-            std::snprintf(vsBuf, sizeof vsBuf, "%s", sp->vs.source_path.c_str());
-            std::snprintf(fsBuf, sizeof fsBuf, "%s", sp->fs.source_path.c_str());
+            if (sp) {
+                vsSel = sp->vs_name;
+                fsSel = sp->fs_name;
+                passSel = sp->associated_render_pass ? sp->associated_render_pass->debug_name : "";
+                spdBuf = sp->spd;
+                vsBufSel = sp->vertex_shader_buffer_names;     // ссылки по имени — берём как есть
+                fsBufSel = sp->fragment_shader_buffer_names;
+                slotsSel = sp->required_slots;
+            }
+            else {   // «+» — чистая форма новой sp
+                vsSel.clear(); fsSel.clear(); passSel.clear();
+                spdBuf = ShaderProgramDescription{};
+                vsBufSel.clear(); fsBufSel.clear(); slotsSel.clear();
+            }
         }
 
-        // Забрать путь из диалога в нужное из двух полей.
-        if ((g_pick_target == PickTarget::ShaderVert || g_pick_target == PickTarget::ShaderFrag)
-            && g_picked_ready.exchange(false, std::memory_order_acquire)) {
-            std::lock_guard<std::mutex> lk(g_pick_mtx);
-            char* dst = (g_pick_target == PickTarget::ShaderVert) ? vsBuf : fsBuf;
-            std::snprintf(dst, 512, "%s", g_picked_path.c_str());
-            g_pick_target = PickTarget::None;
-        }
-
-        static const SDL_DialogFileFilter filters[] = { { "HLSL", "hlsl" }, { "All files", "*" } };
-
-        ImGui::TextDisabled("Shader (rename / reload = recreate)");
+        ImGui::TextDisabled(creating ? "Shader program (create)" : "Shader program (compose / rename = recreate)");
         ImGui::InputText("Name", nameBuf, sizeof nameBuf);
 
-        ImGui::InputText("Vertex", vsBuf, sizeof vsBuf);
-        ImGui::SameLine();
-        if (ImGui::Button("Browse...##sv")) OpenFileDialog(PickTarget::ShaderVert, filters, 2);
-
-        ImGui::InputText("Fragment", fsBuf, sizeof fsBuf);
-        ImGui::SameLine();
-        if (ImGui::Button("Browse...##sf")) OpenFileDialog(PickTarget::ShaderFrag, filters, 2);
-
-        // Свободу имени в UI НЕ проверяем (как текстуры/модели) — иначе GetShaderProgram(nameBuf)
-        // каждый кадр спамит "not found" в лог. Занятость нового имени решает хендлер.
-        const bool ready = nameBuf[0] && vsBuf[0] && fsBuf[0];
-        ImGui::BeginDisabled(!ready);
-        if (ImGui::Button("Recreate", ImVec2(160, 0))) {
-            im->PushCommand(CommandId::RecreateShader, new RecreateShaderCmd{ spName, nameBuf, vsBuf, fsBuf });
-            g_sel.name = nameBuf;   // выбор следует за именем
+        // Вершинный слот — только вершинники; фрагментный — только фрагментные (фильтр по типу реестра).
+        if (ImGui::BeginCombo("Vertex", vsSel.c_str())) {
+            for (auto& [n, d] : smgr->GetVertexShaders()) {
+                bool is_cur = (n == vsSel);
+                if (ImGui::Selectable(n.c_str(), is_cur)) vsSel = n;
+                if (is_cur) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
         }
-        ImGui::EndDisabled();
-
-        // ================= Проход (моментально) =================
-        // Смена associated_render_pass: пайплайн зависит от форматов прохода → пересборка (не пересоздание sp).
-        ImGui::SeparatorText("Pass");
-        RenderPassStep* curPass = sp->associated_render_pass;
-        if (ImGui::BeginCombo("Pass", curPass ? curPass->debug_name.c_str() : "(none)")) {
-            for (RenderPassStep* rp : ctx->GetPassManager()->GetOrderedRenderPasses()) {
-                bool is_cur = (rp == curPass);
-                if (ImGui::Selectable(rp->debug_name.c_str(), is_cur) && !is_cur)
-                    im->PushCommand(CommandId::SetShaderPass, new SetShaderPassCmd{ spName, rp->debug_name });
+        if (ImGui::BeginCombo("Fragment", fsSel.c_str())) {
+            for (auto& [n, d] : smgr->GetFragmentShaders()) {
+                bool is_cur = (n == fsSel);
+                if (ImGui::Selectable(n.c_str(), is_cur)) fsSel = n;
                 if (is_cur) ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();
         }
 
-        // ================= Pipeline state (spd) — моментально, in-place =================
-        ImGui::SeparatorText("Pipeline state (spd)");
+        // ================= Storage-буферы стадий (в буфер, применяется по кнопке) =================
+        // Порядок строк = слоты бинда (BindGPU*StorageBuffers). Раздельно вершинные и фрагментные.
+        // Перечень — каноничные ключи реестра (BufferDataName): их же кладём в ссылки sp.
+        std::vector<BufferDataName> bufNames;
+        for (auto& [k, b] : ctx->GetBufferManager()->GetBuffersData())
+            if (b && (g_show_internal || !IsInternalName(b->debug_name))) bufNames.push_back(k);
+        std::sort(bufNames.begin(), bufNames.end(),
+                  [](BufferDataName a, BufferDataName b) { return std::strcmp(a, b) < 0; });
+        BufferListEditor("Vertex buffers",   vsBufSel, bufNames);
+        BufferListEditor("Fragment buffers", fsBufSel, bufNames);
 
-        ShaderProgramDescription& d = sp->spd;
-        bool changed = false;
+        // ================= Слот-роли текстур (в буфер, применяется по кнопке) =================
+        RoleListEditor(slotsSel);
 
-        // Взаимоисключающие enum'ы — списки.
-        { const char* names[] = { "None", "Front", "Back" }; int v = static_cast<int>(d.cull_mode);
-          if (ImGui::Combo("Cull mode", &v, names, 3)) { d.cull_mode = static_cast<SDL_GPUCullMode>(v); changed = true; } }
-        { const char* names[] = { "Fill", "Wireframe" }; int v = static_cast<int>(d.fill_mode);
-          if (ImGui::Combo("Fill mode", &v, names, 2)) { d.fill_mode = static_cast<SDL_GPUFillMode>(v); changed = true; } }
-        { const char* names[] = { "TriangleList", "TriangleStrip", "LineList", "LineStrip", "PointList" };
-          int v = static_cast<int>(d.primitive_type);
-          if (ImGui::Combo("Primitive", &v, names, 5)) { d.primitive_type = static_cast<SDL_GPUPrimitiveType>(v); changed = true; } }
-
-        // Булевы — галочки.
-        changed |= ImGui::Checkbox("Depth test",   &d.depth_test);
-        changed |= ImGui::Checkbox("Depth write",  &d.depth_write);
-        changed |= ImGui::Checkbox("Stencil test", &d.stencil_test);
-        changed |= ImGui::Checkbox("Color blend",  &d.color_blend);
-
-        // Depth bias — галочка + поля (показываем поля только когда включён).
-        changed |= ImGui::Checkbox("Depth bias", &d.rasterizer_bias.enable_depth_bias);
-        if (d.rasterizer_bias.enable_depth_bias) {
-            changed |= ImGui::DragFloat("Bias constant", &d.rasterizer_bias.depth_bias_constant_factor, 0.05f);
-            changed |= ImGui::DragFloat("Bias slope",    &d.rasterizer_bias.depth_bias_slope_factor, 0.05f);
-            changed |= ImGui::DragFloat("Bias clamp",    &d.rasterizer_bias.depth_bias_clamp, 0.05f);
+        // ================= Проход (в буфер, применяется по кнопке) =================
+        ImGui::SeparatorText("Pass");
+        if (ImGui::BeginCombo("Pass", passSel.empty() ? "(none)" : passSel.c_str())) {
+            for (RenderPassStep* rp : ctx->GetPassManager()->GetOrderedRenderPasses()) {
+                bool is_cur = (rp->debug_name == passSel);
+                if (ImGui::Selectable(rp->debug_name.c_str(), is_cur)) passSel = rp->debug_name;
+                if (is_cur) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
         }
 
-        if (changed)   // spd уже поправлен in-place; команда пересоздаёт пайплайн + пересобирает батчи
-            im->PushCommand(CommandId::RebuildShaderPipeline, new RebuildShaderPipelineCmd{ spName });
+        // ================= Pipeline state (spd) — в буфер =================
+        ImGui::SeparatorText("Pipeline state (spd)");
+        {
+            ShaderProgramDescription& d = spdBuf;
+            { const char* names[] = { "None", "Front", "Back" }; int v = static_cast<int>(d.cull_mode);
+              if (ImGui::Combo("Cull mode", &v, names, 3)) d.cull_mode = static_cast<SDL_GPUCullMode>(v); }
+            { const char* names[] = { "Fill", "Wireframe" }; int v = static_cast<int>(d.fill_mode);
+              if (ImGui::Combo("Fill mode", &v, names, 2)) d.fill_mode = static_cast<SDL_GPUFillMode>(v); }
+            { const char* names[] = { "TriangleList", "TriangleStrip", "LineList", "LineStrip", "PointList" };
+              int v = static_cast<int>(d.primitive_type);
+              if (ImGui::Combo("Primitive", &v, names, 5)) d.primitive_type = static_cast<SDL_GPUPrimitiveType>(v); }
+            ImGui::Checkbox("Depth test",   &d.depth_test);
+            ImGui::Checkbox("Depth write",  &d.depth_write);
+            ImGui::Checkbox("Stencil test", &d.stencil_test);
+            ImGui::Checkbox("Color blend",  &d.color_blend);
+            ImGui::Checkbox("Depth bias", &d.rasterizer_bias.enable_depth_bias);
+            if (d.rasterizer_bias.enable_depth_bias) {
+                ImGui::DragFloat("Bias constant", &d.rasterizer_bias.depth_bias_constant_factor, 0.05f);
+                ImGui::DragFloat("Bias slope",    &d.rasterizer_bias.depth_bias_slope_factor, 0.05f);
+                ImGui::DragFloat("Bias clamp",    &d.rasterizer_bias.depth_bias_clamp, 0.05f);
+            }
+        }
 
-        // ================= Удаление (внизу) =================
-        // Пайплайн в отложенное удаление, шейдеры релизятся по refcount, материалы → fallback.
+        // ===== Одна кнопка на ВСЮ композицию sp (имя/vs/fs/буферы/слоты/проход/spd) =====
+        // Создание: имя обязано быть свободным (иначе кнопка гаснет — не молчаливая перезапись).
         ImGui::Separator();
-        if (DangerButton("Delete shader")) {
-            im->PushCommand(CommandId::DeleteShader, new RebuildShaderPipelineCmd{ spName });
-            g_sel = Selection{};
-            return;
+        const bool nameFree = !smgr->GetShaderPrograms().count(nameBuf);
+        const bool ready = nameBuf[0] && !vsSel.empty() && !fsSel.empty() && !passSel.empty()
+            && (!creating || nameFree);
+        ImGui::BeginDisabled(!ready);
+        if (ImGui::Button(creating ? "Create" : "Apply / Recreate", ImVec2(160, 0))) {
+            im->PushCommand(CommandId::RecreateShader,
+                new RecreateShaderCmd{ spName, nameBuf, vsSel, fsSel, passSel, spdBuf, vsBufSel, fsBufSel, slotsSel });
+            g_sel = Selection{}; g_sel.kind = SelKind::Shader; g_sel.name = nameBuf;   // выбор на созданную/переименованную
+        }
+        ImGui::EndDisabled();
+        if (creating && nameBuf[0] && !nameFree) { ImGui::SameLine(); ImGui::TextDisabled("(name taken)"); }
+
+        // ================= Удаление (внизу, только у существующей) =================
+        // Пайплайн в отложенное удаление, шейдеры релизятся по refcount, материалы → fallback.
+        if (!creating) {
+            ImGui::Separator();
+            if (DangerButton("Delete shader")) {
+                im->PushCommand(CommandId::DeleteShader, new RebuildShaderPipelineCmd{ spName });
+                g_sel = Selection{};
+                return;
+            }
+        }
+    }
+    // Редактор списка storage-буферов стадии (порядок строк = слоты бинда). Каждый слот — свой
+    // выпадающий список: буфер можно заменить на ЛЮБОЙ другой (в отличие от взаимоисключающих
+    // семантик pull в VsdEditor — там уже добавленную нельзя выбрать повторно). Выбор не исключающий:
+    // один буфер может стоять в нескольких слотах. "x" справа убирает слот, "+ buffer" — добавляет
+    // новый в конец. Правит list на месте; коммит — общей кнопкой sp.
+    void BufferListEditor(const char* label, std::vector<BufferDataName>& list,
+                          const std::vector<BufferDataName>& avail)
+    {
+        ImGui::PushID(label);
+        ImGui::SeparatorText(label);
+        int rm_at = -1;
+        for (int i = 0; i < static_cast<int>(list.size()); ++i) {
+            ImGui::PushID(i);
+            ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);   // оставить место под "x"
+            if (ImGui::BeginCombo("##buf", list[i])) {
+                for (BufferDataName b : avail) {
+                    bool is_cur = (b == list[i]);
+                    if (ImGui::Selectable(b, is_cur)) list[i] = b;
+                    if (is_cur) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("x")) rm_at = i;
+            ImGui::PopID();
+        }
+        if (rm_at >= 0) list.erase(list.begin() + rm_at);
+
+        if (ImGui::BeginCombo("+ buffer", "(add)")) {
+            for (BufferDataName b : avail)                       // не исключающий: дубликаты допустимы
+                if (ImGui::Selectable(b)) list.push_back(b);
+            ImGui::EndCombo();
+        }
+        ImGui::PopID();
+    }
+
+    // Редактор слот-ролей sp (required_slots). В отличие от буферов роли ВЗАИМОИСКЛЮЧАЮЩИЕ: одна
+    // роль = один слот, поэтому дропдаун каждого слота и "+ slot" показывают только ещё не занятые
+    // роли (+ текущую самого слота). Порядок не влияет — стрелок нет. "x" убирает слот.
+    void RoleListEditor(std::vector<TextureSlotRole>& list)
+    {
+        static const TextureSlotRole kRoles[] = {
+            TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive,
+            TextureSlotRole::Custom0, TextureSlotRole::Custom1, TextureSlotRole::Custom2, TextureSlotRole::Custom3,
+            TextureSlotRole::Custom4, TextureSlotRole::Custom5, TextureSlotRole::Custom6, TextureSlotRole::Custom7,
+        };
+        ImGui::PushID("roles");
+        ImGui::SeparatorText("Texture slots");
+        auto used_elsewhere = [&](TextureSlotRole r, int self) {
+            for (int j = 0; j < static_cast<int>(list.size()); ++j) if (j != self && list[j] == r) return true;
+            return false;
+        };
+        int rm_at = -1;
+        for (int i = 0; i < static_cast<int>(list.size()); ++i) {
+            ImGui::PushID(i);
+            ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);   // место под "x"
+            if (ImGui::BeginCombo("##role", RoleName(list[i]))) {
+                for (TextureSlotRole r : kRoles) {
+                    if (used_elsewhere(r, i)) continue;                 // занятую другим слотом не предлагаем
+                    bool is_cur = (r == list[i]);
+                    if (ImGui::Selectable(RoleName(r), is_cur)) list[i] = r;
+                    if (is_cur) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("x")) rm_at = i;
+            ImGui::PopID();
+        }
+        if (rm_at >= 0) list.erase(list.begin() + rm_at);
+
+        if (ImGui::BeginCombo("+ slot", "(add)")) {                     // только ещё не добавленные роли
+            for (TextureSlotRole r : kRoles) {
+                if (std::find(list.begin(), list.end(), r) != list.end()) continue;
+                if (ImGui::Selectable(RoleName(r))) list.push_back(r);
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::PopID();
+    }
+
+    // VertexSemantic -> строка (набор фиксирован; реестра раскладок пока нет).
+    const char* SemName(VertexSemantic s)
+    {
+        switch (s) {
+        case POSITION: return "POSITION";
+        case UV:       return "UV";
+        case NORMAL:   return "NORMAL";
+        case TANGENT:  return "TANGENT";
+        default:       return "?";
+        }
+    }
+
+    // Общий приём пути из файл-диалога для форм SD (по своему PickTarget-полю).
+    bool TakePickedPath(PickTarget want, char* dst, size_t n)
+    {
+        if (g_pick_target == want && g_picked_ready.exchange(false, std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> lk(g_pick_mtx);
+            std::snprintf(dst, n, "%s", g_picked_path.c_str());
+            g_pick_target = PickTarget::None;
+            return true;
+        }
+        return false;
+    }
+
+    static const SDL_DialogFileFilter kHlslFilters[] = { { "HLSL", "hlsl" }, { "All files", "*" } };
+
+    // Форма фрагментного шейдера (create/edit = Upsert по имени, как текстура/модель).
+    void FsdEditor(EngineContext* ctx)
+    {
+        static char nameBuf[128] = "", pathBuf[512] = "";
+        static std::string syncedFor = "\x01";
+        if (g_sel.name != syncedFor) {
+            syncedFor = g_sel.name;
+            std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
+            FragmentShaderData* d = ctx->GetShaderManager()->GetFragmentShader(g_sel.name);
+            std::snprintf(pathBuf, sizeof pathBuf, "%s", d ? d->source_path.c_str() : "");
+        }
+        TakePickedPath(PickTarget::ShaderFrag, pathBuf, sizeof pathBuf);
+
+        ImGui::TextDisabled("Fragment shader (create / edit)");
+        ImGui::InputText("Name", nameBuf, sizeof nameBuf);
+        ImGui::InputText("Path", pathBuf, sizeof pathBuf);
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...##fsd")) OpenFileDialog(PickTarget::ShaderFrag, kHlslFilters, 2);
+
+        const bool ready = nameBuf[0] && pathBuf[0];
+        ImGui::BeginDisabled(!ready);
+        if (ImGui::Button("Recreate", ImVec2(160, 0))) {
+            ctx->GetInputManager()->PushCommand(CommandId::UpsertFragmentShader,
+                new UpsertFragmentShaderCmd{ nameBuf, pathBuf, g_sel.name });
+            g_sel = Selection{}; g_sel.kind = SelKind::Fsd; g_sel.name = nameBuf;
+        }
+        ImGui::EndDisabled();
+        if (!g_sel.name.empty()) {
+            ImGui::SameLine();
+            const bool used = ctx->GetShaderManager()->IsFragmentShaderUsed(g_sel.name);
+            ImGui::BeginDisabled(used);   // используемый SD удалять запрещено (см. ShaderManager)
+            if (DangerButton("Delete")) {
+                ctx->GetInputManager()->PushCommand(CommandId::DeleteFragmentShader, new ShaderDataNameCmd{ g_sel.name });
+                g_sel = Selection{};
+            }
+            ImGui::EndDisabled();
+            if (used) { ImGui::SameLine(); ImGui::TextDisabled("(used by sp)"); }
+        }
+    }
+
+    // Форма compute-шейдера (аналогично FSD; source_path у CSD не храним).
+    void CsdEditor(EngineContext* ctx)
+    {
+        static char nameBuf[128] = "", pathBuf[512] = "";
+        static std::string syncedFor = "\x01";
+        if (g_sel.name != syncedFor) {
+            syncedFor = g_sel.name;
+            std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
+            if (g_sel.name.empty()) pathBuf[0] = '\0';
+        }
+        TakePickedPath(PickTarget::ShaderComp, pathBuf, sizeof pathBuf);
+
+        ImGui::TextDisabled("Compute shader (create / edit)");
+        ImGui::InputText("Name", nameBuf, sizeof nameBuf);
+        ImGui::InputText("Path", pathBuf, sizeof pathBuf);
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...##csd")) OpenFileDialog(PickTarget::ShaderComp, kHlslFilters, 2);
+
+        const bool ready = nameBuf[0] && pathBuf[0];
+        ImGui::BeginDisabled(!ready);
+        if (ImGui::Button("Recreate", ImVec2(160, 0))) {
+            ctx->GetInputManager()->PushCommand(CommandId::UpsertComputeShader,
+                new UpsertComputeShaderCmd{ nameBuf, pathBuf, g_sel.name });
+            g_sel = Selection{}; g_sel.kind = SelKind::Csd; g_sel.name = nameBuf;
+        }
+        ImGui::EndDisabled();
+        if (!g_sel.name.empty()) {
+            ImGui::SameLine();
+            const bool used = ctx->GetShaderManager()->IsComputeShaderUsed(g_sel.name);
+            ImGui::BeginDisabled(used);   // используемый SD удалять запрещено (см. ShaderManager)
+            if (DangerButton("Delete")) {
+                ctx->GetInputManager()->PushCommand(CommandId::DeleteComputeShader, new ShaderDataNameCmd{ g_sel.name });
+                g_sel = Selection{};
+            }
+            ImGui::EndDisabled();
+            if (used) { ImGui::SameLine(); ImGui::TextDisabled("(used by sp)"); }
+        }
+    }
+
+    // Форма вершинного шейдера: имя + путь + РАСКЛАДКА (pull) — семантики добавляются/удаляются и
+    // переставляются стрелками (реестра форматов пока нет; формат фиксирован FMT_PosUVNormal).
+    void VsdEditor(EngineContext* ctx)
+    {
+        static char nameBuf[128] = "", pathBuf[512] = "";
+        static std::vector<VertexSemantic> pull;
+        static std::string syncedFor = "\x01";
+        if (g_sel.name != syncedFor) {
+            syncedFor = g_sel.name;
+            std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
+            VertexShaderData* d = ctx->GetShaderManager()->GetVertexShader(g_sel.name);
+            std::snprintf(pathBuf, sizeof pathBuf, "%s", d ? d->source_path.c_str() : "");
+            pull.clear();
+            if (d && !d->bindings.empty()) pull = d->bindings.front().pull;   // раскладка первого слота
+            else pull.push_back(POSITION);                                    // дефолт для новой
+        }
+        TakePickedPath(PickTarget::ShaderVert, pathBuf, sizeof pathBuf);
+
+        ImGui::TextDisabled("Vertex shader (create / edit)");
+        ImGui::InputText("Name", nameBuf, sizeof nameBuf);
+        ImGui::InputText("Path", pathBuf, sizeof pathBuf);
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...##vsd")) OpenFileDialog(PickTarget::ShaderVert, kHlslFilters, 2);
+
+        // Раскладка pull: строки со стрелками up/dn (перестановка) и x (удаление).
+        ImGui::SeparatorText("Vertex layout (pull)");
+        int mv_from = -1, mv_to = -1, rm_at = -1;
+        for (int i = 0; i < static_cast<int>(pull.size()); ++i) {
+            ImGui::PushID(i);
+            if (ImGui::ArrowButton("up", ImGuiDir_Up)   && i > 0)                               { mv_from = i; mv_to = i - 1; }
+            ImGui::SameLine();
+            if (ImGui::ArrowButton("dn", ImGuiDir_Down) && i < static_cast<int>(pull.size()) - 1) { mv_from = i; mv_to = i + 1; }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("x")) rm_at = i;
+            ImGui::SameLine();
+            ImGui::TextUnformatted(SemName(pull[i]));
+            ImGui::PopID();
+        }
+        if (mv_from >= 0) std::swap(pull[mv_from], pull[mv_to]);
+        if (rm_at  >= 0) pull.erase(pull.begin() + rm_at);
+
+        // Добавить недостающую семантику (набор фиксирован).
+        static const VertexSemantic kSems[] = { POSITION, UV, NORMAL, TANGENT };
+        if (ImGui::BeginCombo("+ field", "(add)")) {
+            for (VertexSemantic sem : kSems) {
+                if (std::find(pull.begin(), pull.end(), sem) != pull.end()) continue;
+                if (ImGui::Selectable(SemName(sem))) pull.push_back(sem);
+            }
+            ImGui::EndCombo();
+        }
+
+        const bool ready = nameBuf[0] && pathBuf[0] && !pull.empty();
+        ImGui::BeginDisabled(!ready);
+        if (ImGui::Button("Recreate", ImVec2(160, 0))) {
+            ctx->GetInputManager()->PushCommand(CommandId::UpsertVertexShader,
+                new UpsertVertexShaderCmd{ nameBuf, pathBuf, g_sel.name, pull });
+            g_sel = Selection{}; g_sel.kind = SelKind::Vsd; g_sel.name = nameBuf;
+        }
+        ImGui::EndDisabled();
+        if (!g_sel.name.empty()) {
+            ImGui::SameLine();
+            const bool used = ctx->GetShaderManager()->IsVertexShaderUsed(g_sel.name);
+            ImGui::BeginDisabled(used);   // используемый SD удалять запрещено (см. ShaderManager)
+            if (DangerButton("Delete")) {
+                ctx->GetInputManager()->PushCommand(CommandId::DeleteVertexShader, new ShaderDataNameCmd{ g_sel.name });
+                g_sel = Selection{};
+            }
+            ImGui::EndDisabled();
+            if (used) { ImGui::SameLine(); ImGui::TextDisabled("(used by sp)"); }
         }
     }
 }
@@ -709,6 +996,10 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         ImGui::Text("Compute: %s", g_sel.name.c_str());
         ImGui::TextDisabled("(no editable pipeline state; push/dispatch are code)");
         break;
+
+    case SelKind::Vsd: VsdEditor(ctx); break;
+    case SelKind::Fsd: FsdEditor(ctx); break;
+    case SelKind::Csd: CsdEditor(ctx); break;
 
     default:
         ImGui::TextDisabled("Nothing selected.");

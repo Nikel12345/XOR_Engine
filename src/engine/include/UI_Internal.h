@@ -12,7 +12,8 @@ namespace ui {
 // по нему решает, что рисовать. Свет НЕ отдельный вид: он такая же сущность (Entity).
 // Виды — только «сущность vs ресурс». Shader = graphics sp, Compute = compute sp
 // (2 типа, отдельные вкладки-фильтры).
-enum class SelKind { None, Entity, Camera, Material, Texture, Model, Shader, Compute };
+enum class SelKind { None, Entity, Camera, Material, Texture, Model, Shader, Compute,
+                     Vsd, Fsd, Csd };   // именованные шейдер-данные (список; своё окно редактирования — позже)
 
 struct Selection {
     SelKind     kind   = SelKind::None;

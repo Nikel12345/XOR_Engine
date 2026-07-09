@@ -40,7 +40,7 @@ void BufferManager::EnsureBufferCapacity(SDL_GPUCopyPass* cp, BufferData* data, 
         data->Static.buffer = new_buffer;
         data->Static.buffer_size = req_buffer_size;
 
-        trash.push_back({ old_buffer, BUFFERING_LEVEL });
+        trash.push_back({ old_buffer });
         return;
     }
 
@@ -70,7 +70,7 @@ void BufferManager::EnsureBufferCapacity(SDL_GPUCopyPass* cp, BufferData* data, 
         data->Dynamic.buffers[li] = new_buffer;
         data->Dynamic.buffer_size[li] = req_buffer_size;
 
-        trash.push_back({ old_buffer, BUFFERING_LEVEL });
+        trash.push_back({ old_buffer });
         return;
     }
 

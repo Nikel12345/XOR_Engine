@@ -7,6 +7,7 @@
 #include "RenderManager.h"
 #include "ShaderManager.h"
 #include "TextureManager.h"   // резолв имён текстур материала → TextureHandle на сборке батча
+#include "BufferManager.h"    // резолв имён storage-буферов sp → BufferData* на сборке батча
 #include "ModelData.h"
 #include "TextureData.h"
 #include <unordered_set>
@@ -118,7 +119,7 @@ void BatchBuilder::QueueDelete(Entity entity)
     entities_to_delete.push_back(entity);
 }
 
-void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureManager* tm, ShaderManager* sm,
+void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
     const MaterialComponent& material_component, const ModelComponent& model_component) {
 
     // Защита от незаполненных ссылок: сущность из загрузки сцены, чьё имя ассета не
@@ -167,9 +168,19 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
                 ShaderBatchData new_batch{};
                 new_batch.push_func = sp->push_func;
                 new_batch.pipeline = pm->GetGraphicPipeline(sp);
-                new_batch.vertexStorageBuffers = sp->vertex_shader_buffers;
-                new_batch.fragmentStorageBuffers = sp->fragment_shader_buffers;
-                new_batch.frag_uniform_count = sp->fs.shader_data.num_uniform_buffers;
+                // Буферы sp — по имени (BufferDataName = ключ реестра); резолвим в BufferData* здесь
+                // (как имена текстур/sp выше) через GetBufferData. Ненайденное имя пропускаем — слот
+                // бинда сдвинется, но висячего указателя не будет.
+                auto resolve_buffers = [bm](const std::vector<BufferDataName>& names) {
+                    std::vector<BufferData*> out; out.reserve(names.size());
+                    for (BufferDataName n : names)
+                        if (BufferData* b = bm->GetBufferData(n)) out.push_back(b);
+                    return out;
+                };
+                new_batch.vertexStorageBuffers   = resolve_buffers(sp->vertex_shader_buffer_names);
+                new_batch.fragmentStorageBuffers = resolve_buffers(sp->fragment_shader_buffer_names);
+                FragmentShaderData* fsd = sm->GetFragmentShader(sp->fs_name);   // fs по имени из реестра
+                new_batch.frag_uniform_count = fsd ? fsd->shader_data.num_uniform_buffers : 0u;
                 shader_map[sp_key] = std::move(new_batch);
             }
 
@@ -285,7 +296,7 @@ void BatchBuilder::RemoveEntityFromBatches(Entity entity)
 }
 
 void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-    TextureManager* tm, ShaderManager* sm, SceneData* scene)
+    TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene)
 {
     if (!scene) {
         SDL_Log("UpdateRenderBatches called with null scene!");
@@ -298,14 +309,14 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
     // раскладки слота — см. FinalizeOffsets/AskLayout), дерево приватно для sim.
     bool changed = false;
     if (dirty_batches.exchange(false)) {
-        BuildRenderBatches(pm, pass_manager, om, tm, sm, scene);
+        BuildRenderBatches(pm, pass_manager, om, tm, sm, bm, scene);
         FinalizeOffsets(pass_manager);
         // Полная пересборка переклеила ВСЮ раскладку (indirect_command_index, firstInstance).
         // Бампим эпоху — слоты, залитые под старой раскладкой, рендер больше не покажет.
         ++rebuild_epoch;
         changed = true;
     }
-    else if (ApplyIncremental(pm, pass_manager, om, tm, sm, scene)) {
+    else if (ApplyIncremental(pm, pass_manager, om, tm, sm, bm, scene)) {
         FinalizeOffsets(pass_manager);
         changed = true;
     }
@@ -332,7 +343,7 @@ inline void RecalculateInstanceOffsets(SceneData* scene)
 }
 
 void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-    TextureManager* tm, ShaderManager* sm, SceneData* scene)
+    TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene)
 {
     for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses()) {
         rp->shader_batches.clear();
@@ -360,7 +371,7 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
             return;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
         const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
-        AddEntityToBatches(entity, pm, tm, sm, material_component, model_component);
+        AddEntityToBatches(entity, pm, tm, sm, bm, material_component, model_component);
     }
     );
 
@@ -368,7 +379,7 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
 }
 
 bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-    TextureManager* tm, ShaderManager* sm, SceneData* scene)
+    TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene)
 {
     // Atomically take + clear the queues, then work on the local copies outside
     // the lock so we never hold delta_mutex while mutating the batch tree.
@@ -400,7 +411,7 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
             continue;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
         const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
-        AddEntityToBatches(entity, pm, tm, sm, material_component, model_component);
+        AddEntityToBatches(entity, pm, tm, sm, bm, material_component, model_component);
     }
     for (Entity entity : deletes) {
         RemoveEntityFromBatches(entity);
@@ -536,13 +547,17 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         new_batch.push_func = sp->push_func;
         new_batch.dispatch_func = sp->dispatch_func;
 
-        new_batch.threadcount_x = sp->cs.threadcount_x;
-        new_batch.threadcount_y = sp->cs.threadcount_y;
-        new_batch.threadcount_z = sp->cs.threadcount_z;
+        ComputeShaderData* csd = sm->GetComputeShader(sp->cs_name);   // cs по имени из реестра
+        new_batch.threadcount_x = csd ? csd->threadcount_x : 1u;
+        new_batch.threadcount_y = csd ? csd->threadcount_y : 1u;
+        new_batch.threadcount_z = csd ? csd->threadcount_z : 1u;
 
         new_batch.debug_name = sp->debug_name;
 
         cmp->shader_batches.push_back(std::move(new_batch));
     }
     sm->SetDirtyComputeBatches(false);
+    // Дерево пересобрано — старых указателей пайплайнов в нём больше нет. Бамп армирует
+    // отложенное удаление compute-пайплайнов (TrashPipelines дренирует in-flight и освобождает).
+    compute_rebuild_epoch.fetch_add(1, std::memory_order_release);
 }

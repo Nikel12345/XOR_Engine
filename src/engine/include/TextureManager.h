@@ -6,6 +6,7 @@
 #include <deque>
 #include <memory>
 #include <unordered_map>
+#include <functional>   // LoadSceneTextures: колбэк создания из файла (декод — верхний слой)
 #include "config.h"
 #include "TransferManager.h"
 #include "TextureData.h"
@@ -37,7 +38,16 @@ namespace DefaultSamplersNames {
 
 struct PendingTextureDestroy {
 	SDL_GPUTexture* tex;
-	uint64_t frame_ready;
+	uint64_t ready_at = 0;   // стамп освобождения, семантика — как у PendingDestroy (BufferManager.h)
+};
+
+// Запись манифеста текстур сцены (textures.json): чего достаточно для пересоздания из файла.
+// Парсит/пишет json верхний слой (Engine::Save/LoadScene) — TM получает уже разобранный список.
+struct SceneTextureEntry {
+	std::string name;
+	std::string atlas;
+	std::string path;
+	ChannelConvention conv = ChannelConvention::AsIs;
 };
 
 class TextureManager
@@ -90,9 +100,17 @@ public:
 	// остаток. Выжившие не двигаются.
 	void DeleteTextureHandle(const std::string& name);
 
+	// Merge-upsert текстур из манифеста сцены (см. SceneTextureEntry): занятое имя снимается
+	// (replace, как UpsertTexture), затем create_from_file — декод файла остаётся верхнему слою
+	// (EngineContext::CreateTextureFromFile), TM владеет только словарной семантикой. Ресурсы,
+	// которых нет в манифесте, НЕ трогаются (кодовая инфраструктура переживает загрузку).
+	// Возвращает число успешно созданных.
+	size_t LoadSceneTextures(const std::vector<SceneTextureEntry>& entries,
+		const std::function<TextureHandle*(const SceneTextureEntry&)>& create_from_file);
+
 	SharedDepthTarget* CreateSharedDepthTarget(SDL_GPUTextureCreateInfo tci);
 	void QueueDeleteTexture(SDL_GPUTexture* texture);
-	void TrashTextures();
+	void TrashTextures(uint64_t fences_done);
 	~TextureManager();
 
 	// Разделяемый depth основного прохода (MAIN/TRANSPARENT/DEBUG). Ресайзится через ->Resize().
@@ -140,6 +158,9 @@ private:
 	std::vector<UploadTaskTexture> upload_tasks;
 
 	std::vector<std::unique_ptr<SharedDepthTarget>> shared_depth_targets;
+	// Очередь ЦЕЛИКОМ владеется render-потоком: оба пуша (ResizeSceneHDRTargets / Resize depth —
+	// по размеру свопчейна) и дренаж (TrashTextures в RenderFunc) живут в нём. Без замков —
+	// симметрично трэшам буферов/пайплайнов, которыми так же монопольно владеет sim.
 	std::deque<PendingTextureDestroy> texture_trash;
 
 	SDL_GPUDevice* dev = nullptr;

@@ -60,18 +60,19 @@ BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, SD
     return ptr;
 }
 
-void BufferManager::TrashBuffers()
+void BufferManager::TrashBuffers(uint64_t fences_done)
 {
+    // Дренаж на sim. Стамп при первом визите (позже момента постановки — консервативно, безопасно);
+    // release после BUFFERING_LEVEL завершённых render-fence: fence одного queue сигналят в порядке
+    // сабмита, значит все кадры, отправленные до стампа, к этому моменту дошли.
     auto it = trash.begin();
     while (it != trash.end()) {
-        if (it->frame_ready <= 0) {
+        if (it->ready_at == 0) { it->ready_at = fences_done + BUFFERING_LEVEL; ++it; }
+        else if (fences_done >= it->ready_at) {
             SDL_ReleaseGPUBuffer(dev, it->buf);
             it = trash.erase(it);
         }
-        else {
-            it->frame_ready--;
-            ++it;
-        }
+        else ++it;
     }
 }
 

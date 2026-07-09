@@ -38,7 +38,9 @@ namespace DefaultBuffersNames {
 
 struct PendingDestroy {
 	SDL_GPUBuffer* buf;
-	uint64_t frame_ready;
+	// Стамп освобождения: 0 = не проставлен; первый дренаж ставит fences_done + BUFFERING_LEVEL,
+	// release при fences_done >= ready_at (дренаж — sim, счётчик render-fence тикает FenceThread).
+	uint64_t ready_at = 0;
 };
 
 class BufferManager
@@ -102,9 +104,12 @@ public:
 	void* AcquireTransferWritePtr(UploadTask* task, Uint32 size);
 	std::span<const std::byte> ReadFromTransferBuffer(ReadBackTask* task, uint32_t size);
 
-	void TrashBuffers();
+	void TrashBuffers(uint64_t fences_done);
 
 	BufferData* GetBufferData(BufferDataName name);
+	// Весь реестр буферов — для UI (перечень для дропдаунов). Ключ карты (BufferDataName) и есть
+	// каноничное имя буфера — его и показываем/кладём в ссылки sp (резолв назад через GetBufferData).
+	const std::unordered_map<BufferDataName, std::unique_ptr<BufferData>>& GetBuffersData() const { return buffers_data; }
 	~BufferManager();
 
 	std::atomic<uint8_t> logic_index{ 0 };

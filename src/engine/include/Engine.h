@@ -61,6 +61,13 @@ public:
 	LightDataModule* GetLightDataModule() const { return light_data_module; }
 
 
+    // Сохранение/загрузка сцены-папки (dir): scene.scene (ECS через om) + файлы ресурсов рядом
+    // (tm/mm/sm — подключаются поэтапно). Публичная точка входа — ctx->Save/LoadScene (делегирует
+    // сюда): оркестрация по менеджерам — забота Engine, а не контекста. Порядок load:
+    // ресурсы (merge-upsert) → ECS (replace-on-load) → фикс-ап указателей → пересборка батчей.
+    void SaveScene(const SceneName& scene_name, const std::string& dir);
+    void LoadScene(const SceneName& scene_name, const std::string& dir);
+
     //void Iterate();
     void PrepareFunc(uint8_t idx);
 
@@ -69,9 +76,6 @@ public:
     bool RenderFunc(uint8_t idx);
 
     void FenceFunc(uint8_t slot);
-
-    // [DEBUG] Дебаг-ридбек первых значений out_pib (см. Engine.cpp). Временный.
-    void DebugReadbackOutPib(uint8_t slot);
 
     void BeginImGuiFrame();
 
@@ -95,6 +99,8 @@ private:
 	void InitDefaultBufferUpdaters();
     void InitPasses();
     void InitUICommands();
+    // Билтин-типы material-params (None/Opaque/Transparent) в реестр для UI-дропдауна Kind.
+    void InitDefaultMaterialParams();
     // Движковые дефолтные текстуры (albedo/normal/orm/emissive) в _FallbackAtlas — чтобы редактор
     // мог создавать материалы и заполнять слоты по ролям без ассетов игры.
     void InitDefaultResources();

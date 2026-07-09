@@ -25,14 +25,15 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
         SceneName active = om->GetActiveSceneName();
         ImGui::Selectable(active.c_str(), true);   // активная сцена
 
+        // Путь — ПАПКА сцены (scene.scene + файлы ресурсов внутри), см. Engine::Save/LoadScene.
         if (ImGui::SmallButton("Save scene")) {
             ctx->GetInputManager()->PushCommand(CommandId::SaveScene,
-                new SceneIOCmd{ active, "saved_scene.scene" });
+                new SceneIOCmd{ active, "saved_scene" });
         }
         ImGui::SameLine();
         if (ImGui::SmallButton("Load scene")) {
             ctx->GetInputManager()->PushCommand(CommandId::LoadScene,
-                new SceneIOCmd{ active, "saved_scene.scene" });
+                new SceneIOCmd{ active, "saved_scene" });
         }
     }
 

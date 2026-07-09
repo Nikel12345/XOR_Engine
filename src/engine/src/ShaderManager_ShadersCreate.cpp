@@ -71,8 +71,8 @@ void ShaderManager::ReadVertexAttributes(
         for (VertexSemantic sem : g.pull) {
             const VertexAttr* a = g.format->Find(sem);
             if (!a) {
-                SDL_Log("Warning: Vertex format for buffer '%s' does not contain semantic %u, skipping this attribute.",
-					g.buffer, (Uint32)sem);
+                SDL_Log("Warning: vertex format (slot %u) does not contain semantic %u, skipping this attribute.",
+					slot, (Uint32)sem);
                 continue;
 			}
 
@@ -160,33 +160,34 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     return (Uint8*)compiled;
 }
 
-VertexShaderData ShaderManager::CreateVertexShader(const char* hlsl_path,
+void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl_path,
     const std::vector<VertexBufferBinding>& bindings)
 {
     size_t n = 0;
     Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_VERTEX, n);
-    if (!spv) return {};
-    VertexShaderData vs = BuildVertexShader(spv, n, hlsl_path, bindings);
+    if (!spv) return;
+    vertex_shaders[name] = BuildVertexShader(spv, n, hlsl_path, bindings);   // в реестр по имени
     SDL_free(spv);
-    return vs;
 }
 
-FragmentShaderData ShaderManager::CreateFragmentShader(const char* hlsl_path)
+void ShaderManager::CreateFragmentShader(const std::string& name, const char* hlsl_path)
 {
     size_t n = 0;
     Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT, n);
-    if (!spv) return {};
-    FragmentShaderData fs = BuildFragmentShader(spv, n, hlsl_path);
+    if (!spv) return;
+    fragment_shaders[name] = BuildFragmentShader(spv, n, hlsl_path);   // в реестр по имени
     SDL_free(spv);
-    return fs;
 }
 
-ComputeShaderData ShaderManager::CreateComputeShader(const char* hlsl_path)
+void ShaderManager::CreateComputeShader(const std::string& name, const char* hlsl_path)
 {
     size_t n = 0;
     Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_COMPUTE, n);
-    if (!spv) return {};
-    return BuildComputeShader(spv, n, hlsl_path);   // владение spv уходит в cs
+    if (!spv) return;
+    // Реестр владеет сырым spv_code — при перезаписи имени старый освобождаем (иначе течёт).
+    auto it = compute_shaders.find(name);
+    if (it != compute_shaders.end() && it->second.spv_code) SDL_free(it->second.spv_code);
+    compute_shaders[name] = BuildComputeShader(spv, n, hlsl_path);   // владение spv уходит в реестр
 }
 
 std::shared_ptr<SDL_GPUShader> ShaderManager::LookupGpuShader(uint64_t key) const

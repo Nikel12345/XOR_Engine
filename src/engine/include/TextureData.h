@@ -63,6 +63,10 @@ struct TextureHandle : std::enable_shared_from_this<TextureHandle> {
 	std::string       atlas_name;
 	std::string       source_path;
 	ChannelConvention conv = ChannelConvention::AsIs;
+	// Не писать в файл сцены при SaveScene. Движковые дефолты (_NoTextureDummy, default_*)
+	// ставят true — они гарантированно пересоздаются кодом до всякой загрузки, файл ими не
+	// раздуваем. UI-пересоздание идёт через create-API с дефолтом false → «тронул = сохраняемый».
+	bool              dont_save = false;
 };
 
 class TextureManager;

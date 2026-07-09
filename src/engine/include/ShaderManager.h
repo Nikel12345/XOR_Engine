@@ -14,28 +14,66 @@ class ShaderManager
 {
 public:
 	ShaderManager(SDL_GPUDevice* device);
-	// bindings/texture_slots — vector (не initializer_list): чтобы редактор мог пересобрать sp из
-	// СОХРАНЁННЫХ на ней рантайм-раскладок (sp->vs.bindings / sp->required_slots). Вызовы из кода с
-	// braced-init { … } по-прежнему компилируются (фигурные скобки строят vector).
-	VertexShaderData CreateVertexShader(const char* hlsl_path, const std::vector<VertexBufferBinding>& bindings);
-	FragmentShaderData CreateFragmentShader(const char* path);
+	// Create*Shader компилируют и КЛАДУТ результат в именованный реестр (vertex_shaders/
+	// fragment_shaders/compute_shaders); sp/csp ссылаются на них по ИМЕНИ. Повтор с тем же именем
+	// перезаписывает запись. bindings/texture_slots — vector (не initializer_list), вызовы из кода
+	// с braced-init { … } по-прежнему компилируются.
+	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::vector<VertexBufferBinding>& bindings);
+	void CreateFragmentShader(const std::string& name, const char* path);
 
 	ShaderProgram* CreateShaderProgram(
 		const std::string& name, const ShaderProgramDescription& spd, RenderPassStep* associated_pass,
-		VertexShaderData vs, std::vector<BufferData*> vertex_shader_buffers,
-		FragmentShaderData fs, std::vector<BufferData*> fragment_shader_buffers,
+		const std::string& vs_name, std::vector<BufferDataName> vertex_shader_buffer_names,
+		const std::string& fs_name, std::vector<BufferDataName> fragment_shader_buffer_names,
 		const std::vector<TextureSlotRole>& texture_slots);
 
-	ComputeShaderData CreateComputeShader(const char* path);
+	void CreateComputeShader(const std::string& name, const char* path);
 	// ������� �������� ComputeShaderProgram �� ���������� ������� �� ���������� � �������!
 	// The order in which ComputeShaderPrograms are created does not determine the order in which they are executed in a pass!
-	ComputeShaderProgram* CreateComputeShaderProgram(const std::string& name, ComputeShaderData csd, 
-		std::vector<BufferData*> rw_storage_buffers, 
-		std::vector<BufferData*> ro_storage_buffers, 
-		std::vector<ComputeShaderProgram::ComputeRWTextureBinding> rw_storage_textures, 
-		std::vector<TextureAtlas*> ro_storage_textures, 
-		std::vector<TextureAtlas*> texture_samplers, 
+	ComputeShaderProgram* CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
+		std::vector<BufferData*> rw_storage_buffers,
+		std::vector<BufferData*> ro_storage_buffers,
+		std::vector<ComputeShaderProgram::ComputeRWTextureBinding> rw_storage_textures,
+		std::vector<TextureAtlas*> ro_storage_textures,
+		std::vector<TextureAtlas*> texture_samplers,
 		ComputePassStep* associated_compute_pass);
+
+	// Именованные шейдер-данные: доступ/удаление по имени (владелец — реестр, не sp/csp). Резолв
+	// делают потребители на сборке (PipeManager/BatchBuilder). nullptr при промахе.
+	VertexShaderData*   GetVertexShader(const std::string& name);
+	FragmentShaderData* GetFragmentShader(const std::string& name);
+	ComputeShaderData*  GetComputeShader(const std::string& name);
+
+	// Занятость SD программами (по ссылкам-именам). Удаление ИСПОЛЬЗУЕМОГО шейдера запрещено:
+	// пайплайн sp собран из его данных, а fallback с чужой раскладкой вершин невозможен —
+	// сначала сними шейдер со всех sp (или удали их), потом удаляй SD.
+	bool IsVertexShaderUsed(const std::string& name) const {
+		for (auto& [n, sp] : shader_programs) if (sp->vs_name == name) return true;
+		return false;
+	}
+	bool IsFragmentShaderUsed(const std::string& name) const {
+		for (auto& [n, sp] : shader_programs) if (sp->fs_name == name) return true;
+		return false;
+	}
+	bool IsComputeShaderUsed(const std::string& name) const {
+		for (auto& csp : compute_shader_programs) if (csp->cs_name == name) return true;
+		return false;
+	}
+
+	// false = отказ (используется) или нет такой записи. Неиспользуемый SD ничего не рисует —
+	// после удаления ни пайплайны, ни батчи трогать не нужно.
+	bool DeleteVertexShader(const std::string& name) {
+		if (IsVertexShaderUsed(name)) { SDL_Log("ShaderManager: vertex shader '%s' is used by a shader program — delete refused", name.c_str()); return false; }
+		return vertex_shaders.erase(name) > 0;
+	}
+	bool DeleteFragmentShader(const std::string& name) {
+		if (IsFragmentShaderUsed(name)) { SDL_Log("ShaderManager: fragment shader '%s' is used by a shader program — delete refused", name.c_str()); return false; }
+		return fragment_shaders.erase(name) > 0;
+	}
+	bool DeleteComputeShader(const std::string& name);
+	std::unordered_map<std::string, VertexShaderData>&   GetVertexShaders()   { return vertex_shaders; }
+	std::unordered_map<std::string, FragmentShaderData>& GetFragmentShaders() { return fragment_shaders; }
+	std::unordered_map<std::string, ComputeShaderData>&  GetComputeShaders()  { return compute_shaders; }
 
 	VertexShaderData CreateVertexShaderFromSPV(const char* path, std::initializer_list<VertexBufferBinding> bindings);
 	FragmentShaderData CreateFragmentShaderFromSPV(const char* spv_path);
@@ -86,9 +124,15 @@ private:
 	std::string m_cacheBasePath;
 
 	std::unordered_map<std::string, std::unique_ptr<ShaderProgram>> shader_programs;
-	
+
 	std::vector<std::unique_ptr<ComputeShaderProgram>> compute_shader_programs;
 	std::unordered_map<std::string, ComputeShaderProgram*>  compute_shader_programs_by_name;
+
+	// Реестры именованных шейдер-данных — владельцы. compute_shaders владеет сырым spv_code
+	// (free в деструкторе идёт отсюда, а не с csp, т.к. csp держит только имя).
+	std::unordered_map<std::string, VertexShaderData>   vertex_shaders;
+	std::unordered_map<std::string, FragmentShaderData> fragment_shaders;
+	std::unordered_map<std::string, ComputeShaderData>  compute_shaders;
 
 	SDL_GPUDevice* dev;
 

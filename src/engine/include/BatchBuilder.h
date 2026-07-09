@@ -15,6 +15,7 @@ class PipeManager;
 class PassManager;
 class TextureManager;
 class ShaderManager;
+class BufferManager;
 struct SceneData;
 struct ModelBatchData;
 struct MaterialComponent;
@@ -32,7 +33,7 @@ public:
 	// Резолверы name-based ссылок материала (имя текстуры/sp → указатель на сборке) передаются
 	// параметром, а не хранятся полем: системы движка не держат указатели друг на друга.
 	void UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-		TextureManager* tm, ShaderManager* sm, SceneData* scene);
+		TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene);
 	void BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm);
 	void BuildComputePrepassBatches(PipeManager* pm, ShaderManager* sm);
 
@@ -48,6 +49,10 @@ public:
 	// SlotController клеймит ею слоты: после редкого ребилда рендер держит кадр, пока
 	// перестроенный слот не готов, вместо мерцания старой раскладкой indirect/out_pib.
 	uint64_t RebuildEpoch() const { return rebuild_epoch; }
+	// Эпоха пересборок COMPUTE-дерева (BuildComputeBatches). Атомик: пишет sim, читает
+	// FenceThread — гейт отложенного удаления compute-пайплайнов (PipeManager::TrashPipelines):
+	// после бампа дерево уже не держит старый указатель, остаётся дренаж in-flight кадров.
+	uint64_t ComputeRebuildEpoch() const { return compute_rebuild_epoch.load(std::memory_order_acquire); }
 	void SetDirtyBatches(bool state) { dirty_batches = state; };
 
 	// ── Слепок раскладки батчей (RenderSnap::BatchLayout) ──
@@ -75,16 +80,16 @@ private:
 	};
 
 	void BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-		TextureManager* tm, ShaderManager* sm, SceneData* scene);
+		TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene);
 	// Drains the queues and applies them to the batch tree. Returns true if any
 	// delta was applied.
 	bool ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-		TextureManager* tm, ShaderManager* sm, SceneData* scene);
+		TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene);
 	void FinalizeOffsets(PassManager* pass_manager);
 
 	// Find-or-create the batch nodes for a single entity and record its slots.
 	// Shared by full rebuild and incremental add.
-	void AddEntityToBatches(Entity entity, PipeManager* pm, TextureManager* tm, ShaderManager* sm,
+	void AddEntityToBatches(Entity entity, PipeManager* pm, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
 		const MaterialComponent& material_component, const ModelComponent& model_component);
 	void RemoveEntityFromBatches(Entity entity);
 
@@ -106,5 +111,6 @@ private:
 
 	uint64_t batches_revision = 0;
 	uint64_t rebuild_epoch = 0;   // ++ только на полном ребилде (не на инкременте)
+	std::atomic<uint64_t> compute_rebuild_epoch{ 0 };   // ++ в конце BuildComputeBatches (см. геттер)
 	std::atomic<bool> dirty_batches{ true };
 };

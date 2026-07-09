@@ -1,10 +1,9 @@
 #include "PCH.h"
 #include "EngineContext.h"
+#include "Engine.h"           // делегирование Save/LoadScene (оркестрация сцены-папки — в Engine)
 #include "TextureLoader.h"
 #include "RenderManager.h"    // PassManager (создание проходов, GetRenderPassStep)
 #include "EngineProfiler.h"   // Prof::Clock/MsSince — тайминг фаз загрузки (реальны при любом ENGINE_PROFILE)
-#include <fstream>
-#include <sstream>
 
 EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager* rm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pm, BatchBuilder* bb, TextureLoader* tl)
 	: gpu_ctx(bm, sm, rm, tm)   // GPU-фасад над Buffer/Shader/Pass/Texture
@@ -52,7 +51,7 @@ static SDL_PixelFormat PixelFormatForGpuFormat(SDL_GPUTextureFormat fmt)
 	}
 }
 
-TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv) {
+TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv, bool dont_save) {
 	TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
 	if (!atlas) return nullptr;   // GetTextureAtlas уже залогировал отсутствие
 
@@ -75,7 +74,7 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 	}
 
 	TextureHandle* h = texture_manager->CreateTexture(name, atlas, img.width, img.height, std::move(img.pixels));
-	if (h) { h->atlas_name = atlas_name; h->source_path = path; h->conv = conv; }   // самоописание для редактора/сериализации
+	if (h) { h->atlas_name = atlas_name; h->source_path = path; h->conv = conv; h->dont_save = dont_save; }   // самоописание для редактора/сериализации
 	return h;
 }
 
@@ -231,94 +230,17 @@ void EngineContext::ClearScene(const SceneName& scene_name)
 	batch_builder->SetDirtyBatches(true);
 }
 
-void EngineContext::SaveScene(const SceneName& scene_name, const std::string& path)
+void EngineContext::SaveScene(const SceneName& scene_name, const std::string& dir)
 {
-	SceneData* scene = object_manager->GetScene(scene_name);
-	if (!scene) { SDL_Log("SaveScene: scene '%s' not found", scene_name.c_str()); return; }
-
-	const std::string text = object_manager->SaveScene(scene);
-	std::ofstream f(path, std::ios::binary);
-	if (!f) { SDL_Log("SaveScene: cannot open '%s' for write", path.c_str()); return; }
-	f << text;
-	SDL_Log("SaveScene: wrote scene '%s' to '%s'", scene_name.c_str(), path.c_str());
+	// Тонкий прокси: оркестрация по менеджерам (om + tm/mm/sm по этапам) — в Engine.
+	if (engine) engine->SaveScene(scene_name, dir);
+	else SDL_Log("SaveScene: engine back-pointer not set");
 }
 
-void EngineContext::LoadScene(const SceneName& scene_name, const std::string& path)
+void EngineContext::LoadScene(const SceneName& scene_name, const std::string& dir)
 {
-	// ── Тайминг фаз загрузки (диагностика 5-секундной загрузки 100k). Load — событие
-	// разовое, поэтому не через кадровый Prof, а прямым SDL_Log сразу после. ──
-	const auto t_read = Prof::Clock::now();
-	std::ifstream f(path, std::ios::binary | std::ios::ate);   // ate: сразу в конец — узнать размер
-	if (!f) { SDL_Log("LoadScene: cannot open '%s'", path.c_str()); return; }
-	// Читаем ФАЙЛ ОДНОЙ аллокацией прямо в строку (без stringstream → без тройной копии
-	// 43 МБ: rdbuf-буфер + ss.str()). Одна аллокация точного размера + один read.
-	const std::streamoff sz = f.tellg();
-	std::string text;
-	if (sz > 0) {
-		text.resize(static_cast<size_t>(sz));
-		f.seekg(0);
-		f.read(text.data(), sz);
-		text.resize(static_cast<size_t>(f.gcount()));          // усечь до реально прочитанного
-	}
-	const double read_ms = Prof::MsSince(t_read);
-
-	// Replace-on-load: сносим прежнее содержимое сцены ДО наполнения — иначе загрузка
-	// дописала бы поверх (дубликаты сущностей). Делаем это только после успешного
-	// открытия файла, чтобы кривой путь не обнулял текущую сцену.
-	//
-	// Замок на ECS-swap не нужен: рендер-проходы/каллинг читают пер-слотовые слепки, а не
-	// ECS. Единственный живой читатель ECS на рендер-потоке — UI (осознанный компромисс,
-	// см. Engine::RenderFunc; правильное закрытие — UI-слепок или построение UI в sim).
-	double clear_ms = 0.0, ecs_ms = 0.0, ptr_ms = 0.0;
-	std::vector<Entity> loaded;
-	{
-		const auto t_clear = Prof::Clock::now();
-		if (SceneData* prev = object_manager->GetScene(scene_name)) prev->clear();
-		clear_ms = Prof::MsSince(t_clear);
-
-		// ECS-часть: текст → сущности (указатели на ассеты пока пустые, только имена).
-		// Возвращает ИМЕННО созданные этой загрузкой сущности.
-		const auto t_ecs = Prof::Clock::now();
-		loaded = object_manager->LoadScene(scene_name, text);
-		ecs_ms = Prof::MsSince(t_ecs);
-
-		SceneData* scene = object_manager->GetScene(scene_name);
-		if (scene) {
-			// Чиним указатели на ассеты по сохранённым именам — это знает только верхний слой.
-			// Обходим ТОЛЬКО загруженные сущности (не всю сцену): уже существовавшие в ней
-			// производные сущности (напр. дебаг-коллайдеры) держат живые указатели без имён —
-			// их трогать нельзя. Незаполнённое/неизвестное имя оставляет nullptr; сборщик батчей
-			// такие сущности пропускает (см. BatchBuilder::AddEntityToBatches), но логируем.
-			const auto t_ptr = Prof::Clock::now();
-			for (Entity e : loaded) {
-				if (object_manager->Has<ModelComponent>(scene, e)) {
-					ModelComponent& m = object_manager->GetComponent<ModelComponent>(scene, e);
-					m.model = m.name.empty() ? nullptr : (*model_manager)[m.name];
-					if (!m.model)
-						SDL_Log("LoadScene: model '%s' not resolved (entity will not render)", m.name.c_str());
-				}
-				if (object_manager->Has<MaterialComponent>(scene, e)) {
-					MaterialComponent& mc = object_manager->GetComponent<MaterialComponent>(scene, e);
-					mc.materials.clear();
-					mc.materials.reserve(mc.names.size());
-					for (const auto& n : mc.names) {
-						Material* mat = material_manager->GetMaterial(n);
-						if (!mat) SDL_Log("LoadScene: material '%s' not resolved", n.c_str());
-						mc.materials.push_back(mat);
-					}
-				}
-			}
-			ptr_ms = Prof::MsSince(t_ptr);
-
-			object_manager->SetSceneState(scene_name, true);
-		}
-	}
-
-	batch_builder->SetDirtyBatches(true);
-	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), path.c_str());
-	SDL_Log("LoadScene TIMING [%zu ent, %.1f MB]: read=%.1f  clear=%.1f  ecs=%.1f  ptr_restore=%.1f  | total=%.1f ms",
-		loaded.size(), text.size() / (1024.0 * 1024.0),
-		read_ms, clear_ms, ecs_ms, ptr_ms, read_ms + clear_ms + ecs_ms + ptr_ms);
+	if (engine) engine->LoadScene(scene_name, dir);
+	else SDL_Log("LoadScene: engine back-pointer not set");
 }
 
 void EngineContext::ExecuteGenerators()
@@ -337,7 +259,7 @@ void EngineContext::CreateGraphicsPipelines()
 	}
 	
 	auto& shader_programs = shader_manager->GetShaderPrograms();
-	pipe_manager->CreateGraphicsPiplenes(shader_programs);
+	pipe_manager->CreateGraphicsPiplenes(shader_programs, shader_manager);
 	shader_manager->SetDirtyGraphicsPipelines(false);
 }
 
@@ -347,31 +269,31 @@ void EngineContext::CreateComputePipelines()
 		return;
 	}
 	auto& compute_shader_programs = shader_manager->GetComputeShaderPrograms();
-	pipe_manager->CreateComputePipelines(compute_shader_programs);
+	pipe_manager->CreateComputePipelines(compute_shader_programs, shader_manager);
 	shader_manager->SetDirtyComputePipelines(false);
 }
 
 // GPU-методы — тонкие форвардеры в gpu_ctx (реализация в GpuTaskContext.cpp).
-FragmentShaderData EngineContext::CreateFragmentShader(const char* path) {
-	return gpu_ctx.CreateFragmentShader(path);
+void EngineContext::CreateFragmentShader(const std::string& name, const char* path) {
+	gpu_ctx.CreateFragmentShader(name, path);
 }
 
-VertexShaderData EngineContext::CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout) {
-	return gpu_ctx.CreateVertexShader(hlsl_path, vertex_buffer_layout);
+void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout) {
+	gpu_ctx.CreateVertexShader(name, hlsl_path, vertex_buffer_layout);
 }
 
 ShaderProgram* EngineContext::CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
-	VertexShaderData vs, std::initializer_list<BufferDataName> vertex_shader_buffers,
-	FragmentShaderData fs, std::initializer_list<BufferDataName> fragment_shader_buffers,
+	const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
+	const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
 	std::initializer_list<TextureSlotRole> texture_slots) {
-	return gpu_ctx.CreateShaderProgram(name, spd, associated_pass_name, vs, vertex_shader_buffers, fs, fragment_shader_buffers, texture_slots);
+	return gpu_ctx.CreateShaderProgram(name, spd, associated_pass_name, vs_name, vertex_shader_buffers, fs_name, fragment_shader_buffers, texture_slots);
 }
 
-ComputeShaderData EngineContext::CreateComputeShader(const char* hlsl_path) {
-	return gpu_ctx.CreateComputeShader(hlsl_path);
+void EngineContext::CreateComputeShader(const std::string& name, const char* hlsl_path) {
+	gpu_ctx.CreateComputeShader(name, hlsl_path);
 }
 
-ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::string& name, ComputeShaderData cs,
+ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
 	std::initializer_list<BufferDataName> rw_storage_buffers,
 	std::initializer_list<BufferDataName> ro_storage_buffers,
 	std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
@@ -379,5 +301,5 @@ ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::strin
 	std::initializer_list<AtlasName> texture_samplers,
 	const ComputePassName& associated_compute_pass)
 {
-	return gpu_ctx.CreateComputeShaderProgram(name, cs, rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers, associated_compute_pass);
+	return gpu_ctx.CreateComputeShaderProgram(name, cs_name, rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers, associated_compute_pass);
 }

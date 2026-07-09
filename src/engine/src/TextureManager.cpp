@@ -189,22 +189,21 @@ SharedDepthTarget* TextureManager::CreateSharedDepthTarget(SDL_GPUTextureCreateI
 
 void TextureManager::QueueDeleteTexture(SDL_GPUTexture* texture)
 {
-    if (!texture) return;
-    texture_trash.push_back({ texture, BUFFERING_LEVEL });
+    if (!texture) return;   // зовётся ТОЛЬКО render-потоком (владелец очереди — см. поле texture_trash)
+    texture_trash.push_back({ texture });
 }
 
-void TextureManager::TrashTextures()
+void TextureManager::TrashTextures(uint64_t fences_done)
 {
+    // Дренаж render-потоком (RenderFunc); логика стампа — как у TrashBuffers (см. BufferManager.cpp).
     auto it = texture_trash.begin();
     while (it != texture_trash.end()) {
-        if (it->frame_ready <= 0) {
+        if (it->ready_at == 0) { it->ready_at = fences_done + BUFFERING_LEVEL; ++it; }
+        else if (fences_done >= it->ready_at) {
             SDL_ReleaseGPUTexture(dev, it->tex);
             it = texture_trash.erase(it);
         }
-        else {
-            it->frame_ready--;
-            ++it;
-        }
+        else ++it;
     }
 }
 
@@ -474,6 +473,24 @@ void TextureManager::DeleteTextureHandle(const std::string& name)
         upload_tasks.end());
 
     handles_data.erase(it);   // уничтожает TextureHandle вместе с его TextureData (по значению)
+}
+
+size_t TextureManager::LoadSceneTextures(const std::vector<SceneTextureEntry>& entries,
+    const std::function<TextureHandle*(const SceneTextureEntry&)>& create_from_file)
+{
+    // Merge-upsert (см. заголовок): семантика UpsertTexture-команды, только пачкой из манифеста.
+    size_t created = 0;
+    for (const SceneTextureEntry& e : entries) {
+        if (e.name.empty() || e.atlas.empty() || e.path.empty()) {
+            SDL_Log("LoadSceneTextures: incomplete entry ('%s') — skipped", e.name.c_str());
+            continue;
+        }
+        if (handles_data.count(e.name))
+            DeleteTextureHandle(e.name);   // replace под тем же именем (материалы перепривяжутся по имени)
+        if (create_from_file(e)) ++created;
+        else SDL_Log("LoadSceneTextures: failed to create '%s' from '%s'", e.name.c_str(), e.path.c_str());
+    }
+    return created;
 }
 
 void TextureManager::DeleteTexture(SDL_GPUTexture* texture)

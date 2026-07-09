@@ -1,0 +1,58 @@
+{
+    "textures": [
+        {
+            "name": "new_car",
+            "atlas": "albedo_atlas",
+            "path": "textures/assets/new_car.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "albedo_cube",
+            "atlas": "albedo_atlas",
+            "path": "textures/assets/cube_test.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "norm",
+            "atlas": "normal_atlas",
+            "path": "textures/assets/car_norm.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "texture_sun",
+            "atlas": "albedo_atlas",
+            "path": "textures/assets/2k_sun.jpg",
+            "conv": "AsIs"
+        },
+        {
+            "name": "texture_asphalt",
+            "atlas": "albedo_atlas",
+            "path": "textures/blocks/brick_base_c.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "texture_asphalt_orm",
+            "atlas": "orm_atlas",
+            "path": "textures/blocks/brick_orm.png",
+            "conv": "SmoothnessInGreen"
+        },
+        {
+            "name": "wood_norm",
+            "atlas": "normal_atlas",
+            "path": "textures/blocks/brick_normal_h.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "new_car_ground",
+            "atlas": "albedo_atlas",
+            "path": "textures/assets/new_car_ground.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "new_car_glass",
+            "atlas": "albedo_atlas",
+            "path": "textures/assets/Tex_Glass.jpg",
+            "conv": "AsIs"
+        }
+    ]
+}

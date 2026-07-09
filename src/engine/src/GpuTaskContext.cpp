@@ -10,48 +10,32 @@ GpuTaskContext::GpuTaskContext(BufferManager* bm, ShaderManager* sm, PassManager
 {
 }
 
-FragmentShaderData GpuTaskContext::CreateFragmentShader(const char* path) {
-	return shader_manager->CreateFragmentShader(path);
+void GpuTaskContext::CreateFragmentShader(const std::string& name, const char* path) {
+	shader_manager->CreateFragmentShader(name, path);
 }
 
-VertexShaderData GpuTaskContext::CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout) {
-	return shader_manager->CreateVertexShader(hlsl_path, vertex_buffer_layout);
+void GpuTaskContext::CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout) {
+	shader_manager->CreateVertexShader(name, hlsl_path, vertex_buffer_layout);
 }
 
 ShaderProgram* GpuTaskContext::CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
-	VertexShaderData vs, std::initializer_list<BufferDataName> vertex_shader_buffers,
-	FragmentShaderData fs, std::initializer_list<BufferDataName> fragment_shader_buffers,
+	const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
+	const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
 	std::initializer_list<TextureSlotRole> texture_slots) {
 
-	std::vector<BufferData*> vertex_buffers;
-	vertex_buffers.reserve(vertex_shader_buffers.size());
-	for (const auto& buffer_name : vertex_shader_buffers) {
-		BufferData* bd = buffer_manager->GetBufferData(buffer_name);
-		if (!bd) {
-			SDL_Log("GpuTaskContext::Creating shader program with non existing vertex shader buffer '%s'", buffer_name);
-			continue;
-		}
-		vertex_buffers.push_back(bd);
-	}
-	std::vector<BufferData*> fragment_buffers;
-	fragment_buffers.reserve(fragment_shader_buffers.size());
-	for (const auto& buffer_name : fragment_shader_buffers) {
-		BufferData* bd = buffer_manager->GetBufferData(buffer_name);
-		if (!bd) {
-			SDL_Log("GpuTaskContext::Creating shader program with non existing fragment shader buffer '%s'", buffer_name);
-			continue;
-		}
-		fragment_buffers.push_back(bd);
-	}
+	// Буферы sp — ССЫЛКИ ПО ИМЕНИ (BufferDataName, как vs/fs): храним сами ключи реестра, резолв
+	// в BufferData* отложен на сборку батча (BatchBuilder). Существование здесь не проверяем.
+	std::vector<BufferDataName> vertex_buffer_names(vertex_shader_buffers.begin(), vertex_shader_buffers.end());
+	std::vector<BufferDataName> fragment_buffer_names(fragment_shader_buffers.begin(), fragment_shader_buffers.end());
 	RenderPassStep* associated_pass = pass_manager->GetRenderPassStep(associated_pass_name);
-	return shader_manager->CreateShaderProgram(name, spd, associated_pass, vs, std::move(vertex_buffers), fs, std::move(fragment_buffers), texture_slots);
+	return shader_manager->CreateShaderProgram(name, spd, associated_pass, vs_name, std::move(vertex_buffer_names), fs_name, std::move(fragment_buffer_names), texture_slots);
 }
 
-ComputeShaderData GpuTaskContext::CreateComputeShader(const char* hlsl_path) {
-	return shader_manager->CreateComputeShader(hlsl_path);
+void GpuTaskContext::CreateComputeShader(const std::string& name, const char* hlsl_path) {
+	shader_manager->CreateComputeShader(name, hlsl_path);
 }
 
-ComputeShaderProgram* GpuTaskContext::CreateComputeShaderProgram(const std::string& name, ComputeShaderData cs,
+ComputeShaderProgram* GpuTaskContext::CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
 	std::initializer_list<BufferDataName> rw_storage_buffers,
 	std::initializer_list<BufferDataName> ro_storage_buffers,
 	std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
@@ -114,12 +98,12 @@ ComputeShaderProgram* GpuTaskContext::CreateComputeShaderProgram(const std::stri
 	ComputePassStep* associated_compute_pass_ptr = nullptr;
 	associated_compute_pass_ptr = pass_manager->GetComputePassStep(associated_compute_pass);
 	if (associated_compute_pass_ptr) {
-		return shader_manager->CreateComputeShaderProgram(name, cs, std::move(rw_buffers), std::move(ro_buffers), std::move(rw_textures), std::move(ro_texture_atlases), std::move(samplers), associated_compute_pass_ptr);
+		return shader_manager->CreateComputeShaderProgram(name, cs_name, std::move(rw_buffers), std::move(ro_buffers), std::move(rw_textures), std::move(ro_texture_atlases), std::move(samplers), associated_compute_pass_ptr);
 
 	}
 	associated_compute_pass_ptr = pass_manager->GetComputePrepassStep(associated_compute_pass);
 	if (associated_compute_pass_ptr) {
-		return shader_manager->CreateComputeShaderProgram(name, cs, std::move(rw_buffers), std::move(ro_buffers), std::move(rw_textures), std::move(ro_texture_atlases), std::move(samplers), associated_compute_pass_ptr);
+		return shader_manager->CreateComputeShaderProgram(name, cs_name, std::move(rw_buffers), std::move(ro_buffers), std::move(rw_textures), std::move(ro_texture_atlases), std::move(samplers), associated_compute_pass_ptr);
 
 	}
 	SDL_Log("GpuTaskContext::Creating compute shader program with non existing associated compute pass '%s'", associated_compute_pass.c_str());

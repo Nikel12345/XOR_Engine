@@ -74,14 +74,34 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
                 [&](auto&& emit) { for (auto& [name, m] : ctx->GetModelManager()->GetModels()) emit(name); });
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Shaders")) {                                        // graphics sp (создание — код)
-            tiles(SelKind::Shader, false, []{},
+        if (ImGui::BeginTabItem("Shaders")) {                                        // graphics sp (создание/правка в UI)
+            tiles(SelKind::Shader, true,
+                [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Shader; g_sel.name = ""; },   // + = форма новой sp
                 [&](auto&& emit) { for (auto& [name, sp] : ctx->GetShaderManager()->GetShaderPrograms()) emit(name); });
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Compute")) {                                        // compute sp
             tiles(SelKind::Compute, false, []{},
                 [&](auto&& emit) { for (auto& csp : ctx->GetShaderManager()->GetComputeShaderPrograms()) emit(csp->debug_name); });
+            ImGui::EndTabItem();
+        }
+        // Именованные шейдер-данные (vs/fs/cs) — только список; редактирование (пути) появится позже.
+        if (ImGui::BeginTabItem("VS")) {
+            tiles(SelKind::Vsd, true,
+                [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Vsd; g_sel.name = ""; },   // + = форма нового vs
+                [&](auto&& emit) { for (auto& [n, d] : ctx->GetShaderManager()->GetVertexShaders()) emit(n); });
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("FS")) {
+            tiles(SelKind::Fsd, true,
+                [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Fsd; g_sel.name = ""; },
+                [&](auto&& emit) { for (auto& [n, d] : ctx->GetShaderManager()->GetFragmentShaders()) emit(n); });
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("CS")) {
+            tiles(SelKind::Csd, true,
+                [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Csd; g_sel.name = ""; },
+                [&](auto&& emit) { for (auto& [n, d] : ctx->GetShaderManager()->GetComputeShaders()) emit(n); });
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

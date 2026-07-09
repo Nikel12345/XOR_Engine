@@ -37,19 +37,19 @@ namespace DefaultShaderProgramSet
     // Общий VS для main и transparent пассов: один GPU-шейдер на оба (не плодим дубль).
     // Создаётся лениво при первом запросе; копия VertexShaderData переиспользует тот же
     // SDL_GPUShader*, поэтому передача по значению в CreateShaderProgram безопасна.
-    static VertexShaderData main_pass_vs;
+    // Общий VS main/transparent/untextured — регистрируем ОДИН раз под именем, sp ссылаются по нему.
+    static const char* MAIN_PASS_VS = "main_pass_vs";
     static bool main_pass_vs_inited = false;
 
-    static VertexShaderData GetMainPassVertexShader(EngineContext* ctx)
+    static const char* GetMainPassVertexShaderName(EngineContext* ctx)
     {
-        using namespace DefaultBuffersNames;
         if (!main_pass_vs_inited) {
-            main_pass_vs = ctx->CreateVertexShader(
+            ctx->CreateVertexShader(MAIN_PASS_VS,
                 "../engine/shaders_code/main_pass/main_pass.vert.hlsl",
-                { { DEFAULT_VERTEX_BUFFER, &FMT_PosUVNormal, {POSITION, UV, NORMAL, TANGENT} } });
+                { { &FMT_PosUVNormal, {POSITION, UV, NORMAL, TANGENT} } });
             main_pass_vs_inited = true;
         }
-        return main_pass_vs;
+        return MAIN_PASS_VS;
     }
 }
 
@@ -60,15 +60,15 @@ void DefaultShaderProgramSet::SetMainShaderProgram(EngineContext* ctx)
         SDL_Log("Main render shader programs already initialized.");
         return;
     }
-    VertexShaderData vs = GetMainPassVertexShader(ctx);
-    FragmentShaderData fs = ctx->CreateFragmentShader("../engine/shaders_code/main_pass/surface.hlsl");
+    const char* vs = GetMainPassVertexShaderName(ctx);
+    ctx->CreateFragmentShader("main_surface_fs", "../engine/shaders_code/main_pass/surface.hlsl");
     ShaderProgramDescription spd_main;
     spd_main.BehavesAsOpaqueGeometry()->DoesNotCull()
         ;
 
     ctx->CreateShaderProgram("sp", spd_main, DefaultRenderPassNamespace::MAIN_PASS,
         vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-        fs, { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
+        "main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
         // Порядок ДОЛЖЕН совпадать с textures[] в прологе: albedo, normal, orm, emissive.
         { TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive }
     );
@@ -97,8 +97,8 @@ void DefaultShaderProgramSet::SetDefaultShadowShaderProgram(EngineContext* ctx)
         SDL_Log("Shadow render shader programs already initialized.");
         return;
     }
-	VertexShaderData vs_2 = ctx->CreateVertexShader("../engine/shaders_code/shadow_pass/shadow_pass.vert.hlsl", { { DEFAULT_VERTEX_BUFFER, &FMT_PosUVNormal, {POSITION} } });
-	FragmentShaderData fs_2 = ctx->CreateFragmentShader("../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl");
+	ctx->CreateVertexShader("shadow_vs", "../engine/shaders_code/shadow_pass/shadow_pass.vert.hlsl", { { &FMT_PosUVNormal, {POSITION} } });
+	ctx->CreateFragmentShader("shadow_fs", "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl");
 
     RasterizerStateBiasParams shadow_rsbp = {};
     shadow_rsbp.enable_depth_bias = true;
@@ -109,8 +109,8 @@ void DefaultShaderProgramSet::SetDefaultShadowShaderProgram(EngineContext* ctx)
     spd_shadow.BehavesAsShadowCaster()->DoesNotCull()
 		;
 	ShaderProgram* sp_shadow = ctx->CreateShaderProgram("sp_shadow", spd_shadow, DefaultRenderPassNamespace::SHADOW_PASS,
-        vs_2, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-        fs_2, {},
+        "shadow_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+        "shadow_fs", {},
         {}
 	);
     sp_shadow->BindPushConstants<DefaultRenderPassNamespace::ShadowPushData>(
@@ -129,9 +129,9 @@ void DefaultShaderProgramSet::SetTransparentShaderProgram(EngineContext* ctx)
         return;
     }
 
-    // VS переиспользуем из main-пасса (общий статик — без дубля GPU-шейдера).
-    VertexShaderData vs = GetMainPassVertexShader(ctx);
-    FragmentShaderData fs = ctx->CreateFragmentShader("../engine/shaders_code/transparent_pass/surface.hlsl");
+    // VS переиспользуем из main-пасса (общий именованный шейдер — без дубля GPU-шейдера).
+    const char* vs = GetMainPassVertexShaderName(ctx);
+    ctx->CreateFragmentShader("transparent_surface_fs", "../engine/shaders_code/transparent_pass/surface.hlsl");
 
     // Блендинг + depth-test без записи (см. BehavesAsTransparentGeometry).
     ShaderProgramDescription spd_transparent;
@@ -140,7 +140,7 @@ void DefaultShaderProgramSet::SetTransparentShaderProgram(EngineContext* ctx)
     // Без shadow-байндингов: только albedo+normal (2 сэмплера) и буфер света (storage t2).
     ctx->CreateShaderProgram("sp_transparent", spd_transparent, DefaultRenderPassNamespace::TRANSPARENT_PASS,
         vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
-        fs, { DEFAULT_LIGHT_BUFFER },
+        "transparent_surface_fs", { DEFAULT_LIGHT_BUFFER },
         { TextureSlotRole::Albedo, TextureSlotRole::Normal }
     );
 
@@ -154,8 +154,8 @@ void DefaultShaderProgramSet::SetUntexturedShaderProgram(EngineContext* ctx)
     if (inited) { SDL_Log("Untextured shader program already initialized."); return; }
 
     // Тот же VS (инстанс-данные и т.д.). Фрагмент — текстурелесс surface (цвет из фактора).
-    VertexShaderData vs = GetMainPassVertexShader(ctx);
-    FragmentShaderData fs = ctx->CreateFragmentShader("../engine/shaders_code/main_pass/untextured/surface.hlsl");
+    const char* vs = GetMainPassVertexShaderName(ctx);
+    ctx->CreateFragmentShader("untextured_surface_fs", "../engine/shaders_code/main_pass/untextured/surface.hlsl");
 
     // Opaque-геометрия, но БЕЗ текстур → required_slots {}; params потребляет (явный флаг,
     // т.к. прокси по текстурам тут не сработал бы — текстур нет).
@@ -164,7 +164,7 @@ void DefaultShaderProgramSet::SetUntexturedShaderProgram(EngineContext* ctx)
 
     ctx->CreateShaderProgram("sp_untextured", spd, DefaultRenderPassNamespace::MAIN_PASS,
         vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-        fs, { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
+        "untextured_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
         { }   // текстур нет
     );
 
@@ -179,10 +179,10 @@ void DefaultShaderProgramSet::SetDebugColliderProgram(EngineContext* ctx)
         return;
     }
 
-    VertexShaderData vs = ctx->CreateVertexShader(
+    ctx->CreateVertexShader("debug_collider_vs",
         "../engine/shaders_code/debug/debug_collider.vert.hlsl",
-        { { DEFAULT_VERTEX_BUFFER, &FMT_PosUVNormal, { POSITION } } });
-    FragmentShaderData fs = ctx->CreateFragmentShader(
+        { { &FMT_PosUVNormal, { POSITION } } });
+    ctx->CreateFragmentShader("debug_collider_fs",
         "../engine/shaders_code/debug/debug_collider.frag.hlsl");
 
     // Рамки рисуем ПОВЕРХ геометрии (IgnoresDepth — без depth-теста): debug-коллайдеры
@@ -193,8 +193,8 @@ void DefaultShaderProgramSet::SetDebugColliderProgram(EngineContext* ctx)
 
     ShaderProgram* sp = ctx->CreateShaderProgram("sp_debug_collider", spd,
         DefaultRenderPassNamespace::DEBUG_PASS,
-        vs, { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
-        fs, {},
+        "debug_collider_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
+        "debug_collider_fs", {},
         {});
 
     sp->BindPushConstants<DefaultRenderPassNamespace::DebugColliderPushData>(
@@ -224,8 +224,8 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
 
     // (1) CLEAR — обнуляет num_instances ВСЕХ (камера,команда) перед scatter. Создаётся ПЕРВОЙ →
     // в CULLING_PASS это shader_batch[0], SDL барьерит между compute-пассами → scatter видит нули.
-    ComputeShaderData csd_clear = ctx->CreateComputeShader("../engine/shaders_code/comp/culling_clear.comp.hlsl");
-    ComputeShaderProgram* csp_clear = ctx->CreateComputeShaderProgram("csp_culling_clear", csd_clear,
+    ctx->CreateComputeShader("culling_clear_cs", "../engine/shaders_code/comp/culling_clear.comp.hlsl");
+    ComputeShaderProgram* csp_clear = ctx->CreateComputeShaderProgram("csp_culling_clear", "culling_clear_cs",
         { DEFAULT_INDIRECT_BUFFER },   // rw (u0)
         {}, {}, {}, {},
         RP::CULLING_PASS);
@@ -240,10 +240,10 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
     });
 
     // Общий шейдер scatter'а для всех групп камер (разные программы = разные камерные буферы).
-    ComputeShaderData csd = ctx->CreateComputeShader("../engine/shaders_code/comp/culling_pib.comp.hlsl");
+    ctx->CreateComputeShader("culling_pib_cs", "../engine/shaders_code/comp/culling_pib.comp.hlsl");
 
     // (2) ИГРОК — камера игрока (блок 0, num_blocks=1), main-записи [shadow_pib, N). Cameras=CAMERA_BUFFER (t3).
-    ComputeShaderProgram* csp_player = ctx->CreateComputeShaderProgram("csp_cull_player", csd,
+    ComputeShaderProgram* csp_player = ctx->CreateComputeShaderProgram("csp_cull_player", "culling_pib_cs",
         { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
         { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
           DEFAULT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4 (Cameras = игрок)
@@ -272,7 +272,7 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
 
     // (3) СВЕТ — световые камеры (блоки 1..L, num_blocks=L), теневые записи [0, shadow_pib).
     // Cameras=LIGHT_CAMERA_BUFFER (t3). При L=0 диспатч 0 → пропуск.
-    ComputeShaderProgram* csp_light = ctx->CreateComputeShaderProgram("csp_cull_light", csd,
+    ComputeShaderProgram* csp_light = ctx->CreateComputeShaderProgram("csp_cull_light", "culling_pib_cs",
         { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
         { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
           DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4 (Cameras = свет)
@@ -308,8 +308,8 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
         return;
     }
 
-    ComputeShaderData csd_h = ctx->CreateComputeShader("../engine/shaders_code/comp/shadow_blur_h.comp.hlsl");
-    ComputeShaderData csd_v = ctx->CreateComputeShader("../engine/shaders_code/comp/shadow_blur_v.comp.hlsl");
+    ctx->CreateComputeShader("shadow_blur_h_cs", "../engine/shaders_code/comp/shadow_blur_h.comp.hlsl");
+    ctx->CreateComputeShader("shadow_blur_v_cs", "../engine/shaders_code/comp/shadow_blur_v.comp.hlsl");
 
     auto moments_atlas = ctx->GetTextureAtlas(SHADOW_MOMENTS_ARRAY);
     auto blur_temp_atlas = ctx->GetTextureAtlas(SHADOW_MOMENTS_BLUR_TEMP);
@@ -317,7 +317,7 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
 
     for (uint32_t L = 0; L < LAYER_COUNT; ++L) {
         std::string name_h = "csp_shadow_blur_h_" + std::to_string(L);
-        ComputeShaderProgram* csp_h = ctx->CreateComputeShaderProgram(name_h, csd_h,
+        ComputeShaderProgram* csp_h = ctx->CreateComputeShaderProgram(name_h, "shadow_blur_h_cs",
             {},                                       // rw buffers
             {},                                       // ro buffers
             { { SHADOW_MOMENTS_BLUR_TEMP, 0, 0 } },   // rw textures
@@ -339,7 +339,7 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
         });
 
         std::string name_v = "csp_shadow_blur_v_" + std::to_string(L);
-        ComputeShaderProgram* csp_v = ctx->CreateComputeShaderProgram(name_v, csd_v,
+        ComputeShaderProgram* csp_v = ctx->CreateComputeShaderProgram(name_v, "shadow_blur_v_cs",
             {},
             {},
             { { SHADOW_MOMENTS_ARRAY, 0, L } },       // rw textures
@@ -365,10 +365,10 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     static bool inited = false;
     if (inited) { SDL_Log("Bloom shader programs already initialized."); return; }
 
-    ComputeShaderData csd_pre  = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_prefilter.comp.hlsl");
-    ComputeShaderData csd_down = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_down.comp.hlsl");
-    ComputeShaderData csd_up   = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_up.comp.hlsl");
-    ComputeShaderData csd_comp = ctx->CreateComputeShader("../engine/shaders_code/comp/bloom_composite.comp.hlsl");
+    ctx->CreateComputeShader("bloom_prefilter_cs", "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl");
+    ctx->CreateComputeShader("bloom_down_cs",      "../engine/shaders_code/comp/bloom_down.comp.hlsl");
+    ctx->CreateComputeShader("bloom_up_cs",        "../engine/shaders_code/comp/bloom_up.comp.hlsl");
+    ctx->CreateComputeShader("bloom_composite_cs", "../engine/shaders_code/comp/bloom_composite.comp.hlsl");
 
     // Пирамида — BLOOM_LEVELS ОТДЕЛЬНЫХ текстур "bloom_L<i>" (см. _SetDefaultCommonResources):
     // dst-уровень биндится RW-storage, src-уровень — сэмплером. Отдельные текстуры исключают
@@ -377,7 +377,7 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     auto L = [](uint32_t i) { return "bloom_L" + std::to_string(i); };
 
     ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
-        "bloom_down_0", csd_pre,
+        "bloom_down_0", "bloom_prefilter_cs",
         {}, {},
         { { L(0), 0, 0 } },                                            // rw: bloom_L0
         {},
@@ -399,7 +399,7 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     // --- Downsample: уровень i-1 → уровень i (1..N-1). Источник — sampler соседнего уровня. ---
     for (uint32_t i = 1; i < BLOOM_LEVELS; ++i) {
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
-            "bloom_down_" + std::to_string(i), csd_down,
+            "bloom_down_" + std::to_string(i), "bloom_down_cs",
             {}, {},
             { { L(i), 0, 0 } },   // rw: bloom_L<i>
             {},
@@ -417,7 +417,7 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     // --- Upsample (tent, аддитивно): уровень i+1 → += уровень i, от мелкого к крупному. ---
     for (int i = (int)BLOOM_LEVELS - 2; i >= 0; --i) {
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
-            "bloom_up_" + std::to_string(i), csd_up,
+            "bloom_up_" + std::to_string(i), "bloom_up_cs",
             {}, {},
             { { L((uint32_t)i), 0, 0 } },   // rw: bloom_L<i> (RMW: += размытие → нужен SIMULTANEOUS)
             {},
@@ -436,7 +436,7 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     {
         auto dst = ctx->GetTextureAtlas(std::string("scene_hdr"));
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
-            "bloom_composite", csd_comp,
+            "bloom_composite", "bloom_composite_cs",
             {}, {},
             { { std::string("scene_hdr"), 0, 0 } },   // rw: scene_hdr (RMW)
             {},

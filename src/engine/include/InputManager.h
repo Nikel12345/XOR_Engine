@@ -7,6 +7,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include "ShaderData.h"   // ShaderProgramDescription в payload RecreateShaderCmd (spd под кнопкой)
 
 class EngineContext;
 
@@ -38,6 +39,12 @@ enum class CommandId : uint32_t {
                           // текстуры/модели. Ссылки материалов по старому имени НЕ чиним → fallback
     SetShaderPass,        // payload: SetShaderPassCmd* — сменить проход sp (associated_render_pass),
                           // инвалидация пайплайна + пересборка (моментально, как spd-тумблеры)
+    UpsertVertexShader,   // payload: UpsertVertexShaderCmd*   — создать/пересобрать VSD из формы
+    UpsertFragmentShader, // payload: UpsertFragmentShaderCmd* — создать/пересобрать FSD из формы
+    UpsertComputeShader,  // payload: UpsertComputeShaderCmd*  — создать/пересобрать CSD из формы
+    DeleteVertexShader,   // payload: ShaderDataNameCmd* — удалить VSD из реестра (sp по имени → fallback)
+    DeleteFragmentShader, // payload: ShaderDataNameCmd*
+    DeleteComputeShader,  // payload: ShaderDataNameCmd*
 
     COUNT
 };
@@ -53,8 +60,17 @@ struct RebuildShaderPipelineCmd { std::string shader; };
 struct RecreateShaderCmd {
     std::string oldName;
     std::string newName;
-    std::string vertexPath;
-    std::string fragmentPath;
+    std::string vsName;    // имя вершинного шейдера из реестра (пусто → прежний)
+    std::string fsName;    // имя фрагментного шейдера из реестра (пусто → прежний)
+    std::string passName;  // имя прохода (пусто → прежний). Вся правка sp — под одной кнопкой
+    ShaderProgramDescription spd;   // состояние пайплайна (тоже под кнопкой, не мгновенно)
+    // Storage-буферы стадий ПО ИМЕНИ (BufferDataName = каноничный ключ реестра, порядок = слоты
+    // бинда). Указатели стабильны (имена — статические литералы DefaultBuffersNames), поэтому их
+    // безопасно нести через очередь команд и хранить в sp; резолв в BufferData* — на сборке батча.
+    std::vector<BufferDataName> vsBuffers;
+    std::vector<BufferDataName> fsBuffers;
+    // Слот-роли текстур (взаимоисключающие). Дубли отсеет CreateShaderProgram, но UI и так их не даёт.
+    std::vector<TextureSlotRole> slots;
 };
 
 // Смена прохода sp: имя прохода резолвится в RenderPassStep* (PassManager) и кладётся в
@@ -63,6 +79,14 @@ struct SetShaderPassCmd {
     std::string shader;
     std::string pass;
 };
+
+// Upsert шейдер-данных из формы редактора SD (как UpsertTexture/UpsertModel): компиляция по имени,
+// oldName != name → удалить старую запись. Пайплайны ссылающихся sp/csp инвалидируются в хендлере.
+// pull у вершинника — набор+ПОРЯДОК семантик из FMT_PosUVNormal (пока без реестра раскладок).
+struct UpsertVertexShaderCmd   { std::string name, path, oldName; std::vector<VertexSemantic> pull; };
+struct UpsertFragmentShaderCmd { std::string name, path, oldName; };
+struct UpsertComputeShaderCmd  { std::string name, path, oldName; };
+struct ShaderDataNameCmd       { std::string name; };   // удаление vs/fs/cs (тип — по CommandId)
 
 // Создание/замена модели из файла (аналог UpsertTexture). Существующую перезагружает В ТОТ ЖЕ
 // объект (указатель у энтити жив; старая геометрия в буфере остаётся — reclaim'а нет). Процедурные

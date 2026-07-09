@@ -26,6 +26,16 @@ target_link_libraries(ImGui PUBLIC
 # (SDL_ShaderCross_Reflect*), а SpvReflect* в коде не вызывается. Файлы в
 # external/SPIRV оставлены на месте — при необходимости вернуть таргет сюда.
 
+# yyjson — вендорный JSON (файлы сцены/ресурсов: Engine::Save/LoadScene). C-либа из одного
+# .c/.h (external/yyjson, MIT). Линкуется только Engine (PRIVATE): json — деталь файлового IO,
+# наружу торчат лишь Save/LoadScene(папка).
+add_library(yyjson STATIC
+    "${CMAKE_SOURCE_DIR}/external/yyjson/yyjson.c"
+)
+target_include_directories(yyjson PUBLIC
+    "${CMAKE_SOURCE_DIR}/external/yyjson"
+)
+
 # ============================================================
 #  EngineEcs — ECS-ядро: ObjectManager + компоненты + сцены.
 #  Лист: не зависит ни от рендера, ни от GPU. Линкуется и Engine, и Physics.
@@ -220,9 +230,12 @@ set(ENGINE_UTILS_HDR
 )
 set(ENGINE_CORE_SRC
     src/Engine.cpp
+    src/Engine_Frame.cpp
+    src/Engine_Scene.cpp
     src/Engine_PrepassBench.cpp
     src/DefaultRenderPassSet.cpp
     src/DefaultUpdateSet.cpp
+    src/DefaultCommandSet.cpp
     src/UI_ImGui.cpp
     src/UI_Widgets.cpp
     src/UI_Hierarchy.cpp
@@ -236,6 +249,7 @@ set(ENGINE_CORE_HDR
     include/Engine.h
     include/DefaultRenderPassSet.h
     include/DefaultUpdateSet.h
+    include/DefaultCommandSet.h
     include/UI_ImGui.h
     include/UI_Internal.h
     include/UI_Widgets.h
@@ -296,6 +310,7 @@ target_link_libraries(Engine PUBLIC
 )
 target_link_libraries(Engine PRIVATE
     "${CMAKE_SOURCE_DIR}/external/SDL3_image/lib/x64/SDL3_image.lib"  # только TextureLoader
+    yyjson                                                            # файлы сцены/ресурсов (Save/LoadScene)
 )
 
 target_compile_definitions(Engine PRIVATE

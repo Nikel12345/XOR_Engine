@@ -16,6 +16,7 @@
 
 class InputManager;
 class TextureLoader;
+class Engine;
 
 class EngineContext {
 public:
@@ -29,7 +30,8 @@ public:
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name);
 	// conv — конвенция исходного файла; импорт нормализует её к канону движка (G = roughness).
 	// По умолчанию AsIs (поведение без изменений). SmoothnessInGreen инвертирует G на загрузке.
-	TextureHandle* CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv = ChannelConvention::AsIs);
+	// dont_save=true — движковый дефолт, в файл сцены не пишется (см. TextureHandle::dont_save).
+	TextureHandle* CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv = ChannelConvention::AsIs, bool dont_save = false);
 	// Грузит cube-текстуру (4×3 крест) в УЖЕ существующий cube-атлас (создаётся отдельно
 	// через CreateTextureAtlas с tci.type=CUBE — характер атласа задаёт только tci). ctx здесь
 	// дирижёр: проверяет совместимость (что атлас и правда куб + квадратный) и делегирует
@@ -79,12 +81,11 @@ public:
 	// Activating a scene swaps the whole entity set; force a full batch rebuild.
 	void SetActiveScene(const SceneName& name);
 
-	// Сохранение/загрузка сцены в текстовый файл. OM делает ECS-часть (текст ↔ сущности),
-	// а здесь — файловый IO и то, что ECS-ядру недоступно: восстановление указателей на
-	// ассеты по именам (Model→ModelManager, Material→MaterialManager) и взвод флагов
-	// рендера (полная пересборка батчей), как при смене активной сцены.
-	void SaveScene(const SceneName& scene_name, const std::string& path);
-	void LoadScene(const SceneName& scene_name, const std::string& path);
+	// Сохранение/загрузка СЦЕНЫ-ПАПКИ (dir = путь к папке): scene.scene (ECS) + файлы ресурсов
+	// рядом (по менеджерам, подключаются поэтапно). Тонкий прокси в Engine::Save/LoadScene —
+	// оркестрация по менеджерам (tm/mm/sm + om) живёт там; ctx лишь публичная точка входа.
+	void SaveScene(const SceneName& scene_name, const std::string& dir);
+	void LoadScene(const SceneName& scene_name, const std::string& dir);
 	void ExecuteGenerators();
 	// Сносит ВСЁ содержимое сцены (сущности/иерархию; генераторы переживают) и помечает
 	// батчи на полную пересборку. LoadScene вызывает его первым (replace-on-load).
@@ -96,16 +97,18 @@ public:
 	// RegisterGenerator → потом Load наполняет и сам запускает их.
 	void RegisterGenerator(const SceneName& scene_name, std::function<void()> generator);
 
-	FragmentShaderData CreateFragmentShader(const char* hlsl_path);
-	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout);
+	// Create*Shader регистрируют шейдер-данные по имени в ShaderManager; CreateShaderProgram
+	// ссылается на них по имени (vs_name/fs_name/cs_name).
+	void CreateFragmentShader(const std::string& name, const char* hlsl_path);
+	void CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout);
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
-		VertexShaderData vs, std::initializer_list<BufferDataName> vertex_shader_buffers,
-		FragmentShaderData fs, std::initializer_list<BufferDataName> fragment_shader_buffers,
+		const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
+		const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
 		std::initializer_list<TextureSlotRole> texture_slots);
 
-	ComputeShaderData CreateComputeShader(const char* hlsl_path);
+	void CreateComputeShader(const std::string& name, const char* hlsl_path);
 	ComputeShaderProgram* CreateComputeShaderProgram(const std::string& name,
-		ComputeShaderData cs,
+		const std::string& cs_name,
 		std::initializer_list<BufferDataName> rw_storage_buffers,
 		std::initializer_list<BufferDataName> ro_storage_buffers,
 		std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
@@ -129,6 +132,9 @@ public:
 	void SetInputManager(InputManager* im) { input_manager = im; }
 	InputManager* GetInputManager() const { return input_manager; }
 
+	// Бэк-поинтер на Engine — только для делегирования Save/LoadScene (оркестрация по менеджерам).
+	void SetEngine(Engine* e) { engine = e; }
+
 private:
 	BufferManager* buffer_manager = nullptr;
 	TextureManager* texture_manager = nullptr;
@@ -144,6 +150,7 @@ private:
 
 	InputManager* input_manager = nullptr;
 	TextureLoader* texture_loader = nullptr;
+	Engine* engine = nullptr;   // см. SetEngine
 
 	GpuTaskContext gpu_ctx;
 };

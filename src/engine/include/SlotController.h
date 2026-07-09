@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <atomic>
 #include <mutex>
 #include <condition_variable>
 #include <chrono>
@@ -79,6 +80,17 @@ public:
     // слот не дозальётся, вместо мерцания старой раскладкой.
     void StampSlotEpoch(uint8_t slot, uint64_t epoch);
 
+    // Текущая планка эпохи (см. required_epoch_). Читает sim при дренаже трэша пайплайнов
+    // (PrepareFunc → TrashPipelines): released только после того, как планка ушла дальше эпохи
+    // инвалидации (рендер уже не покажет слоты со слепками, держащими старый указатель).
+    uint64_t RequiredEpoch() { std::lock_guard<std::mutex> lk(mutex_); return required_epoch_; }
+
+    // Счётчик завершённых render-fence. Тикает FenceThread — единственное, что он сообщает о
+    // жизни GPU-кадров; ФАКТИЧЕСКИЕ release отложенных ресурсов делает sim в prepare, сравнивая
+    // стампы записей трэшей с этим счётчиком (очереди остаются одно-поточными, без замков).
+    void NotifyRenderFenceDone() { render_fences_done_.fetch_add(1, std::memory_order_release); }
+    uint64_t RenderFencesDone() const { return render_fences_done_.load(std::memory_order_acquire); }
+
     void DebugDump(const char* tag = nullptr);
 
 private:
@@ -94,6 +106,8 @@ private:
     // Планка эпохи: рендер показывает только слоты с epoch == required_epoch_. Поднимается
     // в StampSlotEpoch (монотонно, вслед за rebuild_epoch дерева). Инертна, пока нет ребилда.
     uint64_t required_epoch_ = 0;
+
+    std::atomic<uint64_t> render_fences_done_{ 0 };   // см. NotifyRenderFenceDone
 
     std::mutex mutex_;
     std::condition_variable cv_free_;        // sim ждёт записываемый слот

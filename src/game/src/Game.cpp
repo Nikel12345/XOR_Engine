@@ -307,7 +307,7 @@ SDL_AppResult Game::MainInit()
 
 
     ctx->RegisterGenerator("main_menu", [this] { CreateDebugColliders(); });
-    ctx->LoadScene("main_menu", "saved_scene.scene");
+    ctx->LoadScene("main_menu", "saved_scene");   // папка сцены (scene.scene + ресурсы внутри)
 
     Entity sun = ctx->CreateEntity("main_menu",
         MaterialComponent{ { metal2 } },
