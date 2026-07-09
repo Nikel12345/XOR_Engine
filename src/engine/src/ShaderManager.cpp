@@ -22,7 +22,7 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
     const std::string& name, const ShaderProgramDescription& spd, RenderPassStep* associated_pass,
     VertexShaderData vs, std::vector<BufferData*> vertex_shader_buffers,
     FragmentShaderData fs, std::vector<BufferData*> fragment_shader_buffers,
-    std::initializer_list<TextureSlotRole> texture_slots)
+    const std::vector<TextureSlotRole>& texture_slots)
 {
     auto it = shader_programs.find(name);
     if (it != shader_programs.end()) {
@@ -35,7 +35,7 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
     program->fs = fs;
 	program->vertex_shader_buffers = std::move(vertex_shader_buffers);
 	program->fragment_shader_buffers = std::move(fragment_shader_buffers);
-	program->required_slots.assign(texture_slots);
+	program->required_slots = texture_slots;
 	program->spd = spd;
     program->associated_render_pass = associated_pass;
     ShaderProgram* ptr = program.get();

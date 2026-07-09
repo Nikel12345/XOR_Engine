@@ -76,6 +76,7 @@ struct RenderPassStep {
     std::unordered_map<ShaderBatchKey, ShaderBatchData> shader_batches;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function;
     std::vector<SDL_GPUTextureSamplerBinding> global_texture_bindings;
+    std::string debug_name;   // = ключ в render_steps; нужен UI для дропдауна прохода у sp
     int pass_index = -1;
     // Порядковый номер в ordered_passes (ставит FillRenderPasses) — индекс прохода в
     // RenderSnap::BatchLayout::passes. Стабилен после старта.

@@ -33,6 +33,11 @@ enum class CommandId : uint32_t {
                           // кэша пайплайна sp + пересборка (пайплайн строится из spd)
     DeleteShader,         // payload: RebuildShaderPipelineCmd* (то же поле shader) — удалить sp:
                           // пайплайн в отложенное удаление + erase sp (шейдеры релизятся по refcount)
+    RecreateShader,       // payload: RecreateShaderCmd* — ПЕРЕСОЗДАНИЕ sp (удалить по старому имени,
+                          // создать по новому из путей vs/fs) готовым CreateShaderProgram; как Upsert
+                          // текстуры/модели. Ссылки материалов по старому имени НЕ чиним → fallback
+    SetShaderPass,        // payload: SetShaderPassCmd* — сменить проход sp (associated_render_pass),
+                          // инвалидация пайплайна + пересборка (моментально, как spd-тумблеры)
 
     COUNT
 };
@@ -40,6 +45,24 @@ enum class CommandId : uint32_t {
 // Применить изменённый spd шейдера: sp->spd уже поправлен в UI in-place, здесь сбрасываем
 // кэшированный пайплайн (строится из spd) и взводим его пересоздание + пересборку батчей.
 struct RebuildShaderPipelineCmd { std::string shader; };
+
+// Пересоздание sp по кнопке-подтверждению (как UpsertTexture/UpsertModel): удалить старую sp,
+// создать новую под newName из путей vs/fs. Неизменяемые в форме части (буферы/слоты/пасс/spd/
+// push-константы) переносятся со старой. Ссылки материалов по СТАРОМУ имени не патчим (конвенция:
+// на пересборке → fallback; переименовывай до назначения). Пустой путь → прежний. Строки на куче.
+struct RecreateShaderCmd {
+    std::string oldName;
+    std::string newName;
+    std::string vertexPath;
+    std::string fragmentPath;
+};
+
+// Смена прохода sp: имя прохода резолвится в RenderPassStep* (PassManager) и кладётся в
+// sp->associated_render_pass; пайплайн зависит от форматов прохода → инвалидация + пересборка.
+struct SetShaderPassCmd {
+    std::string shader;
+    std::string pass;
+};
 
 // Создание/замена модели из файла (аналог UpsertTexture). Существующую перезагружает В ТОТ ЖЕ
 // объект (указатель у энтити жив; старая геометрия в буфере остаётся — reclaim'а нет). Процедурные

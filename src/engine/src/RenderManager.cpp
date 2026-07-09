@@ -21,6 +21,7 @@ RenderPassStep* PassManager::CreateRenderPass(const ComputePassName& name, std::
 	auto data = std::make_unique<RenderPassStep>();
 	data->renderPassTexsData = std::move(rptd);
 	data->render_function = render_function;
+	data->debug_name = name;
 	data->pass_index = pass_index;
 
 	RenderPassStep* ptr = data.get();

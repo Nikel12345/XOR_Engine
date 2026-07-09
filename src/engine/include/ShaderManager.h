@@ -14,14 +14,17 @@ class ShaderManager
 {
 public:
 	ShaderManager(SDL_GPUDevice* device);
-	VertexShaderData CreateVertexShader(const char* hlsl_path, std::initializer_list<VertexBufferBinding> bindings);
+	// bindings/texture_slots — vector (не initializer_list): чтобы редактор мог пересобрать sp из
+	// СОХРАНЁННЫХ на ней рантайм-раскладок (sp->vs.bindings / sp->required_slots). Вызовы из кода с
+	// braced-init { … } по-прежнему компилируются (фигурные скобки строят vector).
+	VertexShaderData CreateVertexShader(const char* hlsl_path, const std::vector<VertexBufferBinding>& bindings);
 	FragmentShaderData CreateFragmentShader(const char* path);
 
 	ShaderProgram* CreateShaderProgram(
 		const std::string& name, const ShaderProgramDescription& spd, RenderPassStep* associated_pass,
 		VertexShaderData vs, std::vector<BufferData*> vertex_shader_buffers,
 		FragmentShaderData fs, std::vector<BufferData*> fragment_shader_buffers,
-		std::initializer_list<TextureSlotRole> texture_slots);
+		const std::vector<TextureSlotRole>& texture_slots);
 
 	ComputeShaderData CreateComputeShader(const char* path);
 	// ������� �������� ComputeShaderProgram �� ���������� ������� �� ���������� � �������!
@@ -64,14 +67,14 @@ public:
 	~ShaderManager();
 
 private:
-	VertexShaderData BuildVertexShader(const Uint8* spv, size_t spv_size, const char* dbg_name, std::initializer_list<VertexBufferBinding> bindings);
+	VertexShaderData BuildVertexShader(const Uint8* spv, size_t spv_size, const char* dbg_name, const std::vector<VertexBufferBinding>& bindings);
 
 	FragmentShaderData BuildFragmentShader(const Uint8* spv, size_t spv_size, const char* dbg_name);
 
 	ComputeShaderData BuildComputeShader(Uint8* spv, size_t spv_size, const char* dbg_name);
 
 	std::string BuildCachePath(const char* source_path, uint64_t hash) const;
-	void ReadVertexAttributes(std::initializer_list<ShaderBase::VertexBufferBinding> bindings, VertexShaderData& vs);
+	void ReadVertexAttributes(const std::vector<ShaderBase::VertexBufferBinding>& bindings, VertexShaderData& vs);
 
 	Uint8* LoadOrCompileSPIRV(const char* hlsl_path, SDL_ShaderCross_ShaderStage stage, size_t& out_size);
 

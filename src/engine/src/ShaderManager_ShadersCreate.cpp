@@ -61,7 +61,7 @@ std::string ShaderManager::BuildCachePath(const char* source_path, uint64_t hash
 }
 
 void ShaderManager::ReadVertexAttributes(
-    std::initializer_list<VertexBufferBinding> bindings,
+    const std::vector<VertexBufferBinding>& bindings,
     VertexShaderData& vs)
 {
     vs.attributes.clear(); vs.vbs.clear();
@@ -161,7 +161,7 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
 }
 
 VertexShaderData ShaderManager::CreateVertexShader(const char* hlsl_path,
-    std::initializer_list<VertexBufferBinding> bindings)
+    const std::vector<VertexBufferBinding>& bindings)
 {
     size_t n = 0;
     Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_VERTEX, n);
@@ -212,10 +212,13 @@ std::shared_ptr<SDL_GPUShader> ShaderManager::RegisterGpuShader(uint64_t key, SD
 
 VertexShaderData ShaderManager::BuildVertexShader(
     const Uint8* spv, size_t spv_size, const char* dbg_name,
-    std::initializer_list<VertexBufferBinding> bindings)
+    const std::vector<VertexBufferBinding>& bindings)
 {
     VertexShaderData vs{};
     ReadVertexAttributes(bindings, vs);   // раскладка из VertexFormat, рефлексия не нужна
+    // Путь + bindings сохраняем ДО ранних return (дедуп-кэш ниже) — нужны редактору для ребилда.
+    vs.source_path = dbg_name ? dbg_name : "";
+    vs.bindings = bindings;
 
     // Дедуп: одинаковый SPIR-V → один GPU-шейдер на всех владельцев (refcount через shared_ptr).
     const uint64_t key = HashBytes(spv, spv_size) ^ (uint64_t)SDL_SHADERCROSS_SHADERSTAGE_VERTEX;
@@ -257,6 +260,7 @@ FragmentShaderData ShaderManager::BuildFragmentShader(
     const Uint8* spv, size_t spv_size, const char* dbg_name)
 {
     FragmentShaderData fs{};
+    fs.source_path = dbg_name ? dbg_name : "";   // до ранних return — нужен редактору для ребилда
 
     // Рефлексия ВСЕГДА (дёшево, load-time): нужна для числа uniform-буферов (гейт пуша params
     // в RenderManager) и для компиляции. Дедуп ниже только переиспользует готовый GPU-шейдер.

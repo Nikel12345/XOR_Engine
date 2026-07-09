@@ -624,7 +624,7 @@ void Engine::InitUICommands()
 		[](EngineContext* ctx, const void* data)
 		{
 			// Данных-структуры нет — Entity и флаг упакованы прямо в указатель:
-			// младшие 32 бита — Entity, бит 32 — visible (см. UI_ImGui::DrawObjectsPanel).
+			// младшие 32 бита — Entity, бит 32 — visible (см. UI_ImGui::InspectEntity).
 			const uintptr_t packed = reinterpret_cast<uintptr_t>(data);
 			const Entity e = static_cast<Entity>(packed & 0xFFFFFFFFu);
 			const bool visible = ((packed >> 32) & 0x1u) != 0u;
@@ -806,6 +806,62 @@ void Engine::InitUICommands()
 			if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader)) {
 				ctx->GetPipeManager()->InvalidatePipeline(sp);           // сперва пайплайн (кэш по sp*)
 				ctx->GetShaderManager()->DeleteShaderProgram(c->shader); // затем сам sp
+				ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			}
+			delete c;
+		});
+
+	// Пересоздание sp по кнопке-подтверждению (как Upsert текстуры/модели): сносим старую,
+	// создаём новую из путей. Кэш пайплайна ключуется по sp* — инвалидируем старый ДО пересоздания.
+	input_manager->RegisterCommand(CommandId::RecreateShader,
+		[](EngineContext* ctx, const void* data)
+		{
+			const RecreateShaderCmd* c = static_cast<const RecreateShaderCmd*>(data);
+			ShaderManager* sm = ctx->GetShaderManager();
+			if (ShaderProgram* old = sm->GetShaderProgram(c->oldName)) {
+				// Имя: свободное новое → ренейм, иначе прежнее. Ссылки материалов по СТАРОМУ имени НЕ
+				// чиним (конвенция движка, ср. RenameMaterial/UpsertTexture) — на пересборке дадут fallback.
+				const std::string finalName = (!c->newName.empty() && c->newName != c->oldName
+					&& !sm->GetShaderPrograms().count(c->newName)) ? c->newName : c->oldName;
+				// Снимок параметров создания со старой sp (в форме их нет) — ДО удаления.
+				const ShaderProgramDescription     spd   = old->spd;
+				RenderPassStep*                     pass  = old->associated_render_pass;
+				const std::vector<BufferData*>      vbufs = old->vertex_shader_buffers;
+				const std::vector<BufferData*>      fbufs = old->fragment_shader_buffers;
+				const std::vector<TextureSlotRole>  slots = old->required_slots;
+				const std::vector<VertexBufferBinding> binds = old->vs.bindings;
+				const std::string vp = !c->vertexPath.empty()   ? c->vertexPath   : old->vs.source_path;
+				const std::string fp = !c->fragmentPath.empty() ? c->fragmentPath : old->fs.source_path;
+				auto push = old->push_func;   // код-байндинг push-констант переносим (в UI не редактируется)
+				// Пересобираем стадии из путей; провал компиляции → прежняя стадия (не чёрный экран).
+				VertexShaderData   vs = sm->CreateVertexShader(vp.c_str(), binds);
+				FragmentShaderData fs = sm->CreateFragmentShader(fp.c_str());
+				if (!vs.shader_data.shader) vs = old->vs;
+				if (!fs.shader_data.shader) fs = old->fs;
+				// Удалить старую + создать новую готовым CreateShaderProgram (кэш пайплайна по sp* — снести).
+				ctx->GetPipeManager()->InvalidatePipeline(old);
+				sm->DeleteShaderProgram(c->oldName);
+				ShaderProgram* nw = sm->CreateShaderProgram(finalName, spd, pass, vs, vbufs, fs, fbufs, slots);
+				if (nw) nw->push_func = std::move(push);
+				sm->SetDirtyGraphicsPipelines(true);
+				ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			}
+			delete c;
+		});
+
+	// Смена прохода sp — моментально (без подтверждения, как spd-тумблеры). associated_render_pass
+	// = выбранный RenderPassStep*; пайплайн зависит от форматов прохода → инвалидация + пересборка.
+	input_manager->RegisterCommand(CommandId::SetShaderPass,
+		[](EngineContext* ctx, const void* data)
+		{
+			const SetShaderPassCmd* c = static_cast<const SetShaderPassCmd*>(data);
+			ShaderManager* sm = ctx->GetShaderManager();
+			ShaderProgram*  sp = sm->GetShaderProgram(c->shader);
+			RenderPassStep* rp = ctx->GetPassManager()->GetRenderPassStep(c->pass);
+			if (sp && rp) {
+				sp->associated_render_pass = rp;
+				ctx->GetPipeManager()->InvalidatePipeline(sp);
+				sm->SetDirtyGraphicsPipelines(true);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 			delete c;

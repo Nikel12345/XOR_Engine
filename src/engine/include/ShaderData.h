@@ -83,10 +83,16 @@ struct VertexShaderData {
     ShaderData shader_data;
     std::vector<SDL_GPUVertexAttribute> attributes;
     std::vector<SDL_GPUVertexBufferDescription> vbs;
+    // Исходник + раскладка буферов — чтобы редактор мог ПЕРЕКОМПИЛИРОВАТЬ vs из (возможно
+    // изменённого) пути, не зная контекста создания. bindings копируют статику (buffer/format —
+    // указатели на глобальные имена/форматы), поэтому переживают программу. Пусто у SPV/дефолтных.
+    std::string source_path;
+    std::vector<VertexBufferBinding> bindings;
 };
 
 struct FragmentShaderData {
     ShaderData shader_data;
+    std::string source_path;   // исходник fs (для перекомпиляции из редактора; см. VertexShaderData)
 };
 
 struct ComputeShaderData {
