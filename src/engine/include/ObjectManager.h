@@ -13,6 +13,7 @@ class PassManager;
 class BufferManager;
 class PipeManager;
 struct RenderBatchData;
+struct ComponentSpec;   // реестр спецификаций компонентов (ComponentSerializer.h)
 
 template<typename T, typename... Ts>
 constexpr bool contains_type_v = (std::is_same_v<T, std::decay_t<Ts>> || ...);
@@ -64,6 +65,12 @@ public:
     // Верхний слой чинит указатели на ассеты только по ним, не трогая то, что уже
     // было в сцене (напр. сгенерированные сущности с живыми указателями).
     std::vector<Entity> LoadScene(const SceneName& scene_name, const std::string& text);
+
+    // Рантайм-создание сущности по НАБОРУ спецификаций (форма создания в UI): тот же путь,
+    // что проход 1 LoadScene — сигнатура из sig_type → архетип → Load(nullptr, 1) = дефолтный
+    // ряд каждого компонента. В отличие от шаблонного CreateEntity набор задаётся в рантайме.
+    // dirty_entity НЕ взводит — решает вызывающий (staging-сцене формы это не нужно).
+    Entity CreateEntityFromSpecs(SceneData* scene, const std::vector<const ComponentSpec*>& specs);
 
 	void SetSceneState(const SceneName& scene_name, bool is_active);
     SceneData* GetActiveScene();

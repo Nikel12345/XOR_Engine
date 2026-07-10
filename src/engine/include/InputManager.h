@@ -45,6 +45,8 @@ enum class CommandId : uint32_t {
     DeleteVertexShader,   // payload: ShaderDataNameCmd* — удалить VSD из реестра (sp по имени → fallback)
     DeleteFragmentShader, // payload: ShaderDataNameCmd*
     DeleteComputeShader,  // payload: ShaderDataNameCmd*
+    CreateEntity,         // payload: CreateEntityCmd* — json одной сущности из staging-формы;
+                          // sim: ObjectManager::LoadScene + фиксап указателей ассетов + пересборка
 
     COUNT
 };

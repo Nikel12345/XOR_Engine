@@ -66,17 +66,6 @@ static inline void MulMat4InPlace(float* lhs, const float* rhs)
     }
 }
 
-// Иерархия трансформов: для энтити с родителем и локальной матрицей пишем в его
-// Positions полную композицию world = parent_world × local. Используется отладочными
-// рамками коллайдеров (статичная локальная матрица — рамка сама следует за владельцем).
-//
-// Горячий путь (каждый кадр) — проход по КЭШУ разрезолвленных связей: без единого
-// хэш-поиска. Сам резолв parent→(Positions*,index) (3 lookup'а в unordered_map на
-// сущность) выполняется ТОЛЬКО при структурном изменении ECS: между изменениями адреса
-// Archetype (std::map) и ComponentArray (unique_ptr) стабильны, а индексы/раскладка
-// векторов меняются лишь на add/delete/load — все они взводят dirty_entity. Коммитим
-// флаг здесь: единственный его потребитель — этот модуль (CalculateTransformSize читает
-// его как size_fn РАНЬШЕ в кадре, до updater'а StoreTransforms), порядок соблюдён.
 void TransformDataModule::UpdateLocalTransforms(ObjectManager* om, SceneData* scene)
 {
     if (om->CheckNewObjects()) {

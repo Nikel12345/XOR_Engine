@@ -90,7 +90,11 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	InitDefaultBufferUpdaters();
 	InitPasses();
 	InitUICommands();
-	RegisterBuiltinComponentSerializers();   // сериалайзеры компонентов для save/load сцены
+	RegisterBuiltinComponentSpecs();   // спецификации компонентов: save/load сцены + схема полей для UI
+	// Staging-сцена формы создания энтити (UI_Hierarchy): НИКОГДА не активна — дата-модули и
+	// батчи её не видят, поэтому UI-поток монопольно правит её содержимое. Создаётся здесь,
+	// до старта потоков: карту сцен после старта не мутируем (GetActiveScene её итерирует).
+	object_manager->CreateScene("_staging")->is_active = false;
 	InitDefaultMaterialParams();             // билтин-типы params для UI-дропдауна Kind
 	pass_manager->FillRenderPasses();
 
@@ -118,10 +122,12 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	ImGui_ImplSDLGPU3_Init(&init_info);
 
 	engine_context->CreateTextureAtlas("_FallbackAtlas", TexturePresets::AlbedoAtlas(64, 1, 1), "_SimpleSampler");
-	TextureHandle* dummy = engine_context->CreateTextureFromFile("_NoTextureDummy", "_FallbackAtlas", "../engine/textures/dummy.png",
+	engine_context->CreateTextureFromFile("_NoTextureDummy", "_FallbackAtlas", "../engine/textures/dummy.png",
 		ChannelConvention::AsIs, /*dont_save=*/true);   // движковый дефолт — в файл сцены не идёт
 
-	batch_builder->SetDummyTexture(dummy);
+	// ПО ИМЕНИ (как SetFallbackShader): удаление _NoTextureDummy не оставляет висячего указателя —
+	// промах на сборке батча даёт пропуск отрисовки (пустой рендер), а не разыменование мёртвого хэндла.
+	batch_builder->SetDummyTexture("_NoTextureDummy");
 	InitDefaultResources();
 }
 

@@ -71,6 +71,41 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 			}
 			delete c;
 		});
+
+	// Создание сущности из staging-формы: json одной сущности идёт ТЕМ ЖЕ путём, что файл
+	// сцены (ObjectManager::LoadScene), затем фиксап указателей ассетов по именам — зеркало
+	// Engine::LoadScene (ECS-ядро менеджеров не знает). Незарезолвленное имя → nullptr,
+	// сборщик батчей такие пропускает. Полный ребилд: одна сущность, дёшево и без края.
+	im.RegisterCommand(CommandId::CreateEntity,
+		[](EngineContext* ctx, const void* data)
+		{
+			const CreateEntityCmd* c = static_cast<const CreateEntityCmd*>(data);
+			ObjectManager* om = ctx->GetObjectManager();
+			SceneData* scene = om->GetScene(c->scene);
+			if (scene) {
+				const std::vector<Entity> created = om->LoadScene(c->scene, c->json);
+				for (Entity e : created) {
+					if (om->Has<ModelComponent>(scene, e)) {
+						ModelComponent& m = om->GetComponent<ModelComponent>(scene, e);
+						m.model = m.name.empty() ? nullptr : (*ctx->GetModelManager())[m.name];
+						if (!m.model && !m.name.empty())
+							SDL_Log("CreateEntity: model '%s' not resolved (entity will not render)", m.name.c_str());
+					}
+					if (om->Has<MaterialComponent>(scene, e)) {
+						MaterialComponent& mc = om->GetComponent<MaterialComponent>(scene, e);
+						mc.materials.clear();
+						mc.materials.reserve(mc.names.size());
+						for (const auto& n : mc.names) {
+							Material* mat = ctx->GetMaterialManager()->GetMaterial(n);
+							if (!mat) SDL_Log("CreateEntity: material '%s' not resolved", n.c_str());
+							mc.materials.push_back(mat);
+						}
+					}
+				}
+				ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			}
+			delete c;
+		});
 }
 
 void DefaultCommandSet::SetSceneCommands(InputManager& im)

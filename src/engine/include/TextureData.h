@@ -67,6 +67,9 @@ struct TextureHandle : std::enable_shared_from_this<TextureHandle> {
 	// ставят true — они гарантированно пересоздаются кодом до всякой загрузки, файл ими не
 	// раздуваем. UI-пересоздание идёт через create-API с дефолтом false → «тронул = сохраняемый».
 	bool              dont_save = false;
+	// Ячейка превью-атласа UI (-1 = нет). Атласы движка — 2D_ARRAY, ImGui сэмплит только 2D,
+	// поэтому регион текстуры блитится в общий 2D превью-атлас (см. TextureManager::BlitPendingPreviews).
+	int32_t           preview_cell = -1;
 };
 
 class TextureManager;

@@ -90,7 +90,7 @@ int main(int argc, char** argv)
     ObjectManager*   om  = new ObjectManager();
     TransformDataModule* tdm = new TransformDataModule();
 
-    RegisterBuiltinComponentSerializers();
+    RegisterBuiltinComponentSpecs();
     SceneData* scene = om->CreateScene("main");
     const char* candidates[] = { argc > 1 ? argv[1] : "saved_scene.scene",
                                  "saved_scene.scene", "../game/saved_scene.scene",

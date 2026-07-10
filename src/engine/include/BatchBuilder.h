@@ -67,7 +67,10 @@ public:
 	// Нужен GPU-каллингу (размер out_pib и диспатч) и адресации камерных блоков out_pib.
 	uint32_t AskNumInstances(uint8_t slot) const;
 
-	void SetDummyTexture(TextureHandle* dummy) { dummy_texture = dummy; };
+	// Dummy-текстура ПО ИМЕНИ (та же конвенция, что SetFallbackShader ниже): резолв на сборке
+	// батча, удаление dummy = промах → пропуск отрисовки sp у битого материала (пустой рендер,
+	// без висячего указателя). Раньше держался сырой TextureHandle* — удаление dummy крашило.
+	void SetDummyTexture(const std::string& name) { dummy_texture_name = name; };
 	// Fallback-sp ПО ИМЕНИ для материалов, чья sp удалена. Резолвится на сборке как обычная sp,
 	// поэтому удаление самого fallback = промах → пустой рендер (без висячего указателя).
 	void SetFallbackShader(const std::string& name) { fallback_shader_name = name; };
@@ -93,7 +96,7 @@ private:
 		const MaterialComponent& material_component, const ModelComponent& model_component);
 	void RemoveEntityFromBatches(Entity entity);
 
-	TextureHandle* dummy_texture = nullptr;
+	std::string dummy_texture_name;     // dummy по имени для битых текстурных ссылок (см. SetDummyTexture)
 	std::string fallback_shader_name;   // sp по имени для материала с удалённой sp (см. SetFallbackShader)
 	// Reverse index: entity -> all its slots across model batches. Rebuilt on full
 	// rebuild, mutated incrementally by AddEntityToBatches/RemoveEntityFromBatches.
