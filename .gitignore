@@ -9,3 +9,4 @@ scripts/scene_gen/venv
 todo.txt
 src/game/imgui.ini
 external/yyjson/
+src/engine/textures/assets
