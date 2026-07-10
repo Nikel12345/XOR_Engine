@@ -81,13 +81,22 @@ namespace {
     }
 } // namespace
 
-bool AssetTile(const char* name, bool selected, float size, AssetIcon icon)
+bool AssetTile(const char* name, bool selected, float size, AssetIcon icon, const TilePreview* preview)
 {
     ImGui::BeginGroup();
     ImGui::PushID(name);
     const ImVec2 p0 = ImGui::GetCursorScreenPos();
     bool clicked = ImGui::Selectable("##sq", selected, ImGuiSelectableFlags_None, ImVec2(size, size));
-    DrawAssetIcon(ImGui::GetWindowDrawList(), p0, size, icon);   // затычка поверх (Selectable рисует подсветку под)
+    ImDrawList* dl = ImGui::GetWindowDrawList();                 // рисуем поверх (подсветка Selectable — под)
+    if (preview && preview->tex) {
+        const float inset = 1.0f;                                // 1px — рамка подсветки выбора видна по краю
+        dl->AddImage(ImTextureRef(preview->tex),
+            ImVec2(p0.x + inset, p0.y + inset), ImVec2(p0.x + size - inset, p0.y + size - inset),
+            preview->uv0, preview->uv1, ImGui::GetColorU32(preview->tint));
+    }
+    else {
+        DrawAssetIcon(dl, p0, size, icon);                       // затычка по типу ассета
+    }
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + size);       // подпись не шире плитки
     ImGui::TextWrapped("%s", name);
     ImGui::PopTextWrapPos();

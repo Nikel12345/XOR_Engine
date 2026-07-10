@@ -244,6 +244,7 @@ set(ENGINE_CORE_SRC
     src/UI_Hierarchy.cpp
     src/UI_AssetBrowser.cpp
     src/UI_Inspector.cpp
+    src/UI_ComponentEditor.cpp
     src/PCH.cpp
     src/EngineContext.cpp
     src/TextureLoader.cpp
@@ -256,6 +257,7 @@ set(ENGINE_CORE_HDR
     include/UI_ImGui.h
     include/UI_Internal.h
     include/UI_Widgets.h
+    include/UI_ComponentEditor.h
     include/PCH.h
     include/PCH_Engine.h
     include/EngineContext.h

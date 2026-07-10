@@ -136,6 +136,8 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 		PROF_SCOPE(Sim, "  generate_mipmaps");
 		texture_manager->GenerateMipmaps(cb);
 	}
+	// Превью-блиты UI — тем же cb ПОСЛЕ заливки пикселей и мипов (порядок внутри cb).
+	texture_manager->BlitPendingPreviews(cb);
 	SDL_GPUFence* fence;
 	{
 		PROF_SCOPE(Sim, "  submit_acquire_fence");

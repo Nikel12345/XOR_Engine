@@ -17,6 +17,8 @@
 #include "BatchBuilder.h"
 #include "MaterialParams.h"          // раскладки факторов: разбор params по полям в инспекторе материала
 #include "MaterialParamsRegistry.h"  // реестр типов params для дропдауна Kind
+#include "ComponentSerializer.h"     // ComponentSpecRegistry — цикл по компонентам энтити
+#include "UI_ComponentEditor.h"      // generic-редактор полей компонента по схеме
 #include "RenderManager.h"           // PassManager + RenderPassStep — дропдаун прохода у sp
 #include "ImGuizmo.h"
 #include <glm/gtc/type_ptr.hpp>
@@ -99,15 +101,57 @@ namespace {
         }
     }
 
+    // Маркер «ссылка по имени не резолвится» в конце строки: жёлтый (!) + тултип с причиной.
+    // Икон-шрифта у ImGui нет — обычный цветной текст. Рендер при таких промахах не падает
+    // (dummy/fallback на пересборке), маркер лишь делает промах видимым в инспекторе.
+    void MissingRefMark(const char* tooltip)
+    {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "(!)");
+        ImGui::SetItemTooltip("%s", tooltip);
+    }
+
     // ================= Inspector-блоки =================
 
-    // Пред-объявления: InspectEntity дёргает свет-редакторы, определённые ниже.
-    void InspectSpotLight(Positions&, size_t, SpotLightComponent&);
-    void InspectSphereLight(Positions&, size_t, SphereLightComponent&);
-    void InspectDirectLight(DirectLightComponent&);
     // ShaderInspector дёргает редакторы списков буферов/слот-ролей, определённые ниже (рядом с формами SD).
     void BufferListEditor(const char* label, std::vector<BufferDataName>& list, const std::vector<BufferDataName>& avail);
     void RoleListEditor(std::vector<TextureSlotRole>& list);
+
+    // Пост-блоки компонентов после generic-полей: производные значения, которые схема не
+    // описывает (вычисления, не поля), и контролы-через-команду (visible). Рукописный
+    // остаток UI компонентов — всё остальное рисует DrawComponentFields по схеме.
+    void ComponentExtraUI(EngineContext* ctx, Entity e, const std::string& name, Archetype& arch, size_t row)
+    {
+        if (name == "Draw") {
+            // visible — ЧЕРЕЗ команду HideEntity (та же упаковка, что у рамок коллайдеров):
+            // прямая запись флага не перестроила бы батчи, поэтому в схеме поле ui_hidden.
+            bool visible = (*arch.get_array<DrawComponent>())[row].visible;
+            if (ImGui::Checkbox("visible", &visible)) {
+                const uintptr_t packed = static_cast<uintptr_t>(e)
+                    | (visible ? (static_cast<uintptr_t>(1) << 32) : static_cast<uintptr_t>(0));
+                ctx->GetInputManager()->PushCommand(CommandId::HideEntity, reinterpret_cast<const void*>(packed));
+            }
+        }
+        else if (name == "SpotLight") {
+            auto& d = (*arch.get_array<SpotLightComponent>())[row].light_data;
+            d.ResolveDistance();
+            ImGui::Text("Max Distance: %.3f", d.GetMaxDistance());
+        }
+        else if (name == "SphereLight") {
+            auto& d = (*arch.get_array<SphereLightComponent>())[row].light_data;
+            d.ResolveDistance();
+            ImGui::Text("Max Distance: %.3f", d.GetMaxDistance());
+        }
+        else if (name == "DirectLight") {
+            auto& d = (*arch.get_array<DirectLightComponent>())[row].light_data;
+            for (int c = 0; c < d.cascade_count; ++c) {
+                float he = d.CascadeExtent(c);
+                float dp = d.CascadeDepth(c);
+                ImGui::Text("  c%d: %.1f x %.1f, depth %.1f, texel %.4f",
+                    c, 2.0f * he, 2.0f * he, 2.0f * dp, (2.0f * he) / 1024.0f);
+            }
+        }
+    }
 
     // Единый инспектор сущности: свет — такая же сущность, отдельного «типа выбора» нет. Показываем
     // то, что есть по компонентам: удаление (всегда) + трансформ (если Positions) + коллайдеры + свет.
@@ -147,17 +191,30 @@ namespace {
             }
         }
 
-        // Свет — по наличию компонента (тип выбора не нужен).
-        if (om->Has<SpotLightComponent>(scene, e) && om->Has<Positions>(scene, e)) {
-            SoAElement<Positions> el = om->GetComponent<Positions>(scene, e);
-            InspectSpotLight(el.container(), el.i(), om->GetComponent<SpotLightComponent>(scene, e));
-        }
-        else if (om->Has<SphereLightComponent>(scene, e) && om->Has<Positions>(scene, e)) {
-            SoAElement<Positions> el = om->GetComponent<Positions>(scene, e);
-            InspectSphereLight(el.container(), el.i(), om->GetComponent<SphereLightComponent>(scene, e));
-        }
-        else if (om->Has<DirectLightComponent>(scene, e)) {
-            InspectDirectLight(om->GetComponent<DirectLightComponent>(scene, e));
+        // Остальные компоненты — generic по схемам реестра: секция на компонент архетипа
+        // (порядок = порядок регистрации, детерминирован), поля рисует DrawComponentFields,
+        // производные значения — ComponentExtraUI. Новый зарегистрированный компонент
+        // появляется здесь сам, без правки инспектора.
+        auto arch_it = scene->entity_to_archetype.find(e);
+        auto idx_it  = scene->entity_to_index.find(e);
+        if (arch_it != scene->entity_to_archetype.end() && idx_it != scene->entity_to_index.end()) {
+            Archetype& arch = *arch_it->second;
+            const size_t row = idx_it->second;
+            std::string tags;   // теги без данных — одной строкой внизу, не секциями
+            for (const ComponentSpec& s : ComponentSpecRegistry::Get().All()) {
+                if (!arch.components.count(s.sig_type)) continue;
+                // Transform выше (Offset+гизмо), Material редактируется как ассет (вкладка Materials).
+                if (s.name == "Transform" || s.name == "Material") continue;
+                if (s.fields.empty() && !s.custom_save) {
+                    tags += tags.empty() ? s.name : ", " + s.name;
+                    continue;
+                }
+                if (ImGui::CollapsingHeader(s.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+                    DrawComponentFields(s, arch, row);
+                    ComponentExtraUI(ctx, e, s.name, arch, row);
+                }
+            }
+            if (!tags.empty()) { ImGui::Separator(); ImGui::Text("Tags: %s", tags.c_str()); }
         }
     }
 
@@ -239,8 +296,13 @@ namespace {
             ImGui::SameLine();
             ImGui::TextUnformatted(spName.c_str());
 
+            // Резолв sp через карту (GetShaderProgram логирует промах — спамил бы каждый кадр).
+            auto spIt = sm->GetShaderPrograms().find(spName);
+            ShaderProgram* sp = (spIt != sm->GetShaderPrograms().end()) ? spIt->second.get() : nullptr;
+            if (!sp) MissingRefMark("shader program not found — renders with fallback");
+
             // Слоты этого sp; значение — из общей карты по роли (правка отражается во всех sp с этой ролью).
-            if (ShaderProgram* sp = sm->GetShaderProgram(spName))
+            if (sp)
                 for (TextureSlotRole role : sp->required_slots) {
                     auto it = mat->textures.find(role);
                     const std::string current = (it != mat->textures.end()) ? it->second : std::string();
@@ -255,6 +317,9 @@ namespace {
                         }
                         ImGui::EndCombo();
                     }
+                    // Имя назначено, но текстуры с ним нет (удалена/переименована) → маркер в конце строки.
+                    if (!current.empty() && !ctx->GetTextureManager()->GetTextureHandles().count(current))
+                        MissingRefMark("texture not found — dummy is used");
                     ImGui::PopID();
                 }
             ImGui::PopID();
@@ -272,92 +337,6 @@ namespace {
             }
             ImGui::EndCombo();
         }
-    }
-
-    void InspectSpotLight(Positions& P, size_t i, SpotLightComponent& light)
-    {
-        auto& d = light.light_data;
-        bool changed = false;
-
-        ImGui::SeparatorText("Transform");
-        float pos[3] = { P.w[i], P.d[i], P.h[i] };
-        if (ImGui::DragFloat3("Position", pos, 0.05f)) { P.w[i] = pos[0]; P.d[i] = pos[1]; P.h[i] = pos[2]; }
-        float dir[3] = { d.dir_x, d.dir_y, d.dir_z };
-        if (ImGui::DragFloat3("Direction", dir, 0.01f, -1.0f, 1.0f))
-        {
-            d.dir_x = dir[0]; d.dir_y = dir[1]; d.dir_z = dir[2]; changed = true;
-        }
-
-        ImGui::SeparatorText("Cone");
-        changed |= ImGui::SliderAngle("Angle", &d.source_angle, 1.0f, 89.0f);
-        changed |= ImGui::DragFloat("Source Radius", &d.source_radius, 0.01f, 0.0f, FLT_MAX);
-
-        ImGui::SeparatorText("Color");
-        changed |= ImGui::ColorEdit3("RGB", &d.r);
-
-        ImGui::SeparatorText("Falloff");
-        changed |= ImGui::DragFloat("Power", &d.power, 0.05f, 0.0f, FLT_MAX);
-        changed |= ImGui::DragFloat("Attenuation", &d.attenuation, 0.05f, 0.0f, FLT_MAX);
-
-        d.ResolveDistance();
-        ImGui::Text("Max Distance: %.3f", d.GetMaxDistance());
-        if (changed) light.needsUpdate = true;
-    }
-
-    void InspectSphereLight(Positions& P, size_t i, SphereLightComponent& light)
-    {
-        auto& d = light.light_data;
-        bool changed = false;
-
-        ImGui::SeparatorText("Transform");
-        float pos[3] = { P.w[i], P.d[i], P.h[i] };
-        if (ImGui::DragFloat3("Position", pos, 0.05f)) { P.w[i] = pos[0]; P.d[i] = pos[1]; P.h[i] = pos[2]; }
-
-        ImGui::SeparatorText("Shape");
-        changed |= ImGui::DragFloat("Radius", &d.source_radius, 0.01f, 0.0f, FLT_MAX);
-
-        ImGui::SeparatorText("Color");
-        changed |= ImGui::ColorEdit3("RGB", &d.r);
-
-        ImGui::SeparatorText("Falloff");
-        changed |= ImGui::DragFloat("Power", &d.power, 0.05f, 0.0f, FLT_MAX);
-        changed |= ImGui::DragFloat("Attenuation", &d.attenuation, 0.05f, 0.0f, FLT_MAX);
-
-        d.ResolveDistance();
-        ImGui::Text("Max Distance: %.3f", d.GetMaxDistance());
-        if (changed) light.needsUpdate = true;
-    }
-
-    void InspectDirectLight(DirectLightComponent& light)
-    {
-        auto& d = light.light_data;
-        bool changed = false;
-
-        ImGui::SeparatorText("Direction");
-        changed |= ImGui::DragFloat3("Dir", &d.dir_x, 0.01f, -1.0f, 1.0f);
-
-        ImGui::SeparatorText("Color");
-        changed |= ImGui::ColorEdit3("RGB", &d.r);
-        changed |= ImGui::DragFloat("Power", &d.power, 0.05f, 0.0f, FLT_MAX);
-
-        ImGui::SeparatorText("Shadow Cascades");
-        changed |= ImGui::DragFloat3("Center", &d.center_x, 0.05f);
-        changed |= ImGui::DragFloat("Half Extent (c0)", &d.half_extent, 0.1f, 0.01f, FLT_MAX);
-        changed |= ImGui::DragFloat("Half Depth (c0)", &d.half_depth, 0.1f, 0.01f, FLT_MAX);
-        changed |= ImGui::DragFloat("Cascade Ratio", &d.cascade_ratio, 0.05f, 1.0f, FLT_MAX);
-        if (ImGui::InputInt("Cascade Count", &d.cascade_count)) {
-            if (d.cascade_count < 1) d.cascade_count = 1;
-            if (d.cascade_count > DirectLightComponent::DirectLightData::MAX_CASCADES)
-                d.cascade_count = DirectLightComponent::DirectLightData::MAX_CASCADES;
-            changed = true;
-        }
-        for (int c = 0; c < d.cascade_count; ++c) {
-            float he = d.CascadeExtent(c);
-            float dp = d.CascadeDepth(c);
-            ImGui::Text("  c%d: %.1f x %.1f, depth %.1f, texel %.4f",
-                c, 2.0f * he, 2.0f * he, 2.0f * dp, (2.0f * he) / 1024.0f);
-        }
-        if (changed) light.needsUpdate = true;
     }
 
     void InspectCamera(Camera* cam)

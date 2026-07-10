@@ -191,12 +191,21 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
 
             AtlasBatchKey atlas_key = sp->required_slots.empty() ? 0 : HashAtlasBatchKey(material, tm);
 
+            // Dummy — ПО ИМЕНИ (как fallback-sp): резолв здесь, через карту (без лог-спама Get*).
+            // Нет и dummy (удалён) → битые слоты не забиндить → sp у этого материала пропускается
+            // (пустой рендер вместо разыменования мёртвого хэндла).
+            TextureHandle* dummy = nullptr;
+            if (tm && !dummy_texture_name.empty()) {
+                auto dit = tm->GetTextureHandles().find(dummy_texture_name);
+                if (dit != tm->GetTextureHandles().end()) dummy = dit->second.get();
+            }
+
             auto& atlas_map = sb.atlases_batches;
             auto atlas_it = atlas_map.find(atlas_key);
             if (atlas_it == atlas_map.end())
             {
                 AtlasBatchData new_tex{};
-                TextureHandle* texture_handle = nullptr;
+                bool bindable = true;
 
                 for (const auto& role : sp->required_slots) {
                     auto it = material->textures.find(role);
@@ -204,13 +213,14 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
                         ? tm->GetTextureHandle(it->second) : nullptr;
                     if (!h || !h->atlas) {   // нет слота / имя не резолвится (удалена/переименована) / нет атласа
                         SDL_Log("BuildBatches:: Material is missing required atlas for shader slot");
-                        texture_handle = dummy_texture;
+                        h = (dummy && dummy->atlas) ? dummy : nullptr;
                     }
-                    else {
-                        texture_handle = h;
-                    }
-                    new_tex.texture_binding.push_back(texture_handle->atlas->texture_binding);
-
+                    if (!h) { bindable = false; break; }   // и dummy нет → слот не собрать
+                    new_tex.texture_binding.push_back(h->atlas->texture_binding);
+                }
+                if (!bindable) {
+                    SDL_Log("BuildBatches:: dummy texture missing too — sp draw skipped for this material");
+                    continue;   // следующий sp материала: пустой рендер, без краша
                 }
 
                 atlas_map[atlas_key] = std::move(new_tex);
@@ -231,15 +241,21 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
                 // MaterialBlock) params не получат автоматически, без флагов и прокси по текстурам.
                 new_texb.params = &material->params;
                 new_texb.texture_uvl.reserve(material->textures.size());
+                bool bindable = true;
                 for (const auto& role : sp->required_slots) {
                     auto it = material->textures.find(role);
                     TextureHandle* texture_handle = (it != material->textures.end() && tm)
                         ? tm->GetTextureHandle(it->second) : nullptr;
                     if (!texture_handle) {   // нет слота / имя не резолвится (удалена/переименована)
                         SDL_Log("BuildBatches:: Material is missing required texture_data for shader slot");
-                        texture_handle = dummy_texture;
+                        texture_handle = dummy;   // dummy по имени (см. выше); тоже нет → пропуск sp
                     }
+                    if (!texture_handle) { bindable = false; break; }
                     new_texb.texture_uvl.push_back(texture_handle->texture_data);   // КОПИЯ значения (см. инвариант в TextureBatchData)
+                }
+                if (!bindable) {
+                    SDL_Log("BuildBatches:: dummy texture missing too — sp draw skipped for this material");
+                    continue;   // пустой рендер, без краша
                 }
 
                 tex_map[tex_key] = std::move(new_texb);

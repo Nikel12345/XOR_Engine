@@ -111,6 +111,21 @@ public:
 	SharedDepthTarget* CreateSharedDepthTarget(SDL_GPUTextureCreateInfo tci);
 	void QueueDeleteTexture(SDL_GPUTexture* texture);
 	void TrashTextures(uint64_t fences_done);
+
+	// ── Превью-атлас UI: общий 2D (атласы движка — 2D_ARRAY, ImGui сэмплит только texture2D).
+	//    Сетка фиксированных ячеек PREVIEW_CELL px; регион текстуры блитится в её ячейку
+	//    (SDL_BlitGPUTexture, LINEAR) на upload-cb сразу после GenerateMipmaps — тот же поток
+	//    (sim/prepare) и fence-цикл, очередь одно-поточная, без замков. ──
+	static constexpr uint32_t PREVIEW_ATLAS_SIZE = 2048;
+	static constexpr uint32_t PREVIEW_CELL = 64;                                    // 16×16 = 256 превью
+	static constexpr uint32_t PREVIEW_PER_ROW = PREVIEW_ATLAS_SIZE / PREVIEW_CELL;
+	// Дренаж дёрти-превью: блит региона атласа (слой+UVL) в ячейку. Зовётся с upload-cb.
+	void BlitPendingPreviews(SDL_GPUCommandBuffer* cb);
+	SDL_GPUTexture* GetPreviewAtlasTexture() const { return preview_atlas; }
+	// UV ячейки превью хэндла в превью-атласе (для ImGui::Image/AddImage). valid=false — превью нет.
+	struct PreviewUV { bool valid = false; float u0 = 0, v0 = 0, u1 = 0, v1 = 0; };
+	PreviewUV GetPreviewUV(const TextureHandle* h) const;
+
 	~TextureManager();
 
 	// Разделяемый depth основного прохода (MAIN/TRANSPARENT/DEBUG). Ресайзится через ->Resize().
@@ -156,6 +171,15 @@ private:
 	std::unordered_map<std::string, SDL_GPUSampler*> samplers_data;
 	std::unordered_map<TextureAtlas*, std::unique_ptr<AtlasPacker>> atlas_packers;  // персистентное состояние упаковки
 	std::vector<UploadTaskTexture> upload_tasks;
+
+	// Превью-атлас UI (см. публичный блок): владение здесь, ячейки — счётчик + фрилист.
+	// preview_dirty пушится в _PlaceTask (UVL готов) и дренится BlitPendingPreviews —
+	// оба на sim/prepare, одно-поточно.
+	void QueuePreviewBlit(TextureHandle* h);
+	SDL_GPUTexture* preview_atlas = nullptr;
+	std::vector<TextureHandle*> preview_dirty;
+	std::vector<int32_t> preview_free_cells;
+	int32_t preview_next_cell = 0;
 
 	std::vector<std::unique_ptr<SharedDepthTarget>> shared_depth_targets;
 	// Очередь ЦЕЛИКОМ владеется render-потоком: оба пуша (ResizeSceneHDRTargets / Resize depth —

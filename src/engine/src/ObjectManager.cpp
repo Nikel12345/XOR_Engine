@@ -132,7 +132,7 @@ SceneData* ObjectManager::GetScene(const SceneName& name)
 std::string ObjectManager::SaveScene(SceneData* scene)
 {
     if (!scene) return {};
-    auto& reg = ComponentSerializerRegistry::Get();
+    auto& reg = ComponentSpecRegistry::Get();
 
     // Верх — объект; ключ = сам архетип (отсортированные имена компонентов через запятую,
     // порядконезависимо). Внутри: count + колонка entities (файл-локальные id) + компоненты-колонки.
@@ -146,10 +146,10 @@ std::string ObjectManager::SaveScene(SceneData* scene)
         const size_t count = arch.entities.size();
         if (count == 0) continue;
 
-        std::vector<const ComponentSerializer*> hs;
+        std::vector<const ComponentSpec*> hs;
         std::vector<std::string> names;
         for (auto& [tindex, arr] : arch.components) {
-            const ComponentSerializer* h = reg.ByType(tindex);
+            const ComponentSpec* h = reg.ByType(tindex);
             if (h) { hs.push_back(h); names.push_back(h->name); }
         }
         if (hs.empty()) continue;
@@ -166,10 +166,10 @@ std::string ObjectManager::SaveScene(SceneData* scene)
         yyjson_mut_val* ents = yyjson_mut_obj_add_arr(doc, block, "entities");
         for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_uint(doc, ents, arch.entities[i]);
 
-        for (const ComponentSerializer* h : hs) {
+        for (const ComponentSpec* h : hs) {
             yyjson_mut_val* comp = yyjson_mut_obj(doc);
             yyjson_mut_obj_add(block, yyjson_mut_strcpy(doc, h->name.c_str()), comp);
-            h->save(arch, count, doc, comp);   // колонки по полям
+            h->Save(arch, count, doc, comp);   // колонки по полям (генератор схемы или custom)
         }
     }
 
@@ -185,7 +185,7 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
     auto sit = scenes_data.find(scene_name);
     SceneData* scene = (sit != scenes_data.end()) ? sit->second.get()
                                                   : CreateScene(scene_name);
-    auto& reg = ComponentSerializerRegistry::Get();
+    auto& reg = ComponentSpecRegistry::Get();
 
     std::vector<Entity> created;
     std::unordered_map<uint32_t, Entity> old_to_new;     // файл-локальный id → новый Entity
@@ -214,14 +214,14 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
             if (!yyjson_is_obj(block)) continue;
 
             // Компоненты архетипа = ключи блока, кроме служебных count/entities.
-            std::vector<const ComponentSerializer*> hs;
+            std::vector<const ComponentSpec*> hs;
             std::set<std::type_index> sig;
             {
                 size_t ck, cm; yyjson_val *cname, *cval;
                 yyjson_obj_foreach(block, ck, cm, cname, cval) {
                     const char* nm = yyjson_get_str(cname);
                     if (!nm || !std::strcmp(nm, "count") || !std::strcmp(nm, "entities")) continue;
-                    const ComponentSerializer* h = reg.ByName(nm);
+                    const ComponentSpec* h = reg.ByName(nm);
                     if (h) { hs.push_back(h); sig.insert(h->sig_type); }
                 }
             }
@@ -245,9 +245,9 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
                 created.push_back(e);
             }
 
-            for (const ComponentSerializer* h : hs) {
+            for (const ComponentSpec* h : hs) {
                 yyjson_val* comp = yyjson_obj_get(block, h->name.c_str());
-                h->load(arch, comp, count);   // ensure_component<T> + ровно count add
+                h->Load(arch, comp, count);   // ensure_component<T> + ровно count add
             }
         }
     }
@@ -278,5 +278,25 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
 
     dirty_entity = true;
     return created;
+}
+
+Entity ObjectManager::CreateEntityFromSpecs(SceneData* scene, const std::vector<const ComponentSpec*>& specs)
+{
+    if (!scene || specs.empty()) { SDL_Log("CreateEntityFromSpecs: null scene or empty set"); return static_cast<Entity>(-1); }
+
+    std::set<std::type_index> sig;
+    for (const ComponentSpec* s : specs) sig.insert(s->sig_type);
+
+    Archetype& arch = scene->archetypes[sig];
+    Entity e = scene->next_entity_id++;
+    // Сущность — ДО Load'ов: инвариант ComponentSpec::Load (строки дописываются в хвост,
+    // base считается от entities.size()), тот же порядок, что в LoadScene.
+    arch.entities.push_back(e);
+    scene->entity_to_archetype[e] = &arch;
+    scene->entity_to_index[e] = arch.entities.size() - 1;
+
+    for (const ComponentSpec* s : specs) s->Load(arch, nullptr, 1);   // дефолтный ряд каждого
+
+    return e;
 }
 

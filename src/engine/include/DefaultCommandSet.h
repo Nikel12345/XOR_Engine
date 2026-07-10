@@ -8,7 +8,7 @@ class InputManager;
 // Engine не касаются, поэтому живут отдельным TU и Engine.h не тянут.
 namespace DefaultCommandSet
 {
-	void SetEntityCommands(InputManager& im);    // Delete/Hide/SetTransform
+	void SetEntityCommands(InputManager& im);    // Delete/Hide/SetTransform/Create (из staging-формы)
 	void SetSceneCommands(InputManager& im);     // Save/Load сцены-папки
 	void SetMaterialCommands(InputManager& im);  // texture-слот/create/add-remove-sp/rename
 	void SetTextureCommands(InputManager& im);   // upsert/delete текстуры
