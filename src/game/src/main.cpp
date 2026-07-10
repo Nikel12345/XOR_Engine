@@ -9,8 +9,8 @@
 extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 static SDL_Window* win = NULL;
 static SDL_GPUDevice* dev = NULL;
-static constexpr float WIDTH = 1920.0f;
-static constexpr float HEIGHT = 1080.0f;
+static constexpr float WIDTH = 800.0f;
+static constexpr float HEIGHT = 600.0f;
 
 int main() {
     win = SDL_CreateWindow("GPU-triangle (basic)",
