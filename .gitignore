@@ -8,3 +8,4 @@ scripts/scene_gen/venv
 !scripts/model_loader/raw/.gitkeep
 todo.txt
 src/game/imgui.ini
+external/yyjson/
