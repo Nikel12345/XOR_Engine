@@ -115,6 +115,7 @@ static void WriteSpd(yyjson_mut_doc* doc, yyjson_mut_val* obj, const ShaderProgr
 	yyjson_mut_obj_add_int (doc, obj, "primitive_type", (int)d.primitive_type);
 	yyjson_mut_obj_add_bool(doc, obj, "depth_test",     d.depth_test);
 	yyjson_mut_obj_add_bool(doc, obj, "depth_write",    d.depth_write);
+	yyjson_mut_obj_add_int (doc, obj, "depth_compare",  (int)d.depth_compare_op);
 	yyjson_mut_obj_add_bool(doc, obj, "stencil_test",   d.stencil_test);
 	yyjson_mut_obj_add_bool(doc, obj, "color_blend",    d.color_blend);
 	yyjson_mut_obj_add_bool(doc, obj, "bias_enable",    d.rasterizer_bias.enable_depth_bias);
@@ -176,6 +177,7 @@ static ShaderProgramDescription ReadSpd(yyjson_val* obj) {
 	d.primitive_type = (SDL_GPUPrimitiveType)JsonInt(obj, "primitive_type", (int)d.primitive_type);
 	d.depth_test   = JsonBool(obj, "depth_test",   d.depth_test);
 	d.depth_write  = JsonBool(obj, "depth_write",  d.depth_write);
+	d.depth_compare_op = (SDL_GPUCompareOp)JsonInt(obj, "depth_compare", (int)d.depth_compare_op);
 	d.stencil_test = JsonBool(obj, "stencil_test", d.stencil_test);
 	d.color_blend  = JsonBool(obj, "color_blend",  d.color_blend);
 	d.rasterizer_bias.enable_depth_bias        = JsonBool(obj, "bias_enable",   false);
@@ -634,6 +636,21 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 			ptr_ms = Prof::MsSince(t_ptr);
 
 			object_manager->SetSceneState(scene_name, true);
+
+			// Скайбокс — производная сущность каждой загруженной сцены (GeneratedComponent →
+			// не сериализуется; replace-on-load пересоздаёт её здесь же). Positions НЕТ
+			// намеренно: transformless-дровабл (PIB=-1 → безусловный скаттер), позицию строит
+			// _skybox_vs из камерного буфера. Подхватится полной пересборкой батчей ниже.
+			ModelData* sky_model = (*model_manager)["skybox_cube"];
+			Material* sky_material = material_manager->GetMaterial("_skybox");
+			if (sky_model && sky_material) {
+				engine_context->CreateEntity(scene_name,
+					MaterialComponent{ { sky_material }, { "_skybox" } },
+					ModelComponent{ sky_model, "skybox_cube" },
+					DrawComponent{},
+					GeneratedComponent{});
+			}
+			else SDL_Log("LoadScene: skybox defaults missing (model/material) — skybox skipped");
 		}
 	}
 

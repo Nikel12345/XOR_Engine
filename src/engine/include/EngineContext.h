@@ -79,11 +79,10 @@ public:
 
 	template<typename... Components>
 	Entity CreateEntity(const std::string& scene_name, Components&&... comps) {
-		// Рисуемость теперь определяет DrawComponent (см. BatchBuilder). Инкремент в
-		// батчи имеет смысл лишь для рисуемого энтити с моделью и трансформом.
+		// Рисуемость теперь определяет DrawComponent (см. BatchBuilder). Positions НЕ требуется:
+		// transformless-дровабл (скайбокс) батчится с PIB=-1, позицию строит его VS.
 		constexpr bool needs_pib = contains_type_v<DrawComponent, Components...>
-			&& contains_type_v<ModelComponent, Components...>
-			&& contains_type_v<PositionProxy16, Components...>;
+			&& contains_type_v<ModelComponent, Components...>;
 
 		Entity entity = object_manager->CreateEntity(scene_name, std::forward<Components>(comps)...);
 

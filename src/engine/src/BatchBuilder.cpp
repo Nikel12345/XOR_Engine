@@ -378,12 +378,14 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
         entities_to_delete.clear();
     }
 
-    // Отбор по маркеру DrawComponent (+Positions для матрицы). Геометрия/материал
-    // не часть сигнатуры — тянем через Has/GetComponent. Голый рисуемый энтити без
-    // модели/материала получит лишь трансформ-строку и не батчится.
-    om->ForEach<DrawComponent, Positions>(
+    // Отбор по маркеру DrawComponent — Positions НЕ требуется (тот же критерий, что в
+    // ApplyIncremental). Transformless-дровабл (напр. скайбокс: его VS строит позицию из
+    // камеры) батчится как все, но строки трансформа не имеет — StorePIB пишет ему -1,
+    // каллинг скаттерит такую запись безусловно. Геометрия/материал не часть сигнатуры —
+    // тянем через Has/GetComponent.
+    om->ForEach<DrawComponent>(
         scene,
-        [&](Entity entity, const DrawComponent& draw, const Positions&)
+        [&](Entity entity, const DrawComponent& draw)
     {
         if (!draw.visible) return;  // скрытые (выключенные в UI debug-рамки) в дерево не идут
         if (!om->Has<ModelComponent>(scene, entity) || !om->Has<MaterialComponent>(scene, entity))

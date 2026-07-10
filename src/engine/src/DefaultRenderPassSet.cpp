@@ -56,7 +56,7 @@ namespace DefaultRenderPassNamespace
             // Cube-атлас создаётся ОТДЕЛЬНО (его характер задаёт tci-пресет EnvCube), а нарезку
             // 4×3 креста на 6 граней и заливку делает ctx->CreateCubeMapTexture. faceSize пресета —
             // единственный источник истины о разрешении env-куба.
-            TextureAtlas* cube = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(200), env_sampler);
+            TextureAtlas* cube = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(512), env_sampler);
 
             // Путь — ассет игры (CWD = src/game); временно здесь, позже окружение задаёт игра.
             if (cube && ctx->CreateCubeMapTexture("_env_skybox", "env_skybox", "../engine/textures/skybox.png"))
@@ -90,11 +90,11 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
 	BatchBuilder* bb = ctx->GetBatchBuilder();   // слепок раскладки: num_commands/num_instances слота
 
     auto shadow_sampler = tm->GetSampler(DefaultSamplersNames::DEFAULT_SHADOW_SAMPLER);
-    auto shadow_tci = TexturePresets::GetCreateInfo(TexturePreset::Depth_FlatArray1024_8Layers);
+    auto shadow_tci = TexturePresets::GetCreateInfo(TexturePreset::Depth_FlatArray2048_8Layers);
     uint32_t max_layers = shadow_tci.layer_count_or_depth;
 
     shadow_depth_flat_array = tm->CreateTextureAtlas(SHADOW_DEPTH_FLAT_ARRAY, shadow_tci, shadow_sampler);
-    TextureAtlas* shadow_temp = tm->CreateTextureAtlas("shadow_depth_single_temp", TexturePresets::GetCreateInfo(TexturePreset::TempDepth1024), shadow_sampler);
+    TextureAtlas* shadow_temp = tm->CreateTextureAtlas("shadow_depth_single_temp", TexturePresets::GetCreateInfo(TexturePreset::TempDepth2048), shadow_sampler);
 
     RenderPassTexturesInfo shadow_rptd{};
     shadow_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, shadow_temp->format);

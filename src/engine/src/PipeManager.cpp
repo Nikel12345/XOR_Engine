@@ -105,7 +105,7 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp, Sha
     pci.depth_stencil_state.enable_depth_test = sp->spd.depth_test;
     pci.depth_stencil_state.enable_depth_write = sp->spd.depth_write;
     pci.depth_stencil_state.enable_stencil_test = sp->spd.stencil_test;
-    pci.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pci.depth_stencil_state.compare_op = sp->spd.depth_compare_op;
 
 
     const auto& color_formats = sp->associated_render_pass->renderPassTexsData.color_formats;

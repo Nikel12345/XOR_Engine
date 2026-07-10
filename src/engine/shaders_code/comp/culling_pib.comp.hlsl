@@ -8,7 +8,7 @@
 // indirect[c*total_commands + k].num_instances += 1 (атомик). c = block_base + b, Cameras[b] — b-я
 // камера группы. block_stride = N (всего PIB-записей). first_instance/num_instances @16/@4 в команде.
 
-StructuredBuffer<int>     PIB          : register(t0, space0);   // запись -> строка трансформа (-1 = протухшая)
+StructuredBuffer<int>     PIB          : register(t0, space0);   // запись -> строка трансформа (-1 = transformless, всегда видим)
 StructuredBuffer<uint>    EntityToCmd  : register(t1, space0);   // запись -> глобальный индекс команды k
 StructuredBuffer<float4>  BoundSpheres : register(t2, space0);   // по строкам: xyz центр (model), w радиус; w<0 — нет модели
 struct CameraData { float4x4 view; float4x4 proj; };
@@ -59,14 +59,17 @@ void main(uint3 tid : SV_DispatchThreadID)
     if (local >= range_count) return;
     uint i = range_start + local;               // запись в СВОЁМ диапазоне прохода
 
-    int row = PIB[i];
-    if (row < 0) return;                        // протухшая запись — не рисуем
+    int row = PIB[i];   // -1 = transformless (нет Positions): строки/сферы нет — видим всегда
 
     uint k = EntityToCmd[i];
     uint first_instance_k = Indirect.Load(k * CMD_STRIDE + 16u); // +16 = first_instance (одинаков во всех блоках)
 
     // Мировые центр/радиус — один раз (не зависят от камеры). w<0 → нет геометрии, видим всегда.
-    float4 sphere = BoundSpheres[row];
+    // row<0 идёт тем же путём: сфера-заглушка w=-1 → безусловный скаттер во все камеры группы
+    // (-1 уезжает в out_pib — читатели трактуют его как вырожденный, а transformless-VS позицию
+    // строит сам и out_pib не читает). [branch] обязателен: flatten прочитал бы BoundSpheres[-1].
+    float4 sphere = float4(0.0, 0.0, 0.0, -1.0);
+    [branch] if (row >= 0) sphere = BoundSpheres[row];
     bool has_geom = (sphere.w >= 0.0);
     float3 center = float3(0, 0, 0);
     float  radius = 0.0;
