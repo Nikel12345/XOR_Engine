@@ -194,10 +194,10 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 	std::filesystem::create_directories(dir, ec);   // папка сцены (уже существует — не ошибка)
 	if (ec) { SDL_Log("SaveScene: cannot create dir '%s' (%s)", dir.c_str(), ec.message().c_str()); return; }
 
-	// ── ECS → scene.scene (как раньше, формат om не меняем) ──
+	// ── ECS → scene.json (колоночный архетип-формат, см. ObjectManager::SaveScene) ──
 	{
 		const std::string text = object_manager->SaveScene(scene);
-		const std::string path = dir + "/scene.scene";
+		const std::string path = dir + "/scene.json";
 		std::ofstream f(path, std::ios::binary);
 		if (!f) { SDL_Log("SaveScene: cannot open '%s' for write", path.c_str()); return; }
 		f << text;
@@ -365,7 +365,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 	// ── Тайминг фаз загрузки (диагностика 5-секундной загрузки 100k). Load — событие
 	// разовое, поэтому не через кадровый Prof, а прямым SDL_Log сразу после. ──
 	const auto t_read = Prof::Clock::now();
-	const std::string scene_path = dir + "/scene.scene";
+	const std::string scene_path = dir + "/scene.json";
 	std::ifstream f(scene_path, std::ios::binary | std::ios::ate);   // ate: сразу в конец — узнать размер
 	if (!f) { SDL_Log("LoadScene: cannot open '%s'", scene_path.c_str()); return; }
 	// Читаем ФАЙЛ ОДНОЙ аллокацией прямо в строку (без stringstream → без тройной копии
@@ -521,6 +521,8 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 					const ShaderProgramDescription spd = ReadSpd(yyjson_obj_get(e, "spd"));
 
 					// Merge-upsert: занятое имя = delete+create (кэш пайплайна по sp* — снять ДО).
+					// push_func НЕ переносим: код-байндинги пере-привязывает bind_shader_functions
+					// в конце LoadScene (перенос по имени ломался бы на переименовании sp).
 					auto& progs = sm->GetShaderPrograms();
 					if (auto it = progs.find(name); it != progs.end()) {
 						pipe_manager->InvalidatePipeline(it->second.get(), batch_builder->RebuildEpoch());
@@ -634,6 +636,10 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 			object_manager->SetSceneState(scene_name, true);
 		}
 	}
+
+	// Пере-привязка код-байндингов (push_func) к загруженным sp — колбэк игры (у неё живут
+	// лямбды). После КАЖДОЙ загрузки, в т.ч. UI-рантаймовой: sp из манифеста пересозданы голыми.
+	if (bind_shader_functions) bind_shader_functions();
 
 	batch_builder->SetDirtyBatches(true);
 	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), dir.c_str());

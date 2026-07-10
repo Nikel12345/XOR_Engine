@@ -4,10 +4,11 @@
 #include "ModelData.h"
 #include "ComponentSerializer.h"
 #include "EngineProfiler.h"   // Prof::Clock/MsSince — тайминг фаз парса (без GPU-зависимостей, безопасно для ECS-ядра)
-#include <algorithm>   // std::remove (отцепление ребёнка), std::sort/std::unique (сигнатура)
-#include <charconv>    // std::from_chars — быстрый парс id сущности/родителя без locale
-#include <cstring>     // memchr/memcmp — посимвольный сканер текста сцены
-#include <string_view> // токены-срезы в исходный буфер (без копий)
+#include <algorithm>   // std::remove (отцепление ребёнка), std::sort (ключ-сигнатура архетипа)
+#include <cstring>     // strcmp — отсев служебных ключей count/entities
+#include <cstdlib>     // free — строка от yyjson_mut_write
+#include <set>         // std::set<type_index> — ключ архетипа в scene->archetypes
+#include <unordered_map>   // old_to_new (файл-локальный id → Entity)
 // RenderManager.h/PipeManager.h не использовались — убраны, чтобы ECS-ядро
 // (EngineEcs) не тянуло GPU-заголовки.
 
@@ -130,38 +131,52 @@ SceneData* ObjectManager::GetScene(const SceneName& name)
 // ============================================================
 std::string ObjectManager::SaveScene(SceneData* scene)
 {
-    std::string out;
-    if (!scene) return out;
+    if (!scene) return {};
     auto& reg = ComponentSerializerRegistry::Get();
 
-    for (auto& [sig, arch] : scene->archetypes) {
-        // Сгенерированные кодом сущности (debug-рамки и т.п.) в файл не идут — их пересоздаст
-        // генератор при загрузке. Маркер — GeneratedComponent (НЕ EditorHidden: тот лишь
-        // прячет из списка UI и к персистентности отношения не имеет).
-        if (arch.components.count(std::type_index(typeid(GeneratedComponent)))) continue;
+    // Верх — объект; ключ = сам архетип (отсортированные имена компонентов через запятую,
+    // порядконезависимо). Внутри: count + колонка entities (файл-локальные id) + компоненты-колонки.
+    yyjson_mut_doc* doc = yyjson_mut_doc_new(nullptr);
+    yyjson_mut_val* root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
 
-        for (size_t i = 0; i < arch.entities.size(); ++i) {
-            std::string body;
-            for (auto& [tindex, arr] : arch.components) {
-                const ComponentSerializer* h = reg.ByType(tindex);
-                if (!h) continue;                       // тип без сериалайзера — пропускаем
-                std::string payload;
-                h->save(arch, i, payload);
-                body += "  ";
-                body += h->name;
-                body += " =";
-                if (!payload.empty()) { body += ' '; body += payload; }
-                body += '\n';
-            }
-            if (!body.empty()) {                        // нечего сохранять — нет и блока
-                // id сущности в заголовке — стабильный ключ для ссылок Parent (ремап при загрузке).
-                out += "[entity] ";
-                out += std::to_string(arch.entities[i]);
-                out += '\n';
-                out += body;
-            }
+    for (auto& [sig, arch] : scene->archetypes) {
+        // Сгенерированные кодом (debug-рамки и т.п.) в файл не идут — пересоздаст генератор.
+        if (arch.components.count(std::type_index(typeid(GeneratedComponent)))) continue;
+        const size_t count = arch.entities.size();
+        if (count == 0) continue;
+
+        std::vector<const ComponentSerializer*> hs;
+        std::vector<std::string> names;
+        for (auto& [tindex, arr] : arch.components) {
+            const ComponentSerializer* h = reg.ByType(tindex);
+            if (h) { hs.push_back(h); names.push_back(h->name); }
+        }
+        if (hs.empty()) continue;
+
+        std::sort(names.begin(), names.end());   // порядконезависимый ключ архетипа
+        std::string key;
+        for (size_t i = 0; i < names.size(); ++i) { if (i) key += ','; key += names[i]; }
+
+        yyjson_mut_val* block = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add(root, yyjson_mut_strcpy(doc, key.c_str()), block);   // ключ динамический → strcpy
+        yyjson_mut_obj_add_uint(doc, block, "count", count);
+
+        // entities — файл-локальные id, всегда (нужны для ремапа Parent на загрузке).
+        yyjson_mut_val* ents = yyjson_mut_obj_add_arr(doc, block, "entities");
+        for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_uint(doc, ents, arch.entities[i]);
+
+        for (const ComponentSerializer* h : hs) {
+            yyjson_mut_val* comp = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add(block, yyjson_mut_strcpy(doc, h->name.c_str()), comp);
+            h->save(arch, count, doc, comp);   // колонки по полям
         }
     }
+
+    char* js = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, nullptr);
+    std::string out = js ? std::string(js) : std::string{};
+    if (js) free(js);
+    yyjson_mut_doc_free(doc);
     return out;
 }
 
@@ -172,166 +187,81 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
                                                   : CreateScene(scene_name);
     auto& reg = ComponentSerializerRegistry::Get();
 
-    // Пул компонентов текущей сущности. Переиспользуется между сущностями: n_comps
-    // сбрасывается в 0 (а не clear()), поэтому внутренние векторы токенов сохраняют
-    // ёмкость — на группе одинаковых архетипов аллокаций почти нет. Токены — это
-    // string_view В ИСХОДНЫЙ text (жив всю функцию), без копий строк.
-    struct Pending { const ComponentSerializer* h = nullptr; std::vector<std::string_view> tokens; };
-    std::vector<Pending> comps;
-    size_t   n_comps = 0;
-    uint32_t cur_id = 0;
-    bool     have_block = false;
-    uint32_t synthetic = 0xFFFF0000u;                    // id для блоков без явного (back-compat)
-
-    // Кэш «последняя сигнатура → архетип». В файле сущности идут ГРУППАМИ своего
-    // архетипа, поэтому подряд идущие дают тот же набор типов. Пока сигнатура не
-    // сменилась — переиспользуем указатель, минуя пересборку std::set и поиск в
-    // std::map (это и был главный пожиратель pass1). Указатель на Archetype стабилен:
-    // узлы std::map не переезжают при вставке новых архетипов (как и в остальном ECS).
-    std::vector<std::type_index> last_sig;               // отсортирован; сравнивается с текущим
-    std::vector<std::type_index> cur_sig;
-    Archetype* last_arch = nullptr;
-
-    std::unordered_map<uint32_t, Entity> old_to_new;     // id из файла → новый Entity
     std::vector<Entity> created;
+    std::unordered_map<uint32_t, Entity> old_to_new;     // файл-локальный id → новый Entity
 
-    // Предпроход: считаем заголовки (строки, начинающиеся с '[') — точная оценка числа
-    // сущностей. Резервируем карты/векторы, чтобы 200k вставок не давали ре-хэшей.
-    // Один линейный проход по 43 МБ ≈ единицы мс на фоне парса.
-    size_t est_entities = 0;
+    const auto t_pass1 = Prof::Clock::now();   // фаза 1: парс json + сборка архетипов
+    yyjson_doc* doc = yyjson_read(text.data(), text.size(), 0);
+    if (!doc) { SDL_Log("LoadScene: scene.json parse failed"); return created; }
+    yyjson_val* root = yyjson_doc_get_root(doc);
+    if (!root || !yyjson_is_obj(root)) { SDL_Log("LoadScene: scene.json root is not object"); yyjson_doc_free(doc); return created; }
+
+    // Оценка числа сущностей (сумма count по архетипам) — reserve, чтобы вставки не ре-хэшили.
+    size_t est = 0;
     {
-        const char* c = text.data();
-        const char* e = c + text.size();
-        bool bol = true;
-        for (; c < e; ++c) {
-            if (bol && *c == '[') ++est_entities;
-            bol = (*c == '\n');
-        }
+        size_t ak, am; yyjson_val *an, *ab;
+        yyjson_obj_foreach(root, ak, am, an, ab) est += (size_t)yyjson_get_uint(yyjson_obj_get(ab, "count"));
     }
-    created.reserve(est_entities);
-    old_to_new.reserve(est_entities * 2);
-    scene->entity_to_archetype.reserve(scene->entity_to_archetype.size() + est_entities);
-    scene->entity_to_index.reserve(scene->entity_to_index.size() + est_entities);
+    created.reserve(est);
+    old_to_new.reserve(est * 2);
+    scene->entity_to_archetype.reserve(scene->entity_to_archetype.size() + est);
+    scene->entity_to_index.reserve(scene->entity_to_index.size() + est);
 
-    auto flush = [&]() {
-        if (!have_block) { n_comps = 0; return; }
-        have_block = false;
-        if (n_comps == 0) return;
+    // Проход 1: по архетипам — создать count сущностей, залить колонки компонентов.
+    {
+        size_t ak, am; yyjson_val *aname, *block;
+        yyjson_obj_foreach(root, ak, am, aname, block) {
+            if (!yyjson_is_obj(block)) continue;
 
-        // Сигнатура = отсортированный уникальный набор sig_type компонентов.
-        cur_sig.clear();
-        for (size_t i = 0; i < n_comps; ++i) cur_sig.push_back(comps[i].h->sig_type);
-        std::sort(cur_sig.begin(), cur_sig.end());
-        cur_sig.erase(std::unique(cur_sig.begin(), cur_sig.end()), cur_sig.end());
-
-        Archetype* arch;
-        if (last_arch && cur_sig == last_sig) {
-            arch = last_arch;                              // та же группа — без set/map
-        }
-        else {
-            std::set<std::type_index> sig(cur_sig.begin(), cur_sig.end());
-            arch = &scene->archetypes[sig];
-            last_sig = cur_sig;
-            last_arch = arch;
-        }
-
-        Entity e = scene->next_entity_id++;
-        arch->entities.push_back(e);
-        for (size_t i = 0; i < n_comps; ++i)
-            comps[i].h->load(*arch, comps[i].tokens);      // ensure_component<T> + дописать
-        scene->entity_to_archetype[e] = arch;
-        scene->entity_to_index[e] = arch->entities.size() - 1;
-
-        old_to_new[cur_id] = e;
-        created.push_back(e);
-        n_comps = 0;
-    };
-
-    // Взять/переиспользовать слот компонента (векторы токенов сохраняют ёмкость).
-    auto push_comp = [&](const ComponentSerializer* h) -> std::vector<std::string_view>& {
-        if (n_comps == comps.size()) comps.emplace_back();
-        Pending& pc = comps[n_comps++];
-        pc.h = h;
-        pc.tokens.clear();
-        return pc.tokens;
-    };
-
-    auto is_space = [](char c) { return c == ' ' || c == '\t' || c == '\r'; };
-
-    const auto t_pass1 = Prof::Clock::now();   // фаза 1: парс текста + сборка архетипов
-
-    // Однопроходный посимвольный сканер по всему буферу — без istringstream/getline,
-    // без substr и без промежуточных std::string. Строки ограничиваем memchr('\n').
-    const char* p   = text.data();
-    const char* end = p + text.size();
-    while (p < end) {
-        const char* nl       = static_cast<const char*>(std::memchr(p, '\n', end - p));
-        const char* line_end = nl ? nl : end;
-        const char* next     = nl ? nl + 1 : end;
-
-        // Trim строки → [a, b).
-        const char* a = p;
-        const char* b = line_end;
-        while (a < b && is_space(*a)) ++a;
-        while (b > a && is_space(b[-1])) --b;
-        p = next;
-
-        if (a == b) continue;                 // пустая
-        if (*a == '#') continue;              // комментарий
-
-        // Заголовок сущности: "[entity] <id>"
-        if (b - a >= 8 && std::memcmp(a, "[entity]", 8) == 0) {
-            flush();
-            const char* q = a + 8;
-            while (q < b && is_space(*q)) ++q;
-            if (q < b) {
-                uint32_t id = 0;
-                std::from_chars(q, b, id);
-                cur_id = id;
+            // Компоненты архетипа = ключи блока, кроме служебных count/entities.
+            std::vector<const ComponentSerializer*> hs;
+            std::set<std::type_index> sig;
+            {
+                size_t ck, cm; yyjson_val *cname, *cval;
+                yyjson_obj_foreach(block, ck, cm, cname, cval) {
+                    const char* nm = yyjson_get_str(cname);
+                    if (!nm || !std::strcmp(nm, "count") || !std::strcmp(nm, "entities")) continue;
+                    const ComponentSerializer* h = reg.ByName(nm);
+                    if (h) { hs.push_back(h); sig.insert(h->sig_type); }
+                }
             }
-            else {
-                cur_id = synthetic++;
+            yyjson_val* ents  = yyjson_obj_get(block, "entities");
+            yyjson_val* cnt_v = yyjson_obj_get(block, "count");
+            size_t count = cnt_v ? (size_t)yyjson_get_uint(cnt_v) : (ents ? yyjson_arr_size(ents) : 0);
+            if (count == 0 || hs.empty()) continue;
+
+            Archetype& arch = scene->archetypes[sig];
+
+            // Файл-локальные id (для ремапа Parent). Создаём count сущностей ДО заливки колонок:
+            // индексы в arch.entities совпадут с порядком add в load каждого компонента.
+            std::vector<uint32_t> ids(count, 0);
+            if (ents) { size_t i, m; yyjson_val* v; yyjson_arr_foreach(ents, i, m, v) { if (i >= count) break; ids[i] = (uint32_t)yyjson_get_uint(v); } }
+            for (size_t i = 0; i < count; ++i) {
+                Entity e = scene->next_entity_id++;
+                arch.entities.push_back(e);
+                scene->entity_to_archetype[e] = &arch;
+                scene->entity_to_index[e] = arch.entities.size() - 1;
+                old_to_new[ids[i]] = e;
+                created.push_back(e);
             }
-            have_block = true;
-            continue;
-        }
 
-        if (!have_block) continue;
-
-        // Строка компонента: "<Name> = <tokens...>"
-        const char* eq       = static_cast<const char*>(std::memchr(a, '=', b - a));
-        const char* name_end = eq ? eq : b;
-        while (name_end > a && is_space(name_end[-1])) --name_end;   // trim имени справа
-
-        const ComponentSerializer* h = reg.ByName(std::string(a, name_end));  // имя короткое → SSO
-        if (!h) continue;                                                     // незнакомый компонент
-
-        std::vector<std::string_view>& toks = push_comp(h);
-        if (eq) {
-            const char* q = eq + 1;
-            while (q < b) {
-                while (q < b && is_space(*q)) ++q;
-                if (q >= b) break;
-                const char* ts = q;
-                while (q < b && !is_space(*q)) ++q;
-                toks.emplace_back(ts, static_cast<size_t>(q - ts));
+            for (const ComponentSerializer* h : hs) {
+                yyjson_val* comp = yyjson_obj_get(block, h->name.c_str());
+                h->load(arch, comp, count);   // ensure_component<T> + ровно count add
             }
         }
     }
-    flush();
     const double pass1_ms = Prof::MsSince(t_pass1);
 
-    // Проход 2: ParentComponent сейчас держит СТАРЫЙ id из файла. Ремапим в новый Entity
-    // и заполняем обратный индекс scene->children (CreateEntity делает это при создании —
-    // здесь путь иной, поэтому вручную). Родитель уже создан: все сущности есть после прохода 1.
-    const auto t_pass2 = Prof::Clock::now();   // фаза 2: ремап родителей + обратный индекс
+    // Проход 2: ParentComponent держит файл-локальный old id. Ремапим в новый Entity и заполняем
+    // обратный индекс scene->children. Все сущности уже есть после прохода 1 — глубина/циклы не важны.
+    const auto t_pass2 = Prof::Clock::now();
     for (Entity e : created) {
         if (!Has<ParentComponent>(scene, e)) continue;
         ParentComponent& pc = GetComponent<ParentComponent>(scene, e);
         auto it = old_to_new.find(pc.parent);
         if (it == old_to_new.end()) {
-            // Родитель не сохранён (напр. был скрыт EditorHidden). Висячий id уронил бы
-            // трансформ-модуль — делаем самоссылку (существует, без падения) и логируем.
+            // Родитель не сохранён (напр. был скрыт/Generated). Самоссылка — существует, без падения.
             SDL_Log("LoadScene: parent id %u unresolved for entity %u — hierarchy dropped", pc.parent, e);
             pc.parent = e;
             continue;
@@ -340,6 +270,8 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
         scene->children[pc.parent].push_back(e);
     }
     const double pass2_ms = Prof::MsSince(t_pass2);
+
+    yyjson_doc_free(doc);
 
     SDL_Log("  ObjectManager::LoadScene: pass1(parse+build)=%.1f  pass2(parent remap)=%.1f ms  [%zu ent, %zu archetypes]",
         pass1_ms, pass2_ms, created.size(), scene->archetypes.size());

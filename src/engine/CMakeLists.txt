@@ -72,6 +72,7 @@ target_include_directories(EngineEcs PRIVATE
 )
 target_link_libraries(EngineEcs PUBLIC
     "${CMAKE_SOURCE_DIR}/external/SDL3/lib/libSDL3.dll.a"
+    yyjson                                                  # scene.json: колоночная сериализация ECS (ComponentSerializer.h раскрывает yyjson-типы)
 )
 target_precompile_headers(EngineEcs PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include/PCH.h

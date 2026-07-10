@@ -5,21 +5,22 @@
 // пара функций {save, load}, замкнутых на конкретный T. Открытая регистрация: движок
 // регистрирует свои компоненты здесь, верхние слои (физика/игра) могут добавить свои.
 #include <string>
-#include <string_view>
 #include <vector>
 #include <typeindex>
 #include <unordered_map>
 #include "BaseComponents.h"   // Archetype, ComponentArray, компоненты
+#include "yyjson.h"           // scene.json колоночный: save/load пишут/читают колонки полей
 
 struct ComponentSerializer {
-    std::string     name;       // имя в файле, напр. "Model"
+    std::string     name;       // имя в файле = ключ объекта компонента, напр. "Model"
     std::type_index sig_type;   // type_index, идущий в сигнатуру архетипа (для SoA — тип хранилища)
 
-    // Память → файл: прочитать строку i архетипа, дописать токены полезной нагрузки в out.
-    void (*save)(Archetype& arch, size_t i, std::string& out);
-    // Файл → память: распарсить токены, ensure_component<T> на архетипе и дописать значение.
-    // Токены — string_view В ИСХОДНЫЙ буфер сцены (жив на всё время загрузки): без копий строк.
-    void (*load)(Archetype& arch, const std::vector<std::string_view>& tokens);
+    // Память → json: записать ВЕСЬ компонент архетипа (count строк) КОЛОНКАМИ по полям в comp
+    // (объект компонента). Для SoA это прямой сброс массива поля; для AoS — колонка на поле.
+    void (*save)(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp);
+    // json → память: ensure_component<T> и добавить РОВНО count строк, читая поля-колонки из comp
+    // (nullptr, если компонент без данных-тег). Недостающие/короткие колонки → дефолт (count-гвард).
+    void (*load)(Archetype& arch, yyjson_val* comp, size_t count);
 };
 
 class ComponentSerializerRegistry {

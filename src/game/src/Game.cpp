@@ -178,12 +178,18 @@ SDL_AppResult Game::MainInit()
 
 
 
+    // Пере-привязку push-констант к sp движок зовёт сам В КОНЦЕ каждой загрузки (в т.ч.
+    // UI-рантаймовой): sp из манифеста пересозданы голыми, а перенос по имени ломался бы
+    // на переименовании. Регистрируем ДО первого LoadScene.
+    engine->SetBindShaderFunctions([this] { DefaultShaderProgramSet::BindDefaultPushFuncs(ctx); });
+
     ctx->RegisterGenerator("main_menu", [this] { CreateDebugColliders(); });
-    ctx->LoadScene("main_menu", "saved_scene");   // папка сцены (scene.scene + ресурсы внутри)
+    ctx->LoadScene("main_menu", "saved_scene");   // папка сцены (scene.json + ресурсы внутри)
 
     debug_collider_material = ctx->GetMaterialManager()->GetMaterial("debug_collider");
 
-    DefaultShaderProgramSet::BindDefaultPushFuncs(ctx);
+    // BindDefaultPushFuncs здесь больше не зовём: движок дёргает зарегистрированный колбэк
+    // сам в конце LoadScene (см. SetBindShaderFunctions выше).
 
     {
         MaterialManager* mm = ctx->GetMaterialManager();

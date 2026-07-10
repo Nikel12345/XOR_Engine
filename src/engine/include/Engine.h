@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>  // bind_shader_functions — колбэк пере-привязки push после LoadScene
 #include <string>
 #include "config.h"    // BUFFERING_LEVEL — размер pending_upload_tbs
 #include "Aliases.h"   // SceneName
@@ -65,12 +66,17 @@ public:
 	LightDataModule* GetLightDataModule() const { return light_data_module; }
 
 
-    // Сохранение/загрузка сцены-папки (dir): scene.scene (ECS через om) + файлы ресурсов рядом
+    // Сохранение/загрузка сцены-папки (dir): scene.json (ECS через om) + файлы ресурсов рядом
     // (tm/mm/sm — подключаются поэтапно). Публичная точка входа — ctx->Save/LoadScene (делегирует
     // сюда): оркестрация по менеджерам — забота Engine, а не контекста. Порядок load:
     // ресурсы (merge-upsert) → ECS (replace-on-load) → фикс-ап указателей → пересборка батчей.
     void SaveScene(const SceneName& scene_name, const std::string& dir);
     void LoadScene(const SceneName& scene_name, const std::string& dir);
+
+    // Колбэк пере-привязки код-байндингов (push_func и т.п.) к sp ПОСЛЕ каждой загрузки сцены.
+    // Регистрирует игра (у неё живут лямбды), зовёт LoadScene в конце: код-байндинги не
+    // сериализуются, а перенос со старой sp по имени ломался бы на переименовании.
+    void SetBindShaderFunctions(std::function<void()> fn) { bind_shader_functions = std::move(fn); }
 
     //void Iterate();
     void PrepareFunc(uint8_t idx);
@@ -142,6 +148,7 @@ private:
     BoundSphereDataModule* bound_sphere_data_module = nullptr;
 
 	EngineContext* engine_context;
+	std::function<void()> bind_shader_functions;   // см. SetBindShaderFunctions
     std::atomic<bool> running = true;
     ImDrawData* imgui_draw_data = nullptr;
 

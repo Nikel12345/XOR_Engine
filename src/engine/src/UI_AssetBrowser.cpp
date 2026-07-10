@@ -29,9 +29,25 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
 
     if (ImGui::BeginTabBar("AssetTabs"))
     {
+        // SelKind → иконка-затычка плитки (цвет + рисунок по типу ассета).
+        auto icon_of = [](SelKind k) {
+            switch (k) {
+            case SelKind::Texture:  return AssetIcon::Texture;
+            case SelKind::Model:    return AssetIcon::Model;
+            case SelKind::Material: return AssetIcon::Material;
+            case SelKind::Shader:   return AssetIcon::Shader;
+            case SelKind::Compute:  return AssetIcon::Compute;
+            case SelKind::Vsd:      return AssetIcon::Vsd;
+            case SelKind::Fsd:      return AssetIcon::Fsd;
+            case SelKind::Csd:      return AssetIcon::Csd;
+            default:                return AssetIcon::Generic;
+            }
+        };
+
         // Общая раскладка плиток: переносим ряд, когда следующая не влезает по ширине.
         auto tiles = [&](SelKind kind, bool withNew, auto&& onNew, auto&& for_each_name)
         {
+            const AssetIcon icon = icon_of(kind);
             float avail = ImGui::GetContentRegionAvail().x;
             int per_row = std::max(1, static_cast<int>(avail / (tile + pad)));
             int col = 0;
@@ -47,7 +63,7 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
             {
                 if (!g_show_internal && IsInternalName(name)) return;   // фильтр служебных
                 bool selected = (g_sel.kind == kind && g_sel.name == name);
-                if (AssetTile(name.c_str(), selected, tile)) {
+                if (AssetTile(name.c_str(), selected, tile, icon)) {
                     if (selected) g_sel = Selection{};                                 // повторный клик — снять
                     else { g_sel = Selection{}; g_sel.kind = kind; g_sel.name = name; }
                 }

@@ -1,8 +1,8 @@
 #include "PCH.h"
 #include "ComponentSerializer.h"
-#include <cstdio>     // snprintf (save-путь)
-#include <charconv>   // std::from_chars — парс токенов (string_view) без locale/аллокаций
-#include <string_view>
+#include <cstdio>     // snprintf — имена колонок m0..m15
+#include <string>
+#include <vector>
 
 // ============================================================
 //  Реестр
@@ -35,301 +35,357 @@ const ComponentSerializer* ComponentSerializerRegistry::ByType(std::type_index t
 }
 
 // ============================================================
-//  Сериалайзеры встроенных компонентов
-//  save: читает строку i из массива архетипа (тип знаем — он замкнут в функции).
-//  load: ensure_component<T> + дописать значение (как одна ветка add_components).
+//  Колоночные сериалайзеры компонентов (scene.json)
+//  save: пишет ВЕСЬ компонент архетипа колонками по полям (count строк).
+//  load: ensure_component<T> + РОВНО count add'ов, читая колонки по полю.
 // ============================================================
 namespace {
 
-// Токены — string_view в исходный буфер; парсим from_chars (без locale, без c_str/аллокаций).
-// На неразобранном токене значение остаётся = fallback (from_chars не трогает out при ошибке).
-float ParseFloat(const std::vector<std::string_view>& t, size_t k, float fallback = 0.0f)
+// ---- save: колонка из SoA-массива поля (P.member[] — уже готовая колонка) ----
+#define SOA_COL(P, member) do { \
+    yyjson_mut_val* _a = yyjson_mut_obj_add_arr(doc, comp, #member); \
+    for (size_t _i = 0; _i < count; ++_i) yyjson_mut_arr_add_real(doc, _a, (double)(P).member[_i]); \
+} while (0)
+
+// ---- save: колонка AoS-поля (expr использует локальный `arr` и индекс `_i`) ----
+#define AOS_R(name, expr) do { \
+    yyjson_mut_val* _a = yyjson_mut_obj_add_arr(doc, comp, name); \
+    for (size_t _i = 0; _i < count; ++_i) yyjson_mut_arr_add_real(doc, _a, (double)(expr)); \
+} while (0)
+#define AOS_U(name, expr) do { \
+    yyjson_mut_val* _a = yyjson_mut_obj_add_arr(doc, comp, name); \
+    for (size_t _i = 0; _i < count; ++_i) yyjson_mut_arr_add_uint(doc, _a, (uint64_t)(expr)); \
+} while (0)
+#define AOS_B(name, expr) do { \
+    yyjson_mut_val* _a = yyjson_mut_obj_add_arr(doc, comp, name); \
+    for (size_t _i = 0; _i < count; ++_i) yyjson_mut_arr_add_bool(doc, _a, (bool)(expr)); \
+} while (0)
+
+// ---- load: число из json (int/uint/real/bool) с фолбэком ----
+double GetNum(yyjson_val* v, double fb)
 {
-    if (k >= t.size()) return fallback;
-    float v = fallback;
-    std::from_chars(t[k].data(), t[k].data() + t[k].size(), v);
-    return v;
+    if (!v) return fb;
+    if (yyjson_is_real(v)) return yyjson_get_real(v);
+    if (yyjson_is_sint(v)) return (double)yyjson_get_sint(v);
+    if (yyjson_is_uint(v)) return (double)yyjson_get_uint(v);
+    if (yyjson_is_bool(v)) return yyjson_get_bool(v) ? 1.0 : 0.0;
+    return fb;
 }
 
-uint32_t ParseUint(const std::vector<std::string_view>& t, size_t k, uint32_t fallback = 0u)
+// ---- load: колонка → out[0..count). count-гвард: нет/короче → fb, длиннее → усечь. ----
+void ReadReal(yyjson_val* comp, const char* name, size_t n, float fb, std::vector<float>& out)
 {
-    if (k >= t.size()) return fallback;
-    uint32_t v = fallback;
-    std::from_chars(t[k].data(), t[k].data() + t[k].size(), v);
-    return v;
+    out.assign(n, fb);
+    yyjson_val* col = comp ? yyjson_obj_get(comp, name) : nullptr;
+    if (!col) return;
+    size_t idx, max; yyjson_val* v;
+    yyjson_arr_foreach(col, idx, max, v) { if (idx >= n) break; out[idx] = (float)GetNum(v, fb); }
 }
-
-int ParseInt(const std::vector<std::string_view>& t, size_t k, int fallback = 0)
+void ReadUint(yyjson_val* comp, const char* name, size_t n, uint32_t fb, std::vector<uint32_t>& out)
 {
-    if (k >= t.size()) return fallback;
-    int v = fallback;
-    std::from_chars(t[k].data(), t[k].data() + t[k].size(), v);
-    return v;
+    out.assign(n, fb);
+    yyjson_val* col = comp ? yyjson_obj_get(comp, name) : nullptr;
+    if (!col) return;
+    size_t idx, max; yyjson_val* v;
+    yyjson_arr_foreach(col, idx, max, v) { if (idx >= n) break; out[idx] = (uint32_t)GetNum(v, fb); }
+}
+void ReadStr(yyjson_val* comp, const char* name, size_t n, std::vector<std::string>& out)
+{
+    out.assign(n, std::string{});
+    yyjson_val* col = comp ? yyjson_obj_get(comp, name) : nullptr;
+    if (!col) return;
+    size_t idx, max; yyjson_val* v;
+    yyjson_arr_foreach(col, idx, max, v) { if (idx >= n) break; const char* s = yyjson_get_str(v); if (s) out[idx] = s; }
 }
 
 // ---- Transform (Positions, SoA: 16 float, row-major x..l) ----
-void SaveTransform(Archetype& arch, size_t i, std::string& out)
+void SaveTransform(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
 {
     const Positions& P = arch.get_array<Positions>()->data;
-    char b[320];
-    std::snprintf(b, sizeof b,
-        "%.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g",
-        P.x[i], P.y[i], P.z[i], P.w[i], P.a[i], P.b[i], P.c[i], P.d[i],
-        P.e[i], P.f[i], P.g[i], P.h[i], P.i[i], P.j[i], P.k[i], P.l[i]);
-    out = b;
+    SOA_COL(P, x); SOA_COL(P, y); SOA_COL(P, z); SOA_COL(P, w);
+    SOA_COL(P, a); SOA_COL(P, b); SOA_COL(P, c); SOA_COL(P, d);
+    SOA_COL(P, e); SOA_COL(P, f); SOA_COL(P, g); SOA_COL(P, h);
+    SOA_COL(P, i); SOA_COL(P, j); SOA_COL(P, k); SOA_COL(P, l);
 }
-void LoadTransform(Archetype& arch, const std::vector<std::string_view>& t)
+void LoadTransform(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<Positions>();
-    PositionProxy16 p{
-        ParseFloat(t, 0, 1), ParseFloat(t, 1), ParseFloat(t, 2),  ParseFloat(t, 3),
-        ParseFloat(t, 4),    ParseFloat(t, 5, 1), ParseFloat(t, 6), ParseFloat(t, 7),
-        ParseFloat(t, 8),    ParseFloat(t, 9), ParseFloat(t, 10, 1), ParseFloat(t, 11),
-        ParseFloat(t, 12),   ParseFloat(t, 13), ParseFloat(t, 14), ParseFloat(t, 15, 1) };
-    arch.get_array<Positions>()->add(p);
+    static const char* N[16] = { "x","y","z","w","a","b","c","d","e","f","g","h","i","j","k","l" };
+    static const float D[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };   // единичная (row-major)
+    std::vector<float> c[16];
+    for (int k = 0; k < 16; ++k) ReadReal(comp, N[k], count, D[k], c[k]);
+    auto* pos = arch.get_array<Positions>();
+    for (size_t i = 0; i < count; ++i)
+        pos->add(PositionProxy16{ c[0][i],c[1][i],c[2][i],c[3][i],  c[4][i],c[5][i],c[6][i],c[7][i],
+                                  c[8][i],c[9][i],c[10][i],c[11][i], c[12][i],c[13][i],c[14][i],c[15][i] });
 }
 
 // ---- Model (имя ассета) ----
-void SaveModel(Archetype& arch, size_t i, std::string& out)
+void SaveModel(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
 {
-    out = (*arch.get_array<ModelComponent>())[i].name;
+    auto& arr = *arch.get_array<ModelComponent>();
+    yyjson_mut_val* a = yyjson_mut_obj_add_arr(doc, comp, "name");
+    for (size_t _i = 0; _i < count; ++_i) yyjson_mut_arr_add_strcpy(doc, a, arr[_i].name.c_str());
 }
-void LoadModel(Archetype& arch, const std::vector<std::string_view>& t)
+void LoadModel(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<ModelComponent>();
-    ModelComponent m;
-    m.model = nullptr;                 // указатель восстановит верхний слой по имени
-    m.name  = t.empty() ? std::string{} : std::string(t[0]);   // из string_view
-    arch.get_array<ModelComponent>()->add(m);
-}
-
-// ---- Material (список имён, по одному на сабмеш) ----
-void SaveMaterial(Archetype& arch, size_t i, std::string& out)
-{
-    const auto& names = (*arch.get_array<MaterialComponent>())[i].names;
-    for (size_t k = 0; k < names.size(); ++k) {
-        if (k) out += ' ';
-        out += names[k];
+    std::vector<std::string> names; ReadStr(comp, "name", count, names);
+    auto* a = arch.get_array<ModelComponent>();
+    for (size_t i = 0; i < count; ++i) {
+        ModelComponent m; m.model = nullptr; m.name = std::move(names[i]);   // указатель восстановит верхний слой
+        a->add(m);
     }
 }
-void LoadMaterial(Archetype& arch, const std::vector<std::string_view>& t)
+
+// ---- Material (список имён на сущность → зубчатая колонка array-of-arrays) ----
+void SaveMaterial(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
+{
+    auto& arr = *arch.get_array<MaterialComponent>();
+    yyjson_mut_val* col = yyjson_mut_obj_add_arr(doc, comp, "names");
+    for (size_t _i = 0; _i < count; ++_i) {
+        yyjson_mut_val* row = yyjson_mut_arr_add_arr(doc, col);
+        for (const auto& nm : arr[_i].names) yyjson_mut_arr_add_strcpy(doc, row, nm.c_str());
+    }
+}
+void LoadMaterial(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<MaterialComponent>();
-    MaterialComponent mc;
-    mc.names.reserve(t.size());         // все токены — имена; указатели восстановит верхний слой
-    for (std::string_view sv : t) mc.names.emplace_back(sv);   // string из string_view
-    arch.get_array<MaterialComponent>()->add(mc);
+    std::vector<MaterialComponent> rows(count);
+    yyjson_val* col = comp ? yyjson_obj_get(comp, "names") : nullptr;
+    if (col) {
+        size_t idx, max; yyjson_val* row;
+        yyjson_arr_foreach(col, idx, max, row) {
+            if (idx >= count) break;
+            size_t j, jm; yyjson_val* s;
+            yyjson_arr_foreach(row, j, jm, s) { const char* str = yyjson_get_str(s); if (str) rows[idx].names.emplace_back(str); }
+        }
+    }
+    auto* a = arch.get_array<MaterialComponent>();
+    for (size_t i = 0; i < count; ++i) a->add(rows[i]);   // указатели восстановит верхний слой
 }
 
 // ---- Draw (видимость + per-instance alpha/flags) ----
-void SaveDraw(Archetype& arch, size_t i, std::string& out)
+void SaveDraw(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
 {
-    const DrawComponent& d = (*arch.get_array<DrawComponent>())[i];
-    char b[64];
-    std::snprintf(b, sizeof b, "%d %.7g %u",
-        d.visible ? 1 : 0, d.alpha, static_cast<unsigned>(d.flags));
-    out = b;
+    auto& arr = *arch.get_array<DrawComponent>();
+    AOS_B("visible", arr[_i].visible);
+    AOS_R("alpha",   arr[_i].alpha);
+    AOS_U("flags",   arr[_i].flags);
 }
-void LoadDraw(Archetype& arch, const std::vector<std::string_view>& t)
+void LoadDraw(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<DrawComponent>();
-    DrawComponent d;
-    d.visible = t.empty() || t[0] == "1";
-    d.alpha   = ParseFloat(t, 1, 1.0f);
-    d.flags   = ParseUint(t, 2, 0u);
-    arch.get_array<DrawComponent>()->add(d);
+    std::vector<uint32_t> vis, flags; std::vector<float> alpha;
+    ReadUint(comp, "visible", count, 1u, vis);
+    ReadReal(comp, "alpha", count, 1.0f, alpha);
+    ReadUint(comp, "flags", count, 0u, flags);
+    auto* a = arch.get_array<DrawComponent>();
+    for (size_t i = 0; i < count; ++i) { DrawComponent d; d.visible = vis[i] != 0; d.alpha = alpha[i]; d.flags = flags[i]; a->add(d); }
 }
 
 // ---- Shadow (тег, без данных) ----
-void SaveShadow(Archetype&, size_t, std::string&) {}
-void LoadShadow(Archetype& arch, const std::vector<std::string_view>&)
+void SaveShadow(Archetype&, size_t, yyjson_mut_doc*, yyjson_mut_val*) {}
+void LoadShadow(Archetype& arch, yyjson_val*, size_t count)
 {
     arch.ensure_component<ShadowComponent>();
-    arch.get_array<ShadowComponent>()->add(ShadowComponent{});
+    auto* a = arch.get_array<ShadowComponent>();
+    for (size_t i = 0; i < count; ++i) a->add(ShadowComponent{});
 }
 
-// ---- LocalMatrix (SoA LocalMatrices, 16 float column-major) ----
-void SaveLocalMatrix(Archetype& arch, size_t i, std::string& out)
+// ---- LocalMatrix (SoA LocalMatrices, 16 float column-major m0..m15) ----
+void SaveLocalMatrix(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
 {
     const LocalMatrices& L = arch.get_array<LocalMatrices>()->data;
-    char b[320];
-    std::snprintf(b, sizeof b,
-        "%.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g",
-        L.m0[i], L.m1[i], L.m2[i], L.m3[i], L.m4[i], L.m5[i], L.m6[i], L.m7[i],
-        L.m8[i], L.m9[i], L.m10[i], L.m11[i], L.m12[i], L.m13[i], L.m14[i], L.m15[i]);
-    out = b;
+    SOA_COL(L, m0); SOA_COL(L, m1); SOA_COL(L, m2);  SOA_COL(L, m3);
+    SOA_COL(L, m4); SOA_COL(L, m5); SOA_COL(L, m6);  SOA_COL(L, m7);
+    SOA_COL(L, m8); SOA_COL(L, m9); SOA_COL(L, m10); SOA_COL(L, m11);
+    SOA_COL(L, m12); SOA_COL(L, m13); SOA_COL(L, m14); SOA_COL(L, m15);
 }
-void LoadLocalMatrix(Archetype& arch, const std::vector<std::string_view>& t)
+void LoadLocalMatrix(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<LocalMatrices>();
-    LocalMatrixProxy16 p{};
-    for (int k = 0; k < 16; ++k)
-        p.m[k] = ParseFloat(t, k, (k % 5 == 0) ? 1.0f : 0.0f);   // дефолт — единичная
-    arch.get_array<LocalMatrices>()->add(p);
+    std::vector<float> c[16];
+    char nm[8];
+    for (int k = 0; k < 16; ++k) { std::snprintf(nm, sizeof nm, "m%d", k); ReadReal(comp, nm, count, (k % 5 == 0) ? 1.0f : 0.0f, c[k]); }
+    auto* lm = arch.get_array<LocalMatrices>();
+    for (size_t i = 0; i < count; ++i) { LocalMatrixProxy16 p; for (int k = 0; k < 16; ++k) p.m[k] = c[k][i]; lm->add(p); }
 }
 
-// ---- Parent (ссылка на родителя) ----
-// save пишет СЫРОЙ id родителя — он уже хранится в компоненте, кросс-контекст не нужен.
-// load кладёт его как есть (СТАРЫЙ id из файла); реальный ремап старый→новый + заполнение
-// scene->children делает ObjectManager::LoadScene во втором проходе (родитель мог ещё не
-// существовать в момент создания этой сущности).
-void SaveParent(Archetype& arch, size_t i, std::string& out)
+// ---- Parent (СЫРОЙ старый id из файла; ремап old→new делает ObjectManager::LoadScene, проход 2) ----
+void SaveParent(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
 {
-    out = std::to_string((*arch.get_array<ParentComponent>())[i].parent);
+    auto& arr = *arch.get_array<ParentComponent>();
+    AOS_U("parent", arr[_i].parent);
 }
-void LoadParent(Archetype& arch, const std::vector<std::string_view>& t)
+void LoadParent(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<ParentComponent>();
-    ParentComponent p;
-    p.parent = static_cast<Entity>(ParseUint(t, 0, 0u));
-    arch.get_array<ParentComponent>()->add(p);
+    std::vector<uint32_t> par; ReadUint(comp, "parent", count, 0u, par);
+    auto* a = arch.get_array<ParentComponent>();
+    for (size_t i = 0; i < count; ++i) { ParentComponent p; p.parent = static_cast<Entity>(par[i]); a->add(p); }
 }
 
 // ---- ShadowCaster (тег) ----
-void SaveShadowCaster(Archetype&, size_t, std::string&) {}
-void LoadShadowCaster(Archetype& arch, const std::vector<std::string_view>&)
+void SaveShadowCaster(Archetype&, size_t, yyjson_mut_doc*, yyjson_mut_val*) {}
+void LoadShadowCaster(Archetype& arch, yyjson_val*, size_t count)
 {
     arch.ensure_component<ShadowCasterComponent>();
-    arch.get_array<ShadowCasterComponent>()->add(ShadowCasterComponent{});
+    auto* a = arch.get_array<ShadowCasterComponent>();
+    for (size_t i = 0; i < count; ++i) a->add(ShadowCasterComponent{});
 }
 
-// ---- Лайты: пишем ТОЛЬКО входные поля. Приватные кэши (max_distance/cached_*) —
-//      производные, пересчитаются лениво; needsUpdate=true заставит залить заново. ----
-void SaveSpotLight(Archetype& arch, size_t i, std::string& out)
+// ---- Лайты: только входные поля; приватные кэши (max_distance/cached_*) пересчитаются, needsUpdate=true ----
+void SaveSpotLight(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
 {
-    const auto& d = (*arch.get_array<SpotLightComponent>())[i].light_data;
-    char b[256];
-    std::snprintf(b, sizeof b, "%.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g",
-        d.source_radius, d.dir_x, d.dir_y, d.dir_z, d.source_angle,
-        d.r, d.g, d.b, d.power, d.attenuation);
-    out = b;
+    auto& arr = *arch.get_array<SpotLightComponent>();
+    AOS_R("source_radius", arr[_i].light_data.source_radius);
+    AOS_R("dir_x", arr[_i].light_data.dir_x); AOS_R("dir_y", arr[_i].light_data.dir_y); AOS_R("dir_z", arr[_i].light_data.dir_z);
+    AOS_R("source_angle", arr[_i].light_data.source_angle);
+    AOS_R("r", arr[_i].light_data.r); AOS_R("g", arr[_i].light_data.g); AOS_R("b", arr[_i].light_data.b);
+    AOS_R("power", arr[_i].light_data.power); AOS_R("attenuation", arr[_i].light_data.attenuation);
 }
-void LoadSpotLight(Archetype& arch, const std::vector<std::string_view>& t)
+void LoadSpotLight(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<SpotLightComponent>();
-    SpotLightComponent c;
-    auto& d = c.light_data;
-    d.source_radius = ParseFloat(t, 0);   d.dir_x = ParseFloat(t, 1); d.dir_y = ParseFloat(t, 2); d.dir_z = ParseFloat(t, 3, 1);
-    d.source_angle  = ParseFloat(t, 4, 0.3f);
-    d.r = ParseFloat(t, 5, 1); d.g = ParseFloat(t, 6, 1); d.b = ParseFloat(t, 7, 1);
-    d.power = ParseFloat(t, 8, 1); d.attenuation = ParseFloat(t, 9, 1);
-    c.needsUpdate = true;
-    arch.get_array<SpotLightComponent>()->add(c);
+    std::vector<float> sr, dx, dy, dz, sa, r, g, b, pw, at;
+    ReadReal(comp, "source_radius", count, 0, sr);
+    ReadReal(comp, "dir_x", count, 0, dx); ReadReal(comp, "dir_y", count, 0, dy); ReadReal(comp, "dir_z", count, 1, dz);
+    ReadReal(comp, "source_angle", count, 0.3f, sa);
+    ReadReal(comp, "r", count, 1, r); ReadReal(comp, "g", count, 1, g); ReadReal(comp, "b", count, 1, b);
+    ReadReal(comp, "power", count, 1, pw); ReadReal(comp, "attenuation", count, 1, at);
+    auto* a = arch.get_array<SpotLightComponent>();
+    for (size_t i = 0; i < count; ++i) {
+        SpotLightComponent c; auto& d = c.light_data;
+        d.source_radius = sr[i]; d.dir_x = dx[i]; d.dir_y = dy[i]; d.dir_z = dz[i]; d.source_angle = sa[i];
+        d.r = r[i]; d.g = g[i]; d.b = b[i]; d.power = pw[i]; d.attenuation = at[i];
+        c.needsUpdate = true; a->add(c);
+    }
 }
 
-void SaveSphereLight(Archetype& arch, size_t i, std::string& out)
+void SaveSphereLight(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
 {
-    const auto& d = (*arch.get_array<SphereLightComponent>())[i].light_data;
-    char b[160];
-    std::snprintf(b, sizeof b, "%.7g %.7g %.7g %.7g %.7g %.7g",
-        d.source_radius, d.r, d.g, d.b, d.power, d.attenuation);
-    out = b;
+    auto& arr = *arch.get_array<SphereLightComponent>();
+    AOS_R("source_radius", arr[_i].light_data.source_radius);
+    AOS_R("r", arr[_i].light_data.r); AOS_R("g", arr[_i].light_data.g); AOS_R("b", arr[_i].light_data.b);
+    AOS_R("power", arr[_i].light_data.power); AOS_R("attenuation", arr[_i].light_data.attenuation);
 }
-void LoadSphereLight(Archetype& arch, const std::vector<std::string_view>& t)
+void LoadSphereLight(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<SphereLightComponent>();
-    SphereLightComponent c;
-    auto& d = c.light_data;
-    d.source_radius = ParseFloat(t, 0);
-    d.r = ParseFloat(t, 1, 1); d.g = ParseFloat(t, 2, 1); d.b = ParseFloat(t, 3, 1);
-    d.power = ParseFloat(t, 4, 1); d.attenuation = ParseFloat(t, 5, 1);
-    c.needsUpdate = true;
-    arch.get_array<SphereLightComponent>()->add(c);
+    std::vector<float> sr, r, g, b, pw, at;
+    ReadReal(comp, "source_radius", count, 0, sr);
+    ReadReal(comp, "r", count, 1, r); ReadReal(comp, "g", count, 1, g); ReadReal(comp, "b", count, 1, b);
+    ReadReal(comp, "power", count, 1, pw); ReadReal(comp, "attenuation", count, 1, at);
+    auto* a = arch.get_array<SphereLightComponent>();
+    for (size_t i = 0; i < count; ++i) {
+        SphereLightComponent c; auto& d = c.light_data;
+        d.source_radius = sr[i]; d.r = r[i]; d.g = g[i]; d.b = b[i]; d.power = pw[i]; d.attenuation = at[i];
+        c.needsUpdate = true; a->add(c);
+    }
 }
 
-void SaveDirectLight(Archetype& arch, size_t i, std::string& out)
+void SaveDirectLight(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
 {
-    const auto& d = (*arch.get_array<DirectLightComponent>())[i].light_data;
-    char b[320];
-    std::snprintf(b, sizeof b,
-        "%.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %d %.7g",
-        d.dir_x, d.dir_y, d.dir_z, d.r, d.g, d.b, d.power,
-        d.center_x, d.center_y, d.center_z, d.half_extent, d.half_depth,
-        d.cascade_count, d.cascade_ratio);
-    out = b;
+    auto& arr = *arch.get_array<DirectLightComponent>();
+    AOS_R("dir_x", arr[_i].light_data.dir_x); AOS_R("dir_y", arr[_i].light_data.dir_y); AOS_R("dir_z", arr[_i].light_data.dir_z);
+    AOS_R("r", arr[_i].light_data.r); AOS_R("g", arr[_i].light_data.g); AOS_R("b", arr[_i].light_data.b);
+    AOS_R("power", arr[_i].light_data.power);
+    AOS_R("center_x", arr[_i].light_data.center_x); AOS_R("center_y", arr[_i].light_data.center_y); AOS_R("center_z", arr[_i].light_data.center_z);
+    AOS_R("half_extent", arr[_i].light_data.half_extent); AOS_R("half_depth", arr[_i].light_data.half_depth);
+    AOS_U("cascade_count", arr[_i].light_data.cascade_count);
+    AOS_R("cascade_ratio", arr[_i].light_data.cascade_ratio);
 }
-void LoadDirectLight(Archetype& arch, const std::vector<std::string_view>& t)
+void LoadDirectLight(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<DirectLightComponent>();
-    DirectLightComponent c;
-    auto& d = c.light_data;
-    d.dir_x = ParseFloat(t, 0); d.dir_y = ParseFloat(t, 1, -1); d.dir_z = ParseFloat(t, 2);
-    d.r = ParseFloat(t, 3, 1); d.g = ParseFloat(t, 4, 1); d.b = ParseFloat(t, 5, 1);
-    d.power = ParseFloat(t, 6, 1);
-    d.center_x = ParseFloat(t, 7); d.center_y = ParseFloat(t, 8); d.center_z = ParseFloat(t, 9);
-    d.half_extent = ParseFloat(t, 10, 20.0f); d.half_depth = ParseFloat(t, 11, 20.0f);
-    int cc = ParseInt(t, 12, 3);
-    if (cc < 1) cc = 1;
-    if (cc > DirectLightComponent::DirectLightData::MAX_CASCADES)
-        cc = DirectLightComponent::DirectLightData::MAX_CASCADES;
-    d.cascade_count = cc;
-    d.cascade_ratio = ParseFloat(t, 13, 3.0f);
-    c.needsUpdate = true;
-    arch.get_array<DirectLightComponent>()->add(c);
+    std::vector<float> dx, dy, dz, r, g, b, pw, cx, cy, cz, he, hd, cr;
+    std::vector<uint32_t> cc;
+    ReadReal(comp, "dir_x", count, 0, dx); ReadReal(comp, "dir_y", count, -1, dy); ReadReal(comp, "dir_z", count, 0, dz);
+    ReadReal(comp, "r", count, 1, r); ReadReal(comp, "g", count, 1, g); ReadReal(comp, "b", count, 1, b);
+    ReadReal(comp, "power", count, 1, pw);
+    ReadReal(comp, "center_x", count, 0, cx); ReadReal(comp, "center_y", count, 0, cy); ReadReal(comp, "center_z", count, 0, cz);
+    ReadReal(comp, "half_extent", count, 20.0f, he); ReadReal(comp, "half_depth", count, 20.0f, hd);
+    ReadUint(comp, "cascade_count", count, 3u, cc);
+    ReadReal(comp, "cascade_ratio", count, 3.0f, cr);
+    auto* a = arch.get_array<DirectLightComponent>();
+    for (size_t i = 0; i < count; ++i) {
+        DirectLightComponent c; auto& d = c.light_data;
+        d.dir_x = dx[i]; d.dir_y = dy[i]; d.dir_z = dz[i]; d.r = r[i]; d.g = g[i]; d.b = b[i]; d.power = pw[i];
+        d.center_x = cx[i]; d.center_y = cy[i]; d.center_z = cz[i]; d.half_extent = he[i]; d.half_depth = hd[i];
+        int cci = (int)cc[i];
+        if (cci < 1) cci = 1;
+        if (cci > DirectLightComponent::DirectLightData::MAX_CASCADES) cci = DirectLightComponent::DirectLightData::MAX_CASCADES;
+        d.cascade_count = cci; d.cascade_ratio = cr[i];
+        c.needsUpdate = true; a->add(c);
+    }
 }
 
 // ---- Mass ----
-void SaveMass(Archetype& arch, size_t i, std::string& out)
+void SaveMass(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
 {
-    char b[32];
-    std::snprintf(b, sizeof b, "%.7g", (*arch.get_array<MassComponent>())[i].mass);
-    out = b;
+    auto& arr = *arch.get_array<MassComponent>();
+    AOS_R("mass", arr[_i].mass);
 }
-void LoadMass(Archetype& arch, const std::vector<std::string_view>& t)
+void LoadMass(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<MassComponent>();
-    MassComponent m{};
-    m.mass = ParseFloat(t, 0);
-    arch.get_array<MassComponent>()->add(m);
+    std::vector<float> m; ReadReal(comp, "mass", count, 0, m);
+    auto* a = arch.get_array<MassComponent>();
+    for (size_t i = 0; i < count; ++i) { MassComponent mc{}; mc.mass = m[i]; a->add(mc); }
 }
 
 // ---- EditorHidden (тег: скрыт из списка UI; персистится как авторское состояние) ----
-void SaveEditorHidden(Archetype&, size_t, std::string&) {}
-void LoadEditorHidden(Archetype& arch, const std::vector<std::string_view>&)
+void SaveEditorHidden(Archetype&, size_t, yyjson_mut_doc*, yyjson_mut_val*) {}
+void LoadEditorHidden(Archetype& arch, yyjson_val*, size_t count)
 {
     arch.ensure_component<EditorHiddenComponent>();
-    arch.get_array<EditorHiddenComponent>()->add(EditorHiddenComponent{});
+    auto* a = arch.get_array<EditorHiddenComponent>();
+    for (size_t i = 0; i < count; ++i) a->add(EditorHiddenComponent{});
 }
 
-// ---- Velocity / Acceleration (SoA, рантайм-стейт; сериализуем как начальные значения) ----
-void SaveVelocity(Archetype& arch, size_t i, std::string& out)
+// ---- Velocity / Acceleration (SoA x,y,z) ----
+void SaveVelocity(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
 {
     const Velocities& V = arch.get_array<Velocities>()->data;
-    char b[64];
-    std::snprintf(b, sizeof b, "%.7g %.7g %.7g", V.x[i], V.y[i], V.z[i]);
-    out = b;
+    SOA_COL(V, x); SOA_COL(V, y); SOA_COL(V, z);
 }
-void LoadVelocity(Archetype& arch, const std::vector<std::string_view>& t)
+void LoadVelocity(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<Velocities>();
-    VelocityProxy p{ ParseFloat(t, 0), ParseFloat(t, 1), ParseFloat(t, 2) };
-    arch.get_array<Velocities>()->add(p);
+    std::vector<float> x, y, z; ReadReal(comp, "x", count, 0, x); ReadReal(comp, "y", count, 0, y); ReadReal(comp, "z", count, 0, z);
+    auto* a = arch.get_array<Velocities>();
+    for (size_t i = 0; i < count; ++i) a->add(VelocityProxy{ x[i], y[i], z[i] });
 }
 
-void SaveAcceleration(Archetype& arch, size_t i, std::string& out)
+void SaveAcceleration(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
 {
     const Accelerations& A = arch.get_array<Accelerations>()->data;
-    char b[64];
-    std::snprintf(b, sizeof b, "%.7g %.7g %.7g", A.x[i], A.y[i], A.z[i]);
-    out = b;
+    SOA_COL(A, x); SOA_COL(A, y); SOA_COL(A, z);
 }
-void LoadAcceleration(Archetype& arch, const std::vector<std::string_view>& t)
+void LoadAcceleration(Archetype& arch, yyjson_val* comp, size_t count)
 {
     arch.ensure_component<Accelerations>();
-    AccelerationProxy p{ ParseFloat(t, 0), ParseFloat(t, 1), ParseFloat(t, 2) };
-    arch.get_array<Accelerations>()->add(p);
+    std::vector<float> x, y, z; ReadReal(comp, "x", count, 0, x); ReadReal(comp, "y", count, 0, y); ReadReal(comp, "z", count, 0, z);
+    auto* a = arch.get_array<Accelerations>();
+    for (size_t i = 0; i < count; ++i) a->add(AccelerationProxy{ x[i], y[i], z[i] });
 }
+
+#undef SOA_COL
+#undef AOS_R
+#undef AOS_U
+#undef AOS_B
 
 } // namespace
 
 void RegisterBuiltinComponentSerializers()
 {
     auto& reg = ComponentSerializerRegistry::Get();
-    reg.Register({ "Transform", std::type_index(typeid(Positions)),         &SaveTransform, &LoadTransform });
-    reg.Register({ "Model",     std::type_index(typeid(ModelComponent)),    &SaveModel,     &LoadModel });
-    reg.Register({ "Material",  std::type_index(typeid(MaterialComponent)), &SaveMaterial,  &LoadMaterial });
-    reg.Register({ "Draw",        std::type_index(typeid(DrawComponent)),       &SaveDraw,        &LoadDraw });
-    reg.Register({ "Shadow",      std::type_index(typeid(ShadowComponent)),     &SaveShadow,      &LoadShadow });
+    reg.Register({ "Transform",    std::type_index(typeid(Positions)),            &SaveTransform,    &LoadTransform });
+    reg.Register({ "Model",        std::type_index(typeid(ModelComponent)),       &SaveModel,        &LoadModel });
+    reg.Register({ "Material",     std::type_index(typeid(MaterialComponent)),    &SaveMaterial,     &LoadMaterial });
+    reg.Register({ "Draw",         std::type_index(typeid(DrawComponent)),        &SaveDraw,         &LoadDraw });
+    reg.Register({ "Shadow",       std::type_index(typeid(ShadowComponent)),      &SaveShadow,       &LoadShadow });
     reg.Register({ "LocalMatrix",  std::type_index(typeid(LocalMatrices)),        &SaveLocalMatrix,  &LoadLocalMatrix });
     reg.Register({ "Parent",       std::type_index(typeid(ParentComponent)),      &SaveParent,       &LoadParent });
     reg.Register({ "ShadowCaster", std::type_index(typeid(ShadowCasterComponent)),&SaveShadowCaster, &LoadShadowCaster });
