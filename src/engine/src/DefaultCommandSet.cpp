@@ -1,9 +1,19 @@
 #include "PCH.h"
 #include "DefaultCommandSet.h"
-#include "InputManager.h"      // CommandId + payload-структуры команд
+#include "InputManager.h"      // CommandId + очередь команд
+#include "InputCommands.h"     // payload-структуры команд
 #include "EngineContext.h"     // фасад + (транзитивно) все менеджеры
 #include "MaterialParams.h"    // OpaqueMaterialParams — блоб дефолт-params нового материала
 #include "PositionStructure.h" // FMT_PosUVNormal — раскладка pull вершинника из формы SD
+// EngineContext.h держит менеджеры forward-декларациями — полные типы тянет этот TU.
+#include "MaterialManager.h"
+#include "ShaderManager.h"
+#include "TextureManager.h"
+#include "ModelManager.h"
+#include "PipeManager.h"
+#include "RenderManager.h"
+
+using namespace ShaderBase;   // VertexBufferBinding/FMT_* в UpsertVertexShader
 
 // Дефолтная текстура по роли слота (движковые из Engine::InitDefaultResources). Custom* → dummy.
 static const char* DefaultTextureForRole(TextureSlotRole r)

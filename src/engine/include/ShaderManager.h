@@ -18,7 +18,7 @@ public:
 	// fragment_shaders/compute_shaders); sp/csp ссылаются на них по ИМЕНИ. Повтор с тем же именем
 	// перезаписывает запись. bindings/texture_slots — vector (не initializer_list), вызовы из кода
 	// с braced-init { … } по-прежнему компилируются.
-	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::vector<VertexBufferBinding>& bindings);
+	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::vector<ShaderBase::VertexBufferBinding>& bindings);
 	void CreateFragmentShader(const std::string& name, const char* path);
 
 	ShaderProgram* CreateShaderProgram(
@@ -75,7 +75,7 @@ public:
 	std::unordered_map<std::string, FragmentShaderData>& GetFragmentShaders() { return fragment_shaders; }
 	std::unordered_map<std::string, ComputeShaderData>&  GetComputeShaders()  { return compute_shaders; }
 
-	VertexShaderData CreateVertexShaderFromSPV(const char* path, std::initializer_list<VertexBufferBinding> bindings);
+	VertexShaderData CreateVertexShaderFromSPV(const char* path, std::initializer_list<ShaderBase::VertexBufferBinding> bindings);
 	FragmentShaderData CreateFragmentShaderFromSPV(const char* spv_path);
 	ComputeShaderData CreateComputeShaderFromSPV(const char* spv_path);
 
@@ -105,7 +105,7 @@ public:
 	~ShaderManager();
 
 private:
-	VertexShaderData BuildVertexShader(const Uint8* spv, size_t spv_size, const char* dbg_name, const std::vector<VertexBufferBinding>& bindings);
+	VertexShaderData BuildVertexShader(const Uint8* spv, size_t spv_size, const char* dbg_name, const std::vector<ShaderBase::VertexBufferBinding>& bindings);
 
 	FragmentShaderData BuildFragmentShader(const Uint8* spv, size_t spv_size, const char* dbg_name);
 

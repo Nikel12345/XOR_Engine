@@ -1,39 +1,43 @@
 #pragma once
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
-#include <vector>
-#include <iostream>
-#include <string_view>
-#include <thread>
-#include "BufferManager.h"
-#include "TextureManager.h"
-#include "ShaderManager.h"
-#include "PipeManager.h"
-#include "ModelManager.h"
-#include "RenderManager.h"
-#include "ObjectManager.h"
-//#include "PositionStructure.h"
-#include "CameraManager.h"
-#include "SlotController.h"
-#include "ThreadController.h"
-#include "LightStruct.h"
-#include "PIB_DataModule.h"
-#include "TransformDataModule.h"
-#include "InstanceDataModule.h"
-#include "LightDataModule.h"
-#include "MaterialManager.h"
-#include "BatchBuilder.h"
-#include "DefaultUpdateSet.h"
-#include "DefaultRenderPassSet.h"
-#include "IndirectDataModule.h"
-#include "BoundSphereDataModule.h"
-#include "config.h"
-#include "UI_ImGui.h"
-#include "EngineContext.h"
-#include "InputManager.h"
-#include "TextureLoader.h"
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <string>
+#include "config.h"    // BUFFERING_LEVEL — размер pending_upload_tbs
+#include "Aliases.h"   // SceneName
 
+// ТОЛЬКО forward-декларации: все члены — указатели, геттеры отдают указатели, полные
+// определения заголовку не нужны. Каждый cpp (движка и игры) сам инклюдит те менеджеры,
+// которые реально зовёт — правка одного менеджер-заголовка больше НЕ пересобирает всех
+// потребителей Engine.h (раньше это был хаб на весь мир: ~28 TU на любое изменение).
+class TransferManager;
+class BufferManager;
+class TextureManager;
+class ShaderManager;
+class PipeManager;
+class ModelManager;
+class PassManager;
+class ObjectManager;
+class CameraManager;
+class SlotController;
+class ThreadController;
+class MaterialManager;
+class InputManager;
+class TextureLoader;
+class BatchBuilder;
+class PIB_DataModule;
+class TransformDataModule;
+class InstanceDataModule;
+class LightDataModule;
+class IndirectDataModule;
+class BoundSphereDataModule;
+class EngineContext;
+struct TransferBufferData;
 struct PrepassTimingReport;
+struct ImDrawData;
+
 class Engine
 {
 public:
@@ -49,7 +53,7 @@ public:
 	CameraManager* GetCameraManager() const { return camera_manager; }
 	MaterialManager* GetMaterialManager() const { return material_manager; }
     BatchBuilder* GetBatchBuilder() const { return batch_builder; }
-    
+
 	EngineContext* GetEngineContext() { return engine_context; }
 
 	ThreadController* GetThreadController() const { return thread_controller; }
@@ -157,5 +161,3 @@ private:
     std::chrono::steady_clock::time_point last_frame_done_time{};
     bool last_frame_done_valid = false;
 };
-
-

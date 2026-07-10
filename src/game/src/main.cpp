@@ -1,6 +1,8 @@
 ﻿#include "PCH.h"
 #include "Engine.h"
 #include "Game.h"
+#include "ThreadController.h"   // Engine.h теперь forward-only
+#include "InputManager.h"
 #include "config.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"

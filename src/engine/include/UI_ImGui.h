@@ -1,8 +1,7 @@
 #pragma once
-#include "imgui.h"
-#include "ObjectManager.h"
-#include "CameraManager.h"
 
+// Заголовку хватает forward-декларации: только статические методы с EngineContext*.
+// imgui/ObjectManager/CameraManager тянут сами UI_*.cpp — по факту использования.
 class EngineContext;
 
 class UI_ImGui

@@ -8,10 +8,18 @@
 
 class BufferManager;
 struct UploadTask;
+// ModelGeneratorFn — теперь в ModelData.h (приходит транзитивно): фасады объявляют
+// CreateModel(generator) без завязки на этот заголовок.
 
-// Генератор геометрии процедурной модели: заполняет переданные массивы вершин/индексов
-// как угодно — от руками записанного квада до математической поверхности. MM это безразлично.
-using ModelGeneratorFn = std::function<void(std::vector<PosUVNormal>&, std::vector<Uint32>&)>;
+// Запись манифеста моделей сцены (models.json): рецепт пересоздания из файла. Парсит/пишет json
+// верхний слой (Engine::Save/LoadScene); MM сам читает .bin, поэтому колбэк не нужен (в отличие
+// от текстур, чей декод живёт в верхнем слое).
+struct SceneModelEntry {
+	std::string name;
+	std::string vertex_path;
+	std::string index_path;
+	AnchorShift anchor = AnchorShift::Keep;
+};
 
 class ModelManager
 {
@@ -33,6 +41,12 @@ public:
 	// заново-аппендженную геометрию. Старая геометрия остаётся в GPU-буфере (reclaim'а нет —
 	// приемлемо для редактора). Новое имя — создаёт. Пересборку батчей взводит вызывающий.
 	ModelData* LoadModelFromFile(const std::string& name, const std::string& path, const std::string& path_ind, AnchorShift anchor = AnchorShift::Keep);
+
+	// Merge-upsert моделей из манифеста сцены (см. SceneModelEntry): каждая запись через
+	// LoadModelFromFile (существующая перезагружается в тот же объект, новая создаётся). MM сам
+	// читает .bin — колбэк не нужен. Модели вне манифеста не трогаются (кодовая инфраструктура
+	// переживает загрузку). Возвращает число успешно загруженных.
+	size_t LoadSceneModels(const std::vector<SceneModelEntry>& entries);
 
 	uint32_t CalculateModelsVerticesSize();
 	uint32_t CalculateModelsIndicesSize();

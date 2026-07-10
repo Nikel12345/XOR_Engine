@@ -1,3 +1,4 @@
+#pragma once
 #include <chrono>
 #include <iostream>
 #include <string>
@@ -12,6 +13,19 @@
 #include <cstdint>
 #include <span>
 #include <variant>
+// Часто используемые std-заголовки (по факту инклюдов в headers движка): парсятся один раз в PCH.
+#include <functional>
+#include <mutex>
+#include <atomic>
+#include <condition_variable>
+#include <thread>
+#include <deque>
+#include <map>
+#include <set>
+#include <string_view>
+#include <typeindex>
+#include <type_traits>
+#include <initializer_list>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>

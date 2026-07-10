@@ -13,6 +13,13 @@ target_include_directories(Game PRIVATE
 
 target_link_libraries(Game PRIVATE Engine Physics)
 
+# PCH: std/SDL/glm/imgui (движковый PCH_Engine.h) + Engine.h (фасад движка). Правка заголовков
+# движка пересобирает PCH один раз, а TU игры дальше грузят его бинарно, а не парсят текст заново.
+target_precompile_headers(Game PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/engine/include/PCH_Engine.h"
+    "${CMAKE_SOURCE_DIR}/src/engine/include/Engine.h"
+)
+
 set_target_properties(Game PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src/game"
 )

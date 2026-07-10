@@ -1,6 +1,11 @@
 #include "PCH.h"
 #include "DefaultUpdateSet.h"
 #include "EngineContext.h"
+// EngineContext.h держит менеджеры forward-декларациями — полные типы тянет этот TU.
+#include "BufferManager.h"
+#include "CameraManager.h"
+#include "ModelManager.h"
+#include "RenderManager.h"
 #include "LightDataModule.h"
 #include "PIB_DataModule.h"
 #include "TransformDataModule.h"

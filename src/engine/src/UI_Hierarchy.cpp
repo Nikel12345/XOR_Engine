@@ -1,8 +1,11 @@
 #include "PCH.h"
 #include "UI_ImGui.h"
 #include "UI_Internal.h"
+#include "imgui.h"           // раньше транзитивно из UI_ImGui.h
+#include "ObjectManager.h"   // иерархия читает сцену
 #include "EngineContext.h"
-#include "InputManager.h"   // PushCommand + CommandId + SceneIOCmd
+#include "InputManager.h"   // PushCommand + CommandId
+#include "InputCommands.h"  // SceneIOCmd
 
 using namespace ui;
 

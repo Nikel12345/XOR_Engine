@@ -114,6 +114,7 @@ set(ENGINEGPU_HDR
     include/BufferUpdateStruct.h
     include/ShaderManager.h
     include/ShaderData.h
+    include/ShaderTypes.h
     include/TextureManager.h
     include/TextureData.h
     include/RenderManager.h
@@ -183,6 +184,7 @@ set(ENGINE_MANAGERS_HDR
     include/ThreadController.h
     include/SlotController.h
     include/InputManager.h
+    include/InputCommands.h
     include/TextureLoader.h
 )
 set(ENGINE_STRUCTS_SRC
@@ -254,6 +256,7 @@ set(ENGINE_CORE_HDR
     include/UI_Internal.h
     include/UI_Widgets.h
     include/PCH.h
+    include/PCH_Engine.h
     include/EngineContext.h
 )
 
@@ -299,8 +302,10 @@ target_include_directories(Engine PRIVATE
     "${CMAKE_SOURCE_DIR}/external/SDL3_image/include"   # только TextureLoader.cpp
 )
 
+# Свой PCH верхнего слоя: PCH.h + imgui.h (~8 TU таргета зовут ImGui). EngineGpu/EngineEcs
+# остаются на чистом PCH.h — imgui в GPU/ECS-слои не протекает.
 target_precompile_headers(Engine PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/PCH.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/PCH_Engine.h
 )
 
 target_link_libraries(Engine PUBLIC

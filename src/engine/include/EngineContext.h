@@ -1,19 +1,34 @@
 #pragma once
-#include "BufferManager.h"
-#include "TextureManager.h"
-#include "RenderManager.h"
-#include "MaterialManager.h"
-#include "ObjectManager.h"
-#include "ShaderManager.h"
-#include "ModelManager.h"
-#include "CameraManager.h"
-#include "BatchBuilder.h"
-#include "PipeManager.h"
-#include "GpuTaskContext.h"
-#include "Aliases.h"
+#include <SDL3/SDL_gpu.h>   // SDL_GPUTextureCreateInfo — по значению в CreateTextureAtlas
 #include <functional>
 #include <vector>
+#include <string>
+#include <utility>
+#include <initializer_list>
+#include <cstring>          // std::memcpy в SetMaterialParams<T>
+#include "Aliases.h"
+#include "ObjectManager.h"  // тело шаблона CreateEntity (ECS-типажи считаются на компиляции)
+#include "BatchBuilder.h"   // QueueCreate в теле CreateEntity
+#include "ShaderTypes.h"    // spd/VertexBufferBinding/TextureSlotRole/ComputeRWTextureBindingParametr в сигнатурах
+#include "MaterialData.h"   // Material::params — тело SetMaterialParams<T>
+#include "TextureData.h"    // ChannelConvention::AsIs — дефолтный аргумент CreateTextureFromFile
+#include "ModelData.h"      // AnchorShift::Keep — дефолтный аргумент + ModelGeneratorFn
 
+// Менеджеры — ТОЛЬКО forward: контекст держит их указателями, а сигнатуры фасада отдают
+// указатели/принимают имена. Полные заголовки инклюдит тот cpp, который реально зовёт
+// методы менеджера (ctx->GetXxxManager()->...). Так правка одного менеджера не пересобирает
+// всех потребителей фасада (раньше EngineContext.h был хабом на все менеджеры разом).
+class BufferManager;
+class TextureManager;
+class PassManager;
+class MaterialManager;
+class ShaderManager;
+class ModelManager;
+class CameraManager;
+class PipeManager;
+class GpuTaskContext;
+struct ShaderProgram;          // тяжёлая половина (ShaderData.h) — только у реальных потребителей
+struct ComputeShaderProgram;
 class InputManager;
 class TextureLoader;
 class Engine;
@@ -21,10 +36,12 @@ class Engine;
 class EngineContext {
 public:
 	EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* rm, BatchBuilder* bb, TextureLoader* tl);
+	~EngineContext();   // delete gpu_ctx (тип неполный в заголовке)
 
-	// Узкий GPU-фасад: им пользуются ShaderSet'ы и модуль физики.
-	GpuTaskContext& Gpu() { return gpu_ctx; }
-	GpuTaskContext* GetGpuContext() { return &gpu_ctx; }
+	// Узкий GPU-фасад: им пользуются ShaderSet'ы и модуль физики. Хранится указателем,
+	// чтобы заголовок не тянул GpuTaskContext.h (deref неполного типа под ссылку легален).
+	GpuTaskContext& Gpu() { return *gpu_ctx; }
+	GpuTaskContext* GetGpuContext() { return gpu_ctx; }
 
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name);
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name);
@@ -37,16 +54,25 @@ public:
 	// дирижёр: проверяет совместимость (что атлас и правда куб + квадратный) и делегирует
 	// нарезку/заливку 6 граней TextureLoader'у. Размер грани диктует tci атласа.
 	TextureHandle* CreateCubeMapTexture(const TextureName& name, const AtlasName& atlas_name, const char* path);
-	TextureAtlas* GetTextureAtlas(const AtlasName& name) const { return texture_manager->GetTextureAtlas(name); }
+	TextureAtlas* GetTextureAtlas(const AtlasName& name) const;
 
-	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders);
+	// dont_save=true — кодовая инфраструктура (напр. debug_collider), в materials.json не пишется.
+	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders, bool dont_save = false);
 
-	// Прокси к MaterialManager: упаковать per-material факторы (T = раскладка MaterialBlock) в Material::params.
+	// Тип-безопасная упаковка per-material факторов (T = раскладка cbuffer MaterialBlock) в
+	// Material::params. Тело — прямой memcpy (зеркало MaterialManager::SetMaterialParams),
+	// чтобы заголовок фасада не зависел от MaterialManager.h ради одного шаблона.
 	template<class T>
-	void SetMaterialParams(Material* m, const T& p) { material_manager->SetMaterialParams(m, p); }
+	void SetMaterialParams(Material* m, const T& p) {
+		if (!m) return;
+		m->params.resize(sizeof(T));
+		std::memcpy(m->params.data(), &p, sizeof(T));
+		m->params_kind = T::kind;   // тег для UI-разбора (рендер его не читает)
+	}
 
 	ModelData* CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor = AnchorShift::Keep);
-	ModelData* CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep);
+	// dont_save=true — движковая/кодовая процедурная модель (sphere/quad/cubes), в models.json не пишется.
+	ModelData* CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep, bool dont_save = false);
 
 	void CreateGraphicsPipelines();
 	void CreateComputePipelines();
@@ -98,20 +124,21 @@ public:
 	void RegisterGenerator(const SceneName& scene_name, std::function<void()> generator);
 
 	// Create*Shader регистрируют шейдер-данные по имени в ShaderManager; CreateShaderProgram
-	// ссылается на них по имени (vs_name/fs_name/cs_name).
-	void CreateFragmentShader(const std::string& name, const char* hlsl_path);
-	void CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout);
+	// ссылается на них по имени (vs_name/fs_name/cs_name). dont_save=true — движковый дефолт
+	// (_fallback_vs/_fallback_fs/_FallbackShader), в shaders.json не пишется (см. *ShaderData::dont_save).
+	void CreateFragmentShader(const std::string& name, const char* hlsl_path, bool dont_save = false);
+	void CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<ShaderBase::VertexBufferBinding> vertex_buffer_layout, bool dont_save = false);
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 		const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 		const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
-		std::initializer_list<TextureSlotRole> texture_slots);
+		std::initializer_list<TextureSlotRole> texture_slots, bool dont_save = false);
 
-	void CreateComputeShader(const std::string& name, const char* hlsl_path);
+	void CreateComputeShader(const std::string& name, const char* hlsl_path, bool dont_save = false);
 	ComputeShaderProgram* CreateComputeShaderProgram(const std::string& name,
 		const std::string& cs_name,
 		std::initializer_list<BufferDataName> rw_storage_buffers,
 		std::initializer_list<BufferDataName> ro_storage_buffers,
-		std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
+		std::initializer_list<ComputeRWTextureBindingParametr> rw_storage_textures,   // топ-левел тип (ShaderTypes.h)
 		std::initializer_list<AtlasName> ro_storage_textures,
 		std::initializer_list<AtlasName> texture_samplers,
 		const ComputePassName& associated_compute_pass);
@@ -152,5 +179,5 @@ private:
 	TextureLoader* texture_loader = nullptr;
 	Engine* engine = nullptr;   // см. SetEngine
 
-	GpuTaskContext gpu_ctx;
+	GpuTaskContext* gpu_ctx = nullptr;   // указателем: заголовок не тянет GpuTaskContext.h
 };

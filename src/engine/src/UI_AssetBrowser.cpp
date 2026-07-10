@@ -3,7 +3,13 @@
 #include "UI_Internal.h"
 #include "UI_Widgets.h"
 #include "EngineContext.h"
-#include "InputManager.h"   // PushCommand + CommandId + CreateMaterialCmd
+// EngineContext.h держит менеджеры forward-декларациями — полные типы тянет этот TU.
+#include "TextureManager.h"
+#include "MaterialManager.h"
+#include "ModelManager.h"
+#include "ShaderManager.h"
+#include "InputManager.h"   // PushCommand + CommandId
+#include "InputCommands.h"  // CreateMaterialCmd и прочие payload-структуры
 
 using namespace ui;
 

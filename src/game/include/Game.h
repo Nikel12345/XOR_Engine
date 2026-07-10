@@ -1,6 +1,10 @@
 #pragma once
 #include <SDL3/SDL.h>
 #include "Engine.h"
+#include "InputManager.h"   // InputManager::KeyEvent в скретч-буферах ниже
+
+struct ModelData;   // члены-указатели: полные типы тянет Game.cpp
+struct Material;
 
 enum class GameState {
 	MAIN_MENU,

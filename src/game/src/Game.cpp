@@ -1,6 +1,17 @@
 ﻿#include "PCH.h"
 #include <cmath>
 #include "Game.h"
+// Engine.h теперь только forward-декларации — полные типы тянет этот TU.
+#include "EngineContext.h"
+#include "ObjectManager.h"
+#include "CameraManager.h"
+#include "TextureManager.h"
+#include "ModelManager.h"
+#include "MaterialManager.h"   // GetMaterial — переприменение params к загруженным материалам
+#include "InputManager.h"
+#include "ThreadController.h"
+#include "LightDataModule.h"
+#include "imgui.h"              // раньше транзитивно через Engine.h → UI_ImGui.h
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
 #include "MaterialParams.h"        // SetMaterialParams + раскладки факторов материалов
@@ -53,159 +64,20 @@ SDL_AppResult Game::MainInit()
 	TextureAtlas* orm_atlas      = ctx->CreateTextureAtlas("orm_atlas",      TexturePresets::ORMAtlas(2048, 2), DefaultSamplersNames::DEFAULT_SAMPLER);
 	TextureAtlas* emissive_atlas = ctx->CreateTextureAtlas("emissive_atlas", TexturePresets::EmissiveAtlas(1024, 1), DefaultSamplersNames::DEFAULT_SAMPLER);
 
-	TextureHandle* texture_cube = ctx->CreateTextureFromFile("albedo_cube", "albedo_atlas", "textures/assets/cube_test.png");
-	TextureHandle* norm = ctx->CreateTextureFromFile("norm", "normal_atlas", "textures/assets/car_norm.png");
-
-    ctx->CreateTextureFromFile("texture_sun", "albedo_atlas", "textures/assets/2k_sun.jpg");
-
-    ctx->CreateTextureFromFile("texture_asphalt", "albedo_atlas", "textures/blocks/brick_base_c.png");
-    ctx->CreateTextureFromFile("texture_asphalt_orm", "orm_atlas", "textures/blocks/brick_orm.png", ChannelConvention::SmoothnessInGreen);
-    ctx->CreateTextureFromFile("wood_norm", "normal_atlas", "textures/blocks/brick_normal_h.png", ChannelConvention::AsIs);
-
-	// default_albedo/normal/orm/emissive теперь движковые (Engine::InitDefaultResources → _FallbackAtlas).
-
-    TextureHandle* texture_car = ctx->CreateTextureFromFile("new_car", "albedo_atlas", "textures/assets/new_car.png");
-	TextureHandle* ground = ctx->CreateTextureFromFile("new_car_ground", "albedo_atlas", "textures/assets/new_car_ground.png");
-	TextureHandle* glass = ctx->CreateTextureFromFile("new_car_glass", "albedo_atlas", "textures/assets/Tex_Glass.jpg");
+	// Текстуры (хендлы) грузятся из сцены (textures.json) — атласы выше остаются кодовыми (инфра,
+	// не сериализуются; текстуры садятся в них при загрузке). default_* — движковые (InitDefaultResources).
 
     {
+        // Только COMPUTE-программы: они держат указатели на буферы/атласы + dispatch_func, не
+        // сериализуются. Render-sp (main/shadow/transparent/untextured/debug) идут из shaders.json;
+        // их push_func вешается в BindDefaultPushFuncs ПОСЛЕ загрузки.
         using namespace DefaultShaderProgramSet;
-        SetMainShaderProgram(ctx);
-        SetDefaultShadowShaderProgram(ctx);
-        SetTransparentShaderProgram(ctx);
-        SetUntexturedShaderProgram(ctx);
-        SetDebugColliderProgram(ctx);
         SetBloomPrograms(ctx);
         SetCullingPibPrograms(ctx, engine->GetLightDataModule());   // GPU-каллинг: out_pib
     }
-    
-    auto material_car = ctx->CreateMaterial("car", {
-        {TextureSlotRole::Albedo, "new_car"},
-        {TextureSlotRole::Normal, "norm"},
-        {TextureSlotRole::ORM, "default_orm"},
-        {TextureSlotRole::Emissive, "default_emissive"} },
-        { "sp", "sp_shadow" });
-	auto material_car2 = ctx->CreateMaterial("car2", {
-        {TextureSlotRole::Albedo, "new_car"},
-        {TextureSlotRole::Normal, "norm"},
-        {TextureSlotRole::ORM, "default_orm"},
-        {TextureSlotRole::Emissive, "default_emissive"} },
-		{ "sp", "sp_shadow" });
-    auto material_ground = ctx->CreateMaterial("ground", {
-        {TextureSlotRole::Albedo, "new_car_ground"},
-        {TextureSlotRole::Normal, "norm"},
-        {TextureSlotRole::ORM, "default_orm"},
-        {TextureSlotRole::Emissive, "default_emissive"} },
-		{ "sp", "sp_shadow" });
 
-    auto material_sprite = ctx->CreateMaterial("material_sprite", {
-        {TextureSlotRole::Albedo, "texture_asphalt"},
-        {TextureSlotRole::Normal, "wood_norm"},
-        {TextureSlotRole::ORM, "texture_asphalt_orm"},
-        {TextureSlotRole::Emissive, "default_emissive"} },
-        { "sp", "sp_shadow" });
-    // heightScale = глубина POM (0 = ВЫКЛючатель). pomBias = АБСОЛЮТНЫЙ пол LOD рельефа (лог2:
-    // 2 = среднее по 4×4 соседям, 3 = 8×8): глушит высокочастотный шум карты («шпили») на любой
-    // дистанции; 0 = полная детализация (кирпич с чётким швом). Для волокнистой коры — 2..3.
-    ctx->SetMaterialParams(material_sprite, OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.08f, /*pomBias*/2.5f });
-
-    auto material_sprite2 = ctx->CreateMaterial("material_sprite2", {
-        {TextureSlotRole::Albedo, "texture_asphalt"},
-        {TextureSlotRole::Normal, "norm"},
-        {TextureSlotRole::ORM, "default_orm"},
-        {TextureSlotRole::Emissive, "default_emissive"} },
-        { "sp", "sp_shadow" });
-    ctx->SetMaterialParams(material_sprite2, OpaqueMaterialParams{ {1,1,1,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f });
-
-    auto material_glass = ctx->CreateMaterial("transparent", {
-        {TextureSlotRole::Albedo, "new_car_glass"},
-        {TextureSlotRole::Normal, "norm"} },
-        { "sp_transparent" });
-    ctx->SetMaterialParams(material_glass, TransparentMaterialParams{ 0.35f });
-
-    auto material_sun = ctx->CreateMaterial("material_sun", {
-        {TextureSlotRole::Albedo, "texture_sun"},
-        {TextureSlotRole::Normal, "norm"},
-        {TextureSlotRole::ORM, "default_orm"},
-        {TextureSlotRole::Emissive, "default_emissive"} },
-        { "sp"});
-    ctx->SetMaterialParams(material_sun, OpaqueMaterialParams{ {1,1,1,1}, {0.99f,0.85f,0.45f}, 2.4f, /*metallic*/0.0f, /*roughness*/1.0f });
-
-    auto ship_material = ctx->CreateMaterial("ship", {}, { "sp_untextured" });
-    ctx->SetMaterialParams(ship_material, OpaqueMaterialParams{ { 0.55f, 0.6f, 0.7f, 1.0f } });
-
-    auto m_orange = ctx->CreateMaterial("m_orange", {}, { "sp_untextured", "sp_shadow" });
-    ctx->SetMaterialParams(m_orange, OpaqueMaterialParams{ {1.0f, 0.45f, 0.1f, 1.0f}, {1.0f, 0.854902f, 0.0f}, 0.171f });
-
-    auto m_gray = ctx->CreateMaterial("m_gray", {}, { "sp_untextured", "sp_shadow" });
-    ctx->SetMaterialParams(m_gray, OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.552941f, 0.552941f, 0.552941f}, 1.2f });
-
-    auto metal1 = ctx->CreateMaterial("metal1", {}, { "sp_untextured", "sp_shadow" });
-    ctx->SetMaterialParams(metal1, OpaqueMaterialParams{ {1.0f, 0.5f, 0.5f, 1.0f}, {1.0f, 0.0f, 0.0f}, 0.146f, 1.0f, 0.96f });
-
-    auto metal2 = ctx->CreateMaterial("metal2", {}, { "sp_untextured", "sp_shadow" });
-    ctx->SetMaterialParams(metal2, OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.0f, 0.0f, 0.0f}, 0.0f, 1.0f, 0.96f });
-
-    auto emission = ctx->CreateMaterial("emission", {}, { "sp_untextured", "sp_shadow" });
-    ctx->SetMaterialParams(emission, OpaqueMaterialParams{ {0.0f, 0.0f, 0.0f, 1.0f}, {0.341176f, 0.341176f, 0.647059f}, 1.7f });
-
-
-
-    // Opaque-материалы тоже несут params (дефолт-белый baseColorFactor = без тинта): иначе их
-    // MaterialBlock @ b1 остался бы несвязанным. metallic/roughness/emission — задел (закомм.).
-    ctx->SetMaterialParams(material_car,    OpaqueMaterialParams{});
-    ctx->SetMaterialParams(material_car2,   OpaqueMaterialParams{});
-    ctx->SetMaterialParams(material_ground, OpaqueMaterialParams{});
-
-    debug_collider_material = ctx->CreateMaterial("debug_collider", {}, { "sp_debug_collider" });
-
-    ModelData* model_car = ctx->CreateModel("car", "models/new_car_n_fixed.bin", "models/new_car_n_fixed_i.bin");
-	ModelData* model_ship = ctx->CreateModel("ship", "models/low_poly_ship.bin", "models/low_poly_ship_i.bin");
-
-    ModelData* quad = ctx->CreateModel("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
-        v = {
-            { 0,0,0,  0,0,  0,0,1,  1,0,0 },
-            { 1,0,0,  1,0,  0,0,1,  1,0,0 },
-            { 1,1,0,  1,1,  0,0,1,  1,0,0 },
-            { 0,1,0,  0,1,  0,0,1,  1,0,0 },
-        };
-        i = { 0, 1, 2, 0, 2, 3 };
-    });
-
-    ModelData* sphere = ctx->CreateModel("sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
-        const uint32_t stacks = 32;   // деления по широте
-        const uint32_t slices = 48;   // деления по долготе
-        const float R = 1.0f;
-        const float PI = 3.14159265358979323846f;
-
-        for (uint32_t i = 0; i <= stacks; ++i) {
-            float phi = PI * (float)i / (float)stacks;              // 0..π (полюс→полюс)
-            float cp = std::cos(phi), sp = std::sin(phi);
-            for (uint32_t j = 0; j <= slices; ++j) {
-                float theta = 2.0f * PI * (float)j / (float)slices; // 0..2π
-                float ct = std::cos(theta), st = std::sin(theta);
-
-                float nx = sp * ct, ny = cp, nz = sp * st;          // нормаль = точка на единичной сфере
-                PosUVNormal vert{};
-                vert.x = R * nx; vert.y = R * ny; vert.z = R * nz;
-                vert.u = (float)j / (float)slices;
-                vert.v = (float)i / (float)stacks;
-                vert.nx = nx; vert.ny = ny; vert.nz = nz;
-                vert.tx = -st; vert.ty = 0.0f; vert.tz = ct;        // касательная = ∂pos/∂θ
-                v.push_back(vert);
-            }
-        }
-
-        const uint32_t row = slices + 1;
-        for (uint32_t i = 0; i < stacks; ++i) {
-            for (uint32_t j = 0; j < slices; ++j) {
-                uint32_t a = i * row + j;
-                uint32_t b = a + row;
-                idx.push_back(a);     idx.push_back(a + 1); idx.push_back(b);
-                idx.push_back(a + 1); idx.push_back(b + 1); idx.push_back(b);
-            }
-        }
-    });
+    // quad/sphere — дефолты движка (Engine::InitDefaultResources, dont_save) — берём по имени.
+    ModelData* sphere = (*ctx->GetModelManager())["sphere"];
 
     debug_box_model = ctx->CreateModel("debug_box", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
         auto P = [](float x, float y, float z) {
@@ -294,7 +166,7 @@ SDL_AppResult Game::MainInit()
                 idx.push_back(vbase + 0); idx.push_back(vbase + 1); idx.push_back(vbase + 2);
                 idx.push_back(vbase + 0); idx.push_back(vbase + 2); idx.push_back(vbase + 3);
             }
-        });
+        }, AnchorShift::Keep, /*dont_save=*/true);   // процедурные кубы игры — в models.json не идут
     }
 
 
@@ -309,6 +181,29 @@ SDL_AppResult Game::MainInit()
     ctx->RegisterGenerator("main_menu", [this] { CreateDebugColliders(); });
     ctx->LoadScene("main_menu", "saved_scene");   // папка сцены (scene.scene + ресурсы внутри)
 
+    debug_collider_material = ctx->GetMaterialManager()->GetMaterial("debug_collider");
+
+    DefaultShaderProgramSet::BindDefaultPushFuncs(ctx);
+
+    {
+        MaterialManager* mm = ctx->GetMaterialManager();
+        ctx->SetMaterialParams(mm->GetMaterial("material_sprite"),  OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.08f, /*pomBias*/2.5f });
+        ctx->SetMaterialParams(mm->GetMaterial("material_sprite2"), OpaqueMaterialParams{ {1,1,1,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f });
+        ctx->SetMaterialParams(mm->GetMaterial("transparent"),      TransparentMaterialParams{ 0.35f });
+        ctx->SetMaterialParams(mm->GetMaterial("material_sun"),     OpaqueMaterialParams{ {1,1,1,1}, {0.99f,0.85f,0.45f}, 2.4f, /*metallic*/0.0f, /*roughness*/1.0f });
+        ctx->SetMaterialParams(mm->GetMaterial("ship"),             OpaqueMaterialParams{ { 0.55f, 0.6f, 0.7f, 1.0f } });
+        ctx->SetMaterialParams(mm->GetMaterial("m_orange"),         OpaqueMaterialParams{ {1.0f, 0.45f, 0.1f, 1.0f}, {1.0f, 0.854902f, 0.0f}, 0.171f });
+        ctx->SetMaterialParams(mm->GetMaterial("m_gray"),           OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.552941f, 0.552941f, 0.552941f}, 1.2f });
+        ctx->SetMaterialParams(mm->GetMaterial("metal1"),           OpaqueMaterialParams{ {1.0f, 0.5f, 0.5f, 1.0f}, {1.0f, 0.0f, 0.0f}, 0.146f, 1.0f, 0.96f });
+        ctx->SetMaterialParams(mm->GetMaterial("metal2"),           OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.0f, 0.0f, 0.0f}, 0.0f, 1.0f, 0.96f });
+        ctx->SetMaterialParams(mm->GetMaterial("emission"),         OpaqueMaterialParams{ {0.0f, 0.0f, 0.0f, 1.0f}, {0.341176f, 0.341176f, 0.647059f}, 1.7f });
+        // Opaque-дефолт (белый baseColor = без тинта): иначе MaterialBlock @ b1 несвязан.
+        ctx->SetMaterialParams(mm->GetMaterial("car"),              OpaqueMaterialParams{});
+        ctx->SetMaterialParams(mm->GetMaterial("car2"),             OpaqueMaterialParams{});
+        ctx->SetMaterialParams(mm->GetMaterial("ground"),           OpaqueMaterialParams{});
+    }
+
+    Material* metal2 = ctx->GetMaterialManager()->GetMaterial("metal2");   // из сцены (было кодовым)
     Entity sun = ctx->CreateEntity("main_menu",
         MaterialComponent{ { metal2 } },
         ModelComponent{ sphere },
@@ -328,7 +223,7 @@ SDL_AppResult Game::MainInit()
     //    ColliderComponent{}
     //);
 
-    //ctx->ExecuteGenerators();
+    ctx->ExecuteGenerators();
     ChangeState(GameState::MAIN_MENU);
     return SDL_APP_CONTINUE;
 }

@@ -1,5 +1,14 @@
 #include "PCH.h"
 #include "MyGame.h"
+// Engine.h теперь только forward-декларации — полные типы тянет этот TU.
+#include "EngineContext.h"
+#include "ObjectManager.h"
+#include "CameraManager.h"
+#include "TextureManager.h"
+#include "ModelManager.h"
+#include "InputManager.h"
+#include "ThreadController.h"
+#include "LightDataModule.h"
 #include "imgui.h"
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
@@ -107,7 +116,9 @@ void MainMenuMode::Enter()
         SetCullingPibPrograms(ctx, s_.engine->GetLightDataModule());   // GPU-каллинг: out_pib
     }
 
-    ModelData* quad = ctx->CreateModel("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
+    // Своя разновидность квада (V-flip + Center-пивот) — имя "quad" теперь занято дефолтом движка
+    // (Engine::InitDefaultResources), поэтому даём отдельное имя, чтобы не переопределить его молча.
+    ModelData* quad = ctx->CreateModel("mygame_quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
         v = {
             { 0,0,0,  0,1,  0,0,1,  1,0,0 },
             { 1,0,0,  1,1,  0,0,1,  1,0,0 },
@@ -115,7 +126,7 @@ void MainMenuMode::Enter()
             { 0,1,0,  0,0,  0,0,1,  1,0,0 },
         };
         i = { 0, 1, 2, 0, 2, 3 };
-    }, AnchorShift::Center);
+    }, AnchorShift::Center, /*dont_save=*/true);
 
     TextureHandle* texture_cube = ctx->CreateTextureFromFile("albedo_cube", "albedo_atlas", "textures/level_1_orig.png");
 

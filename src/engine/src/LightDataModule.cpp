@@ -69,13 +69,13 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
             light_layout.max_range = light.light_data.GetMaxDistance();
 
             if (om->Has<ShadowCasterComponent>(scene, e)) {
-                light_layout.type = LightTypes::SPOT;
+                light_layout.type = static_cast<int>(LightTypes::SPOT);
                 light_layout.offset = offset;
 				light_layout.padding = 0;
                 offset += spot_light_cameras;
             }
             else {
-                light_layout.type = LightTypes::SPOT;
+                light_layout.type = static_cast<int>(LightTypes::SPOT);
                 light_layout.offset = no_camera;
                 light_layout.padding = 0;
             };
@@ -106,13 +106,13 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
             light_layout.max_range = light.light_data.GetMaxDistance();
 
             if (om->Has<ShadowCasterComponent>(scene, e)) {
-                light_layout.type = LightTypes::SPHERE;
+                light_layout.type = static_cast<int>(LightTypes::SPHERE);
                 light_layout.offset = offset;
                 light_layout.padding = 0;
                 offset += sphere_light_cameras;
             }
             else {
-                light_layout.type = LightTypes::SPHERE;
+                light_layout.type = static_cast<int>(LightTypes::SPHERE);
                 light_layout.offset = no_camera;
                 light_layout.padding = 0;
 			};
@@ -147,13 +147,13 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
             light_layout.max_range = 0.0f;
 
             if (om->Has<ShadowCasterComponent>(scene, e)) {
-                light_layout.type = LightTypes::DIRECT;
+                light_layout.type = static_cast<int>(LightTypes::DIRECT);
                 light_layout.offset = offset;
                 light_layout.padding = 0;
                 offset += d.cascade_count;
             }
             else {
-                light_layout.type = LightTypes::DIRECT;
+                light_layout.type = static_cast<int>(LightTypes::DIRECT);
                 light_layout.offset = no_camera;
                 light_layout.padding = 0;
             };

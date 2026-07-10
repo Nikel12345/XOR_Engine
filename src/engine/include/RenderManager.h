@@ -5,7 +5,6 @@
 #include <vector>
 //#include "ShaderManager.h"
 #include "TextureData.h"
-#include "BufferManager.h"
 #include "RenderCommandData.h"
 #include "Aliases.h"
 
@@ -15,6 +14,7 @@ namespace RenderSnap { struct BatchLayout; }
 class MaterialManager;
 class PipeManager;
 class ObjectManager;
+class BufferManager;   // только указатели в сигнатурах — полный тип тянут cpp-потребители
 
 class PassManager
 {

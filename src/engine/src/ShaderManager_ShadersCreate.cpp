@@ -2,6 +2,8 @@
 #include "ShaderManager.h"
 #include <string_view>
 
+using namespace ShaderBase;
+
 inline uint64_t HashBytes(const uint8_t* data, size_t size) {
     uint64_t hash = 14695981039346656037ULL;
     for (size_t i = 0; i < size; i++) {
@@ -300,6 +302,7 @@ ComputeShaderData ShaderManager::BuildComputeShader(Uint8* spv, size_t spv_size,
     ComputeShaderData cs{};
     cs.spv_code = spv;
     cs.spv_size = spv_size;
+    cs.source_path = dbg_name ? dbg_name : "";   // рецепт для перекомпиляции/сериализации (см. VS/FS)
 
     SDL_ShaderCross_ComputePipelineMetadata* metadata =
         SDL_ShaderCross_ReflectComputeSPIRV(spv, spv_size, 0);

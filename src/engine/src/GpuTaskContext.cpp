@@ -5,6 +5,8 @@
 #include "RenderManager.h"
 #include "TextureManager.h"
 
+using namespace ShaderBase;
+
 GpuTaskContext::GpuTaskContext(BufferManager* bm, ShaderManager* sm, PassManager* pm, TextureManager* tm)
 	: buffer_manager(bm), shader_manager(sm), pass_manager(pm), texture_manager(tm)
 {

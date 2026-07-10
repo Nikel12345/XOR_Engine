@@ -1,6 +1,8 @@
 #include "PCH.h"
 #include "ShaderManager.h"
 
+using namespace ShaderBase;
+
 
 VertexShaderData ShaderManager::CreateVertexShaderFromSPV(const char* path, std::initializer_list<VertexBufferBinding> bindings)
 {

@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <typeindex>
 #include "Engine.h"
+#include "InputManager.h"    // InputManager::KeyEvent в скретч-буферах
+#include "BaseComponents.h"  // Entity (раньше транзитивно через Engine.h)
 
 // ============================================================================
 //  Каркас "игры с режимами" поверх общего Engine. Всё намеренно в одном файле:

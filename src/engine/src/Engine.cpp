@@ -1,5 +1,30 @@
 #include "PCH.h"
 #include "Engine.h"
+// Engine.h теперь только forward-декларации — полные типы менеджеров тянет этот TU.
+#include "TransferManager.h"
+#include "BufferManager.h"
+#include "TextureManager.h"
+#include "ShaderManager.h"
+#include "PipeManager.h"
+#include "ModelManager.h"
+#include "RenderManager.h"
+#include "ObjectManager.h"
+#include "CameraManager.h"
+#include "SlotController.h"
+#include "ThreadController.h"
+#include "MaterialManager.h"
+#include "InputManager.h"
+#include "TextureLoader.h"
+#include "BatchBuilder.h"
+#include "PIB_DataModule.h"
+#include "TransformDataModule.h"
+#include "InstanceDataModule.h"
+#include "LightDataModule.h"
+#include "IndirectDataModule.h"
+#include "BoundSphereDataModule.h"
+#include "EngineContext.h"
+#include "DefaultUpdateSet.h"
+#include "DefaultRenderPassSet.h"
 #include "TexturesPresets.h"
 #include "ComponentSerializer.h"
 #include "MaterialParams.h"           // Opaque/TransparentMaterialParams — билтин-типы params
@@ -9,6 +34,8 @@
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
+
+using namespace ShaderBase;   // POSITION/UV/... в раскладке fallback-vs
 
 // ============================================================
 //  Engine: конструирование/разрушение + инициализация дефолтов.
@@ -143,20 +170,69 @@ void Engine::InitDefaultResources()
 
 	// Fallback-sp: материал с УДАЛЁННОЙ sp рисуется им (аналог textureless — цвет из params, без
 	// текстур). Буферы (InitDefaultBufferUpdaters) и MAIN_PASS (InitPasses) к этому моменту готовы.
+	// dont_save=true у всей тройки vs/fs/sp — движковая инфраструктура, в shaders.json не идёт.
 	{
 		using namespace DefaultBuffersNames;
 		engine_context->CreateVertexShader("_fallback_vs",
 			"../engine/shaders_code/main_pass/main_pass.vert.hlsl",
-			{ { &FMT_PosUVNormal, { POSITION, UV, NORMAL, TANGENT } } });
-		engine_context->CreateFragmentShader("_fallback_fs", "../engine/shaders_code/main_pass/untextured/surface.hlsl");
+			{ { &FMT_PosUVNormal, { POSITION, UV, NORMAL, TANGENT } } }, /*dont_save=*/true);
+		engine_context->CreateFragmentShader("_fallback_fs", "../engine/shaders_code/main_pass/untextured/surface.hlsl", /*dont_save=*/true);
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry()->DoesNotCull();
 		engine_context->CreateShaderProgram("_FallbackShader", spd, DefaultRenderPassNamespace::MAIN_PASS,
 			"_fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"_fallback_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
-			{ });   // текстур нет
+			{ }, /*dont_save=*/true);   // текстур нет
 		batch_builder->SetFallbackShader("_FallbackShader");   // ПО ИМЕНИ: удаление fallback → промах → пустой рендер
 	}
+
+	// Примитивы-дефолты движка (quad/sphere): генерируются кодом, поэтому dont_save (в models.json
+	// не идут). Раньше жили в игре — вынесены сюда, чтобы любая игра/сцена могла ссылаться на них по
+	// имени без своего кода генерации. Процедурные пути пусты → и без флага не сериализовались бы.
+	engine_context->CreateModel("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
+		v = {
+			{ 0,0,0,  0,0,  0,0,1,  1,0,0 },
+			{ 1,0,0,  1,0,  0,0,1,  1,0,0 },
+			{ 1,1,0,  1,1,  0,0,1,  1,0,0 },
+			{ 0,1,0,  0,1,  0,0,1,  1,0,0 },
+		};
+		i = { 0, 1, 2, 0, 2, 3 };
+	}, AnchorShift::Keep, /*dont_save=*/true);
+
+	engine_context->CreateModel("sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
+		const uint32_t stacks = 32;   // деления по широте
+		const uint32_t slices = 48;   // деления по долготе
+		const float R = 1.0f;
+		const float PI = 3.14159265358979323846f;
+
+		for (uint32_t i = 0; i <= stacks; ++i) {
+			float phi = PI * (float)i / (float)stacks;              // 0..π (полюс→полюс)
+			float cp = std::cos(phi), sp = std::sin(phi);
+			for (uint32_t j = 0; j <= slices; ++j) {
+				float theta = 2.0f * PI * (float)j / (float)slices; // 0..2π
+				float ct = std::cos(theta), st = std::sin(theta);
+
+				float nx = sp * ct, ny = cp, nz = sp * st;          // нормаль = точка на единичной сфере
+				PosUVNormal vert{};
+				vert.x = R * nx; vert.y = R * ny; vert.z = R * nz;
+				vert.u = (float)j / (float)slices;
+				vert.v = (float)i / (float)stacks;
+				vert.nx = nx; vert.ny = ny; vert.nz = nz;
+				vert.tx = -st; vert.ty = 0.0f; vert.tz = ct;        // касательная = ∂pos/∂θ
+				v.push_back(vert);
+			}
+		}
+
+		const uint32_t row = slices + 1;
+		for (uint32_t i = 0; i < stacks; ++i) {
+			for (uint32_t j = 0; j < slices; ++j) {
+				uint32_t a = i * row + j;
+				uint32_t b = a + row;
+				idx.push_back(a);     idx.push_back(a + 1); idx.push_back(b);
+				idx.push_back(a + 1); idx.push_back(b + 1); idx.push_back(b);
+			}
+		}
+	}, AnchorShift::Keep, /*dont_save=*/true);
 }
 
 void Engine::InitDefaultBufferUpdaters()

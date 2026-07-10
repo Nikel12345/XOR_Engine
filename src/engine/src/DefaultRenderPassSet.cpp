@@ -1,6 +1,7 @@
 ﻿#include "DefaultRenderPassSet.h"
 #include "TextureManager.h"
 #include "RenderManager.h"
+#include "BufferManager.h"   // DefaultBuffersNames (раньше транзитивно из RenderManager.h)
 #include "TexturesPresets.h"
 #include "TextureSamplerPresets.h"
 #include "ObjectManager.h"

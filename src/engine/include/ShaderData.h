@@ -5,8 +5,13 @@
 #include <functional>
 #include <memory>
 #include <SDL3/SDL_gpu.h>
-#include <glm/glm.hpp>   // DispatchSizeBinder использует glm::uvec3 (раньше приходил из PCH)
-#include "Aliases.h"     // BufferDataName — имя storage-буфера в ссылках sp
+#include "ShaderTypes.h"   // лёгкая половина: enum'ы/вершинные форматы/spd/биндеры
+#include "Aliases.h"       // BufferDataName — имя storage-буфера в ссылках sp
+
+// ТЯЖЁЛАЯ половина: живые структуры шейдер-данных и программ (GPU-хэндлы, std::function,
+// рефлексия). Правится часто (редактор шейдеров) — потребители подключают её ТОЛЬКО если
+// реально лезут внутрь sp/csp/шейдер-данных (обычно через ShaderManager.h/GpuTaskContext.h).
+// Материалам/вершинам/UI-командам хватает ShaderTypes.h — не тяни этот файл в заголовки-хабы.
 
 struct BufferData;
 struct RenderPassStep;
@@ -14,28 +19,6 @@ struct ComputePassStep;
 struct TextureAtlas;
 
 namespace ShaderBase {
-    enum VertexSemantic : Uint32 { POSITION = 0, UV = 1, NORMAL = 2, TANGENT = 3 };
-
-    struct VertexAttr {
-        VertexSemantic semantic;
-        Uint32 offset;
-        SDL_GPUVertexElementFormat format;
-    };
-
-    struct VertexFormat {
-        std::vector<VertexAttr> attrs;
-        Uint32 stride;
-        const VertexAttr* Find(VertexSemantic s) const {
-            for (auto& a : attrs) if (a.semantic == s) return &a;
-            return nullptr;
-        }
-    };
-    struct VertexBufferBinding {
-        // Имени буфера тут нет: слот позиционный (порядок биндингов), а какой реальный
-        // GPU-буфер идёт в слот — решает бинд-шаг рендера (BufferManager::BindGPUVertexBuffer).
-        const VertexFormat* format;
-        std::vector<VertexSemantic> pull;
-    };
     struct ShaderData
     {
         // Владеющий хэндл GPU-шейдера. Шарится копированием ShaderData (vs reuse между sp) и
@@ -48,58 +31,28 @@ namespace ShaderBase {
     };
 }
 
-using namespace ShaderBase;
-
-struct PushConstantBinder {
-    SDL_GPUCommandBuffer* cb;
-    // Слот кадра (pass_frame/render_frame) — ключ пер-слотовых слепков: push-лямбды берут
-    // данные ТОЛЬКО через Ask*(binder.slot), живые ECS/дерево батчей из них запрещены.
-    uint8_t slot = 0;
-    mutable Uint32 vert_count = 0;
-    mutable Uint32 frag_count = 0;
-
-    // compute � ��� ����, ����� ����
-    template<typename T> void Push(Uint32 slot, const T& d) const {
-        SDL_PushGPUComputeUniformData(cb, slot, &d, sizeof(T));
-    }
-    // graphics � ����-���� + ���� (mutable, ����� ������ �������� const, ��� � compute)
-    template<typename T> void PushVertex(const T& d) const {
-        SDL_PushGPUVertexUniformData(cb, vert_count++, &d, sizeof(T));
-    }
-    template<typename T> void PushFragment(const T& d) const {
-        SDL_PushGPUFragmentUniformData(cb, frag_count++, &d, sizeof(T));
-    }
-};
-
-struct DispatchSizeBinder {
-    glm::uvec3 element_count{ 0, 0, 0 };
-    // Слот кадра — тот же контракт, что у PushConstantBinder::slot (см. выше).
-    uint8_t slot = 0;
-
-    void Dispatch(uint32_t x, uint32_t y = 1, uint32_t z = 1) {
-        element_count = { x, y, z };
-    }
-};
-
 struct VertexShaderData {
-    ShaderData shader_data;
+    ShaderBase::ShaderData shader_data;
     std::vector<SDL_GPUVertexAttribute> attributes;
     std::vector<SDL_GPUVertexBufferDescription> vbs;
     // Исходник + раскладка буферов — чтобы редактор мог ПЕРЕКОМПИЛИРОВАТЬ vs из (возможно
     // изменённого) пути, не зная контекста создания. bindings копируют статику (buffer/format —
     // указатели на глобальные имена/форматы), поэтому переживают программу. Пусто у SPV/дефолтных.
     std::string source_path;
-    std::vector<VertexBufferBinding> bindings;
+    std::vector<ShaderBase::VertexBufferBinding> bindings;
+    bool dont_save = false;   // движковый дефолт (_fallback_vs) — в shaders.json не пишется
 };
 
 struct FragmentShaderData {
-    ShaderData shader_data;
+    ShaderBase::ShaderData shader_data;
     std::string source_path;   // исходник fs (для перекомпиляции из редактора; см. VertexShaderData)
+    bool dont_save = false;    // см. VertexShaderData::dont_save
 };
 
 struct ComputeShaderData {
 	Uint8* spv_code = nullptr;
 	size_t spv_size = 0;
+    std::string source_path;   // исходник cs (для перекомпиляции/сериализации; см. VertexShaderData)
     Uint32 threadcount_x = 1;
     Uint32 threadcount_y = 1;
     Uint32 threadcount_z = 1;
@@ -109,68 +62,7 @@ struct ComputeShaderData {
     Uint32 num_readwrite_storage_textures = 0;
     Uint32 num_readwrite_storage_buffers = 0;
     Uint32 num_uniform_buffers = 0;
-};
-
-struct RasterizerStateBiasParams {
-    float depth_bias_constant_factor = 0.0f;
-    float depth_bias_slope_factor = 0.0f;
-    float depth_bias_clamp = 0.0f;
-    bool enable_depth_bias = false;
-};
-
-struct ShaderProgramDescription
-{
-    SDL_GPUCullMode           cull_mode = SDL_GPU_CULLMODE_NONE;
-    SDL_GPUFillMode           fill_mode = SDL_GPU_FILLMODE_FILL;
-    RasterizerStateBiasParams rasterizer_bias;
-    bool                      depth_test = true;
-    bool                      depth_write = true;
-    bool                      stencil_test = false;
-    bool                      color_blend = false;
-    SDL_GPUPrimitiveType primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-
-
-    ShaderProgramDescription* BehavesAsShadowCaster();
-    ShaderProgramDescription* BehavesAsOpaqueGeometry();
-    ShaderProgramDescription* BehavesAsTransparentGeometry();
-    ShaderProgramDescription* BehavesAsDepthPrepass();
-    ShaderProgramDescription* BehavesAsFullscreenEffect();
-    ShaderProgramDescription* BehavesAsUIOverlay();
-
-    ShaderProgramDescription* WithBlending() { color_blend = true;  return this; }
-    ShaderProgramDescription* WithoutBlending() { color_blend = false; return this; }
-    ShaderProgramDescription* IgnoresDepth() { depth_test = false; depth_write = false; return this; }
-    ShaderProgramDescription* ReadsDepthOnly() { depth_test = true;  depth_write = false; return this; }
-    ShaderProgramDescription* WritesDepth() { depth_test = true;  depth_write = true;  return this; }
-    ShaderProgramDescription* CullsBackFaces() { cull_mode = SDL_GPU_CULLMODE_BACK;  return this; }
-    ShaderProgramDescription* CullsFrontFaces() { cull_mode = SDL_GPU_CULLMODE_FRONT; return this; }
-    ShaderProgramDescription* DoesNotCull() { cull_mode = SDL_GPU_CULLMODE_NONE;  return this; }
-    ShaderProgramDescription* WithDepthBias(RasterizerStateBiasParams b) { rasterizer_bias = b; return this; }
-    ShaderProgramDescription* Wireframe() { fill_mode = SDL_GPU_FILLMODE_LINE; return this; }
-    ShaderProgramDescription* Solid() { fill_mode = SDL_GPU_FILLMODE_FILL; return this; }
-    ShaderProgramDescription* AsLineList() { primitive_type = SDL_GPU_PRIMITIVETYPE_LINELIST; return this; }
-};
-
-enum class TextureSlotRole {
-    // Well-known PBR-роли: движок знает их семантику (colorspace, встроенные хелперы
-    // SampleAlbedo/computeNormal/SampleORM). Порядок здесь не задаёт бинды — их порядок
-    // диктует ShaderProgram::required_slots (он же → textures[i] в прологе).
-    Albedo,
-    Normal,
-    ORM,                     // упаковка: R=AO, G=Roughness, B=Metallic (одна текстура, один UVL)
-    Emissive,
-    MetallicRoughness = ORM, // back-compat алиас: тот же слот, что ORM (старое имя)
-
-    // Generic-слоты для пользовательских прологов: движок просто биндит хэндл по роли,
-    // никакой семантики. Кастомный surface.hlsl сам объявляет сэмплеры/textures[] под них.
-    Custom0 = 1000,
-    Custom1,
-    Custom2,
-    Custom3,
-    Custom4,
-    Custom5,
-    Custom6,
-    Custom7,
+    bool dont_save = false;    // см. VertexShaderData::dont_save
 };
 
 struct ShaderProgram {
@@ -186,8 +78,8 @@ struct ShaderProgram {
     std::string fs_name;
     std::vector<BufferDataName> fragment_shader_buffer_names;
 
-    // ��������� ���� (�� ����������) ������� ��� ����� �������. ��������, ���� � ������� ���� uniform sampler2D u_albedoTexture, �� � required_slots ����� TextureSlotRole::Albedo.
-	// Expected texture types (by role) for this shader. For example, if the shader has a uniform sampler2D u_albedoTexture, then required_slots will contain TextureSlotRole::Albedo.
+    // Expected texture types (by role) for this shader. For example, if the shader has a
+    // uniform sampler2D u_albedoTexture, then required_slots will contain TextureSlotRole::Albedo.
     std::vector<TextureSlotRole> required_slots;
 
     std::function<void(const PushConstantBinder&, const void*)> push_func;
@@ -198,6 +90,7 @@ struct ShaderProgram {
     }
 	ShaderProgramDescription spd;   // ПО ЗНАЧЕНИЮ: параметры пайплайна живут в самом sp (не в словаре)
     RenderPassStep* associated_render_pass = nullptr;
+    bool dont_save = false;   // движковый дефолт (_FallbackShader) — в shaders.json не пишется
 
 };
 
@@ -208,11 +101,9 @@ struct ComputeShaderProgram {
         Uint32 mip_level = 0;
         Uint32 layer = 0;
     };
-    struct ComputeRWTextureBindingParametr {
-        std::string texture_atlas = "";
-        Uint32 mip_level = 0;
-        Uint32 layer = 0;
-    };
+    // Форма создания «по именам» — теперь топ-левел тип в ShaderTypes.h (сигнатуры фасадов
+    // не требуют полного ComputeShaderProgram); алиас сохраняет старое вложенное написание.
+    using ComputeRWTextureBindingParametr = ::ComputeRWTextureBindingParametr;
     std::string cs_name;   // ссылка по имени на ComputeShaderData в реестре ShaderManager (см. ShaderProgram)
     std::vector<BufferData*> rw_storage_buffers;
     std::vector<BufferData*> ro_storage_buffers;

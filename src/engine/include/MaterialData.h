@@ -2,7 +2,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cstdint>
-#include "ShaderData.h"
+#include "ShaderTypes.h"   // TextureSlotRole (лёгкая половина; тяжёлый ShaderData.h не нужен)
 #include "Aliases.h"
 
 // Тег раскладки params — ТОЛЬКО для тулинга (UI/инспектор). Рендер params не интерпретирует
@@ -26,4 +26,7 @@ struct Material {
     // перестройки дерева), а разные материалы дают разные адреса (не схлопываются).
     std::vector<uint8_t> params;
     MaterialParamsKind   params_kind = MaterialParamsKind::None;   // тег для UI-разбора (см. выше)
+    // Не писать в materials.json при SaveScene (кодовая инфраструктура — напр. debug_collider,
+    // используемый только генератором debug-рамок). UI/пересоздание → false («тронул = сохраняемый»).
+    bool dont_save = false;
 };

@@ -4,7 +4,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <SDL3/SDL.h>
-#include "ShaderData.h"
+#include "ShaderTypes.h"
 
 
 struct PosUVNormal {
@@ -15,18 +15,18 @@ struct PosUVNormal {
 };
 struct PosOnly { float x, y, z; };
 
-const VertexFormat FMT_PosUVNormal = {
+inline const ShaderBase::VertexFormat FMT_PosUVNormal = {   // inline: one entity per program (pointer identity!)
     {
-        { POSITION, offsetof(PosUVNormal, x),  SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 },
-        { UV,       offsetof(PosUVNormal, u),  SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2 },
-        { NORMAL,   offsetof(PosUVNormal, nx), SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 },
-        { TANGENT,  offsetof(PosUVNormal, tx), SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 },
+        { ShaderBase::POSITION, offsetof(PosUVNormal, x),  SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 },
+        { ShaderBase::UV,       offsetof(PosUVNormal, u),  SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2 },
+        { ShaderBase::NORMAL,   offsetof(PosUVNormal, nx), SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 },
+        { ShaderBase::TANGENT,  offsetof(PosUVNormal, tx), SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 },
     },
     sizeof(PosUVNormal)
 };
 
-const VertexFormat FMT_Pos = {
-    { { POSITION, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 } },
+inline const ShaderBase::VertexFormat FMT_Pos = {
+    { { ShaderBase::POSITION, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 } },
     sizeof(PosOnly)
 };
 

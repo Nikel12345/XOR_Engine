@@ -1,6 +1,18 @@
 #include "PCH.h"
 #include "Engine.h"
 #include "EngineProfiler.h"
+// Engine.h теперь только forward-декларации — полные типы тянет этот TU.
+#include "BufferManager.h"
+#include "TextureManager.h"
+#include "PipeManager.h"
+#include "TransferManager.h"
+#include "SlotController.h"
+#include "RenderManager.h"
+#include "ObjectManager.h"
+#include "BatchBuilder.h"
+#include "EngineContext.h"
+#include "DefaultRenderPassSet.h"
+#include "UI_ImGui.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
@@ -97,8 +109,8 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 		SDL_EndGPUCopyPass(cp);
 		SDL_CancelGPUCommandBuffer(cb);
 		transfer_manager->ReleaseTB(tbd);
-		slot_controller->SetSlotState(slot, UPLOADING);
-		slot_controller->SetSlotState(slot, PREPARED);
+		slot_controller->SetSlotState(slot, SlotState::UPLOADING);
+		slot_controller->SetSlotState(slot, SlotState::PREPARED);
 		return;
 	}
 
@@ -134,7 +146,7 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 	pending_upload_tbs[slot] = { undepended_tbd, texture_tbd };
 	slot_controller->GetSlotsData()[slot].submit_time = Prof::Clock::now();
 	slot_controller->SetSlotFence(slot, fence);         // fence ДО флага UPLOADING
-	slot_controller->SetSlotState(slot, UPLOADING);
+	slot_controller->SetSlotState(slot, SlotState::UPLOADING);
 }
 
 // Зеркало FenceFunc для upload-fence. Блокирующее ожидание здесь обязательно:
@@ -161,7 +173,7 @@ void Engine::UploadFunc(uint8_t slot)
 	pending_upload_tbs[slot] = {};
 	double release_ms = Prof::MsSince(t_rel);
 
-	slot_controller->SetSlotState(slot, PREPARED);
+	slot_controller->SetSlotState(slot, SlotState::PREPARED);
 
 	Prof::Upload().Add("upload_gpu (submit->fence, заливка на GPU)", upload_ms);
 	Prof::Upload().Add("upload_fence_wait (CPU-блок)", wait_ms);
@@ -329,7 +341,7 @@ void Engine::FenceFunc(uint8_t slot) {
 	slot_controller->NotifyRenderFenceDone();
 
 	//slot_controller->RemoveSlotFence(slot);
-	slot_controller->SetSlotState(slot, RENDERED);
+	slot_controller->SetSlotState(slot, SlotState::RENDERED);
 
 
 	auto now = Prof::Clock::now();

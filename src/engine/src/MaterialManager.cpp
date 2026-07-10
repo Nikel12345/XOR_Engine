@@ -41,6 +41,28 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 	return materials[name].get();
 }
 
+size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries)
+{
+	size_t n = 0;
+	for (const SceneMaterialEntry& e : entries) {
+		if (e.name.empty()) continue;
+		// Обновление В МЕСТЕ (сохраняем адрес Material — если на него уже кто-то ссылается): если
+		// нет — создаём пустой. Затем переливаем все поля из записи манифеста.
+		auto it = materials.find(e.name);
+		Material* m = (it != materials.end()) ? it->second.get()
+		            : CreateMaterial(e.name, {}, {});   // пустой под этим именем
+		if (!m) continue;
+		m->textures.clear();
+		for (auto& [role, tex] : e.textures) m->textures[role] = tex;
+		m->shader_programs = e.shaders;
+		m->params = e.params;
+		m->params_kind = e.params_kind;
+		m->dont_save = false;   // пришёл из файла — сохраняемый
+		++n;
+	}
+	return n;
+}
+
 std::vector<Material*> MaterialManager::GetAllMaterials()
 {
     std::vector<Material*> result;

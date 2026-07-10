@@ -4,10 +4,19 @@
 #include "TextureLoader.h"
 #include "RenderManager.h"    // PassManager (создание проходов, GetRenderPassStep)
 #include "EngineProfiler.h"   // Prof::Clock/MsSince — тайминг фаз загрузки (реальны при любом ENGINE_PROFILE)
+// Заголовок фасада держит менеджеры forward-декларациями — полные типы тянет этот TU.
+#include "GpuTaskContext.h"
+#include "TextureManager.h"
+#include "MaterialManager.h"
+#include "ModelManager.h"
+#include "ShaderManager.h"
+#include "PipeManager.h"
+
+using namespace ShaderBase;   // VertexBufferBinding в сигнатурах Create*Shader
 
 EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager* rm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pm, BatchBuilder* bb, TextureLoader* tl)
-	: gpu_ctx(bm, sm, rm, tm)   // GPU-фасад над Buffer/Shader/Pass/Texture
 {
+	gpu_ctx = new GpuTaskContext(bm, sm, rm, tm);   // GPU-фасад над Buffer/Shader/Pass/Texture
 	this->buffer_manager = bm;
 	this->texture_manager = tm;
 	this->pass_manager = rm;
@@ -20,6 +29,16 @@ EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager*
 
 	this->batch_builder = bb;
 	this->texture_loader = tl;
+}
+
+EngineContext::~EngineContext()
+{
+	delete gpu_ctx;
+}
+
+TextureAtlas* EngineContext::GetTextureAtlas(const AtlasName& name) const
+{
+	return texture_manager->GetTextureAtlas(name);
 }
 
 TextureAtlas* EngineContext::CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name)
@@ -110,7 +129,7 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 	return first;
 }
 
-Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders)
+Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders, bool dont_save)
 {
 	// Материал хранит ИМЕНА (name-based ссылки, резолв отложен на сборку батча). Здесь sp резолвим
 	// лишь для авторской валидации: у каждого required_slot шейдера должна быть текстура в материале.
@@ -132,7 +151,9 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 				SDL_Log("Material '%s': missing texture for required slot %d", name.c_str(), static_cast<int>(required_role));
 		}
 	}
-	return material_manager->CreateMaterial(std::move(name), std::move(texture_names), std::move(shader_names));
+	Material* m = material_manager->CreateMaterial(std::move(name), std::move(texture_names), std::move(shader_names));
+	if (m) m->dont_save = dont_save;
+	return m;
 }
 
 ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor)
@@ -140,9 +161,11 @@ ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_p
 	return model_manager->CreateModel(name, model_path, index_path, anchor);
 }
 
-ModelData* EngineContext::CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor)
+ModelData* EngineContext::CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor, bool dont_save)
 {
-	return model_manager->CreateModel(name, std::move(generator), anchor);
+	ModelData* m = model_manager->CreateModel(name, std::move(generator), anchor);
+	if (m) m->dont_save = dont_save;   // флаг ставим тут, не тащим в сигнатуру MM (см. ModelData::dont_save)
+	return m;
 }
 
 void EngineContext::DeleteEntity(const SceneName& scene_name, Entity e)
@@ -274,23 +297,31 @@ void EngineContext::CreateComputePipelines()
 }
 
 // GPU-методы — тонкие форвардеры в gpu_ctx (реализация в GpuTaskContext.cpp).
-void EngineContext::CreateFragmentShader(const std::string& name, const char* path) {
-	gpu_ctx.CreateFragmentShader(name, path);
+// dont_save ставим тут через реестр (не тащим флаг в gpu_ctx/sm-сигнатуры): Create* создаёт SD в
+// реестре, затем помечаем его. Get*Shader на промахе не логирует (см. ShaderManager) — компиляция
+// могла не пройти, тогда просто некому ставить флаг.
+void EngineContext::CreateFragmentShader(const std::string& name, const char* path, bool dont_save) {
+	gpu_ctx->CreateFragmentShader(name, path);
+	if (auto* d = shader_manager->GetFragmentShader(name)) d->dont_save = dont_save;
 }
 
-void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout) {
-	gpu_ctx.CreateVertexShader(name, hlsl_path, vertex_buffer_layout);
+void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout, bool dont_save) {
+	gpu_ctx->CreateVertexShader(name, hlsl_path, vertex_buffer_layout);
+	if (auto* d = shader_manager->GetVertexShader(name)) d->dont_save = dont_save;
 }
 
 ShaderProgram* EngineContext::CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 	const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 	const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
-	std::initializer_list<TextureSlotRole> texture_slots) {
-	return gpu_ctx.CreateShaderProgram(name, spd, associated_pass_name, vs_name, vertex_shader_buffers, fs_name, fragment_shader_buffers, texture_slots);
+	std::initializer_list<TextureSlotRole> texture_slots, bool dont_save) {
+	ShaderProgram* sp = gpu_ctx->CreateShaderProgram(name, spd, associated_pass_name, vs_name, vertex_shader_buffers, fs_name, fragment_shader_buffers, texture_slots);
+	if (sp) sp->dont_save = dont_save;
+	return sp;
 }
 
-void EngineContext::CreateComputeShader(const std::string& name, const char* hlsl_path) {
-	gpu_ctx.CreateComputeShader(name, hlsl_path);
+void EngineContext::CreateComputeShader(const std::string& name, const char* hlsl_path, bool dont_save) {
+	gpu_ctx->CreateComputeShader(name, hlsl_path);
+	if (auto* d = shader_manager->GetComputeShader(name)) d->dont_save = dont_save;
 }
 
 ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
@@ -301,5 +332,5 @@ ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::strin
 	std::initializer_list<AtlasName> texture_samplers,
 	const ComputePassName& associated_compute_pass)
 {
-	return gpu_ctx.CreateComputeShaderProgram(name, cs_name, rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers, associated_compute_pass);
+	return gpu_ctx->CreateComputeShaderProgram(name, cs_name, rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers, associated_compute_pass);
 }

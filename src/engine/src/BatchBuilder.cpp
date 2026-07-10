@@ -12,6 +12,9 @@
 #include "TextureData.h"
 #include <unordered_set>
 
+using namespace BatchKeys;    // ключи батчей — локально для TU (в заголовках квалифицированы)
+using namespace ShaderBase;   // вершинные типы/семантики
+
 
 using namespace BatchKeys;
 

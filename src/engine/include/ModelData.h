@@ -1,8 +1,17 @@
 #pragma once
 #include <vector>
 #include <string>
+#include <functional>          // ModelGeneratorFn
 #include <SDL3/SDL_stdinc.h>   // Uint32
 #include <glm/glm.hpp>         // glm::vec4 (раньше приходили из PCH)
+
+struct PosUVNormal;   // полное определение — PositionStructure.h (алиасу ниже хватает fwd)
+
+// Генератор геометрии процедурной модели: заполняет переданные массивы вершин/индексов
+// как угодно — от руками записанного квада до математической поверхности. MM это безразлично.
+// Живёт здесь (а не в ModelManager.h), чтобы сигнатуры фасадов (EngineContext::CreateModel)
+// не тянули весь ModelManager.h ради одного алиаса.
+using ModelGeneratorFn = std::function<void(std::vector<PosUVNormal>&, std::vector<Uint32>&)>;
 
 struct SubMeshData {
     Uint32 vertexOffset = 0;
@@ -33,4 +42,8 @@ struct ModelData {
     // моделей (сгенерированы кодом) — из файла не пересоздаются, редактором не трогаются.
     std::string model_path;
     std::string index_path;
+    // Не писать в models.json при SaveScene (движковые/кодовые дефолты — sphere/quad/cubes).
+    // Процедурные и так скипались бы по пустым путям, но флаг — явный маркер намерения (как
+    // TextureHandle::dont_save). Пересоздание/UI выставляют false → «тронул = сохраняемый».
+    bool dont_save = false;
 };

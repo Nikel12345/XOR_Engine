@@ -1,0 +1,250 @@
+{
+    "materials": [
+        {
+            "name": "debug_collider",
+            "shaders": [
+                "sp_debug_collider"
+            ],
+            "textures": [],
+            "params_kind": "None"
+        },
+        {
+            "name": "car",
+            "shaders": [
+                "sp",
+                "sp_shadow"
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "texture": "new_car"
+                },
+                {
+                    "role": "Normal",
+                    "texture": "norm"
+                },
+                {
+                    "role": "ORM",
+                    "texture": "default_orm"
+                },
+                {
+                    "role": "Emissive",
+                    "texture": "default_emissive"
+                }
+            ],
+            "params_kind": "Opaque",
+            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
+        },
+        {
+            "name": "transparent",
+            "shaders": [
+                "sp_transparent"
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "texture": "new_car_glass"
+                },
+                {
+                    "role": "Normal",
+                    "texture": "norm"
+                }
+            ],
+            "params_kind": "Transparent",
+            "params": "3333b33ecccccccccccccccccccccccc"
+        },
+        {
+            "name": "car2",
+            "shaders": [
+                "sp",
+                "sp_shadow"
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "texture": "new_car"
+                },
+                {
+                    "role": "Normal",
+                    "texture": "norm"
+                },
+                {
+                    "role": "ORM",
+                    "texture": "default_orm"
+                },
+                {
+                    "role": "Emissive",
+                    "texture": "default_emissive"
+                }
+            ],
+            "params_kind": "Opaque",
+            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
+        },
+        {
+            "name": "material_sun",
+            "shaders": [
+                "sp"
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "texture": "texture_sun"
+                },
+                {
+                    "role": "Normal",
+                    "texture": "norm"
+                },
+                {
+                    "role": "ORM",
+                    "texture": "default_orm"
+                },
+                {
+                    "role": "Emissive",
+                    "texture": "default_emissive"
+                }
+            ],
+            "params_kind": "Opaque",
+            "params": "0000803f0000803f0000803f0000803fa4707d3f9a99593f6666e63e9a991940000000000000803f0000000000000000"
+        },
+        {
+            "name": "ground",
+            "shaders": [
+                "sp",
+                "sp_shadow"
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "texture": "new_car_ground"
+                },
+                {
+                    "role": "Normal",
+                    "texture": "norm"
+                },
+                {
+                    "role": "ORM",
+                    "texture": "default_orm"
+                },
+                {
+                    "role": "Emissive",
+                    "texture": "default_emissive"
+                }
+            ],
+            "params_kind": "Opaque",
+            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
+        },
+        {
+            "name": "material_sprite",
+            "shaders": [
+                "sp",
+                "sp_shadow"
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "texture": "texture_asphalt"
+                },
+                {
+                    "role": "Normal",
+                    "texture": "wood_norm"
+                },
+                {
+                    "role": "ORM",
+                    "texture": "texture_asphalt_orm"
+                },
+                {
+                    "role": "Emissive",
+                    "texture": "default_emissive"
+                }
+            ],
+            "params_kind": "Opaque",
+            "params": "0000003f0000003f0000003f0000803f0000000000000000000000000000803f0000803f0000803f0ad7a33d00002040"
+        },
+        {
+            "name": "material_sprite2",
+            "shaders": [
+                "sp",
+                "sp_shadow"
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "texture": "texture_asphalt"
+                },
+                {
+                    "role": "Normal",
+                    "texture": "norm"
+                },
+                {
+                    "role": "ORM",
+                    "texture": "default_orm"
+                },
+                {
+                    "role": "Emissive",
+                    "texture": "default_emissive"
+                }
+            ],
+            "params_kind": "Opaque",
+            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f0000803f0000803f0000000000000000"
+        },
+        {
+            "name": "ship",
+            "shaders": [
+                "sp_untextured"
+            ],
+            "textures": [],
+            "params_kind": "Opaque",
+            "params": "cdcc0c3f9a99193f3333333f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
+        },
+        {
+            "name": "m_orange",
+            "shaders": [
+                "sp_untextured",
+                "sp_shadow"
+            ],
+            "textures": [],
+            "params_kind": "Opaque",
+            "params": "0000803f6666e63ecdcccc3d0000803f0000803fdcda5a3f00000000a01a2f3e000000000000803f0000000000000000"
+        },
+        {
+            "name": "m_gray",
+            "shaders": [
+                "sp_untextured",
+                "sp_shadow"
+            ],
+            "textures": [],
+            "params_kind": "Opaque",
+            "params": "0000003f0000003f0000003f0000803f8b8d0d3f8b8d0d3f8b8d0d3f9a99993f000000000000803f0000000000000000"
+        },
+        {
+            "name": "metal1",
+            "shaders": [
+                "sp_untextured",
+                "sp_shadow"
+            ],
+            "textures": [],
+            "params_kind": "Opaque",
+            "params": "0000803f0000003f0000003f0000803f0000803f00000000000000000681153e0000803f8fc2753f0000000000000000"
+        },
+        {
+            "name": "metal2",
+            "shaders": [
+                "sp_untextured",
+                "sp_shadow"
+            ],
+            "textures": [],
+            "params_kind": "Opaque",
+            "params": "0000003f0000003f0000003f0000803f000000000000000000000000000000000000803f8fc2753f0000000000000000"
+        },
+        {
+            "name": "emission",
+            "shaders": [
+                "sp_untextured",
+                "sp_shadow"
+            ],
+            "textures": [],
+            "params_kind": "Opaque",
+            "params": "0000000000000000000000000000803f9faeae3e9faeae3ea9a5253f9a99d93f000000000000803f0000000000000000"
+        }
+    ]
+}

@@ -4,7 +4,11 @@
 #include "TransformDataModule.h"
 #include "DefaultRenderPassSet.h"
 #include "PositionStructure.h"
+
+using namespace ShaderBase;   // POSITION/UV/... в раскладках вершин
 #include "EngineContext.h"
+#include "BufferManager.h"   // DefaultBuffersNames (раньше транзитивно)
+#include "ShaderData.h"      // sp->BindPushConstants — тяжёлая половина (раньше транзитивно)
 #include "RenderManager.h"    // PassManager + RenderPassStep (ordinal теневого прохода)
 #include "BatchBuilder.h"     // AskLayout/AskNum*(slot) — слепок раскладки слота
 #include "RenderSnapshot.h"   // RenderSnap::BatchLayout

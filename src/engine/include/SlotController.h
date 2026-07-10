@@ -30,7 +30,7 @@
 // при lockstep — старый (по порядку, без потерь). Физическая очередь не нужна:
 // концы = argmin/argmax по BUFFERING_LEVEL слотам под уже взятым мьютексом,
 // а слоты умеют покидать середину (drop, перезапись) — ring это не выразит.
-enum SlotState : uint8_t { UPLOADING, PREPARED, RENDERED };
+enum class SlotState : uint8_t { UPLOADING, PREPARED, RENDERED };   // scoped: имена слишком общие для глобала
 
 constexpr uint8_t SLOT_FLAG_RESERVED     = 1u << 0;
 constexpr uint8_t SLOT_FLAG_IS_UPLOADING = 1u << 1;

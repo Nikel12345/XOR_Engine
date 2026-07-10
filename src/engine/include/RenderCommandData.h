@@ -14,7 +14,7 @@ struct SharedDepthTarget;
 
 class PassManager;
 
-using namespace BatchKeys;
+// BatchKeys НЕ вливается в глобал директивой — ключи квалифицированы явно.
 
 struct ModelBatchData {
     std::vector<uint32_t> pib_sub_buffer;
@@ -24,7 +24,7 @@ struct ModelBatchData {
 };
 
 struct TextureBatchData {
-    std::unordered_map<ModelBatchKey, ModelBatchData> model_batches;
+    std::unordered_map<BatchKeys::ModelBatchKey, ModelBatchData> model_batches;
 	// UVL хранится ЗНАЧЕНИЯМИ (не указателями): непрерывный блок → прямой пуш в Execute
 	// без per-draw сбора разбросанных указателей. Инвариант: значения копируются при
 	// сборке батча, поэтому смена UVL ЖИВОЙ текстуры (репак/компактизация атласа) ОБЯЗАНА
@@ -36,13 +36,13 @@ struct TextureBatchData {
 };
 
 struct AtlasBatchData {
-    std::unordered_map<TextureBatchKey, TextureBatchData> texture_batches;
+    std::unordered_map<BatchKeys::TextureBatchKey, TextureBatchData> texture_batches;
     std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
 };
 
 struct ShaderBatchData {
     std::function<void(const PushConstantBinder&, const void*)> push_func = {};
-    std::unordered_map<AtlasBatchKey, AtlasBatchData> atlases_batches;
+    std::unordered_map<BatchKeys::AtlasBatchKey, AtlasBatchData> atlases_batches;
 	std::vector<BufferData*> vertexBuffers;
     std::vector<BufferData*> vertexStorageBuffers;
     std::vector<BufferData*> fragmentStorageBuffers;
@@ -73,7 +73,7 @@ struct RenderPassTexturesInfo {
 
 struct RenderPassStep {
     RenderPassTexturesInfo renderPassTexsData;
-    std::unordered_map<ShaderBatchKey, ShaderBatchData> shader_batches;
+    std::unordered_map<BatchKeys::ShaderBatchKey, ShaderBatchData> shader_batches;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function;
     std::vector<SDL_GPUTextureSamplerBinding> global_texture_bindings;
     std::string debug_name;   // = ключ в render_steps; нужен UI для дропдауна прохода у sp

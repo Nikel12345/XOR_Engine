@@ -2,9 +2,18 @@
 #include <unordered_map>
 #include <vector>
 #include <cstring>
-#include "ShaderData.h"
-#include "MaterialData.h"
+#include <string>
+#include "MaterialData.h"   // Material + TextureSlotRole (через ShaderTypes.h)
 
+// Запись манифеста материалов сцены (materials.json): всё для пересоздания. params — сырой блоб
+// (layout задаёт автор шейдера, движок видит только байты), params_kind — тег UI-разбора.
+struct SceneMaterialEntry {
+	std::string name;
+	std::vector<std::pair<TextureSlotRole, TextureName>> textures;
+	std::vector<ShaderName> shaders;
+	MaterialParamsKind      params_kind = MaterialParamsKind::None;
+	std::vector<uint8_t>    params;
+};
 
 class MaterialManager {
 public:
@@ -13,6 +22,13 @@ public:
 	// у вызывающего (EngineContext::CreateMaterial): сюда приходят уже готовые имена, менеджер их
 	// просто складывает. Пустой/несуществующий на данный момент — допустим (резолвится на сборке батча).
 	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, TextureName>> textures, std::vector<ShaderName> shaders);
+
+	// Merge-upsert материалов из манифеста (см. SceneMaterialEntry). Существующий обновляется
+	// В МЕСТЕ (указатель у энтити жив — MaterialComponent.materials перепривяжется на пересборке,
+	// но и так тот же адрес), новый создаётся. params/params_kind проставляются напрямую. Материалы
+	// вне манифеста не трогаются. Возвращает число обработанных.
+	size_t LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries);
+
 	std::vector<Material*> GetAllMaterials();
 	Material* GetMaterial(const std::string& name);
 	// Имя→материал (для UI/инспектора). Pointee не const — params можно крутить на лету.

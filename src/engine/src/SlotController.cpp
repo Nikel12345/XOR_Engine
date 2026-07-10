@@ -251,9 +251,9 @@ void SlotController::SetSlotState(uint8_t slot, SlotState new_state)
         return;
 
     switch (new_state) {
-    case UPLOADING: HandleUploading(slot); break;
-    case PREPARED:  HandlePrepared(slot);  break;
-    case RENDERED:  HandleRendered(slot);  break;
+    case SlotState::UPLOADING: HandleUploading(slot); break;
+    case SlotState::PREPARED:  HandlePrepared(slot);  break;
+    case SlotState::RENDERED:  HandleRendered(slot);  break;
     }
 }
 

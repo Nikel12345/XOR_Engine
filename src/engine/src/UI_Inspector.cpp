@@ -5,6 +5,16 @@
 #include "imgui_internal.h"
 #include "EngineContext.h"
 #include "InputManager.h"
+#include "InputCommands.h"  // payload-структуры команд редактора
+// EngineContext.h держит менеджеры forward-декларациями — полные типы тянет этот TU.
+#include "ObjectManager.h"
+#include "CameraManager.h"
+#include "BufferManager.h"
+#include "TextureManager.h"
+#include "MaterialManager.h"
+#include "ModelManager.h"
+#include "ShaderManager.h"
+#include "BatchBuilder.h"
 #include "MaterialParams.h"          // раскладки факторов: разбор params по полям в инспекторе материала
 #include "MaterialParamsRegistry.h"  // реестр типов params для дропдауна Kind
 #include "RenderManager.h"           // PassManager + RenderPassStep — дропдаун прохода у sp
@@ -13,6 +23,8 @@
 #include <cstring>            // memcpy матрицы в payload команды
 #include <mutex>              // потокобезопасный приём пути из файл-диалога
 #include <atomic>
+
+using namespace ShaderBase;   // VertexSemantic в редакторе pull вершинника
 #include <SDL3/SDL_dialog.h>  // нативный SDL_ShowOpenFileDialog
 
 using namespace ui;
@@ -838,7 +850,8 @@ namespace {
         if (g_sel.name != syncedFor) {
             syncedFor = g_sel.name;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
-            if (g_sel.name.empty()) pathBuf[0] = '\0';
+            ComputeShaderData* d = ctx->GetShaderManager()->GetComputeShader(g_sel.name);   // путь теперь хранится (см. CSD)
+            std::snprintf(pathBuf, sizeof pathBuf, "%s", d ? d->source_path.c_str() : "");
         }
         TakePickedPath(PickTarget::ShaderComp, pathBuf, sizeof pathBuf);
 
