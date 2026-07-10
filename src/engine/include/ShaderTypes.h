@@ -85,6 +85,9 @@ struct ShaderProgramDescription
     RasterizerStateBiasParams rasterizer_bias;
     bool                      depth_test = true;
     bool                      depth_write = true;
+    // Компаратор depth-теста (читается пайплайном при depth_test). LESS — прежний захардкоженный
+    // дефолт; LESS_OR_EQUAL нужен приёмам «глубина ровно на клире» (скайбокс: z=w → 1.0).
+    SDL_GPUCompareOp          depth_compare_op = SDL_GPU_COMPAREOP_LESS;
     bool                      stencil_test = false;
     bool                      color_blend = false;
     SDL_GPUPrimitiveType primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
@@ -102,6 +105,7 @@ struct ShaderProgramDescription
     ShaderProgramDescription* IgnoresDepth() { depth_test = false; depth_write = false; return this; }
     ShaderProgramDescription* ReadsDepthOnly() { depth_test = true;  depth_write = false; return this; }
     ShaderProgramDescription* WritesDepth() { depth_test = true;  depth_write = true;  return this; }
+    ShaderProgramDescription* WithDepthCompare(SDL_GPUCompareOp op) { depth_compare_op = op; return this; }
     ShaderProgramDescription* CullsBackFaces() { cull_mode = SDL_GPU_CULLMODE_BACK;  return this; }
     ShaderProgramDescription* CullsFrontFaces() { cull_mode = SDL_GPU_CULLMODE_FRONT; return this; }
     ShaderProgramDescription* DoesNotCull() { cull_mode = SDL_GPU_CULLMODE_NONE;  return this; }

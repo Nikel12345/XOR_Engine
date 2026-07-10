@@ -56,7 +56,7 @@ namespace DefaultRenderPassNamespace
             // Cube-атлас создаётся ОТДЕЛЬНО (его характер задаёт tci-пресет EnvCube), а нарезку
             // 4×3 креста на 6 граней и заливку делает ctx->CreateCubeMapTexture. faceSize пресета —
             // единственный источник истины о разрешении env-куба.
-            TextureAtlas* cube = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(200), env_sampler);
+            TextureAtlas* cube = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(512), env_sampler);
 
             // Путь — ассет игры (CWD = src/game); временно здесь, позже окружение задаёт игра.
             if (cube && ctx->CreateCubeMapTexture("_env_skybox", "env_skybox", "../engine/textures/skybox.png"))

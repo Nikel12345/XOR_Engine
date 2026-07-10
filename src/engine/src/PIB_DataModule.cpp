@@ -66,6 +66,16 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
                                 combined.push_back(0xFFFFFFFFu);
                                 continue;
                             }
+                            // Transformless (нет Positions): энтити батчится, но строки в
+                            // transform/instance/sphere-буферах не имеет (их домен {Positions ∧
+                            // Draw}, см. RecalculateInstanceOffsets). -1 → каллинг скаттерит
+                            // запись безусловно (сферы нет), а строку никто не читает: такой
+                            // sp строит позицию сам (напр. скайбокс — из камеры). С протухшими
+                            // -1 не конфликтует: удаление энтити пересобирает батчи и PIB.
+                            if (!arch_it->second->get_array<Positions>()) {
+                                combined.push_back(0xFFFFFFFFu);
+                                continue;
+                            }
                             uint32_t row = arch_it->second->render_instance_base
                                          + safe_u32(scene->entity_to_index.at(entity));
                             combined.push_back(row);
