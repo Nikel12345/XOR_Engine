@@ -563,7 +563,15 @@ size_t TextureManager::LoadSceneTextures(const std::vector<SceneTextureEntry>& e
             SDL_Log("LoadSceneTextures: incomplete entry ('%s') — skipped", e.name.c_str());
             continue;
         }
-        if (handles_data.count(e.name))
+        if (e.cube) {
+            // Хэндлы куба — грани name+"_f0".."_f5" (логического имени в реестре нет): сносим их,
+            // иначе CreateTexture вернул бы существующие грани без новой заливки (тихий stale).
+            for (int f = 0; f < 6; ++f) {
+                const std::string face = e.name + "_f" + std::to_string(f);
+                if (handles_data.count(face)) DeleteTextureHandle(face);
+            }
+        }
+        else if (handles_data.count(e.name))
             DeleteTextureHandle(e.name);   // replace под тем же именем (материалы перепривяжутся по имени)
         if (create_from_file(e)) ++created;
         else SDL_Log("LoadSceneTextures: failed to create '%s' from '%s'", e.name.c_str(), e.path.c_str());

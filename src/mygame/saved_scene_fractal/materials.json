@@ -1,0 +1,12 @@
+{
+    "materials": [
+        {
+            "name": "skybox",
+            "shaders": [
+                "Fractal"
+            ],
+            "textures": [],
+            "params_kind": "None"
+        }
+    ]
+}

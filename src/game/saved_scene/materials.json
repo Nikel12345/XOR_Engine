@@ -1,6 +1,14 @@
 {
     "materials": [
         {
+            "name": "skybox",
+            "shaders": [
+                "Skybox"
+            ],
+            "textures": [],
+            "params_kind": "None"
+        },
+        {
             "name": "debug_collider",
             "shaders": [
                 "sp_debug_collider"

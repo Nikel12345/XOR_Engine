@@ -1,6 +1,13 @@
 {
     "vertex_shaders": [
         {
+            "name": "skybox_vs",
+            "path": "../engine/shaders_code/skybox/skybox.vert.hlsl",
+            "pull": [
+                "POSITION"
+            ]
+        },
+        {
             "name": "main_pass_vs",
             "path": "../engine/shaders_code/main_pass/main_pass.vert.hlsl",
             "pull": [
@@ -26,6 +33,10 @@
         }
     ],
     "fragment_shaders": [
+        {
+            "name": "skybox_fs",
+            "path": "../engine/shaders_code/skybox/skybox.frag.hlsl"
+        },
         {
             "name": "main_surface_fs",
             "path": "../engine/shaders_code/main_pass/surface.hlsl"
@@ -74,6 +85,31 @@
         }
     ],
     "render_shader_programs": [
+        {
+            "name": "Skybox",
+            "vs": "skybox_vs",
+            "fs": "skybox_fs",
+            "pass": "_DefaultMainRenderPass",
+            "vs_buffers": [
+                "_cameraBuffer"
+            ],
+            "fs_buffers": [],
+            "slots": [],
+            "spd": {
+                "cull_mode": 0,
+                "fill_mode": 0,
+                "primitive_type": 0,
+                "depth_test": true,
+                "depth_write": false,
+                "depth_compare": 4,
+                "stencil_test": false,
+                "color_blend": false,
+                "bias_enable": false,
+                "bias_constant": 0.0,
+                "bias_slope": 0.0,
+                "bias_clamp": 0.0
+            }
+        },
         {
             "name": "sp",
             "vs": "main_pass_vs",

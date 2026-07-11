@@ -12,13 +12,14 @@ class LightDataModule;
 
 namespace DefaultShaderProgramSet
 {
-    // Render shader programs
-    void SetMainShaderProgram(EngineContext* ctx);
-    void SetDefaultShadowShaderProgram(EngineContext* ctx);
-    void SetTransparentShaderProgram(EngineContext* ctx);
+    // Render shader programs больше НЕ создаются кодом — идут из сцены (shaders.json).
+    // Осталась только привязка их push-констант.
 
-    // Голый шейдер дебаг-рамок коллайдеров (без текстур), привязан к DEBUG_PASS.
-    void SetDebugColliderProgram(EngineContext* ctx);
+    // Пере-привязка push-констант к render-sp ПО ИМЕНИ. push_func — код-байндинг, он НЕ
+    // сериализуется: после LoadScene загруженные sp (пересозданы из манифеста) остаются без него,
+    // поэтому его вешают здесь, ПОСЛЕ загрузки сцены. Промах sp → пропуск. Здесь же — push
+    // фрактального фона ("Fractal" из saved_scene_fractal/shaders.json).
+    void BindDefaultPushFuncs(EngineContext* ctx);
 
     // Compute shader programs
     // GPU-каллинг (culling_pib.comp): пишет out_pib блоками по камерам (0 — игрок, 1..N — световые).

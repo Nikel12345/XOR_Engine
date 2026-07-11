@@ -16,6 +16,13 @@ public:
     static constexpr float DEFAULT_NEAR_PLANE = 0.01f;
     static constexpr float DEFAULT_FAR_PLANE = 5000.0f;
 
+    // Пределы скорости полёта. Дальше расширять нет смысла: ограничивает уже не float как
+    // таковой (1e±38), а точность ПОЗИЦИИ в Move — у 1e6 шаг младшего бита позиции ~0.06,
+    // ниже 1e-6 приращение тонет в округлении на сколь-нибудь удалённой позиции.
+    static constexpr float MIN_MOVE_SPEED = 1e-6f;
+    static constexpr float MAX_MOVE_SPEED = 1e6f;
+    static constexpr float SPEED_STEP     = 2.0f;   // множитель на один «щелчок» (delta = ±1)
+
     Camera(float width, float height,
         float fov_y,
         float near_plane,
@@ -24,7 +31,10 @@ public:
     void Move(const glm::vec3& offset);
     void Rotate(float dx, float dy);
     void RotateView(float mouse_x, float mouse_y, bool lmb_down);
-	void SpeedChange(float delta) { moveSpeed += delta; if (moveSpeed < 0.1f) moveSpeed = 0.1f; }
+	// Мультипликативно (×SPEED_STEP^delta), НЕ аддитивно: диапазон в 12 декад инкрементом
+	// непроходим — у нуля любой фиксированный шаг груб, у миллиона незаметен. ×2 на щелчок
+	// даёт равномерный по ощущению разгон: весь диапазон — ~40 щелчков колеса.
+	void SpeedChange(float delta) { moveSpeed = glm::clamp(moveSpeed * glm::pow(SPEED_STEP, delta), MIN_MOVE_SPEED, MAX_MOVE_SPEED); }
     void LookAt(const glm::vec3& pos, const glm::vec3& tgt);
     void SetView(const glm::vec3& pos, const glm::vec3& dir, const glm::vec3& upVec);
 	void SetPosition(const glm::vec3& pos) { position = pos; }

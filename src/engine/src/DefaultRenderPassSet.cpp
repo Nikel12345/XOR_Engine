@@ -46,31 +46,18 @@ namespace DefaultRenderPassNamespace
     static TextureAtlas* default_env_atlas = nullptr;
 
     // Env-окружение для отражений металла. texture_binding куба → в global_texture_bindings пасса
-    // (слот 1, после тени), шейдер сэмплит через sampleEnv. Файла нет — фолбэк 1×1×6 куб тоном сцены.
+    // (слот 1, после тени), шейдер сэмплит через sampleEnv. Атлас — инфраструктура (как shadow-
+    // массивы): создаётся движком пустым, СОДЕРЖИМОЕ приходит из сцены (textures.json, запись с
+    // "cube": true в атлас "env_skybox") — грани заливаются в эту же GPU-текстуру, биндинг не
+    // меняется. Сцена без env-записи оставляет куб незалитым (сэмпл не определён) — это её выбор.
     static SDL_GPUTextureSamplerBinding GetDefaultEnvBinding(EngineContext* ctx)
     {
         if (!default_env_atlas) {
             TextureManager* tm = ctx->GetTextureManager();
             auto env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
-
-            // Cube-атлас создаётся ОТДЕЛЬНО (его характер задаёт tci-пресет EnvCube), а нарезку
-            // 4×3 креста на 6 граней и заливку делает ctx->CreateCubeMapTexture. faceSize пресета —
-            // единственный источник истины о разрешении env-куба.
-            TextureAtlas* cube = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(512), env_sampler);
-
-            // Путь — ассет игры (CWD = src/game); временно здесь, позже окружение задаёт игра.
-            if (cube && ctx->CreateCubeMapTexture("_env_skybox", "env_skybox", "../engine/textures/skybox.png"))
-                default_env_atlas = cube;
-
-            if (!default_env_atlas) {
-                // Фолбэк: вырожденный 1×1×6 куб тоном сцены (тот же пресет с faceSize=1).
-                default_env_atlas = tm->CreateTextureAtlas("env_fallback", TexturePresets::EnvCube(1), env_sampler);
-                for (int f = 0; f < 6; ++f) {
-                    std::vector<std::byte> px(4);
-                    px[0] = std::byte{ 36 }; px[1] = std::byte{ 26 }; px[2] = std::byte{ 26 }; px[3] = std::byte{ 255 }; // BGRA ≈ тон сцены
-                    tm->CreateTexture("env_fallback_f" + std::to_string(f), default_env_atlas, 1, 1, std::move(px));
-                }
-            }
+            // faceSize пресета — единственный источник истины о разрешении env-куба: крест сцены
+            // нарежется под него (CreateCubeMapTexture).
+            default_env_atlas = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(512), env_sampler);
         }
         return default_env_atlas->texture_binding;
     }

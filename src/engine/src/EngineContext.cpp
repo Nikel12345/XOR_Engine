@@ -126,6 +126,9 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 		TextureHandle* h = texture_manager->CreateTexture(name + "_f" + std::to_string(f), atlas, cube.faceSize, cube.faceSize, std::move(cube.faces[f]));
 		if (f == 0) first = h;
 	}
+	// Самоописание — на f0-грани: одна запись манифеста ("cube": true) на весь куб, имя — логическое
+	// (без "_f0"). Остальные грани без source_path — сами по себе в textures.json не попадают.
+	if (first) { first->atlas_name = atlas_name; first->source_path = path; first->cube_name = name; }
 	return first;
 }
 

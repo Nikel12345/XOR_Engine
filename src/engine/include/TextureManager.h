@@ -48,6 +48,9 @@ struct SceneTextureEntry {
 	std::string atlas;
 	std::string path;
 	ChannelConvention conv = ChannelConvention::AsIs;
+	// Кубмапа-крест: name — логическое имя куба, пересоздание идёт через CreateCubeMapTexture
+	// (6 граней name+"_f0".."_f5" в cube-атлас), conv не применяется.
+	bool cube = false;
 };
 
 class TextureManager

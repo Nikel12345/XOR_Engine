@@ -1,0 +1,31 @@
+{
+    "Draw,Material,Model": {
+        "count": 1,
+        "entities": [
+            0
+        ],
+        "Model": {
+            "name": [
+                "skybox_cube"
+            ]
+        },
+        "Material": {
+            "names": [
+                [
+                    "skybox"
+                ]
+            ]
+        },
+        "Draw": {
+            "visible": [
+                true
+            ],
+            "alpha": [
+                1.0
+            ],
+            "flags": [
+                0
+            ]
+        }
+    }
+}

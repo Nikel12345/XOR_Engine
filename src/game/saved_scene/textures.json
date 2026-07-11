@@ -1,6 +1,13 @@
 {
     "textures": [
         {
+            "name": "env_skybox_cube",
+            "atlas": "env_skybox",
+            "path": "textures/skybox.png",
+            "conv": "AsIs",
+            "cube": true
+        },
+        {
             "name": "new_car",
             "atlas": "albedo_atlas",
             "path": "textures/assets/new_car.png",

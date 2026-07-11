@@ -15,7 +15,6 @@
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
 #include "MaterialParams.h"        // SetMaterialParams + раскладки факторов материалов
-#include "DefaultResources.h"      // FractalScaleStep — ручной масштаб фрактала (I/K)
 #include "Colliders.h"             // из либы Physics: компоненты коллайдеров
 #include "ContactSystem.h"         // детекция контактов
 #include "DebugColliderSystem.h"   // отладочные рамки
@@ -48,16 +47,9 @@ SDL_AppResult Game::MainInit()
     Camera* camera = cameraManager->CreateCamera(width, height);
     cameraManager->SetActiveCamera(0);
 
-    //camera->SetView(
-    //    glm::vec3(-20.0f, 100.7f, 76.5f), // позиция камеры
-    //    glm::vec3(0.174f, -0.8f, -0.6f), // точка взгляда
-    //    glm::vec3(0.0f, 1.0f, 0.0f)  // вектор вверх
-    //);
     camera->SetView(
-        glm::vec3(2.2f, 1.4f, 3.2f), // позиция камеры
-        // Взгляд на центр губки Менгера (ноль мира, полуразмер 1); вращение — ЛКМ,
-        // приближение к поверхности раскрывает уровни детализации адаптивно.
-        glm::vec3(-0.533f, -0.339f, -0.775f),
+        glm::vec3(2.0f, 0.7f, 3.5f), // позиция камеры
+        glm::vec3(0.43f, -0.4f, -0.8f), // точка взгляда
         glm::vec3(0.0f, 1.0f, 0.0f)  // вектор вверх
     );
     TextureAtlas* atlas = ctx->CreateTextureAtlas("albedo_atlas", TexturePresets::AlbedoAtlas(2048, 3, TexturePresets::FullMipLevels(2048)), DefaultSamplersNames::DEFAULT_SAMPLER);
@@ -71,15 +63,11 @@ SDL_AppResult Game::MainInit()
 	// не сериализуются; текстуры садятся в них при загрузке). default_* — движковые (InitDefaultResources).
 
     {
-        // Только COMPUTE-программы: они держат указатели на буферы/атласы + dispatch_func, не
-        // сериализуются. Render-sp (main/shadow/transparent/untextured/debug) идут из shaders.json;
-        // их push_func вешается в BindDefaultPushFuncs ПОСЛЕ загрузки.
         using namespace DefaultShaderProgramSet;
         SetBloomPrograms(ctx);
         SetCullingPibPrograms(ctx, engine->GetLightDataModule());   // GPU-каллинг: out_pib
     }
 
-    // quad/sphere — дефолты движка (Engine::InitDefaultResources, dont_save) — берём по имени.
     ModelData* sphere = (*ctx->GetModelManager())["sphere"];
 
     debug_box_model = ctx->CreateModel("debug_box", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
@@ -186,29 +174,6 @@ SDL_AppResult Game::MainInit()
     // на переименовании. Регистрируем ДО первого LoadScene.
     engine->SetBindShaderFunctions([this] { DefaultShaderProgramSet::BindDefaultPushFuncs(ctx); });
 
-    // Тумблер фрактальной демо-сцены (парный к use_fractal_skybox в Engine::InitDefaultResources):
-    // true — пустая scene_fractal (фон — Мандельброт), false — прежний путь (saved_scene).
-    const bool use_fractal_scene = true;
-    if (use_fractal_scene) {
-        // CSD compute-шейдеров в обычном пути приезжают из saved_scene/shaders.json; фрактальной
-        // сцене каллинг/блум нужны так же — регистрируем кодом. НЕ dont_save: SaveScene ниже
-        // выпишет их в saved_scene_fractal/shaders.json — папка сцены самодостаточна.
-        ctx->CreateComputeShader("culling_clear_cs",   "../engine/shaders_code/comp/culling_clear.comp.hlsl");
-        ctx->CreateComputeShader("culling_pib_cs",     "../engine/shaders_code/comp/culling_pib.comp.hlsl");
-        ctx->CreateComputeShader("bloom_prefilter_cs", "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl");
-        ctx->CreateComputeShader("bloom_down_cs",      "../engine/shaders_code/comp/bloom_down.comp.hlsl");
-        ctx->CreateComputeShader("bloom_up_cs",        "../engine/shaders_code/comp/bloom_up.comp.hlsl");
-        ctx->CreateComputeShader("bloom_composite_cs", "../engine/shaders_code/comp/bloom_composite.comp.hlsl");
-
-        // Ресурсов у сцены нет (фон — движковые dont_save-дефолты), но папку создаём честным
-        // SaveScene: LoadScene требует scene.json, а фон-энтити создаёт именно LoadScene.
-        // main_menu гасим ЯВНО: сцены создаются is_active=true, а GetActiveScene берёт первую
-        // активную по порядку карты — пустая main_menu перехватывала бы сборку батчей.
-        objectManager->CreateScene("scene_fractal");
-        objectManager->SetSceneState("main_menu", false);
-        ctx->SaveScene("scene_fractal", "saved_scene_fractal");
-        ctx->LoadScene("scene_fractal", "saved_scene_fractal");
-    } else {
     ctx->RegisterGenerator("main_menu", [this] { CreateDebugColliders(); });
     ctx->LoadScene("main_menu", "saved_scene");   // папка сцены (scene.json + ресурсы внутри)
 
@@ -254,7 +219,6 @@ SDL_AppResult Game::MainInit()
     //    ShadowCasterComponent{},
     //    ColliderComponent{}
     //);
-    }   // use_fractal_scene
 
     ctx->ExecuteGenerators();
     ChangeState(GameState::MAIN_MENU);
@@ -270,15 +234,6 @@ SDL_AppResult Game::MainIterate()
         case SDL_SCANCODE_ESCAPE:
             // Выход / меню
             break;
-        // Ручной масштаб фрактала: I — на уровень глубже (кадр ×3 мельче: скорость и
-        // детализация следуют), K — наружу. Сам ребейз картинку не меняет (та же мировая
-        // точка, другие единицы) — «зум» проявляется через полёт.
-        case SDL_SCANCODE_I:
-            DefaultResourcesNamespace::FractalScaleStep(+1);
-            break;
-        case SDL_SCANCODE_K:
-            DefaultResourcesNamespace::FractalScaleStep(-1);
-            break;
         default:
             break;
         }
@@ -289,7 +244,7 @@ SDL_AppResult Game::MainIterate()
 
     float wheel = input->ConsumeWheelDelta();
     if (wheel != 0.0f && !io.WantCaptureMouse) {
-        camera->SpeedChange(wheel * 0.5f);
+        camera->SpeedChange(wheel);   // щелчки колеса; шаг мультипликативный (см. Camera::SPEED_STEP)
     }
     mouse_x = input->MouseX();
     mouse_y = input->MouseY();

@@ -25,7 +25,6 @@
 #include "EngineContext.h"
 #include "DefaultUpdateSet.h"
 #include "DefaultRenderPassSet.h"
-#include "DefaultResources.h"         // фон сцены (скайбокс/фрактал) — наборы дефолт-ресурсов
 #include "TexturesPresets.h"
 #include "ComponentSerializer.h"
 #include "MaterialParams.h"           // Opaque/TransparentMaterialParams — билтин-типы params
@@ -241,15 +240,9 @@ void Engine::InitDefaultResources()
 		}
 	}, AnchorShift::Keep, /*dont_save=*/true);
 
-	// ── Фон сцены (материал "_skybox" + модель + шейдеры + sp) — теперь в DefaultResources.
-	// Энтити создаёт LoadScene (производная сущность сцены, GeneratedComponent) — БЕЗ Positions:
-	// transformless-дровабл (PIB=-1, безусловный скаттер), позицию строит _skybox_vs из камеры.
-	// Тумблер временный (демо фрактала): выбор фона позже уедет в данные/настройки сцены.
-	const bool use_fractal_skybox = true;
-	if (use_fractal_skybox)
-		DefaultResourcesNamespace::SetFractalSkyboxResources(engine_context);
-	else
-		DefaultResourcesNamespace::SetDefaultSkyboxResources(engine_context);
+	// Фон сцены (скайбокс/фрактал) движковым дефолтом больше НЕ является: модель/шейдеры/материал/
+	// текстура — ресурсы сцены (манифесты папки сцены), сам фон — сущность в её scene.json.
+	// Классический скайбокс — src/game/saved_scene, фрактал — src/mygame/saved_scene_fractal.
 }
 
 void Engine::InitDefaultBufferUpdaters()

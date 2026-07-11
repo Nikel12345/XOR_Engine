@@ -1,0 +1,73 @@
+{
+    "vertex_shaders": [
+        {
+            "name": "skybox_vs",
+            "path": "../engine/shaders_code/skybox/skybox.vert.hlsl",
+            "pull": [
+                "POSITION"
+            ]
+        }
+    ],
+    "fragment_shaders": [
+        {
+            "name": "fractal_fs",
+            "path": "../engine/shaders_code/fractal/menger.frag.hlsl"
+        }
+    ],
+    "compute_shaders": [
+        {
+            "name": "bloom_down_cs",
+            "path": "../engine/shaders_code/comp/bloom_down.comp.hlsl"
+        },
+        {
+            "name": "culling_clear_cs",
+            "path": "../engine/shaders_code/comp/culling_clear.comp.hlsl"
+        },
+        {
+            "name": "culling_pib_cs",
+            "path": "../engine/shaders_code/comp/culling_pib.comp.hlsl"
+        },
+        {
+            "name": "bloom_up_cs",
+            "path": "../engine/shaders_code/comp/bloom_up.comp.hlsl"
+        },
+        {
+            "name": "bloom_prefilter_cs",
+            "path": "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl"
+        },
+        {
+            "name": "bloom_composite_cs",
+            "path": "../engine/shaders_code/comp/bloom_composite.comp.hlsl"
+        }
+    ],
+    "render_shader_programs": [
+        {
+            "name": "Fractal",
+            "vs": "skybox_vs",
+            "fs": "fractal_fs",
+            "pass": "_DefaultMainRenderPass",
+            "vs_buffers": [
+                "_cameraBuffer"
+            ],
+            "fs_buffers": [
+                "_FractalFrameBuffer"
+            ],
+            "slots": [],
+            "spd": {
+                "cull_mode": 0,
+                "fill_mode": 0,
+                "primitive_type": 0,
+                "depth_test": true,
+                "depth_write": false,
+                "depth_compare": 4,
+                "stencil_test": false,
+                "color_blend": false,
+                "bias_enable": false,
+                "bias_constant": 0.0,
+                "bias_slope": 0.0,
+                "bias_clamp": 0.0
+            }
+        }
+    ],
+    "compute_shader_programs": []
+}

@@ -216,10 +216,14 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 		for (auto& [name, h] : texture_manager->GetTextureHandles()) {
 			if (!h || h->dont_save || h->source_path.empty()) continue;
 			yyjson_mut_val* t = yyjson_mut_arr_add_obj(doc, arr);
-			yyjson_mut_obj_add_strcpy(doc, t, "name",  name.c_str());
+			// Кубмапа самоописана f0-гранью: запись одна на куб, имя — логическое (cube_name),
+			// флаг "cube" ведёт загрузку через CreateCubeMapTexture (см. LoadScene ниже).
+			const bool cube = !h->cube_name.empty();
+			yyjson_mut_obj_add_strcpy(doc, t, "name",  cube ? h->cube_name.c_str() : name.c_str());
 			yyjson_mut_obj_add_strcpy(doc, t, "atlas", h->atlas_name.c_str());
 			yyjson_mut_obj_add_strcpy(doc, t, "path",  h->source_path.c_str());
 			yyjson_mut_obj_add_str   (doc, t, "conv",  ConvToStr(h->conv));   // статический литерал — без копии
+			if (cube) yyjson_mut_obj_add_bool(doc, t, "cube", true);
 			++saved;
 		}
 		yyjson_write_err werr;
@@ -398,12 +402,14 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 			size_t idx, max; yyjson_val* t;
 			yyjson_arr_foreach(arr, idx, max, t) {
 				entries.push_back({ JsonStr(t, "name"), JsonStr(t, "atlas"), JsonStr(t, "path"),
-				                    ConvFromStr(JsonStr(t, "conv")) });
+				                    ConvFromStr(JsonStr(t, "conv")), JsonBool(t, "cube", false) });
 			}
 			yyjson_doc_free(doc);
 
 			const size_t created = texture_manager->LoadSceneTextures(entries,
 				[this](const SceneTextureEntry& e) {
+					// Кубмапа-крест грузится своим путём: нарезка на 6 граней + слои cube-атласа.
+					if (e.cube) return engine_context->CreateCubeMapTexture(e.name, e.atlas, e.path.c_str());
 					return engine_context->CreateTextureFromFile(e.name, e.atlas, e.path.c_str(), e.conv);
 				});
 			SDL_Log("LoadScene: %zu/%zu textures from manifest", created, entries.size());
@@ -637,20 +643,9 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 
 			object_manager->SetSceneState(scene_name, true);
 
-			// Скайбокс — производная сущность каждой загруженной сцены (GeneratedComponent →
-			// не сериализуется; replace-on-load пересоздаёт её здесь же). Positions НЕТ
-			// намеренно: transformless-дровабл (PIB=-1 → безусловный скаттер), позицию строит
-			// _skybox_vs из камерного буфера. Подхватится полной пересборкой батчей ниже.
-			ModelData* sky_model = (*model_manager)["skybox_cube"];
-			Material* sky_material = material_manager->GetMaterial("_skybox");
-			if (sky_model && sky_material) {
-				engine_context->CreateEntity(scene_name,
-					MaterialComponent{ { sky_material }, { "_skybox" } },
-					ModelComponent{ sky_model, "skybox_cube" },
-					DrawComponent{},
-					GeneratedComponent{});
-			}
-			else SDL_Log("LoadScene: skybox defaults missing (model/material) — skybox skipped");
+			// Скайбокс движок больше НЕ создаёт: фон — обычная сущность сцены (scene.json,
+			// Draw+Material+Model БЕЗ Positions — transformless-дровабл, PIB=-1), а его модель/
+			// шейдеры/материал/текстура — ресурсы сцены из её манифестов. У каждой сцены свой.
 		}
 	}
 

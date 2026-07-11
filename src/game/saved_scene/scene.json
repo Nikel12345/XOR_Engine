@@ -1,4 +1,33 @@
 {
+    "Draw,Material,Model": {
+        "count": 1,
+        "entities": [
+            8
+        ],
+        "Model": {
+            "name": [
+                "skybox_cube"
+            ]
+        },
+        "Material": {
+            "names": [
+                [
+                    "skybox"
+                ]
+            ]
+        },
+        "Draw": {
+            "visible": [
+                true
+            ],
+            "alpha": [
+                1.0
+            ],
+            "flags": [
+                0
+            ]
+        }
+    },
     "DirectLight,ShadowCaster": {
         "count": 1,
         "entities": [

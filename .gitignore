@@ -1,7 +1,7 @@
 build
 commands.txt
-external/yyjson/
 src/engine/shaders/
+src/engine/textures/assets/
 scripts/model_loader/raw/*
 scripts/model_loader/venv
 scripts/texture_packer/venv
