@@ -239,6 +239,7 @@ set(ENGINE_CORE_SRC
     src/DefaultRenderPassSet.cpp
     src/DefaultUpdateSet.cpp
     src/DefaultCommandSet.cpp
+    src/DefaultResources.cpp
     src/UI_ImGui.cpp
     src/UI_Widgets.cpp
     src/UI_Hierarchy.cpp
@@ -254,6 +255,7 @@ set(ENGINE_CORE_HDR
     include/DefaultRenderPassSet.h
     include/DefaultUpdateSet.h
     include/DefaultCommandSet.h
+    include/DefaultResources.h
     include/UI_ImGui.h
     include/UI_Internal.h
     include/UI_Widgets.h

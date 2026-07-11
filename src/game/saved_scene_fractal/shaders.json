@@ -1,0 +1,32 @@
+{
+    "vertex_shaders": [],
+    "fragment_shaders": [],
+    "compute_shaders": [
+        {
+            "name": "bloom_down_cs",
+            "path": "../engine/shaders_code/comp/bloom_down.comp.hlsl"
+        },
+        {
+            "name": "culling_clear_cs",
+            "path": "../engine/shaders_code/comp/culling_clear.comp.hlsl"
+        },
+        {
+            "name": "culling_pib_cs",
+            "path": "../engine/shaders_code/comp/culling_pib.comp.hlsl"
+        },
+        {
+            "name": "bloom_up_cs",
+            "path": "../engine/shaders_code/comp/bloom_up.comp.hlsl"
+        },
+        {
+            "name": "bloom_prefilter_cs",
+            "path": "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl"
+        },
+        {
+            "name": "bloom_composite_cs",
+            "path": "../engine/shaders_code/comp/bloom_composite.comp.hlsl"
+        }
+    ],
+    "render_shader_programs": [],
+    "compute_shader_programs": []
+}

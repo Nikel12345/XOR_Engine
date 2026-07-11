@@ -1,5 +1,6 @@
 build
 commands.txt
+external/yyjson/
 src/engine/shaders/
 scripts/model_loader/raw/*
 scripts/model_loader/venv

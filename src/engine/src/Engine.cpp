@@ -25,6 +25,7 @@
 #include "EngineContext.h"
 #include "DefaultUpdateSet.h"
 #include "DefaultRenderPassSet.h"
+#include "DefaultResources.h"         // фон сцены (скайбокс/фрактал) — наборы дефолт-ресурсов
 #include "TexturesPresets.h"
 #include "ComponentSerializer.h"
 #include "MaterialParams.h"           // Opaque/TransparentMaterialParams — билтин-типы params
@@ -240,53 +241,15 @@ void Engine::InitDefaultResources()
 		}
 	}, AnchorShift::Keep, /*dont_save=*/true);
 
-	// ── Скайбокс: модель + шейдеры + sp + материал (движковые дефолты, всё dont_save).
+	// ── Фон сцены (материал "_skybox" + модель + шейдеры + sp) — теперь в DefaultResources.
 	// Энтити создаёт LoadScene (производная сущность сцены, GeneratedComponent) — БЕЗ Positions:
 	// transformless-дровабл (PIB=-1, безусловный скаттер), позицию строит _skybox_vs из камеры.
-	{
-		using namespace DefaultBuffersNames;
-
-		// Куб [-1,1]³. VS тянет только POSITION, поэтому UV/нормали/тангенсы — нули; winding
-		// не важен (DoesNotCull, камера всегда внутри).
-		engine_context->CreateModel("skybox_cube", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
-			v = {
-				{ -1,-1,-1,  0,0,  0,0,0,  0,0,0 },
-				{  1,-1,-1,  0,0,  0,0,0,  0,0,0 },
-				{  1, 1,-1,  0,0,  0,0,0,  0,0,0 },
-				{ -1, 1,-1,  0,0,  0,0,0,  0,0,0 },
-				{ -1,-1, 1,  0,0,  0,0,0,  0,0,0 },
-				{  1,-1, 1,  0,0,  0,0,0,  0,0,0 },
-				{  1, 1, 1,  0,0,  0,0,0,  0,0,0 },
-				{ -1, 1, 1,  0,0,  0,0,0,  0,0,0 },
-			};
-			i = {
-				0,1,2, 0,2,3,   // -Z
-				5,4,7, 5,7,6,   // +Z
-				4,0,3, 4,3,7,   // -X
-				1,5,6, 1,6,2,   // +X
-				3,2,6, 3,6,7,   // +Y
-				4,5,1, 4,1,0,   // -Y
-			};
-		}, AnchorShift::Keep, /*dont_save=*/true);
-
-		engine_context->CreateVertexShader("_skybox_vs",
-			"../engine/shaders_code/skybox/skybox.vert.hlsl",
-			{ { &FMT_PosUVNormal, { POSITION } } }, /*dont_save=*/true);
-		engine_context->CreateFragmentShader("_skybox_fs", "../engine/shaders_code/skybox/skybox.frag.hlsl", /*dont_save=*/true);
-
-		// Глубину не пишет, тестит LESS_OR_EQUAL: VS кладёт z=w (глубина ровно 1.0 = клир) →
-		// небо проходит только по пустому депту, любая геометрия перекрывает его независимо
-		// от порядка отрисовки внутри пасса. Из vs-буферов нужна только камера; текстур у
-		// материала нет — env-кубмапа приходит глобалкой MAIN_PASS (слот 1).
-		ShaderProgramDescription skybox_spd;
-		skybox_spd.DoesNotCull()->ReadsDepthOnly()->WithDepthCompare(SDL_GPU_COMPAREOP_LESS_OR_EQUAL);
-		engine_context->CreateShaderProgram("_Skybox", skybox_spd, DefaultRenderPassNamespace::MAIN_PASS,
-			"_skybox_vs", { DEFAULT_CAMERA_BUFFER },
-			"_skybox_fs", { },
-			{ }, /*dont_save=*/true);
-
-		engine_context->CreateMaterial("_skybox", {}, { "_Skybox" }, /*dont_save=*/true);
-	}
+	// Тумблер временный (демо фрактала): выбор фона позже уедет в данные/настройки сцены.
+	const bool use_fractal_skybox = true;
+	if (use_fractal_skybox)
+		DefaultResourcesNamespace::SetFractalSkyboxResources(engine_context);
+	else
+		DefaultResourcesNamespace::SetDefaultSkyboxResources(engine_context);
 }
 
 void Engine::InitDefaultBufferUpdaters()

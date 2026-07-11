@@ -3,6 +3,7 @@
 #include "LightDataModule.h"
 #include "TransformDataModule.h"
 #include "DefaultRenderPassSet.h"
+#include "DefaultResources.h"   // FractalPushData — push фрактального фона
 #include "PositionStructure.h"
 
 using namespace ShaderBase;   // POSITION/UV/... в раскладках вершин
@@ -48,6 +49,16 @@ void DefaultShaderProgramSet::BindDefaultPushFuncs(EngineContext* ctx)
     if (ShaderProgram* sp = sm->GetShaderProgram("sp_debug_collider"))
         sp->BindPushConstants<RP::DebugColliderPushData>(
             [](const PushConstantBinder& b, RP::DebugColliderPushData data) { b.PushFragment(data); });   // fragment slot 0 → b0, space3
+
+    // Фрактальный фон (_Fractal — движковый dont_save, есть только при use_fractal_skybox).
+    // Тело MAIN_PASS передаёт push_func nullptr вместо данных → BindPushConstants<T>
+    // (разыменовывает raw) не годится; вешаем push_func напрямую, данные строим в лямбде.
+    if (ShaderProgram* sp = sm->GetShaderProgram("_Fractal"))
+        sp->push_func = [](const PushConstantBinder& b, const void*) {
+            DefaultResourcesNamespace::FractalPushData d{};
+            d.time = (float)SDL_GetTicks() / 1000.0f;
+            b.PushFragment(d);   // fragment slot 0 → b0, space3
+        };
 }
 
 void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDataModule* ldm)
