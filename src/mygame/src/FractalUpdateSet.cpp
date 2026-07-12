@@ -1,26 +1,61 @@
 #include "PCH.h"
-#include "FractalBackground.h"
+#include "FractalUpdateSet.h"
 #include "EngineContext.h"
-#include "BufferManager.h"   // буфер/апдейтер кадра фрактала
+#include "BufferManager.h"   // апдейтеры фрактальных буферов (буферы создаёт MyGame::MainInit)
 #include "CameraManager.h"   // камера-аккумулятор сдвига (игровые юниты)
 
 // ════════════════════════════════════════════════════════════════════════════
-//  Позиция во фрактале = целочисленный адрес ячейки + double-локаль + σ (см.
-//  заголовок). Точность НЕ зависит от глубины: локаль всегда ~O(1) (младшие
-//  биты double при деле — дельта камеры не поглощается на любой скорости и
-//  глубине), адрес — точная целочисленная арифметика (боковой перенос разряда
-//  любой длины за тик, без float-цепочек и промежуточных публикаций). Камера
-//  движка — аккумулятор сдвига в игровых юнитах: скорость от масштаба не
-//  зависит, мировой масштаб применяется при внесении сдвига в локаль.
+//  Апдейтеры кадров фракталов (по сценам, см. заголовок). Всё состояние — на
+//  sim-потоке: ввод игры и prepare — один поток, гонок нет. Камера движка —
+//  аккумулятор сдвига в игровых юнитах: скорость от масштаба не зависит,
+//  мировой масштаб применяется при внесении сдвига в состояние фрактала.
 // ════════════════════════════════════════════════════════════════════════════
 
-namespace FractalBackground
+namespace FractalUpdateSet
 {
 
-// Кадр фрактала: [0] = (позиция камеры в локальном кадре, глубина d), [1] = (K, tFar, 1/туман, 0),
-// [2+j] = (офсет предка j+1 уровней вверх, 3^(j+1)). Dynamic, пишется апдейтером каждый кадр.
+// ══════════════ Общее: контроллер масштаба и ручной сдвиг окна (I/K) ══════════════
+
+static constexpr double SIGMA_SMOOTH    = 0.15;   // доля лог-разрыва до цели, закрываемая за тик
+static constexpr double MAX_SIGMA_STEP  = 0.22;   // потолок |Δ ln масштаба| за тик (~0.2 уровня):
+                                                  // дистанция у границы пульсирует — окно не дёргаем
+static constexpr double MANUAL_MULT_MIN = 1.0 / 729.0;   // губка: ручной сдвиг окна ±6 уровней от авто
+static constexpr double MANUAL_MULT_MAX = 729.0;
+
+// Мандельброт: у губки DE ограничена (дистанция до ближайшей стенки, никогда не проваливается
+// на порядки ниже видимого масштаба) — окно ±6 уровней ВОКРУГ авто-цели хватает с запасом.
+// У Мандельброта DE тонких нитей (антенны мини-брота, каспы) может обрушиться на много порядков
+// ниже масштаба, на котором структура ещё видна: авто-цель утаскивает камеру в точку, а узкое
+// окно ±729× не даёт выбраться («падает на точку, нет возможности отдалить» — жалоба пользователя).
+// Лечение — масштаб Мандельброта ПОЛНОСТЬЮ ручной: I/K двигают half_h НАПРЯМУЮ во всём диапазоне
+// [MB_HALF_H_MIN, MB_HALF_H_MAX], авто-DE-слежения нет вовсе (см. SetMandelbrotOrbitUpdater).
+static constexpr double MB_HALF_H_MAX = 2.0;    // дальше отъезжать незачем: всё множество видно
+static constexpr double MB_HALF_H_MIN = 1e-15;  // резкость double-референса (~50 октав)
+
+static double g_manual_mult = 1.0;    // губка: ручной сдвиг окна масштаба поверх авто
+static double g_mb_half_h  = 1.4;     // Мандельброт: масштаб — ПРЯМОЕ состояние, без авто-цели
+
+void FractalScaleStep(float delta_levels)
+{
+	// РУЧНОЙ СДВИГ: + = «я мельче» (глубже), − = крупнее, шаг ×3^∓delta за вызов. У губки —
+	// сдвиг окна ±6 уровней вокруг авто-масштаба (сам масштаб следует за расстоянием до стенки).
+	// У Мандельброта — half_h НАПРЯМУЮ, весь диапазон (см. константу выше); активен один фрактал,
+	// апдейтер второго просто не читает свою половину — обновлять обе дёшево и без ветвления.
+	g_manual_mult = std::clamp(g_manual_mult * std::pow(3.0, -(double)delta_levels),
+		MANUAL_MULT_MIN, MANUAL_MULT_MAX);
+	g_mb_half_h = std::clamp(g_mb_half_h * std::pow(3.0, -(double)delta_levels),
+		MB_HALF_H_MIN, MB_HALF_H_MAX);
+}
+
+// ══════════════ Губка Менгера (scene_fractal): перенормированный кадр ══════════════
+//
+//  Позиция во фрактале = целочисленный адрес ячейки + double-локаль + σ. Точность НЕ
+//  зависит от глубины: локаль всегда ~O(1) (младшие биты double при деле — дельта камеры
+//  не поглощается на любой скорости и глубине), адрес — точная целочисленная арифметика
+//  (боковой перенос разряда любой длины за тик, без float-цепочек).
+
+// Кадр губки (раскладка — в заголовке). Dynamic, пишется каждый кадр.
 // tFar/туман — в ЛОКАЛЬНЫХ юнитах, но ∝σ, т.е. непрерывны по s: смена якоря не даёт шва.
-static constexpr uint32_t FRACTAL_MAX_CONTEXT = 8;    // уровней предков в шейдер (дальше — туман)
 // Потолок глубины — здравый смысл, не точность (адрес целочисленный, локаль всегда ~1).
 // 512 уровней = зум 10^244; ограничивает снизу pow(3,-d) в FoldUpToRoot (жив до ~640).
 static constexpr int      MAX_DEPTH_LEVELS    = 512;
@@ -37,11 +72,6 @@ static constexpr double   BASE_STEP           = 0.05;
 // замедляет полёт (мир = дельта·0.05·s, s ∝ дистанция) и раскрывает детализацию — врезаться
 // невозможно, «зум» = просто лети к грани; клавиши масштаба не нужны. ──
 static constexpr double   AUTO_SCALE      = 0.5;    // размер камеры = доля расстояния до стенки
-static constexpr double   SIGMA_SMOOTH    = 0.15;   // доля лог-разрыва до цели, закрываемая за тик
-static constexpr double   MAX_SIGMA_STEP  = 0.22;   // потолок |Δ ln σ| за тик (~0.2 уровня):
-                                                    // дистанция в тоннелях пульсирует — окно не дёргаем
-static constexpr double   MANUAL_MULT_MIN = 1.0 / 729.0;   // ручной сдвиг окна (I/K): ±6 уровней
-static constexpr double   MANUAL_MULT_MAX = 729.0;
 // «Оболочка» у потолка глубины: когда якорь упёрся в DepthCapFromAddress, мир больше не
 // мельчает вместе с камерой, и зенон-сближение схлопнуло бы локальную дистанцию в ноль за
 // секунду — экран заполняет неразрешимая окном структура (чёрные поры/полосы из потолочных
@@ -49,23 +79,14 @@ static constexpr double   MANUAL_MULT_MAX = 729.0;
 // скольжение вдоль — свободно, в стену — выталкивание по градиенту DE.
 static constexpr double   MIN_WALL_DIST   = 0.3;
 
-// Состояние (всё на sim-потоке: ввод игры и prepare — один поток, гонок нет).
+// Состояние губки.
 static std::vector<glm::ivec3> g_addr;          // адрес якоря: цифры {0,1,2} по осям, root-first
 static glm::dvec3              g_local(0.0);    // позиция в юнитах якорной ячейки ([-1,1] внутри)
 static double                  g_sigma = 1.0;   // дробный масштаб σ; s = σ·3^-depth
 
 static double g_step_scale = BASE_STEP;   // BASE_STEP·σ прошлого кадра — перевод дельты камеры
-static double g_manual_mult = 1.0;        // ручной сдвиг окна масштаба (I/K) поверх авто
 static double g_prev_dist = 1e9;          // дистанция прошлого тика — потолок шага (анти-туннель)
 static bool   g_seeded = false;           // первый тик: позиция камеры — сид, не дельта
-
-void FractalScaleStep(float delta_levels)
-{
-	// РУЧНОЙ СДВИГ окна относительно авто-масштаба (сам масштаб следует за расстоянием до
-	// поверхности): + = «я мельче» (окно глубже), − = крупнее. Нейтраль 1, диапазон ±6 уровней.
-	g_manual_mult = std::clamp(g_manual_mult * std::pow(3.0, -(double)delta_levels),
-		MANUAL_MULT_MIN, MANUAL_MULT_MAX);
-}
 
 // GLSL-мод (floor-периодический), покомпонентно — как glmod в шейдере.
 static glm::dvec3 GlmodD(const glm::dvec3& x, double y)
@@ -79,7 +100,7 @@ static glm::dvec3 GlmodD(const glm::dvec3& x, double y)
 static double SpongeDistanceLocal(const glm::dvec3& p)
 {
 	const int depth = (int)g_addr.size();
-	const int K = std::min(depth, (int)FRACTAL_MAX_CONTEXT);
+	const int K = std::min(depth, (int)MENGER_MAX_CONTEXT);
 
 	// Кресты предков (вырезают тоннели крупных уровней) + внешний бокс контекста.
 	glm::dvec3 o(0.0);
@@ -169,29 +190,24 @@ static int DepthCapFromAddress()
 	for (int i = 0; i < d; ++i) {
 		const glm::ivec3& t = g_addr[i];
 		const int ones = (t.x == 1) + (t.y == 1) + (t.z == 1);
-		if (ones >= 2) return i + (int)FRACTAL_MAX_CONTEXT;
+		if (ones >= 2) return i + (int)MENGER_MAX_CONTEXT;
 	}
 	return MAX_DEPTH_LEVELS;
 }
 
-void CreateFractalFrameResources(EngineContext* ctx)
+void SetMengerFrameUpdater(EngineContext* ctx)
 {
-	// ── Кадр фрактала: апдейтер публикует локальный кадр слоту. Порядок регистрации важен
-	// ровно наоборот, чем кажется: камерный апдейтер уже снял view ДО нас (регистрировался
-	// раньше), но из view шейдер фрактала берёт ТОЛЬКО ротацию (v_dir) — от кадра она не
-	// зависит; позиция луча идёт из ЭТОГО буфера. ──
+	// ── Апдейтер публикует локальный кадр слоту. Порядок регистрации важен ровно наоборот,
+	// чем кажется: камерный апдейтер уже снял view ДО нас (регистрировался раньше), но из
+	// view шейдер фрактала берёт ТОЛЬКО ротацию (v_dir) — от кадра она не зависит; позиция
+	// луча идёт из ЭТОГО буфера. Сам буфер создаёт MyGame::MainInit (под if сцены). ──
 	BufferManager* bm = ctx->GetBufferManager();
 	CameraManager* cm = ctx->GetCameraManager();
-	const uint32_t frame_bytes = (2 + FRACTAL_MAX_CONTEXT) * 4 * sizeof(float);
 
-	bm->CreateBufferData(FRACTAL_FRAME_BUFFER, frame_bytes,
-		SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
-
-	bm->CreateUpdateInstruction(FRACTAL_FRAME_BUFFER,
+	bm->CreateUpdateInstruction(MENGER_FRAME_BUFFER,
 		[cm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task)
 	{
-		float* out = static_cast<float*>(bm->AcquireTransferWritePtr(&task,
-			(2 + FRACTAL_MAX_CONTEXT) * 4 * sizeof(float)));
+		float* out = static_cast<float*>(bm->AcquireTransferWritePtr(&task, MENGER_FRAME_BYTES));
 		if (!out) return;
 
 		// (1) Сдвиг камеры за тик (аккумулятор в игровых юнитах, обнулён в прошлый тик;
@@ -303,7 +319,7 @@ void CreateFractalFrameResources(EngineContext* ctx)
 		// (5) Публикация кадра: позиция, K, σ-непрерывные дальности, офсеты предков из
 		// хвоста адреса (той же накопительной формулой, что и раньше).
 		const int   d     = (int)g_addr.size();
-		const int   K     = std::min(d, (int)FRACTAL_MAX_CONTEXT);
+		const int   K     = std::min(d, (int)MENGER_MAX_CONTEXT);
 		out[0] = (float)g_local.x; out[1] = (float)g_local.y; out[2] = (float)g_local.z;
 		out[3] = (float)d;
 		out[4] = (float)K;
@@ -312,7 +328,7 @@ void CreateFractalFrameResources(EngineContext* ctx)
 		out[7] = 0.0f;
 		glm::vec3 o(0.0f);
 		float s3 = 1.0f;
-		for (int j = 1; j <= (int)FRACTAL_MAX_CONTEXT; ++j) {
+		for (int j = 1; j <= (int)MENGER_MAX_CONTEXT; ++j) {
 			if (j <= K) {
 				o = (o + (glm::vec3(g_addr[d - j]) * 2.0f - 2.0f)) / 3.0f;
 				s3 *= 3.0f;
@@ -324,7 +340,84 @@ void CreateFractalFrameResources(EngineContext* ctx)
 		// (6) Масштаб внесения дельты для следующего тика.
 		g_step_scale = BASE_STEP * g_sigma;
 	},
-		[]() -> uint32_t { return (2 + FRACTAL_MAX_CONTEXT) * 4 * sizeof(float); });
+		[]() -> uint32_t { return MENGER_FRAME_BYTES; });
+}
+
+// ══════════════ Мандельброт (scene_mandelbrot): перетурбация ══════════════
+//
+//  Состояние: центр окна на комплексной плоскости (double — резкость ~50 октав, ровно бюджет
+//  референс-орбиты) + полувысота видимой области half_h. Пан ∝ half_h (постоянная экранная
+//  скорость: дельта вносится с масштабом кадра). Масштаб — ПОЛНОСТЬЮ РУЧНОЙ (I/K двигают
+//  g_mb_half_h напрямую, см. общую секцию выше) — авто-DE-слежения НЕТ (было и убрано: см.
+//  комментарий у MB_HALF_H_MAX). Абсолютная координата пикселя нигде не материализуется:
+//  шейдер итерирует дельту от референса (см. mandelbrot.frag.hlsl).
+
+static constexpr double MB_PAN_STEP = 0.05;   // полувысот экрана за игровой юнит дельты
+
+// Состояние Мандельброта (g_mb_half_h — в общей секции: I/K пишут его напрямую).
+static glm::dvec2 g_mb_center(-0.6, 0.0);   // стартовое окно: всё множество
+static bool       g_mb_seeded = false;      // первый тик: стартовая позиция камеры — не дельта
+
+void SetMandelbrotOrbitUpdater(EngineContext* ctx)
+{
+	BufferManager* bm = ctx->GetBufferManager();
+	CameraManager* cm = ctx->GetCameraManager();
+
+	bm->CreateUpdateInstruction(MANDELBROT_ORBIT_BUFFER,
+		[cm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task)
+	{
+		float* out = static_cast<float*>(bm->AcquireTransferWritePtr(&task, MANDELBROT_ORBIT_BYTES));
+		if (!out) return;
+
+		// (1) Дельта камеры (аккумулятор, см. заголовок) → ЭКРАННЫЕ оси: mat3(view)·delta
+		// разворачивает мировую дельту Move (right/up/forward) обратно в (право, верх, вперёд) —
+		// пан не зависит от поворота камеры, 2D остаётся ротационно-инвариантным. dv.z (стрелки
+		// вверх/вниз — «лететь вперёд» в общем MainIterate) БОЛЬШЕ НЕ крутит масштаб (раньше
+		// крутил — дельта пропорциональна скорости камеры и укатывала масштаб в упор диапазона
+		// без возврата), но выкидывать её насовсем нельзя: тогда стрелки вверх/вниз молчат и
+		// панораму по Y двигает только Space/LShift — неочевидно для 2D-вьюера. Заводим dv.z
+		// ВТОРЫМ источником Y-пана (сумма с dv.y): знак минус — dv.z = −(мировая ось «вперёд» в
+		// view-пространстве, lookAt смотрит вдоль −Z), а стрелка ВВЕРХ должна двигать окно вверх.
+		float aspect = 16.0f / 9.0f;
+		Camera* cam = cm->GetActiveCamera();
+		if (cam) {
+			const glm::mat4 proj = cam->GetProj();
+			aspect = proj[1][1] / proj[0][0];
+
+			const glm::vec3 acc = cam->GetPosition();
+			if (g_mb_seeded) {
+				const glm::dvec3 dv = glm::dvec3(glm::mat3(cam->GetView()) * acc);
+				// Пан ∝ half_h: постоянная ЭКРАННАЯ скорость на любом масштабе.
+				g_mb_center += glm::dvec2(dv.x, dv.y - dv.z) * (MB_PAN_STEP * g_mb_half_h);
+			}
+			else g_mb_seeded = true;   // стартовая позиция из SetView к плоскости отношения не имеет
+			cam->SetPosition(glm::vec3(0.0f));
+		}
+
+		// (2) Референс-орбита центра в double: z → z²+c, Z_n льются в буфер float2 на ходу.
+		// Байлаут — стандартный радиус 16 (|z|²>256), тот же, что использует пиксельная дельта
+		// в шейдере для полного значения z=Z+dz: реф. орбита обязана быть не короче того, что
+		// может понадобиться дельте, и не длиннее — держать её при |z|²>1e10 (как раньше, ради
+		// точности угасшей вместе с ней оценки расстояния Грина) означало жечь бюджет 4096
+		// итераций на хвост ПОСЛЕ побега, а не на глубину зума.
+		float* orbit = out + 4;   // после заголовка (две float2-записи)
+		glm::dvec2 z(0.0);
+		uint32_t len = 0;
+		for (uint32_t n = 0; n < MANDELBROT_ORBIT_MAX; ++n) {
+			orbit[2 * n]     = (float)z.x;
+			orbit[2 * n + 1] = (float)z.y;
+			++len;
+			z = glm::dvec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + g_mb_center;
+			if (glm::dot(z, z) > 256.0) break;
+		}
+
+		// (3) Заголовок: half_h — ПРЯМОЕ состояние (I/K, см. FractalScaleStep), без авто-цели.
+		reinterpret_cast<uint32_t*>(out)[0] = len;
+		out[1] = (float)g_mb_half_h;
+		out[2] = aspect;
+		out[3] = 0.0f;
+	},
+		[]() -> uint32_t { return MANDELBROT_ORBIT_BYTES; });
 }
 
 }

@@ -11,7 +11,8 @@
 #include "LightDataModule.h"
 #include "imgui.h"
 #include "DefaultShaderSet.h"
-#include "FractalBackground.h"   // кадр фрактала (буфер+апдейтер) + FractalScaleStep (I/K)
+#include "BufferManager.h"       // CreateBufferData фрактальных буферов (под if сцены)
+#include "FractalUpdateSet.h"    // апдейтеры кадров фракталов + FractalScaleStep (I/K)
 
 MyGame::MyGame(Engine* engine)
 {
@@ -52,16 +53,33 @@ SDL_AppResult MyGame::MainInit()
         SetCullingPibPrograms(ctx, engine->GetLightDataModule());   // GPU-каллинг: out_pib
     }
 
-    // Кадр фрактала (буфер "_FractalFrameBuffer" + апдейтер-ребейз) — ДО LoadScene: sp "Fractal"
-    // из манифеста сцены ссылается на буфер по имени, резолв идёт по уже существующим.
-    FractalBackground::CreateFractalFrameResources(ctx);
+    // Сцена = выбор фрактала. Всё сценозависимое — буфер кадра (CreateBufferData), его
+    // апдейтер (FractalUpdateSet) и пуши шейдеров (в BindDefaultPushFuncs) — под if'ом
+    // с её именем. Буфер — ДО LoadScene: sp из манифеста сцены ссылается на него по имени,
+    // резолв идёт по уже существующим. Рендер-ресурсы (vs/fs/sp/материал) — в манифестах.
+    const std::string scene_name = "scene_mandelbrot";
+    BufferManager* bm = ctx->GetBufferManager();
+    if (scene_name == "scene_fractal") {
+        bm->CreateBufferData(FractalUpdateSet::MENGER_FRAME_BUFFER,
+            FractalUpdateSet::MENGER_FRAME_BYTES,
+            SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
+        FractalUpdateSet::SetMengerFrameUpdater(ctx);
+    }
+    else if (scene_name == "scene_mandelbrot") {
+        bm->CreateBufferData(FractalUpdateSet::MANDELBROT_ORBIT_BUFFER,
+            FractalUpdateSet::MANDELBROT_ORBIT_BYTES,
+            SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
+        FractalUpdateSet::SetMandelbrotOrbitUpdater(ctx);
+    }
 
     // Пере-привязку push-констант к sp движок зовёт сам В КОНЦЕ каждой загрузки (в т.ч.
     // UI-рантаймовой): sp из манифеста пересозданы голыми. Регистрируем ДО первого LoadScene.
-    engine->SetBindShaderFunctions([this] { DefaultShaderProgramSet::BindDefaultPushFuncs(ctx); });
+    engine->SetBindShaderFunctions([this, scene_name] {
+        DefaultShaderProgramSet::BindDefaultPushFuncs(ctx, scene_name);
+    });
 
-    objectManager->CreateScene("scene_fractal");
-    ctx->LoadScene("scene_fractal", "saved_scene_fractal");   // папка сцены (scene.json + ресурсы)
+    objectManager->CreateScene(scene_name);
+    ctx->LoadScene(scene_name, "saved_" + scene_name);   // папка сцены (scene.json + ресурсы)
 
     return SDL_APP_CONTINUE;
 }
@@ -88,7 +106,7 @@ SDL_AppResult MyGame::MainIterate()
 
     // Полёт: стрелки — горизонталь/вперёд, Space/LShift — вертикаль. Камера — аккумулятор
     // сдвига в ПОСТОЯННЫХ игровых юнитах: мировой масштаб (АВТО: следует за расстоянием до
-    // поверхности) применяет FractalBackground при внесении дельты. «Зум» = лететь к грани:
+    // поверхности) применяет апдейтер FractalUpdateSet при внесении дельты. «Зум» = лететь к грани:
     // подлёт сам замедляется и раскрывает детализацию, врезаться нельзя.
     // Колесо (SpeedChange камеры) — множитель скорости поверх; удержание I/K — ручной сдвиг
     // окна масштаба относительно авто (~1 уровень в секунду, I — мельче, K — крупнее).
@@ -108,8 +126,8 @@ SDL_AppResult MyGame::MainIterate()
             case SDL_SCANCODE_SPACE:  camMove.y += camSpeed; camMoved = true; break;
             case SDL_SCANCODE_LSHIFT: camMove.y -= camSpeed; camMoved = true; break;
 
-            case SDL_SCANCODE_I: FractalBackground::FractalScaleStep(+zoomRate); break;  // глубже
-            case SDL_SCANCODE_K: FractalBackground::FractalScaleStep(-zoomRate); break;  // наружу
+            case SDL_SCANCODE_I: FractalUpdateSet::FractalScaleStep(+zoomRate); break;  // глубже
+            case SDL_SCANCODE_K: FractalUpdateSet::FractalScaleStep(-zoomRate); break;  // наружу
             default: break;
             }
         }

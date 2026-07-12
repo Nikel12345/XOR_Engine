@@ -4,7 +4,7 @@ target_sources(MyGame PRIVATE
     src/main.cpp
     src/MyGame.cpp
     src/DefaultShaderSet.cpp
-    src/FractalBackground.cpp
+    src/FractalUpdateSet.cpp
 )
 
 target_include_directories(MyGame PRIVATE

@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 
 class ShaderManager;
 class PassManager;
@@ -17,9 +18,9 @@ namespace DefaultShaderProgramSet
 
     // Пере-привязка push-констант к render-sp ПО ИМЕНИ. push_func — код-байндинг, он НЕ
     // сериализуется: после LoadScene загруженные sp (пересозданы из манифеста) остаются без него,
-    // поэтому его вешают здесь, ПОСЛЕ загрузки сцены. Промах sp → пропуск. Здесь же — push
-    // фрактального фона ("Fractal" из saved_scene_fractal/shaders.json).
-    void BindDefaultPushFuncs(EngineContext* ctx);
+    // поэтому его вешают здесь, ПОСЛЕ загрузки сцены. Промах sp → пропуск. Пуши фрактальных
+    // фонов ("Fractal"/"Mandelbrot" из shaders.json своих сцен) — под if'ом с именем сцены.
+    void BindDefaultPushFuncs(EngineContext* ctx, const std::string& scene_name);
 
     // Compute shader programs
     // GPU-каллинг (culling_pib.comp): пишет out_pib блоками по камерам (0 — игрок, 1..N — световые).

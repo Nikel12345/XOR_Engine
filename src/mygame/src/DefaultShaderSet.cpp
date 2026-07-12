@@ -3,7 +3,7 @@
 #include "LightDataModule.h"
 #include "TransformDataModule.h"
 #include "DefaultRenderPassSet.h"
-#include "FractalBackground.h"   // FractalPushData — push фрактального фона
+#include "FractalUpdateSet.h"   // FractalPushData — push фрактальных фонов
 #include "PositionStructure.h"
 
 using namespace ShaderBase;   // POSITION/UV/... в раскладках вершин
@@ -37,7 +37,7 @@ namespace DefaultShaderProgramSet
 
 // Единая точка привязки push-констант к render-sp — ПОСЛЕ LoadScene (push не сериализуется, у
 // загруженных из манифеста sp его нет; см. заголовок). Промах имени → пропуск (лог внутри GetShaderProgram).
-void DefaultShaderProgramSet::BindDefaultPushFuncs(EngineContext* ctx)
+void DefaultShaderProgramSet::BindDefaultPushFuncs(EngineContext* ctx, const std::string& scene_name)
 {
     namespace RP = DefaultRenderPassNamespace;
     ShaderManager* sm = ctx->GetShaderManager();
@@ -50,15 +50,29 @@ void DefaultShaderProgramSet::BindDefaultPushFuncs(EngineContext* ctx)
         sp->BindPushConstants<RP::DebugColliderPushData>(
             [](const PushConstantBinder& b, RP::DebugColliderPushData data) { b.PushFragment(data); });   // fragment slot 0 → b0, space3
 
-    // Фрактальный фон ("Fractal" — из saved_scene_fractal/shaders.json). Тело MAIN_PASS передаёт
-    // push_func nullptr вместо данных → BindPushConstants<T> (разыменовывает raw) не годится;
-    // вешаем push_func напрямую, данные строим в лямбде.
-    if (ShaderProgram* sp = sm->GetShaderProgram("Fractal"))
-        sp->push_func = [](const PushConstantBinder& b, const void*) {
-            FractalBackground::FractalPushData d{};
-            d.time = (float)SDL_GetTicks() / 1000.0f;
-            b.PushFragment(d);   // fragment slot 0 → b0, space3
-        };
+    // Фрактальные фоны — под if'ом с именем сцены: sp приходят из её манифеста (shaders.json),
+    // биндим только загруженный. Тело MAIN_PASS передаёт push_func nullptr вместо данных →
+    // BindPushConstants<T> (разыменовывает raw) не годится; вешаем push_func напрямую,
+    // данные строим в лямбде (fragment slot 0 → b0, space3).
+    if (scene_name == "scene_fractal") {
+        if (ShaderProgram* sp = sm->GetShaderProgram("Fractal"))
+            sp->push_func = [](const PushConstantBinder& b, const void*) {
+                FractalUpdateSet::FractalPushData d{};   // max_steps по умолчанию — потолок рэймарча
+                d.time = (float)SDL_GetTicks() / 1000.0f;
+                b.PushFragment(d);
+            };
+    }
+    else if (scene_name == "scene_mandelbrot") {
+        if (ShaderProgram* sp = sm->GetShaderProgram("Mandelbrot"))
+            sp->push_func = [](const PushConstantBinder& b, const void*) {
+                FractalUpdateSet::FractalPushData d{};
+                d.time = (float)SDL_GetTicks() / 1000.0f;
+                // Потолок итераций пикселя = длина референс-орбиты: глубже неё дельты всё
+                // равно не уходят (ре-базирование заворачивает m на начало орбиты).
+                d.max_steps = FractalUpdateSet::MANDELBROT_ORBIT_MAX;
+                b.PushFragment(d);
+            };
+    }
 }
 
 void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDataModule* ldm)

@@ -1,15 +1,16 @@
-// 2D-фрактал: множество Мандельброта во ВСЮ видимую область, без зависимости от поворота
-// камеры — только от её ПОЗИЦИИ. Пан — x/y камеры, зум — экспонента от z (октава на юнит).
-// Экранная точка приходит готовым NDC из fractal2d.vert.hlsl; аспект — из proj.
+// 2D-фрактал: множество Мандельброта во ВСЮ видимую область, от поворота камеры не зависит
+// (и от позиции тоже: камера — дельта-аккумулятор, всегда в нуле). Экранная точка приходит
+// готовым NDC из fractal2d.vert.hlsl; пан/зум/аспект запечены в буфер кадра на CPU
+// (mygame/FractalUpdateSet.cpp, сцена scene_mandelbrot).
 //
 // ГЛУБИНА — ПЕРЕТУРБАЦИЯ: CPU раз в кадр итерирует РЕФЕРЕНС (центр окна) в double и заливает
-// орбиту Z_0..Z_{len-1} буфером (DefaultResources, FRACTAL_ORBIT_BUFFER). Пиксель итерирует
-// только ДЕЛЬТУ от референса: для z = Z + dz алгебраически ТОЧНО dz' = (2Z + dz)·dz + dc,
+// орбиту Z_0..Z_{len-1} буфером (_MandelbrotOrbitBuffer). Пиксель итерирует только ДЕЛЬТУ от
+// референса: для z = Z + dz алгебраически ТОЧНО dz' = (2Z + dz)·dz + dc,
 // где dc = смещение пикселя от центра — оно мало́ по построению и живёт в обычном float.
 // Абсолютная координата пикселя нигде не материализуется → нет и потери её младших битов
-// (прежний шум float с ~17 октав, потом df до ~45). Предел резкости теперь — double
-// референса (~50 октав); наводка пана — ulp float-позиции камеры (~24 октавы; дальше центр
-// квантуется — это сдвиг, не шум). Безлимит — big-float референса на CPU, шейдер не меняется.
+// (прежний шум float с ~17 октав, потом df до ~45). Предел резкости — double референса
+// (~50 октав), наводка пана теперь ТАКАЯ ЖЕ (double-центр копит float-дельты камеры — ulp
+// прежней float-позиции больше не потолок). Безлимит — big-float референса, шейдер не меняется.
 //
 // РЕ-БАЗИРОВАНИЕ (Чжуоран): если |z| < |dz| — точка ближе к началу орбиты (Z_0 = 0), чем к
 // текущему референсу: δ перепривязывается (dz = z, m = 0). Это же закрывает классические
@@ -29,21 +30,14 @@ TextureCube  u_envCube    : register(t1, space2);
 [[vk::combinedImageSampler]]
 SamplerState u_envSampler : register(s1, space2);
 
-// Камера — fs-буфер t2 (после 2 сэмплеров пасса): отсюда только зум (позиция z из
-// rigid-inverse view) и аспект (диагональ proj). Пан x/y камеры сюда НЕ читается — он
-// уже запечён в референс-орбиту на CPU (из того же состояния камеры этого слота).
-struct CameraData
-{
-    float4x4 view;
-    float4x4 proj;
-};
-StructuredBuffer<CameraData> Camera : register(t2, space2);
+// Кадр Мандельброта (пишет апдейтер _MandelbrotOrbitBuffer, mygame/FractalUpdateSet.cpp):
+// [0] = (len asuint, half_h), [1] = (aspect, 0), [2 + n] — Z_n референс-орбиты.
+// Камерного буфера здесь НЕТ намеренно: пан/зум/аспект запечены сюда на CPU, а
+// неиспользуемое объявление DXC стрипает → дырявые слоты storage-буферов (SDL ждёт
+// плотные) → пайплайн не собирается.
+StructuredBuffer<float2> Orbit : register(t2, space2);
 
-// Референс-орбита: [0] — заголовок (len, asuint в .x), [1 + n] — Z_n. Раскладку пишет
-// апдейтер FRACTAL_ORBIT_BUFFER (DefaultResources.cpp).
-StructuredBuffer<float2> Orbit : register(t3, space2);
-
-// Push-константы _Fractal (fragment слот 0). Раскладка = FractalPushData (DefaultResources.h).
+// Push-константы sp "Mandelbrot" (fragment слот 0). Раскладка = FractalPushData (FractalUpdateSet.h).
 cbuffer FractalParams : register(b0, space3)
 {
     float time;       // анимация палитры
@@ -64,11 +58,6 @@ struct PSOutput
     float4 emission : SV_Target1;   // MRT пасса: яркая кромка множества слегка блумит
 };
 
-// Зум: полу-высота видимой области = HALF_H0 · 2^z — на стартовой камере игры (z=3.5)
-// видно всё множество, полёт вперёд удваивает увеличение каждый юнит. Маппинг пана
-// (x/y·0.25 − 0.6) живёт на CPU (центр референса) — здесь его нет.
-static const float HALF_H0 = 0.124;
-
 // Палитра IQ-косинусами: гладкая, циклится по дробному счётчику побега.
 float3 Palette(float t)
 {
@@ -79,14 +68,12 @@ PSOutput main(PSInput input)
 {
     PSOutput o;
 
-    // Зум из позиции камеры (rigid-inverse view, как в main_pass.frag), аспект из proj
-    // (m00 = 1/(aspect·tan), m11 = 1/tan → m11/m00 = aspect; диагональ инвариантна к
-    // конвенции хранения).
-    float4x4 view = Camera[0].view;
-    float3 camPos = -mul(transpose((float3x3)view), view._m03_m13_m23);
-    float aspect  = Camera[0].proj._m11 / Camera[0].proj._m00;
+    // Зум/аспект — из заголовка кадра (CPU уже применил авто-масштаб и ручной сдвиг окна).
+    uint  len    = asuint(Orbit[0].x);   // фактическая длина орбиты (референс мог сбежать)
+    float half_h = Orbit[0].y;
+    float aspect = Orbit[1].x;
 
-    float half_h = HALF_H0 * exp2(camPos.z);
+
     // Смещение пикселя от центра окна = от референса. Только оно и нужно: мало́ → float.
     float2 dc = input.v_ndc * float2(half_h * aspect, half_h);
 
@@ -94,8 +81,6 @@ PSOutput main(PSInput input)
     // потолок — max_iter из push.
     float octaves = max(0.0, -log2(half_h));
     uint  it      = min(max_iter, 64u + (uint)(96.0 * octaves));
-
-    uint len = asuint(Orbit[0].x);   // фактическая длина орбиты (референс мог сбежать)
 
     float3 col = float3(0.0, 0.0, 0.0);   // дефолт: внутренность множества / нет орбиты
     float3 emi = float3(0.0, 0.0, 0.0);
@@ -108,17 +93,23 @@ PSOutput main(PSInput input)
         uint   i  = 0;
         for (; i < it; ++i) {
             // dz' = (2Z + dz)·dz + dc (комплексно) — точная алгебра, без приближений.
-            float2 Z = Orbit[1 + m];
+            float2 Z = Orbit[2 + m];
             float2 t = float2(2.0 * Z.x + dz.x, 2.0 * Z.y + dz.y);
             dz = float2(t.x * dz.x - t.y * dz.y, t.x * dz.y + t.y * dz.x) + dc;
             ++m;
 
-            float2 z = Orbit[1 + m] + dz;   // полное значение — только для тестов/окраски
+            float2 z = Orbit[2 + m] + dz;   // полное значение — только для тестов/окраски
             m2 = dot(z, z);
             if (m2 > 256.0) break;
 
             // Ре-базирование: точка ближе к Z_0=0, чем к референсу, ИЛИ орбита кончилась.
-            if (m2 < dot(dz, dz) || m >= len - 1) { dz = z; m = 0; }
+            // БЕЗ ВЕТКИ (select): на этом драйвере ветвление `if {dz=z; m=0;}` внутри цикла
+            // мискомпилируется — m обнулялся, а присваивание dz=z ТЕРЯЛОСЬ, после чего dz²+dc
+            // расходится у всех пикселей (равномерный побег ~18 итераций, зелёная заливка).
+            // Родня граблям df/precise: логике шейдеров этого GPU с ветками в циклах не верить.
+            const bool rebase = (m2 < dot(dz, dz)) || (m >= len - 1);
+            dz = rebase ? z : dz;
+            m  = rebase ? 0u : m;
         }
 
         if (i < it) {
@@ -128,6 +119,7 @@ PSOutput main(PSInput input)
             col = Palette(sn * 0.02 + time * 0.02) * saturate(sn * 0.08);
             emi = col * col * 0.6;   // квадрат: блумят только яркие полосы кромки
         }
+
     }
 
     o.color    = float4(col, 1.0);
