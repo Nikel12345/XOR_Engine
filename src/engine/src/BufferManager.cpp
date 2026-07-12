@@ -11,7 +11,10 @@ BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_ma
 	CreateBufferData(DEFAULT_TRANSFORM_BUFFER, BASE_TB_SIZE / 10, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_LIGHT_BUFFER, sizeof(LightLayout) * 2, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_CAMERA_BUFFER, sizeof(CameraData), SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, BufferDataType::Dynamic);
-	CreateBufferData(DEFAULT_POSITION_INDEX_BUFFER, BASE_TB_SIZE / 16/ 10, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, BufferDataType::Dynamic);
+	// Сырой PIB читает ТОЛЬКО каллинг (culling_pib.comp) — графика с переходом на компактацию
+	// перешла на out_pib (вершинники ссылаются на DefaultOutPibBuffer). GRAPHICS_STORAGE_READ был
+	// протухшим наследством и снят: авто-сбор флагов его ни из одной декларации не выводит.
+	CreateBufferData(DEFAULT_POSITION_INDEX_BUFFER, BASE_TB_SIZE / 16/ 10, SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, BufferDataType::Dynamic);
 	// Per-instance данные (8 байт/строку). Dynamic — возможны удаления; авторесайз как у трансформов.
 	CreateBufferData(DEFAULT_INSTANCE_BUFFER, BASE_TB_SIZE / 80, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_LIGHT_CAMERA_BUFFER, sizeof(CameraData) * 6, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, BufferDataType::Dynamic);
@@ -39,15 +42,28 @@ BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, SD
     data->resize_behaviour = resize_behaviour;
     data->usage = usage;
 	data->debug_name = name;
+
+    // ── НАМЕРЕНИЕ (declared at creation), а не выведенное использование ──
+    // Структурные роли буфера граф вывести не может, и не сможет: вершинный и индексный буферы
+    // биндятся напрямую по имени (BindGPUVertexBuffer/BindGPUIndexBuffer), а источник indirect-draw
+    // зашит в RenderPassStandardBody — деклараций, из которых это следует, попросту нет. Это
+    // ЗАЯВЛЕНИЕ ЦЕЛИ в момент создания, симметрично SAMPLER'у материального атласа.
+    // Всё остальное (GRAPHICS/COMPUTE storage) собирается из объявлений шейдерных программ.
+    constexpr SDL_GPUBufferUsageFlags kIntent = SDL_GPU_BUFFERUSAGE_VERTEX
+                                              | SDL_GPU_BUFFERUSAGE_INDEX
+                                              | SDL_GPU_BUFFERUSAGE_INDIRECT;
+    data->debug_usage |= (usage & kIntent);
+
+    // ОТЛОЖЕННОЕ СОЗДАНИЕ: здесь только РАЗМЕРЫ, сам SDL_GPUBuffer создаст BakePending (начало
+    // PrepareFunc). Потребителям это безразлично: они держат BufferData* и берут GPU-хэндл через
+    // _GetGPUBufferForFrame на бинде — до бейка его просто никто не спрашивает.
     switch (type) {
         case BufferDataType::Static:
-            data->Static.buffer = CreateBuffer(size, usage);
 			data->Static.buffer_size = size;
             break;
 
         case BufferDataType::Dynamic:
             for (int i = 0; i < BUFFERING_LEVEL; i++) {
-                data->Dynamic.buffers[i] = CreateBuffer(size, usage);
                 data->Dynamic.buffer_size[i] = size;
             };
             break;
@@ -56,8 +72,88 @@ BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, SD
 
     BufferData* ptr = data.get();
     buffers_data[name] = std::move(data);
+    pending_bakes.push_back(ptr);   // GPU-буфер создаст ближайший BakePending
 
     return ptr;
+}
+
+// Дренаж отложенных созданий. Каждый кадр (начало PrepareFunc) — поэтому ресурс, заведённый
+// игрой в любом кадре, живёт на GPU уже в этом же кадре. См. BufferManager.h.
+void BufferManager::BakePending()
+{
+    if (pending_bakes.empty()) return;
+
+    for (BufferData* data : pending_bakes) {
+        if (!data) continue;
+        switch (data->type) {
+        case BufferDataType::Static:
+            if (!data->Static.buffer) {
+                data->Static.buffer = CreateBuffer(data->Static.buffer_size, data->usage);
+                if (!data->Static.buffer)
+                    SDL_Log("BufferManager::BakePending: buffer '%s' failed.", data->debug_name.c_str());
+            }
+            break;
+
+        case BufferDataType::Dynamic:
+            for (int i = 0; i < BUFFERING_LEVEL; i++) {
+                if (data->Dynamic.buffers[i]) continue;
+                data->Dynamic.buffers[i] = CreateBuffer(data->Dynamic.buffer_size[i], data->usage);
+                if (!data->Dynamic.buffers[i])
+                    SDL_Log("BufferManager::BakePending: buffer '%s' [%d] failed.", data->debug_name.c_str(), i);
+            }
+            break;
+        }
+    }
+
+    pending_bakes.clear();
+}
+
+// Имя одного бита usage-флага буфера.
+static const char* BufferUsageFlagName(SDL_GPUBufferUsageFlags bit)
+{
+    switch (bit) {
+    case SDL_GPU_BUFFERUSAGE_VERTEX:                 return "VERTEX";
+    case SDL_GPU_BUFFERUSAGE_INDEX:                  return "INDEX";
+    case SDL_GPU_BUFFERUSAGE_INDIRECT:               return "INDIRECT";
+    case SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ:  return "GRAPHICS_STORAGE_READ";
+    case SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ:   return "COMPUTE_STORAGE_READ";
+    case SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE:  return "COMPUTE_STORAGE_WRITE";
+    default:                                         return "UNKNOWN";
+    }
+}
+
+// Разложить маску в строку "A|B|C" (пусто → "-").
+static std::string BufferUsageFlagsToString(SDL_GPUBufferUsageFlags flags)
+{
+    std::string out;
+    for (uint32_t bit = 1; bit; bit <<= 1) {
+        if (!(flags & bit)) continue;
+        if (!out.empty()) out += "|";
+        out += BufferUsageFlagName(bit);
+    }
+    return out.empty() ? "-" : out;
+}
+
+// ASCII-only: SDL_Log в Windows-консоли калечит кириллицу.
+void BufferManager::ReportUsageMismatch()
+{
+    SDL_Log("=== BUFFER usage flags: manual (used) vs auto-collected (debug_usage) ===");
+    size_t mismatches = 0;
+    for (const auto& [name, data] : buffers_data) {
+        if (!data) continue;
+        const SDL_GPUBufferUsageFlags missed = data->usage & ~data->debug_usage;   // задано вручную, НЕ выведено
+        const SDL_GPUBufferUsageFlags extra  = data->debug_usage & ~data->usage;   // выведено, вручную НЕТ
+        if (!missed && !extra) continue;
+        ++mismatches;
+        SDL_Log("  %-30s mismatch: manual=[%s] auto=[%s] | NOT_DERIVED=[%s] | EXTRA=[%s]",
+            data->debug_name.c_str(),
+            BufferUsageFlagsToString(data->usage).c_str(),
+            BufferUsageFlagsToString(data->debug_usage).c_str(),
+            BufferUsageFlagsToString(missed).c_str(),
+            BufferUsageFlagsToString(extra).c_str());
+    }
+    if (mismatches == 0) SDL_Log("  no mismatches: intent (VERTEX/INDEX/INDIRECT) + derived (storage) == manual.");
+    else SDL_Log("  %zu mismatch(es) -- each one is a real over-grant or a real gap.", mismatches);
 }
 
 void BufferManager::TrashBuffers(uint64_t fences_done)

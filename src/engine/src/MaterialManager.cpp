@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "MaterialManager.h"
 #include "TextureData.h"   // полное определение TextureHandle: нужно для weak_from_this()
+#include "TextureManager.h"   // резолв имени текстуры в атлас (CollectSamplerUsage)
 
 MaterialManager::MaterialManager()
 {
@@ -61,6 +62,43 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 		++n;
 	}
 	return n;
+}
+
+void MaterialManager::CollectSamplerUsage(const Material* m, TextureManager* tm, const std::string& material_name)
+{
+	if (!m || !tm) return;
+	const auto& handles = tm->GetTextureHandles();
+	for (const auto& [role, tex_name] : m->textures) {
+		auto it = handles.find(tex_name);   // не GetTextureHandle: тот шумит логом на промах
+		if (it == handles.end() || !it->second) continue;   // имя ещё не создано — атлас неизвестен
+		TextureAtlas* atlas = it->second->atlas;
+		if (!atlas) continue;
+
+		atlas->debug_usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;   // фактическое использование
+
+		// ── Диагностика дыры «намерения» ──
+		// Материал сэмплит этот атлас, а его tci про SAMPLER не заявлял. Ресурс создаётся по tci,
+		// так что бинд гарантированно упадёт — SDL ударит SDL_assert_release («texture must be
+		// created with SAMPLER») и АБОРТИТ процесс, не назвав ни атласа, ни материала. Называем сами.
+		//
+		// Пофиксить «доклейкой» флага в общем случае НЕЛЬЗЯ: атлас заводится пустым и может быть
+		// создан (залит текстурами) за много кадров до того, как на него сошлётся материал — а
+		// usage GPU-текстуры после создания неизменяем. Поэтому SAMPLER обязан быть ЗАЯВЛЕН в tci
+		// при создании (материальные пресеты это делают; кастомный tci — забота автора).
+		if (!(atlas->tci.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
+			const bool already_created = (atlas->texture_binding.texture != nullptr);
+			SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+				"USAGE VIOLATION: atlas '%s' is sampled by material '%s' (slot %d, texture '%s') "
+				"but was created WITHOUT SDL_GPU_TEXTUREUSAGE_SAMPLER in its tci. %s "
+				"Declare SAMPLER in the atlas tci (use a material-atlas preset).",
+				atlas->debug_name.c_str(),
+				material_name.empty() ? "<unnamed>" : material_name.c_str(),
+				static_cast<int>(role), tex_name.c_str(),
+				already_created
+					? "GPU texture ALREADY CREATED - usage can no longer change, the bind WILL abort."
+					: "GPU texture not created yet - still fixable before the next bake.");
+		}
+	}
 }
 
 std::vector<Material*> MaterialManager::GetAllMaterials()

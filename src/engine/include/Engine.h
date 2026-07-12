@@ -80,6 +80,8 @@ public:
 
     //void Iterate();
     void PrepareFunc(uint8_t idx);
+    // Сверка ручных usage-флагов с авто-собранными печатается один раз, после первого бейка.
+    bool usage_report_done = false;
 
     void UploadFunc(uint8_t slot);
 

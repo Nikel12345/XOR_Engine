@@ -262,7 +262,9 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
             "bloom_up_" + std::to_string(i), "bloom_up_cs",
             {}, {},
-            { { L((uint32_t)i), 0, 0 } },   // rw: bloom_L<i> (RMW: += размытие → нужен SIMULTANEOUS)
+            // rw: bloom_L<i>. Tent-фильтр читает СОСЕДНИЕ тексели того же уровня, пока другие потоки
+            // диспатча их пишут → нужен SIMULTANEOUS (не выводится из формы бинда — ручной тег).
+            { { .texture_atlas = L((uint32_t)i), .need_simultaneous = true } },
             {},
             { L((uint32_t)i + 1) },         // combined sampler: следующий (вдвое мельче) уровень
             BLOOM_PASS);

@@ -137,8 +137,11 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 		[](EngineContext* ctx, const void* data)
 		{
 			const SetMaterialTextureCmd* c = static_cast<const SetMaterialTextureCmd*>(data);
-			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material))
+			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
 				m->textures[static_cast<TextureSlotRole>(c->role)] = c->texture;
+				// Новый слот → его атлас сэмплится (сбор usage-флагов + проверка намерения).
+				ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->material);
+			}
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
 		});
@@ -154,6 +157,7 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			if (sp) for (TextureSlotRole role : sp->required_slots) texs.emplace_back(role, DefaultTextureForRole(role));
 			Material* m = ctx->GetMaterialManager()->CreateMaterial(c->name, std::move(texs), std::vector<ShaderName>{ "sp" });
 			if (m) ctx->SetMaterialParams(m, OpaqueMaterialParams{});   // sp несёт MaterialBlock → нужен блоб
+			ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->name);
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
 		});
@@ -172,6 +176,7 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 					if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader))
 						for (TextureSlotRole role : sp->required_slots)
 							if (!m->textures.count(role)) m->textures[role] = DefaultTextureForRole(role);
+					ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->material);
 					ctx->GetBatchBuilder()->SetDirtyBatches(true);
 				}
 			}
@@ -313,7 +318,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 				ctx->GetPipeManager()->InvalidatePipeline(old, ctx->GetBatchBuilder()->RebuildEpoch());
 				sm->DeleteShaderProgram(c->oldName);
 			}
-			ShaderProgram* nw = sm->CreateShaderProgram(finalName, c->spd, pass, vsName, vbufs, fsName, fbufs, slots);
+			ShaderProgram* nw = sm->CreateShaderProgram(finalName, c->spd, pass, vsName, vbufs, fsName, fbufs, slots, ctx->GetBufferManager());
 			if (nw) nw->push_func = std::move(push);
 			sm->SetDirtyGraphicsPipelines(true);
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);

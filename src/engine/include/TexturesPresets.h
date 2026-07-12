@@ -210,7 +210,10 @@ namespace TexturePresets {
         case TexturePreset::SingleDepth2048:
             info.type = SDL_GPU_TEXTURETYPE_2D;
             info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-            info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+            // Только DEPTH_STENCIL_TARGET: depth сцены используется как аттачмент (тест глубины
+            // в main/transparent/debug), но НИКЕМ не сэмплится. SAMPLER снят — авто-сбор флагов
+            // не выводит его ни из одной декларации.
+            info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
             info.width = 2048;
             info.height = 2048;
             info.layer_count_or_depth = 1;
@@ -370,9 +373,12 @@ namespace TexturePresets {
     }
     inline SDL_GPUTextureCreateInfo _MaterialAtlas(uint32_t resolution, uint32_t layers,
                                                    uint32_t mip_levels, SDL_GPUTextureUsageFlags usage) {
-        // Мип-генерация (SDL_GenerateMipmapsForGPUTexture) рендерит в уровни → требует COLOR_TARGET.
-        // Добавляем его автоматически, когда мипы запрошены, иначе GenerateMipmaps молча ничего не даст.
-        if (mip_levels > 1) usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+        // Мип-генерация (SDL_GenerateMipmapsForGPUTexture) реализована как отрисовка в уровни и
+        // требует ОБА флага — SAMPLER и COLOR_TARGET (проверено зондом, SDL_gpu.c:2498; одного
+        // COLOR_TARGET мало). Добавляем их ровно тогда, когда мипы запрошены: немипованному атласу
+        // COLOR_TARGET не нужен, а безусловная раздача = лишнее право.
+        if (mip_levels > 1)
+            usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
         info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
@@ -385,10 +391,12 @@ namespace TexturePresets {
         info.props = 0;
         return info;
     }
-    // Albedo (sRGB-данные, но формат UNORM как везде в движке). COLOR_TARGET — может быть приёмником.
+    // Albedo (sRGB-данные, но формат UNORM как везде в движке).
+    // COLOR_TARGET здесь НЕ ставим: его добавит _MaterialAtlas ровно тогда, когда запрошены мипы
+    // (мип-ген рендерит в уровни). Безусловный COLOR_TARGET раздавал его и немипованным атласам —
+    // например _FallbackAtlas (64px, 1 мип), которому мип-ген не нужен вовсе.
     inline SDL_GPUTextureCreateInfo AlbedoAtlas(uint32_t resolution, uint32_t layers = 1, uint32_t mip_levels = 1) {
-        return _MaterialAtlas(resolution, layers, mip_levels,
-            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
+        return _MaterialAtlas(resolution, layers, mip_levels, SDL_GPU_TEXTUREUSAGE_SAMPLER);
     }
     // Normal — линейные данные (tangent-space нормали).
     inline SDL_GPUTextureCreateInfo NormalAtlas(uint32_t resolution, uint32_t layers = 1, uint32_t mip_levels = 1) {
@@ -444,10 +452,12 @@ namespace TexturePresets {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;
         info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-        // COLOR_TARGET — основной выход main-прохода; SAMPLER — для present-blit; STORAGE_READ/WRITE —
-        // bloom-composite читает и пишет scene_hdr на месте (tonemap поверх + bloom).
+        // COLOR_TARGET — основной выход main-прохода; SAMPLER — present-blit и bloom-prefilter
+        // (сэмплит scene_hdr); COMPUTE_STORAGE_WRITE — bloom-composite биндит его как RW и пишет.
+        // COMPUTE_STORAGE_READ СНЯТ: он нужен лишь для SDL_BindGPUComputeStorageTextures (RO-бинд),
+        // а им никто не пользуется — RW-биндинг требует WRITE (или SIMULTANEOUS), см. SDL_gpu.h:2055.
         info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER
-                   | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+                   | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
         info.width = width;
         info.height = height;
         info.layer_count_or_depth = 1;
@@ -477,17 +487,22 @@ namespace TexturePresets {
     // общей. Раньше пирамида была одной текстурой с мипами, но down/up-шаг биндит dst-мип как
     // RW-storage, а src читает сэмплером — sampled-вью покрывает ВСЕ мипы, включая RW-мип
     // (GENERAL), и дескриптор нарушает layout-правила (VUID-VkDescriptorImageInfo-imageLayout-00344).
-    // Отдельные текстуры исключают алиасинг по построению. SIMULTANEOUS остаётся только ради
-    // честного RMW в bloom_up (читает и пишет ОДИН уровень в одном диспатче); его поддержку
-    // формата надо проверять (SDL_GPUTextureSupportsFormat) — не универсальна.
+    // Отдельные текстуры исключают алиасинг по построению.
     // Формат согласован с [[vk::image_format("rgba16f")]] в bloom-шейдерах.
-    inline SDL_GPUTextureCreateInfo BloomLevel(uint32_t width, uint32_t height) {
+    //
+    // simultaneous — ТОЛЬКО для уровней, которые являются НАЗНАЧЕНИЕМ апсемпла (bloom_up делает по
+    // ним честный RMW: tent-фильтр читает соседние тексели, пока другие потоки их пишут). Цикл
+    // апсемпла идёт i = BLOOM_LEVELS-2 .. 0, поэтому САМЫЙ МЕЛКИЙ уровень — только источник, и
+    // SIMULTANEOUS ему не нужен. Раньше пресет раздавал флаг всем уровням оптом; авто-сбор
+    // (need_simultaneous на rw-биндинге) показал, что последнему он не требуется.
+    // COMPUTE_STORAGE_READ снят — см. SceneHDR: RO-биндом storage-текстур никто не пользуется.
+    inline SDL_GPUTextureCreateInfo BloomLevel(uint32_t width, uint32_t height, bool simultaneous) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;
         info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER
-                   | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE
-                   | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE;
+        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+        if (simultaneous)
+            info.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE;
         info.width = width;
         info.height = height;
         info.layer_count_or_depth = 1;

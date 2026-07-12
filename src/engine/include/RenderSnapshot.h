@@ -59,6 +59,12 @@ namespace RenderSnap {
 
     struct PassDrawList {
         std::vector<ShaderGroup> shaders;
+        // Глобальные сэмплеры прохода (тень, env-куб), УЖЕ отрезолвленные в SDL-биндинги на
+        // сборке батча. В самом RenderPassStep они лежат как TextureAtlas* (стабильные
+        // указатели): GPU-текстуру атласа могут пересоздать, и держать её копию с момента
+        // setup нельзя — протухнет. Резолв здесь, а не в цикле отрисовки: значение постоянно
+        // по всем шейдер-батчам прохода, а рендер обязан читать только слепок.
+        std::vector<SDL_GPUTextureSamplerBinding> global_texture_bindings;
         uint32_t first_instance = 0;   // PIB-офсет начала прохода (сквозная нумерация FinalizeOffsets)
         uint32_t num_instances = 0;    // сумма инстансов прохода (SHADOW_PASS → shadow_pib каллинга)
     };

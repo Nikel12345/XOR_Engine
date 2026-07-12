@@ -154,8 +154,11 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 				SDL_Log("Material '%s': missing texture for required slot %d", name.c_str(), static_cast<int>(required_role));
 		}
 	}
+	const std::string material_name = name;   // name уходит по move — копию держим для диагностики
 	Material* m = material_manager->CreateMaterial(std::move(name), std::move(texture_names), std::move(shader_names));
 	if (m) m->dont_save = dont_save;
+	// Слот материала = фрагментный сэмплер → атласы его текстур получают SAMPLER (сбор usage-флагов).
+	material_manager->CollectSamplerUsage(m, texture_manager, material_name);
 	return m;
 }
 

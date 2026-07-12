@@ -536,7 +536,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 						pipe_manager->InvalidatePipeline(it->second.get(), batch_builder->RebuildEpoch());
 						sm->DeleteShaderProgram(name);
 					}
-					sm->CreateShaderProgram(name, spd, pass, vs, vbufs, fs, fbufs, slots);
+					sm->CreateShaderProgram(name, spd, pass, vs, vbufs, fs, fbufs, slots, buffer_manager);
 				}
 			}
 			// -- compute_shader_programs: заготовка. compute-sp держит указатели (буферы/атласы),
@@ -587,6 +587,10 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 			}
 			yyjson_doc_free(doc);
 			const size_t n = material_manager->LoadSceneMaterials(entries);
+			// Сбор usage-флагов: текстуры сцены загружены РАНЬШЕ материалов (фаза tex → mat), поэтому
+			// имена уже резолвятся в атласы, и те получают SAMPLER до ближайшего бейка.
+			for (const SceneMaterialEntry& e : entries)
+				material_manager->CollectSamplerUsage(material_manager->GetMaterial(e.name), texture_manager, e.name);
 			SDL_Log("LoadScene: %zu/%zu materials from manifest", n, entries.size());
 		}
 		else SDL_Log("LoadScene: no materials.json ('%s') — skipped", rerr.msg);
@@ -653,6 +657,9 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 	// лямбды). После КАЖДОЙ загрузки, в т.ч. UI-рантаймовой: sp из манифеста пересозданы голыми.
 	if (bind_shader_functions) bind_shader_functions();
 
+	// Бейк GPU-ресурсов здесь НЕ делается: он дренируется каждый кадр в начале Engine::PrepareFunc
+	// (BakePending). Всё, что объявила эта загрузка (атласы, буферы, sp, материалы), попадёт в
+	// ближайший prepare — игровой апдейт и prepare идут последовательно на одном sim-потоке.
 	batch_builder->SetDirtyBatches(true);
 	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), dir.c_str());
 	SDL_Log("LoadScene TIMING [%zu ent, %.1f MB]: read=%.1f  tex=%.1f  mdl=%.1f  shd=%.1f  mat=%.1f  clear=%.1f  ecs=%.1f  ptr_restore=%.1f  | total=%.1f ms",

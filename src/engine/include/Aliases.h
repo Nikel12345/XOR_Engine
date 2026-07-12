@@ -4,6 +4,7 @@
 using RenderPassName = std::string;
 using ComputePassName = std::string;
 using ComputePrepassName = std::string;
+using BlitPassName = std::string;
 using SceneName = std::string;
 using MaterialName = std::string;
 using ModelName = std::string;

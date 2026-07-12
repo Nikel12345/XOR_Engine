@@ -100,6 +100,7 @@ struct ComputeShaderProgram {
         TextureAtlas* texture_atlas = nullptr;
         Uint32 mip_level = 0;
         Uint32 layer = 0;
+        bool need_simultaneous = false;   // см. ComputeRWTextureBindingParametr::need_simultaneous
     };
     // Форма создания «по именам» — теперь топ-левел тип в ShaderTypes.h (сигнатуры фасадов
     // не требуют полного ComputeShaderProgram); алиас сохраняет старое вложенное написание.

@@ -4,6 +4,7 @@ add_executable(Sandbox)
 # Каждый сценарий — свой .cpp; main решает, что именно запустить.
 set(SANDBOX_SRC
     src/main.cpp
+    # src/BlitUsageProbe.cpp    # зонд: какие usage-флаги требуют blit/copy/mip-gen (см. шапку файла)
     # src/CameraScene.cpp
     # src/BufferScene.cpp
 )

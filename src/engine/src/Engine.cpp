@@ -127,8 +127,11 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 
 	// ПО ИМЕНИ (как SetFallbackShader): удаление _NoTextureDummy не оставляет висячего указателя —
 	// промах на сборке батча даёт пропуск отрисовки (пустой рендер), а не разыменование мёртвого хэндла.
-	batch_builder->SetDummyTexture("_NoTextureDummy");
+	batch_builder->SetDummyTexture("_NoTextureDummy", texture_manager);
 	InitDefaultResources();
+	// Бейк GPU-ресурсов здесь НЕ делаем: игра объявляет свои ресурсы и шейдерные программы позже
+	// (атласы в Game::Init, sp — в манифесте сцены), а именно объявления sp несут usage-флаги.
+	// Точка бейка — конец первого Engine::LoadScene.
 }
 
 // Билтин-типы params для UI-дропдауна Kind. Пользователь дорегистрирует свои из кода игры

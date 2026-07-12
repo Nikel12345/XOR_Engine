@@ -39,6 +39,28 @@ void Engine::PrepareFunc(uint8_t slot)
 		pipe_manager->TrashPipelines(fences_done, slot_controller->RequiredEpoch(), batch_builder->ComputeRebuildEpoch());
 	}
 
+	// ── БЕЙК GPU-РЕСУРСОВ ──
+	// Create* только ОБЪЯВЛЯЮТ обёртки (BufferData/TextureAtlas) с их usage-флагами; сами
+	// SDL_GPUBuffer/SDL_GPUTexture рождаются здесь. Место выбрано так, что:
+	//   — игровой апдейт (game_iter_callback: создание ресурсов, ExecuteCommands, LoadScene) идёт
+	//     РАНЬШЕ prepare на этом же sim-потоке → всё, объявленное в кадре N, создаётся в кадре N;
+	//   — все декларации, дающие ресурсу флаги (sp, материалы, проходы), к этому моменту сделаны;
+	//   — а PackAtlases и сборка батчей НИЖЕ уже требуют готовые GPU-хэндлы (они копируют
+	//     texture_binding по значению в upload-таски и в слепок), поэтому бейк обязан быть до них.
+	// Дренаж пер-кадровый, а не разовый: игра может завести новый буфер/атлас в любой момент.
+	{
+		PROF_SCOPE(Sim, " bake_gpu_resources");
+		buffer_manager->BakePending();
+		texture_manager->BakePending();
+		// Сверка ручных флагов с авто-собранными — один раз, после первого дренажа (к нему сцена
+		// уже загружена: LoadScene идёт из игрового апдейта, то есть до первого prepare).
+		if (!usage_report_done) {
+			buffer_manager->ReportUsageMismatch();
+			texture_manager->ReportUsageMismatch();
+			usage_report_done = true;
+		}
+	}
+
 	{
 		PROF_SCOPE(Sim, " pipelines (create g+c)");
 		engine_context->CreateGraphicsPipelines();
@@ -261,8 +283,10 @@ bool Engine::RenderFunc(uint8_t slot)
 	// выше при ресайзе под свопчейн); буферы/пайплайны так же монопольно дренирует sim в PrepareFunc.
 	texture_manager->TrashTextures(slot_controller->RenderFencesDone());
 
-	if (RenderPassStep* present_rp = pass_manager->GetRenderPassStep(DefaultRenderPassNamespace::PRESENT_PASS))
-		present_rp->renderPassTexsData.SetColorTexture(tex);
+	// Свопчейн — в свой атлас (PassManager владеет им как полем, вне реестра TextureManager).
+	// Отсюда его берёт PRESENT_PASS (блит-проход). Пишем только мы — RenderFunc единственный
+	// писатель, он же и читатель (тело блита в ExecutePassesSteps ниже) → без замков.
+	pass_manager->SetSwapchain(tex, w, h);
 	// Слот + его слепок раскладки: scatter и draw ниже читают ТОЛЬКО пер-слотовые слепки
 	// (BatchLayout, таблица теневых камер) — живые ECS/дерево батчей рендеру не нужны,
 	// замков нет, sim свободно мутирует своё параллельно.

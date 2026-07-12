@@ -30,7 +30,9 @@ ShaderProgram* GpuTaskContext::CreateShaderProgram(const std::string& name, cons
 	std::vector<BufferDataName> vertex_buffer_names(vertex_shader_buffers.begin(), vertex_shader_buffers.end());
 	std::vector<BufferDataName> fragment_buffer_names(fragment_shader_buffers.begin(), fragment_shader_buffers.end());
 	RenderPassStep* associated_pass = pass_manager->GetRenderPassStep(associated_pass_name);
-	return shader_manager->CreateShaderProgram(name, spd, associated_pass, vs_name, std::move(vertex_buffer_names), fs_name, std::move(fragment_buffer_names), texture_slots);
+	// buffer_manager — только чтобы sp записал GRAPHICS_STORAGE_READ в обёртки своих буферов
+	// (ShaderManager чужих менеджеров не хранит, получает на вызове).
+	return shader_manager->CreateShaderProgram(name, spd, associated_pass, vs_name, std::move(vertex_buffer_names), fs_name, std::move(fragment_buffer_names), texture_slots, buffer_manager);
 }
 
 void GpuTaskContext::CreateComputeShader(const std::string& name, const char* hlsl_path) {
@@ -74,7 +76,7 @@ ComputeShaderProgram* GpuTaskContext::CreateComputeShaderProgram(const std::stri
 			SDL_Log("GpuTaskContext::Creating compute shader program with non existing RW storage texture atlas '%s'", binding.texture_atlas.c_str());
 			continue;
 		}
-		rw_textures.push_back({ atlas, binding.mip_level, binding.layer });
+		rw_textures.push_back({ atlas, binding.mip_level, binding.layer, binding.need_simultaneous });
 	}
 	std::vector<TextureAtlas*> ro_texture_atlases;
 	ro_texture_atlases.reserve(ro_storage_textures.size());

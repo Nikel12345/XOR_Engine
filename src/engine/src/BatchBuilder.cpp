@@ -110,6 +110,31 @@ BatchBuilder::BatchBuilder()
 {
 }
 
+void BatchBuilder::SetDummyTexture(const std::string& name, TextureManager* tm)
+{
+    dummy_texture_name = name;
+    // Сбор usage-флагов: dummy подставляется в слот материала (BuildBatches) → биндится сэмплером.
+    // Своего материала у него нет, поэтому SAMPLER его атласу собирается тут, а не в MaterialManager.
+    if (!tm) return;
+    const auto& handles = tm->GetTextureHandles();
+    auto it = handles.find(name);
+    if (it == handles.end() || !it->second) return;
+    TextureAtlas* atlas = it->second->atlas;
+    if (!atlas) return;
+
+    atlas->debug_usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+    // Та же диагностика, что в MaterialManager::CollectSamplerUsage: dummy будет забинден
+    // сэмплером, и если его атлас создан без SAMPLER — бинд упадёт абортом без имени ресурса.
+    if (!(atlas->tci.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "USAGE VIOLATION: dummy texture '%s' lives in atlas '%s', which was created WITHOUT "
+            "SDL_GPU_TEXTUREUSAGE_SAMPLER. It IS bound as a fragment sampler (fallback for missing "
+            "material slots) - the bind will abort. Declare SAMPLER in that atlas tci.",
+            name.c_str(), atlas->debug_name.c_str());
+    }
+}
+
 void BatchBuilder::QueueCreate(Entity entity)
 {
     std::lock_guard<std::mutex> lock(delta_mutex);
@@ -459,6 +484,19 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager)
         RenderSnap::PassDrawList pass_list;
         pass_list.first_instance = offset;
         pass_list.shaders.reserve(rp->shader_batches.size());
+
+        // Глобальные сэмплеры прохода (тень/env): резолвим СТАБИЛЬНЫЕ атласы в актуальные
+        // SDL-биндинги ЗДЕСЬ, значениями в слепок — как это делает compute на диспатче. В цикле
+        // отрисовки резолвить нечего: по шейдер-батчам прохода значение постоянно. Атлас без
+        // GPU-текстуры пропускаем (иначе забиндили бы null и сдвинули слоты батчевых сэмплеров).
+        pass_list.global_texture_bindings.reserve(rp->global_texture_bindings.size());
+        for (TextureAtlas* atlas : rp->global_texture_bindings) {
+            if (!atlas || !atlas->texture_binding.texture) {
+                SDL_Log("BatchBuilder: pass '%s' — global sampler atlas is null/has no GPU texture, skipped.", rp->debug_name.c_str());
+                continue;
+            }
+            pass_list.global_texture_bindings.push_back(atlas->texture_binding);
+        }
 
         for (auto& [shader_key, shader_batch] : rp->shader_batches)
         {

@@ -80,6 +80,55 @@ ComputePassStep* PassManager::CreateComputePrepass(const ComputePrepassName& nam
 	return ptr;
 }
 
+BlitPassStep* PassManager::CreateBlitPass(const BlitPassName& name, TextureAtlas* src, TextureAtlas* dst, int pass_index,
+	SDL_GPUFilter filter, SDL_GPULoadOp load_op)
+{
+	if (pass_index == -1) {
+		SDL_Log("PassManager::CreateBlitPass: Invalid BlitPassStep order index.");
+		return nullptr;
+	}
+	if (!src || !dst) {
+		SDL_Log("PassManager::CreateBlitPass: '%s' — src/dst atlas is null.", name.c_str());
+		return nullptr;
+	}
+	auto it_blit = blit_steps.find(name);
+	if (it_blit != blit_steps.end()) {
+		SDL_Log("PassManager::CreateBlitPass: Blit pass with name '%s' already exists.", name.c_str());
+		return it_blit->second.get();
+	}
+	// Имя прохода — общее пространство: sp/UI ищут проход по имени, дубль между видами
+	// сделал бы поиск неоднозначным.
+	if (render_steps.count(name) || compute_steps.count(name) || compute_prepass_steps.count(name)) {
+		SDL_Log("PassManager::CreateBlitPass: A pass with name '%s' already exists (render/compute). Cannot create a blit pass with the same name.", name.c_str());
+		return nullptr;
+	}
+
+	// Сбор флагов: SDL требует у источника блита SAMPLER, у назначения — COLOR_TARGET
+	// (проверено зондом sandbox/BlitUsageProbe.cpp; в докстрингах SDL этого нет).
+	// Свопчейн-атлас движок не создаёт — флаги ему безразличны, но union'у это не мешает.
+	src->debug_usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
+	dst->debug_usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+
+	auto data = std::make_unique<BlitPassStep>();
+	data->src = src;
+	data->dst = dst;
+	data->filter = filter;
+	data->load_op = load_op;
+	data->debug_name = name;
+	data->pass_index = pass_index;
+
+	BlitPassStep* ptr = data.get();
+	blit_steps[name] = std::move(data);
+	return ptr;
+}
+
+void PassManager::SetSwapchain(SDL_GPUTexture* tex, uint32_t w, uint32_t h)
+{
+	swapchain_atlas.texture_binding.texture = tex;
+	swapchain_atlas.width = w;
+	swapchain_atlas.height = h;
+}
+
 void PassManager::FillRenderPasses()
 {
 	if (passes_filled) {
@@ -101,8 +150,18 @@ void PassManager::FillRenderPasses()
 	for (auto& [_, pcs] : compute_prepass_steps)
 		ordered_compute_prepass_steps.push_back(pcs.get());
 
+	ordered_blit_steps.clear();
+	ordered_blit_steps.reserve(blit_steps.size());
+	for (auto& [_, bs] : blit_steps)
+		ordered_blit_steps.push_back(bs.get());
+
 	std::sort(ordered_passes.begin(), ordered_passes.end(),
 		[](const RenderPassStep* a, const RenderPassStep* b) {
+		return a->pass_index < b->pass_index;
+	});
+
+	std::sort(ordered_blit_steps.begin(), ordered_blit_steps.end(),
+		[](const BlitPassStep* a, const BlitPassStep* b) {
 		return a->pass_index < b->pass_index;
 	});
 
@@ -118,25 +177,64 @@ void PassManager::FillRenderPasses()
 
 	// Ordinal = индекс прохода в BatchLayout::passes (слепок строится обходом ordered_passes
 	// в этом же порядке). Ставится один раз — проходы после старта не добавляются.
+	// Блит-проходы сюда НЕ входят: батчей у них нет, рисовать в них нечем.
 	for (size_t i = 0; i < ordered_passes.size(); ++i)
 		ordered_passes[i]->ordinal = safe_u32(i);
+
+	// Единый порядок кадра. Push'им render → compute → blit, затем СТАБИЛЬНАЯ сортировка:
+	// при равном pass_index сохраняется этот же приоритет (раньше ExecutePassesSteps давала
+	// render'у идти первым на равенстве — поведение сохранено).
+	ordered_execution.clear();
+	ordered_execution.reserve(ordered_passes.size() + ordered_compute_steps.size() + ordered_blit_steps.size());
+	for (RenderPassStep* rp : ordered_passes)         ordered_execution.push_back({ rp->pass_index, rp });
+	for (ComputePassStep* cs : ordered_compute_steps) ordered_execution.push_back({ cs->pass_index, cs });
+	for (BlitPassStep* bs : ordered_blit_steps)       ordered_execution.push_back({ bs->pass_index, bs });
+	std::stable_sort(ordered_execution.begin(), ordered_execution.end(),
+		[](const OrderedStep& a, const OrderedStep& b) {
+		return a.pass_index < b.pass_index;
+	});
 
 	passes_filled = true;
 }
 
 void PassManager::ExecutePassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_frame)
 {
-	int i = 0, j = 0;
-	while (i < ordered_passes.size() || j < ordered_compute_steps.size()) {
-		if (i < ordered_passes.size() && (j >= ordered_compute_steps.size() || ordered_passes[i]->pass_index <= ordered_compute_steps[j]->pass_index)) {
-			ordered_passes[i]->render_function(cb, this, *ordered_passes[i]);
-			i++;
-		}
-		else if (j < ordered_compute_steps.size()) {
-			ordered_compute_steps[j]->compute_function(cb, this, *ordered_compute_steps[j], pass_frame);
-			j++;
-		}
+	// Порядок слит один раз в FillRenderPasses (ordered_execution) — здесь просто идём по нему.
+	for (const OrderedStep& step : ordered_execution) {
+		std::visit([&](auto* pass) {
+			using T = std::remove_pointer_t<decltype(pass)>;
+			if constexpr (std::is_same_v<T, RenderPassStep>)       pass->render_function(cb, this, *pass);
+			else if constexpr (std::is_same_v<T, ComputePassStep>) pass->compute_function(cb, this, *pass, pass_frame);
+			else if constexpr (std::is_same_v<T, BlitPassStep>)    BlitPassStandardBody(cb, *pass);
+		}, step.step);
 	}
+}
+
+void PassManager::BlitPassStandardBody(SDL_GPUCommandBuffer* cb, BlitPassStep& bp)
+{
+	if (!bp.src || !bp.dst) return;
+
+	// Текстуры резолвим ЗДЕСЬ, а не на создании: у HDR-таргетов её подменяет ресайз, у
+	// свопчейн-атласа — каждый кадр (Engine::RenderFunc). Указатели на сами атласы стабильны.
+	SDL_GPUTexture* src_tex = bp.src->texture_binding.texture;
+	SDL_GPUTexture* dst_tex = bp.dst->texture_binding.texture;
+	// dst — свопчейн, а кадр без свопчейна: текстуры нет → блит пропускаем (это не ошибка).
+	if (!src_tex || !dst_tex) return;
+	if (bp.src->width == 0 || bp.src->height == 0 || bp.dst->width == 0 || bp.dst->height == 0) return;
+
+	SDL_GPUBlitInfo bi{};
+	bi.source.texture = src_tex;
+	bi.source.mip_level = bp.src_mip;
+	bi.source.layer_or_depth_plane = bp.src_layer;
+	bi.source.w = bp.src->width;    // размеры — у КАЖДОГО свои (src из атласа, dst из свопчейна):
+	bi.source.h = bp.src->height;   // совпадать они не обязаны, blit сам масштабирует и конвертирует формат
+	bi.destination.texture = dst_tex;
+	bi.destination.w = bp.dst->width;
+	bi.destination.h = bp.dst->height;
+	bi.load_op = bp.load_op;
+	bi.filter = bp.filter;
+	bi.cycle = false;
+	SDL_BlitGPUTexture(cb, &bi);
 }
 
 void PassManager::ExecutePrepassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_frame)
@@ -149,8 +247,8 @@ void PassManager::ExecutePrepassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_f
 void PassManager::RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass_step, BufferManager* bm, uint32_t additional_offset, const void* push_data_raw)
 {
 	auto& tex_data = render_pass_step->renderPassTexsData;
-	if (tex_data.shared_depth)
-		tex_data.depthTargetInfo.texture = tex_data.shared_depth->texture;
+	// Атласы/shared-depth → актуальные текстуры (создаёт бейк, подменяет ресайз).
+	tex_data.ResolveTargets();
 
 	SDL_GPURenderPass* rp = nullptr;
 	rp = SDL_BeginGPURenderPass(cb,
@@ -250,6 +348,12 @@ ComputePassStep* PassManager::GetComputePrepassStep(const ComputePrepassName& na
 	return (it != compute_prepass_steps.end()) ? it->second.get() : nullptr;
 }
 
+BlitPassStep* PassManager::GetBlitPassStep(const BlitPassName& name)
+{
+	auto it = blit_steps.find(name);
+	return (it != blit_steps.end()) ? it->second.get() : nullptr;
+}
+
 PassManager::~PassManager()
 {
 	render_steps.clear();
@@ -263,11 +367,16 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 	if (!render_layout || render_pass_step.ordinal >= render_layout->passes.size()) return;
 	const RenderSnap::PassDrawList& pass_list = render_layout->passes[render_pass_step.ordinal];
 
+	// Глобальные сэмплеры прохода — из СЛЕПКА (отрезолвлены на сборке батча), не из живого
+	// прохода: их GPU-текстуры могут пересоздаваться, а рендер обязан видеть согласованный слот.
+	const std::vector<SDL_GPUTextureSamplerBinding>& global_samplers = pass_list.global_texture_bindings;
+	const uint32_t global_sampler_count = safe_u32(global_samplers.size());
+
 	int draw_calls = 0;
 	for (const RenderSnap::ShaderGroup& shader_batch : pass_list.shaders)
 	{
 		SDL_BindGPUGraphicsPipeline(rp, shader_batch.pipeline);
-		SDL_BindGPUFragmentSamplers(rp, 0, render_pass_step.global_texture_bindings.data(), safe_u32(render_pass_step.global_texture_bindings.size()));
+		SDL_BindGPUFragmentSamplers(rp, 0, global_samplers.data(), global_sampler_count);
 
 		bm->BindGPUVertexBuffer(rp, 0, 0);
 		bm->BindGPUIndexBuffer(rp, 0);
@@ -293,7 +402,8 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 
 		for (const RenderSnap::AtlasGroup& atlas_batch : shader_batch.atlases) {
 			if (!atlas_batch.texture_binding.empty()) {
-				SDL_BindGPUFragmentSamplers(rp, safe_u32(render_pass_step.global_texture_bindings.size()), atlas_batch.texture_binding.data(), safe_u32(atlas_batch.texture_binding.size()));
+				// Батчевые сэмплеры идут ПОСЛЕ глобальных — база слота = их число.
+				SDL_BindGPUFragmentSamplers(rp, global_sampler_count, atlas_batch.texture_binding.data(), safe_u32(atlas_batch.texture_binding.size()));
 			}
 			for (const RenderSnap::TextureDraw& texture_batch : atlas_batch.draws) {
 				if (!texture_batch.texture_uvl.empty()) {

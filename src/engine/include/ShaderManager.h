@@ -21,11 +21,14 @@ public:
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::vector<ShaderBase::VertexBufferBinding>& bindings);
 	void CreateFragmentShader(const std::string& name, const char* path);
 
+	// bm передаётся НА ВЫЗОВЕ (не хранится полем): sp ссылается на буферы по имени, а usage-флаг
+	// (GRAPHICS_STORAGE_READ) надо записать в саму обёртку BufferData. Владельцем связки менеджеров
+	// остаётся EngineContext — менеджер не держит указателей на другие менеджеры.
 	ShaderProgram* CreateShaderProgram(
 		const std::string& name, const ShaderProgramDescription& spd, RenderPassStep* associated_pass,
 		const std::string& vs_name, std::vector<BufferDataName> vertex_shader_buffer_names,
 		const std::string& fs_name, std::vector<BufferDataName> fragment_shader_buffer_names,
-		const std::vector<TextureSlotRole>& texture_slots);
+		const std::vector<TextureSlotRole>& texture_slots, BufferManager* bm);
 
 	void CreateComputeShader(const std::string& name, const char* path);
 	// ������� �������� ComputeShaderProgram �� ���������� ������� �� ���������� � �������!

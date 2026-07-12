@@ -30,7 +30,44 @@ struct TextureAtlas{
 	// точно распаковывается из UVL (unorm16, пиксель-в-пиксель) — этого достаточно для пересборки
 	// свободного места при удалении и для гипотетической GPU→GPU перепаковки.
 	std::vector<TextureData*> textures;
+	// ВНИМАНИЕ: .texture может быть nullptr до бейка (TextureManager::BakeGPUResources) — обёртка
+	// живёт с момента CreateTextureAtlas, GPU-текстура создаётся позже. Поэтому нигде нельзя
+	// КОПИРОВАТЬ этот биндинг на этапе setup: держи TextureAtlas* и резолви на исполнении
+	// (так делают проходы, блиты, compute-биндинги и слепок батчей).
 	SDL_GPUTextureSamplerBinding texture_binding;
+	// Полное описание для (пере)создания GPU-текстуры — источник истины об usage-флагах и размерах.
+	// Нужен и бейку (отложенное создание), и ресайзу (пересоздание под новый размер окна).
+	SDL_GPUTextureCreateInfo tci{};
+	std::string debug_name;   // = ключ в atlases_data; нужен диагностике (назвать атлас в логе)
+	// Флаги, собранные АВТОМАТИЧЕСКИ (пока только для сверки с tci.usage; ресурс создаётся по tci).
+	// Складываются из ДВУХ источников, и различие между ними принципиально:
+	//
+	//   НАМЕРЕНИЕ — заявлено в момент создания, из tci: SAMPLER. Граф его вывести НЕ МОЖЕТ: атлас
+	//     заводится пустым, текстуры и материалы приезжают позже (другая сцена, рантайм), а
+	//     GPU-текстура после создания неизменяема — дождёшься фактического использования и получишь
+	//     атлас без SAMPLER, который сломается при первой же загрузке в него текстуры. Пустой
+	//     атлас-под-материалы и пустой атлас-таргет по факту неразличимы, поэтому цель заявляет
+	//     ПРЕСЕТ (AlbedoAtlas/ORMAtlas/… объявляют себя сэмплируемыми).
+	//     Плюс самовыводимое из своего же tci: num_levels > 1 → SAMPLER | COLOR_TARGET (мип-ген
+	//     требует ОБА — SDL_gpu.c:2498, проверено зондом).
+	//
+	//   ИСПОЛЬЗОВАНИЕ — выведено из объявлений, там, где на атлас реально сослались:
+	//     SetColorTexture / SetDepthTexture прохода → COLOR_TARGET / DEPTH_STENCIL_TARGET
+	//     RenderPassStep::SetGlobalTextures         → SAMPLER
+	//     MaterialManager::CollectSamplerUsage      → SAMPLER (слот материала = фрагментный сэмплер)
+	//     BatchBuilder::SetDummyTexture             → SAMPLER (фолбэк подставляется в слот)
+	//     CreateComputeShaderProgram: ro → COMPUTE_STORAGE_READ, rw → COMPUTE_STORAGE_WRITE,
+	//                                 сэмплеры → SAMPLER, need_simultaneous → SIMULTANEOUS_READ_WRITE
+	//     CreateBlitPass: src → SAMPLER, dst → COLOR_TARGET (SDL требует ровно это — зонд)
+	//
+	// Сбор по использованию не лишний рядом с намерением: он ловит ОБРАТНЫЙ случай — атлас, который
+	// материалы сэмплят, а пресет SAMPLER не объявил.
+	// Слияние — чистый union. Расхождение печатается один раз после первого бейка
+	// (ReportUsageMismatch) и означает лишнее право или непокрытую роль.
+	SDL_GPUTextureUsageFlags debug_usage = 0;
+	// != nullptr — атлас ДЕЛИТ GPU-текстуру с другим (CreateTextureAtlas от existing_atlas):
+	// своей не создаёт, на бейке копирует чужую. Владелец текстуры — источник.
+	TextureAtlas* shares_with = nullptr;
 	SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_INVALID;
 	SDL_GPUTextureType texture_type = SDL_GPU_TEXTURETYPE_2D; // 2D / CUBE / ARRAY — берётся из tci при создании; компатибилити-проверки (это куб?) смотрят сюда
 	uint32_t width = 0;
@@ -87,6 +124,9 @@ struct SharedDepthTarget {
 	SDL_GPUTexture* texture = nullptr;
 	SDL_GPUTextureCreateInfo tci{};
 	TextureManager* owner = nullptr;
+	// Авто-собранные флаги — как у TextureAtlas::debug_usage. Копит их SetDepthTexture прохода
+	// (→ DEPTH_STENCIL_TARGET). SAMPLER для него не выводится: depth сцены сейчас никем не сэмплится.
+	SDL_GPUTextureUsageFlags debug_usage = 0;
 
 	void Resize(uint32_t w, uint32_t h);
 };

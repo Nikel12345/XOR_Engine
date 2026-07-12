@@ -79,6 +79,17 @@ public:
 	// �������� ������ GPU ��������
 	SDL_GPUTexture* CreateGPU_Texture(SDL_GPUTextureCreateInfo tci);
 
+	// Отложенная инициализация GPU-ресурсов: Create* только РЕГИСТРИРУЮТ обёртку
+	// (TextureAtlas/SharedDepthTarget) с её tci и кладут в pending; сами SDL-текстуры создаёт этот
+	// дренаж — КАЖДЫЙ кадр, в начале Engine::PrepareFunc (до PackAtlases и сборки батчей, которым
+	// GPU-текстура уже нужна). Смысл — к моменту создания усвоить все usage-флаги ресурса: игровой
+	// апдейт (вместе с объявлением sp/материалов) идёт раньше prepare на том же sim-потоке.
+	void BakePending();
+	// Диагностика перехода на автовывод флагов: печатает атласы/depth-таргеты, у которых ручной
+	// usage (tci.usage) расходится с авто-собранным debug_usage. Ресурсы создаются по РУЧНОМУ
+	// usage — это только сверка.
+	void ReportUsageMismatch();
+
 	void GenerateMipmaps(SDL_GPUCommandBuffer* cb);
 
 	// Арендует transfer-буфер у TransferManager и возвращает его; владелец fence фазы
@@ -189,6 +200,12 @@ private:
 	// по размеру свопчейна) и дренаж (TrashTextures в RenderFunc) живут в нём. Без замков —
 	// симметрично трэшам буферов/пайплайнов, которыми так же монопольно владеет sim.
 	std::deque<PendingTextureDestroy> texture_trash;
+
+	// Обёртки, ждущие создания GPU-текстуры (НЕвладеющие — владельцы atlases_data /
+	// shared_depth_targets). Дренирует BakePending. Атласы-совладельцы (shares_with) создаются
+	// после владельцев: источник обязан существовать.
+	std::vector<TextureAtlas*> pending_atlas_bakes;
+	std::vector<SharedDepthTarget*> pending_depth_bakes;
 
 	SDL_GPUDevice* dev = nullptr;
 	TransferManager* trm = nullptr;

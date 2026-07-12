@@ -145,4 +145,13 @@ struct ComputeRWTextureBindingParametr {
     std::string texture_atlas = "";
     Uint32 mip_level = 0;
     Uint32 layer = 0;
+    // true → шейдер читает СОСЕДНИЕ тексели этой же текстуры, пока другие потоки диспатча их пишут
+    // (bloom_up: tent-фильтр апсемпла делает RMW по одному уровню). Тогда SDL нужен
+    // COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE — это НЕ то же самое, что READ|WRITE (SDL_gpu.h:828).
+    //
+    // Автовывести нельзя: это факт о ТЕЛЕ шейдера, а не о форме бинда. bloom_up и bloom_composite
+    // регистрируются идентично (по одному rw-биндингу, ro пуст, сэмплер — на ЧУЖОЙ атлас), но
+    // composite трогает только СВОЙ тексель (`dst[id] = f(dst[id], src[id])`) — гонки нет, флаг не
+    // нужен; а up читает соседей — нужен. Различие видно только автору шейдера, поэтому — ручной тег.
+    bool need_simultaneous = false;
 };

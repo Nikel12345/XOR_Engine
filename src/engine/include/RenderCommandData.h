@@ -55,27 +55,46 @@ struct RenderPassTexturesInfo {
     // два вызова → два выхода фрагментного шейдера (location 0,1) за один проход геометрии.
     void CreateColorTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_FColor color, SDL_GPUTextureFormat format);
     void CreateDepthTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_GPUTextureFormat format);
-    void SetColorTexture(SDL_GPUTexture* tex, uint32_t index = 0);
-    void SetDepthTexture(SDL_GPUTexture* tex);
-    // Привязка к разделяемому depth-таргету: фактический texture резолвится лениво в
-    // RenderPassStandardBody, поэтому ресайз таргета не требует переназначения по проходам.
+    // Таргеты задаются АТЛАСАМИ, не сырыми SDL_GPUTexture*: GPU-текстуры на момент объявления
+    // прохода ещё не существует (её создаёт бейк), а ресайз её подменяет. Резолв — на исполнении
+    // (ResolveTargets), поэтому ни бейк, ни ресайз не требуют переназначать таргеты по проходам.
+    void SetColorTexture(TextureAtlas* atlas, uint32_t index = 0);
+    void SetDepthTexture(TextureAtlas* atlas);
+    // Привязка к разделяемому depth-таргету (тот же приём, что и для атласов).
     void SetDepthTexture(SharedDepthTarget* dt);
+    // Атласы/shared_depth → colorTargetInfos[i].texture / depthTargetInfo.texture.
+    void ResolveTargets();
 
     void SetColorTargetInfoLayer(uint32_t layer, uint32_t index = 0) { colorTargetInfos[index].layer_or_depth_plane = layer; };
     // Параллельные массивы: colorTargetInfos[i] — рантайм-привязка (texture/clear/layer),
-    // color_formats[i] — формат таргета i для построения пайплайна (PipeManager). Размер = число MRT-выходов.
+    // color_formats[i] — формат таргета i для построения пайплайна (PipeManager),
+    // color_atlases[i] — ИСТОЧНИК текстуры таргета i (резолв в ResolveTargets).
+    // Размер = число MRT-выходов.
     std::vector<SDL_GPUColorTargetInfo> colorTargetInfos;
     std::vector<SDL_GPUTextureFormat>   color_formats;
+    std::vector<TextureAtlas*>          color_atlases;
     SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUDepthStencilTargetInfo depthTargetInfo{};
-    SharedDepthTarget* shared_depth = nullptr;   // != nullptr → depth берётся отсюда (лениво)
+    // Источник depth: ровно один из двух (или ни одного — прохода без depth).
+    SharedDepthTarget* shared_depth = nullptr;
+    TextureAtlas*      depth_atlas = nullptr;
 };
 
 struct RenderPassStep {
     RenderPassTexturesInfo renderPassTexsData;
     std::unordered_map<BatchKeys::ShaderBatchKey, ShaderBatchData> shader_batches;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function;
-    std::vector<SDL_GPUTextureSamplerBinding> global_texture_bindings;
+    // Глобальные сэмплеры прохода (слоты 0..N-1 фрагментного шейдера, ДО батчевых): тень, env-куб.
+    // Держим АТЛАСЫ, а не готовые SDL_GPUTextureSamplerBinding: указатель на атлас стабилен, а
+    // GPU-текстуру внутри могут пересоздать — копия биндинга, снятая на setup, протухнет (и под
+    // отложенной инициализацией GPU-ресурсов её на setup ещё попросту нет). Резолв в SDL-биндинги —
+    // на сборке батча, в слепок (RenderSnap::PassDrawList::global_texture_bindings). Ровно тот же
+    // приём, что у compute (ComputeShaderBatchData::texture_binding) и у BlitPassStep.
+    // Роль однозначна — SDL_BindGPUFragmentSamplers, т.е. для каждого атласа это SAMPLER.
+    // ЗАПОЛНЯТЬ ТОЛЬКО ЧЕРЕЗ SetGlobalTextures — он же собирает флаг в атласы.
+    std::vector<TextureAtlas*> global_texture_bindings;
+    // Единственная точка записи global_texture_bindings: ставит атласы и копит им SAMPLER.
+    void SetGlobalTextures(std::vector<TextureAtlas*> atlases);
     std::string debug_name;   // = ключ в render_steps; нужен UI для дропдауна прохода у sp
     int pass_index = -1;
     // Порядковый номер в ordered_passes (ставит FillRenderPasses) — индекс прохода в
@@ -83,6 +102,27 @@ struct RenderPassStep {
     uint32_t ordinal = 0;
 };
 
+
+// Блит-проход: ОДИН блит src→dst, целиком ДАННЫЕ (без render_function). Функтора здесь нет
+// намеренно: усложни его до лямбды — и вывод usage-флагов снова станет невозможен (внутрь
+// std::function не заглянуть), а блит ЕДИНСТВЕННАЯ операция вне шейдерных биндов, которой
+// флаги реально нужны: SDL требует SAMPLER у src и COLOR_TARGET у dst (проверено зондом,
+// sandbox/BlitUsageProbe.cpp; в докстрингах SDL этого нет). Нужно несколько блитов — заводи
+// несколько проходов, порядок задаёт pass_index.
+//
+// src/dst — TextureAtlas* (НЕ SDL_GPUTexture*): указатель на атлас стабилен, а текстуру внутри
+// подменяют (ResizeSceneHDRTargets пересоздаёт HDR-таргеты; свопчейн-атлас PassManager'а меняет
+// её каждый кадр). Поэтому шаг переживает и ресайз, и смену свопчейна без перепривязки.
+struct BlitPassStep {
+    TextureAtlas* src = nullptr;
+    TextureAtlas* dst = nullptr;   // может быть свопчейн-атлас (PassManager::GetSwapchainAtlas)
+    uint32_t src_mip = 0;
+    uint32_t src_layer = 0;
+    SDL_GPUFilter filter = SDL_GPU_FILTER_NEAREST;
+    SDL_GPULoadOp load_op = SDL_GPU_LOADOP_DONT_CARE;
+    std::string debug_name;   // = ключ в blit_steps
+    int pass_index = -1;
+};
 
 struct ComputeRWStorageTextureRef {
     TextureAtlas* atlas = nullptr;

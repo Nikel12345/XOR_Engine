@@ -90,12 +90,32 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
 	}
 	auto atlas = std::make_unique<TextureAtlas>();
 
-	SDL_GPUTexture* tex = CreateGPU_Texture(tci);
-    if (!tex) {
-        SDL_Log("Failed to create GPU texture for atlas '%s': %s", name.c_str(), SDL_GetError());
-        return nullptr;
-	}
-    atlas->texture_binding.texture = tex;
+    // ОТЛОЖЕННОЕ СОЗДАНИЕ: до бейка обёртка живёт без GPU-текстуры (texture == nullptr) — её
+    // создаст BakeGPUResources по сохранённому tci. После бейка (ресурсы игры, загрузка сцены)
+    // создаём сразу: точка бейка уже пройдена, ждать нечего.
+    atlas->tci = tci;
+    atlas->debug_name = name;
+
+    // ── НАМЕРЕНИЕ (declared at creation), а не выведенное использование ──
+    // SAMPLER материального атласа граф вывести НЕ МОЖЕТ, и это принципиально: атлас заводится
+    // ПУСТЫМ, текстуры и материалы приезжают позже (другая сцена, рантайм-загрузка), а GPU-текстура
+    // после создания неизменяема. Если ждать фактического использования, атлас, в который на этой
+    // сцене ничего не положили, родится без SAMPLER — и сломается, как только текстуру в него
+    // загрузят. Отличить «атлас под материалы» от «атласа-таргета» по факту наличия TextureHandle
+    // тоже нельзя: пустые они неразличимы.
+    // Поэтому SAMPLER берём из tci — это ЗАЯВЛЕНИЕ ЦЕЛИ, зашитое в пресет (AlbedoAtlas/ORMAtlas/…
+    // объявляют себя сэмплируемыми). Фактическое использование параллельно собирает
+    // MaterialManager::CollectSamplerUsage — оно ловит обратный случай: атлас, который материалы
+    // сэмплят, а пресет SAMPLER не объявил.
+    atlas->debug_usage |= (tci.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER);
+
+    // Самовыводимый флаг: мип-ген требует ОБА — SAMPLER и COLOR_TARGET (SDL_gpu.c:2498, зонд).
+    // Это факт о самом ресурсе (его num_levels), а не о графе биндов, поэтому берётся здесь.
+    if (tci.num_levels > 1)
+        atlas->debug_usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+
+    // GPU-текстуру создаст ближайший BakePending (начало PrepareFunc) — к тому моменту все
+    // объявления, дающие атласу флаги (sp/материалы/проходы), уже сделаны.
     atlas->texture_binding.sampler = sampler;
     atlas->width = tci.width;
     atlas->height = tci.height;
@@ -110,6 +130,7 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
 
 	TextureAtlas* ptr = atlas.get();
 	atlases_data[name] = std::move(atlas);
+	pending_atlas_bakes.push_back(ptr);   // GPU-текстуру создаст ближайший BakePending
 	return ptr;
 }
 
@@ -125,7 +146,12 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, Textur
         return it->second.get();
     }
     auto atlas = std::make_unique<TextureAtlas>();
-    atlas->texture_binding.texture = existing_atlas->texture_binding.texture;
+    // Свою GPU-текстуру не создаём — делим чужую. На момент вызова её может ещё не быть (источник
+    // сам ждёт бейка), поэтому запоминаем ИСТОЧНИК: BakePending создаст его первым и скопирует хэндл.
+    atlas->shares_with = existing_atlas;
+    atlas->tci = existing_atlas->tci;
+    atlas->debug_name = name;
+    atlas->debug_usage |= (existing_atlas->tci.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER);   // намерение — как у источника
     atlas->texture_binding.sampler = sampler;
     atlas->width = existing_atlas->width;
     atlas->height = existing_atlas->height;
@@ -137,7 +163,38 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, Textur
 
     TextureAtlas* ptr = atlas.get();
     atlases_data[name] = std::move(atlas);
+    pending_atlas_bakes.push_back(ptr);
 	return ptr;
+}
+
+// Дренаж отложенных созданий (каждый кадр, начало PrepareFunc). См. TextureManager.h.
+void TextureManager::BakePending()
+{
+    if (pending_atlas_bakes.empty() && pending_depth_bakes.empty()) return;
+
+    // Сначала ВЛАДЕЛЬЦЫ текстур, потом совладельцы (shares_with): источник обязан существовать.
+    // Источник мог быть создан в прошлом дренаже — тогда его тут уже нет, и хэндл просто копируется.
+    for (TextureAtlas* atlas : pending_atlas_bakes) {
+        if (!atlas || atlas->shares_with || atlas->texture_binding.texture) continue;
+        atlas->texture_binding.texture = CreateGPU_Texture(atlas->tci);
+        if (!atlas->texture_binding.texture)
+            SDL_Log("TextureManager::BakePending: atlas creation failed: %s", SDL_GetError());
+    }
+    for (TextureAtlas* atlas : pending_atlas_bakes) {
+        if (!atlas || !atlas->shares_with || atlas->texture_binding.texture) continue;
+        atlas->texture_binding.texture = atlas->shares_with->texture_binding.texture;
+        if (!atlas->texture_binding.texture)
+            SDL_Log("TextureManager::BakePending: shared atlas has no source texture.");
+    }
+    pending_atlas_bakes.clear();
+
+    for (SharedDepthTarget* target : pending_depth_bakes) {
+        if (!target || target->texture) continue;
+        target->texture = CreateGPU_Texture(target->tci);
+        if (!target->texture)
+            SDL_Log("TextureManager::BakePending: shared depth target failed: %s", SDL_GetError());
+    }
+    pending_depth_bakes.clear();
 }
 
 TextureHandle* TextureManager::CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels)
@@ -188,15 +245,75 @@ SDL_GPUTexture* TextureManager::CreateGPU_Texture(SDL_GPUTextureCreateInfo tci)
     return tex;
 }
 
+// Имя одного бита usage-флага текстуры.
+static const char* TextureUsageFlagName(SDL_GPUTextureUsageFlags bit)
+{
+    switch (bit) {
+    case SDL_GPU_TEXTUREUSAGE_SAMPLER:                                 return "SAMPLER";
+    case SDL_GPU_TEXTUREUSAGE_COLOR_TARGET:                            return "COLOR_TARGET";
+    case SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET:                    return "DEPTH_STENCIL_TARGET";
+    case SDL_GPU_TEXTUREUSAGE_GRAPHICS_STORAGE_READ:                   return "GRAPHICS_STORAGE_READ";
+    case SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ:                    return "COMPUTE_STORAGE_READ";
+    case SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE:                   return "COMPUTE_STORAGE_WRITE";
+    case SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE: return "SIMULTANEOUS_READ_WRITE";
+    default:                                                           return "UNKNOWN";
+    }
+}
+
+static std::string TextureUsageFlagsToString(SDL_GPUTextureUsageFlags flags)
+{
+    std::string out;
+    for (uint32_t bit = 1; bit; bit <<= 1) {
+        if (!(flags & bit)) continue;
+        if (!out.empty()) out += "|";
+        out += TextureUsageFlagName(bit);
+    }
+    return out.empty() ? "-" : out;
+}
+
+// ASCII-only: SDL_Log в Windows-консоли калечит кириллицу.
+void TextureManager::ReportUsageMismatch()
+{
+    SDL_Log("=== TEXTURE usage flags: manual (tci.usage) vs auto-collected (debug_usage) ===");
+    size_t mismatches = 0;
+
+    auto report = [&](const char* name, SDL_GPUTextureUsageFlags manual, SDL_GPUTextureUsageFlags autoflags) {
+        const SDL_GPUTextureUsageFlags missed = manual & ~autoflags;   // задано вручную, НЕ выведено
+        const SDL_GPUTextureUsageFlags extra  = autoflags & ~manual;   // выведено, вручную НЕТ
+        if (!missed && !extra) return;
+        ++mismatches;
+        SDL_Log("  %-30s mismatch: manual=[%s] auto=[%s] | NOT_DERIVED=[%s] | EXTRA=[%s]",
+            name,
+            TextureUsageFlagsToString(manual).c_str(),
+            TextureUsageFlagsToString(autoflags).c_str(),
+            TextureUsageFlagsToString(missed).c_str(),
+            TextureUsageFlagsToString(extra).c_str());
+    };
+
+    for (const auto& [name, atlas] : atlases_data) {
+        if (!atlas) continue;
+        report(name.c_str(), atlas->tci.usage, atlas->debug_usage);
+    }
+    for (const auto& target : shared_depth_targets) {
+        if (!target) continue;
+        report("<shared_depth_target>", target->tci.usage, target->debug_usage);
+    }
+
+    if (mismatches == 0) SDL_Log("  no mismatches: intent (SAMPLER from preset) + derived (targets/compute/blit/mips) == manual.");
+    else SDL_Log("  %zu mismatch(es) -- each one is a real over-grant or a real gap.", mismatches);
+}
+
 SharedDepthTarget* TextureManager::CreateSharedDepthTarget(SDL_GPUTextureCreateInfo tci)
 {
     auto target = std::make_unique<SharedDepthTarget>();
     target->tci = tci;
     target->owner = this;
-    target->texture = CreateGPU_Texture(tci);
+    // Отложенное создание — как у атласов (см. BakePending). Проходы ссылаются на таргет косвенно
+    // и резолвят texture на исполнении, поэтому nullptr до бейка их не ломает.
 
     SharedDepthTarget* ptr = target.get();
     shared_depth_targets.push_back(std::move(target));
+    pending_depth_bakes.push_back(ptr);
     return ptr;
 }
 
@@ -402,13 +519,30 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
 
 void TextureManager::GenerateMipmaps(SDL_GPUCommandBuffer* cb)
 {
+    // SDL_GenerateMipmapsForGPUTexture — это ОТРИСОВКА в уровни, поэтому требует у текстуры ОБА
+    // флага: SAMPLER и COLOR_TARGET (SDL_gpu.c:2498; одного COLOR_TARGET мало — проверено зондом).
+    // При их отсутствии SDL бьёт SDL_assert_release, а он по умолчанию АБОРТИТ процесс. Пресеты
+    // ставят эти флаги при num_levels > 1 (см. _MaterialAtlas), но атлас может прийти и снаружи
+    // (Custom-tci из игры), поэтому здесь — явная проверка: промах даёт лог и пропуск, а не краш.
+    constexpr SDL_GPUTextureUsageFlags kMipUsage =
+        SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+
     std::unordered_set<SDL_GPUTexture*> seen;
     for (auto& task : upload_tasks) {
+        if (!task.target_handle || !task.target_handle->atlas) continue;
         TextureAtlas* atlas = task.target_handle->atlas;
         SDL_GPUTexture* tex = atlas->texture_binding.texture;
-        if (seen.insert(tex).second and atlas->mip_levels > 1){
-            SDL_GenerateMipmapsForGPUTexture(cb, tex);
+        if (!tex) continue;                       // атлас ещё не забейкан
+        if (atlas->mip_levels <= 1) continue;     // мипов нет — генерировать нечего
+        if (!seen.insert(tex).second) continue;   // атлас уже отмиплен в этом кадре
+
+        if ((atlas->tci.usage & kMipUsage) != kMipUsage) {
+            SDL_Log("TextureManager::GenerateMipmaps: atlas has num_levels=%u but usage lacks "
+                    "SAMPLER|COLOR_TARGET — mip generation skipped (would abort on SDL assert).",
+                    atlas->mip_levels);
+            continue;
         }
+        SDL_GenerateMipmapsForGPUTexture(cb, tex);
     }
     upload_tasks.clear();
 }

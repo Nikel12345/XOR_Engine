@@ -70,7 +70,10 @@ public:
 	// Dummy-текстура ПО ИМЕНИ (та же конвенция, что SetFallbackShader ниже): резолв на сборке
 	// батча, удаление dummy = промах → пропуск отрисовки sp у битого материала (пустой рендер,
 	// без висячего указателя). Раньше держался сырой TextureHandle* — удаление dummy крашило.
-	void SetDummyTexture(const std::string& name) { dummy_texture_name = name; };
+	// tm — на вызове (не полем): dummy подставляется вместо отсутствующего слота материала, то есть
+	// биндится ФРАГМЕНТНЫМ СЭМПЛЕРОМ. Материала у него нет, поэтому SAMPLER его атласу собирается
+	// здесь — единственная декларация «эта текстура будет сэмплиться как фолбэк».
+	void SetDummyTexture(const std::string& name, TextureManager* tm);
 	// Fallback-sp ПО ИМЕНИ для материалов, чья sp удалена. Резолвится на сборке как обычная sp,
 	// поэтому удаление самого fallback = промах → пустой рендер (без висячего указателя).
 	void SetFallbackShader(const std::string& name) { fallback_shader_name = name; };

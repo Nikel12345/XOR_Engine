@@ -5,6 +5,8 @@
 #include <string>
 #include "MaterialData.h"   // Material + TextureSlotRole (через ShaderTypes.h)
 
+class TextureManager;   // только в сигнатуре CollectSamplerUsage — передаётся на вызове
+
 // Запись манифеста материалов сцены (materials.json): всё для пересоздания. params — сырой блоб
 // (layout задаёт автор шейдера, движок видит только байты), params_kind — тег UI-разбора.
 struct SceneMaterialEntry {
@@ -28,6 +30,19 @@ public:
 	// но и так тот же адрес), новый создаётся. params/params_kind проставляются напрямую. Материалы
 	// вне манифеста не трогаются. Возвращает число обработанных.
 	size_t LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries);
+
+	// Сбор usage-флагов. Слот материала — это ФРАГМЕНТНЫЙ СЭМПЛЕР по определению (TextureSlotRole →
+	// SDL_BindGPUFragmentSamplers, см. ShaderTypes.h), поэтому атлас каждой текстуры материала
+	// обязан иметь SAMPLER. Резолв имени в атлас — через TextureManager, переданный НА ВЫЗОВЕ
+	// (менеджер не хранит указателей на другие менеджеры; связку держит EngineContext).
+	// Зовётся везде, где материалу назначается текстура: создание, загрузка манифеста, правка из UI.
+	// Storage-текстур у материала нет и не предвидится: атласная механика (UVL + мипы + фильтрация)
+	// осмысленна только при сэмплировании, а пассовым storage-ресурсам место в проходе, не в материале.
+	//
+	// ЗАОДНО ЛОВИТ НАРУШЕНИЕ: атлас, который материал сэмплит, а его tci SAMPLER не объявлял. Такой
+	// бинд гарантированно упадёт (SDL_assert + abort, БЕЗ имени ресурса) — здесь он называется
+	// поимённо, до краша. material_name — только для этого сообщения.
+	void CollectSamplerUsage(const Material* m, TextureManager* tm, const std::string& material_name);
 
 	std::vector<Material*> GetAllMaterials();
 	Material* GetMaterial(const std::string& name);
