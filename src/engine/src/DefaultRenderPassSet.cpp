@@ -253,7 +253,10 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
         DEBUG_PASS,
         [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
-        // Цвет (свопчейн) ставится в Engine::RenderFunc каждый кадр; если не задан — пропуск.
+        // Резолв ДО гарда — иначе вечный пропуск (см. TRANSPARENT_PASS: таргеты привязаны
+        // атласами, texture заполняет только ResolveTargets). Старый комментарий про свопчейн
+        // протух: цвет — scene_hdr, привязан в setup.
+        rp.renderPassTexsData.ResolveTargets();
         if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
         // Цвет рамок прокидываем как push_data_raw — его читает push_func дебаг-шейдера
         // (fragment slot 0). Другие программы к этому пассу не привязаны.
@@ -287,6 +290,12 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
         TRANSPARENT_PASS,
         [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
+        // Резолв ДО гарда: colorTargetInfos[0].texture заполняется из атласа только в
+        // ResolveTargets (таргеты привязаны атласами, сырой хэндл на setup не пишется).
+        // Гард до резолва зациклился бы: texture == nullptr → return → тело (и резолв в нём)
+        // никогда не выполняются → проход пропускается ВЕЧНО. Повторный резолв в
+        // RenderPassStandardBody идемпотентен и дёшев.
+        rp.renderPassTexsData.ResolveTargets();
         if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
         pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
     },

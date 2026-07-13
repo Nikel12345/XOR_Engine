@@ -30,10 +30,16 @@ SamplerState u_envSampler : register(s1, space2);
 // уровней вверх, 3^(j+1)). tFar/туман — в локальных юнитах, но ∝σ=s·3^d, т.е. НЕПРЕРЫВНЫ
 // по масштабу s: смена якорного уровня не даёт шва по дальности; tFar = дальность насыщения
 // тумана (дальше и хит, и промах — чистый sky, марш не нужен).
-// Камерный буфер здесь НЕ объявлен намеренно: origin луча идёт отсюда (пост-пересчёта кадра),
-// ротация уходит в v_dir ещё в VS — а неиспользуемое объявление DXC стрипает, и слоты
-// storage-буферов становятся дырявыми (SDL ждёт плотные) → пайплайн не собирается.
+// Origin луча идёт отсюда (пост-пересчёт кадра), ротация — в v_dir ещё из VS.
 StructuredBuffer<float4> Frame : register(t2, space2);
+
+// Камера пасса — ТОЛЬКО для SV_Depth (этап 6 якорённых объектов): глубина хита считается
+// тем же mul(proj, mul(view, p)), что у вершинника объектов, поэтому depth-тест сравнивает
+// строго одинаковые значения (конвенция проекции не важна — матрицы общие). view — чистая
+// ротация: аккумулятор позиции обнулён MengerTick'ом до снапшота. Буфер реально
+// используется → DXC не стрипает, слоты storage-буферов остаются плотными.
+struct CameraData { float4x4 view; float4x4 proj; };
+StructuredBuffer<CameraData> Camera : register(t3, space2);
 
 // Push-константы sp "Fractal" (fragment слот 0). Раскладка = FractalPushData (mygame/FractalBackground.h).
 cbuffer FractalParams : register(b0, space3)
@@ -54,6 +60,11 @@ struct PSOutput
 {
     float4 color    : SV_Target0;   // линейный HDR-цвет сцены
     float4 emission : SV_Target1;   // MRT пасса: у губки эмиссии нет
+    // Честная глубина хита (DepthReplacing): растеризатор глубину этого дроу не считает
+    // (вершины скайбокса на z=w), её выдаёт шейдер — в ОБЫЧНЫЙ depth-attachment пасса.
+    // Стенки губки и якорённые объекты режут друг друга штатным depth-тестом; цена —
+    // отключённый early-Z у этого дроу. Промах/небо — 1.0 (far), как раньше.
+    float  depth    : SV_Depth;
 };
 
 static const float K_PX       = 8e-4;   // угловой размер пикселя (~1080p@45°): eps(t) = t·K_PX
@@ -126,6 +137,7 @@ PSOutput main(PSInput input)
     float3 sky = lerp(float3(0.05, 0.06, 0.12), float3(0.010, 0.012, 0.030),
                       saturate(rd.y * 2.0 + 0.2));
     float3 col = sky;
+    float  depthOut = 1.0;   // промах/туманная даль = far, как у скайбокса
 
     float t      = 0.0;
     float tFar   = Frame[1].y;   // дальность насыщения тумана (CPU: FOG_DIST·σ) — дальше только sky
@@ -222,11 +234,17 @@ PSOutput main(PSInput input)
             // (промах < пикселя) остаётся тёмной поверхностью.
             if (capMiss >= 0.0)
                 col = lerp(col, sky, saturate(capMiss / (K_PX * 8.0)) * 0.9);
+
+            // Глубина хита — ТА ЖЕ проекция, что у вершин якорённых объектов (камера растра
+            // в нуле кадра, юниты якоря общие): сравнение в depth-тесте один-в-один.
+            float4 clipH = mul(Camera[0].proj, mul(Camera[0].view, float4(rd * t, 1.0)));
+            depthOut = saturate(clipH.z / max(clipH.w, 1e-9));
         }
     }
 
     o.color    = float4(col, 1.0);
     o.emission = float4(0.0, 0.0, 0.0, 0.0);
+    o.depth    = depthOut;
 
     // ЯКОРЬ t0/t1: ветка никогда не выполняется (sv_pos.x >= 0 во вьюпорте), но компилятор
     // доказать этого не может → глобалки пасса не стрипаются, слоты остаются плотными.

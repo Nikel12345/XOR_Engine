@@ -184,20 +184,20 @@ SDL_AppResult Game::MainInit()
 
     {
         MaterialManager* mm = ctx->GetMaterialManager();
-        ctx->SetMaterialParams(mm->GetMaterial("material_sprite"),  OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.08f, /*pomBias*/2.5f });
-        ctx->SetMaterialParams(mm->GetMaterial("material_sprite2"), OpaqueMaterialParams{ {1,1,1,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f });
-        ctx->SetMaterialParams(mm->GetMaterial("transparent"),      TransparentMaterialParams{ 0.35f });
-        ctx->SetMaterialParams(mm->GetMaterial("material_sun"),     OpaqueMaterialParams{ {1,1,1,1}, {0.99f,0.85f,0.45f}, 2.4f, /*metallic*/0.0f, /*roughness*/1.0f });
-        ctx->SetMaterialParams(mm->GetMaterial("ship"),             OpaqueMaterialParams{ { 0.55f, 0.6f, 0.7f, 1.0f } });
-        ctx->SetMaterialParams(mm->GetMaterial("m_orange"),         OpaqueMaterialParams{ {1.0f, 0.45f, 0.1f, 1.0f}, {1.0f, 0.854902f, 0.0f}, 0.171f });
-        ctx->SetMaterialParams(mm->GetMaterial("m_gray"),           OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.552941f, 0.552941f, 0.552941f}, 1.2f });
-        ctx->SetMaterialParams(mm->GetMaterial("metal1"),           OpaqueMaterialParams{ {1.0f, 0.5f, 0.5f, 1.0f}, {1.0f, 0.0f, 0.0f}, 0.146f, 1.0f, 0.96f });
-        ctx->SetMaterialParams(mm->GetMaterial("metal2"),           OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.0f, 0.0f, 0.0f}, 0.0f, 1.0f, 0.96f });
-        ctx->SetMaterialParams(mm->GetMaterial("emission"),         OpaqueMaterialParams{ {0.0f, 0.0f, 0.0f, 1.0f}, {0.341176f, 0.341176f, 0.647059f}, 1.7f });
-        // Opaque-дефолт (белый baseColor = без тинта): иначе MaterialBlock @ b1 несвязан.
-        ctx->SetMaterialParams(mm->GetMaterial("car"),              OpaqueMaterialParams{});
-        ctx->SetMaterialParams(mm->GetMaterial("car2"),             OpaqueMaterialParams{});
-        ctx->SetMaterialParams(mm->GetMaterial("ground"),           OpaqueMaterialParams{});
+        //ctx->SetMaterialParams(mm->GetMaterial("material_sprite"),  OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.08f, /*pomBias*/2.5f });
+        //ctx->SetMaterialParams(mm->GetMaterial("material_sprite2"), OpaqueMaterialParams{ {1,1,1,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f });
+        //ctx->SetMaterialParams(mm->GetMaterial("transparent"),      TransparentMaterialParams{ 0.35f });
+        //ctx->SetMaterialParams(mm->GetMaterial("material_sun"),     OpaqueMaterialParams{ {1,1,1,1}, {0.99f,0.85f,0.45f}, 2.4f, /*metallic*/0.0f, /*roughness*/1.0f });
+        //ctx->SetMaterialParams(mm->GetMaterial("ship"),             OpaqueMaterialParams{ { 0.55f, 0.6f, 0.7f, 1.0f } });
+        //ctx->SetMaterialParams(mm->GetMaterial("m_orange"),         OpaqueMaterialParams{ {1.0f, 0.45f, 0.1f, 1.0f}, {1.0f, 0.854902f, 0.0f}, 0.171f });
+        //ctx->SetMaterialParams(mm->GetMaterial("m_gray"),           OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.552941f, 0.552941f, 0.552941f}, 1.2f });
+        //ctx->SetMaterialParams(mm->GetMaterial("metal1"),           OpaqueMaterialParams{ {1.0f, 0.5f, 0.5f, 1.0f}, {1.0f, 0.0f, 0.0f}, 0.146f, 1.0f, 0.96f });
+        //ctx->SetMaterialParams(mm->GetMaterial("metal2"),           OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.0f, 0.0f, 0.0f}, 0.0f, 1.0f, 0.96f });
+        //ctx->SetMaterialParams(mm->GetMaterial("emission"),         OpaqueMaterialParams{ {0.0f, 0.0f, 0.0f, 1.0f}, {0.341176f, 0.341176f, 0.647059f}, 1.7f });
+        //// Opaque-дефолт (белый baseColor = без тинта): иначе MaterialBlock @ b1 несвязан.
+        //ctx->SetMaterialParams(mm->GetMaterial("car"),              OpaqueMaterialParams{});
+        //ctx->SetMaterialParams(mm->GetMaterial("car2"),             OpaqueMaterialParams{});
+        //ctx->SetMaterialParams(mm->GetMaterial("ground"),           OpaqueMaterialParams{});
     }
 
     Material* metal2 = ctx->GetMaterialManager()->GetMaterial("metal2");   // из сцены (было кодовым)

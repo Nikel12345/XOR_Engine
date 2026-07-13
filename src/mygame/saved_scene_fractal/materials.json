@@ -7,6 +7,32 @@
             ],
             "textures": [],
             "params_kind": "None"
+        },
+        {
+            "name": "iron_block",
+            "shaders": [
+                "AnchorObject"
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "texture": "iron"
+                },
+                {
+                    "role": "Normal",
+                    "texture": "default_normal"
+                },
+                {
+                    "role": "ORM",
+                    "texture": "default_orm"
+                },
+                {
+                    "role": "Emissive",
+                    "texture": "default_emissive"
+                }
+            ],
+            "params_kind": "Opaque",
+            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
         }
     ]
 }

@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>
+#include <vector>
 
 // Заголовку хватает forward-декларации: только статические методы с EngineContext*.
 // imgui/ObjectManager/CameraManager тянут сами UI_*.cpp — по факту использования.
@@ -8,6 +10,16 @@ class UI_ImGui
 {
 public:
     static void Iterate(EngineContext* ctx);
+
+    // ── Обмен выбором с игрой (вызывать с sim-потока). Выбор редактора сейчас — один
+    // энтити; множественное число в имени — на вырост API (список длины 0/1).
+    // Get ЗАБИРАЕТ выбор: возвращает выбранные энтити и снимает выделение — Inspector и
+    // гизмо гаснут сами (рисуются только при выборе-энтити). Set — отдаёт выделение обратно.
+    // Потокобезопасность: трогаются ТОЛЬКО POD-поля выбора (kind — «ворота» чтения, entity),
+    // строка name не задевается; поля 4-байтовые выровненные, гонка с UI-потоком в худшем
+    // случае сдвигает выбор на кадр — для редактора приемлемо. uint32_t = Entity.
+    static std::vector<uint32_t> GetSelectedEntities();
+    static void SetSelectedEntities(const std::vector<uint32_t>& entities);
 
 private:
     // Хост-докспейс поверх вьюпорта + первичная раскладка панелей (Hierarchy слева,

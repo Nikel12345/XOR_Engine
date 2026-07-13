@@ -6,12 +6,26 @@
             "pull": [
                 "POSITION"
             ]
+        },
+        {
+            "name": "main_pass_vs",
+            "path": "../engine/shaders_code/main_pass/main_pass.vert.hlsl",
+            "pull": [
+                "POSITION",
+                "UV",
+                "NORMAL",
+                "TANGENT"
+            ]
         }
     ],
     "fragment_shaders": [
         {
             "name": "fractal_fs",
             "path": "../engine/shaders_code/fractal/menger.frag.hlsl"
+        },
+        {
+            "name": "anchor_surface_fs",
+            "path": "../engine/shaders_code/main_pass/fractal/surface.hlsl"
         }
     ],
     "compute_shaders": [
@@ -42,6 +56,44 @@
     ],
     "render_shader_programs": [
         {
+            "name": "AnchorObject",
+            "vs": "main_pass_vs",
+            "fs": "anchor_surface_fs",
+            "pass": "_DefaultMainRenderPass",
+            "vs_buffers": [
+                "_DefaultTransformBuffer",
+                "DefaultOutPibBuffer",
+                "_cameraBuffer",
+                "_DefaultInstanceBuffer"
+            ],
+            "fs_buffers": [
+                "_lightBuffer",
+                "DefaultLightCameraBuffer",
+                "_cameraBuffer",
+                "_FractalFrameBuffer"
+            ],
+            "slots": [
+                "Albedo",
+                "Normal",
+                "ORM",
+                "Emissive"
+            ],
+            "spd": {
+                "cull_mode": 0,
+                "fill_mode": 0,
+                "primitive_type": 0,
+                "depth_test": true,
+                "depth_write": true,
+                "depth_compare": 2,
+                "stencil_test": false,
+                "color_blend": false,
+                "bias_enable": false,
+                "bias_constant": 0.0,
+                "bias_slope": 0.0,
+                "bias_clamp": 0.0
+            }
+        },
+        {
             "name": "Fractal",
             "vs": "skybox_vs",
             "fs": "fractal_fs",
@@ -50,7 +102,8 @@
                 "_cameraBuffer"
             ],
             "fs_buffers": [
-                "_FractalFrameBuffer"
+                "_FractalFrameBuffer",
+                "_cameraBuffer"
             ],
             "slots": [],
             "spd": {
@@ -58,7 +111,7 @@
                 "fill_mode": 0,
                 "primitive_type": 0,
                 "depth_test": true,
-                "depth_write": false,
+                "depth_write": true,
                 "depth_compare": 4,
                 "stencil_test": false,
                 "color_blend": false,

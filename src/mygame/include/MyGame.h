@@ -1,8 +1,12 @@
 #pragma once
 #include <SDL3/SDL.h>
 #include <vector>
+#include <glm/glm.hpp>      // поза захвата переноски (carry_view_offset)
 #include "Engine.h"
 #include "InputManager.h"   // InputManager::KeyEvent в скретч-буферах
+
+struct Material;    // ресурсы спавна якорённых кубов — только указатели
+struct ModelData;
 
 // ============================================================================
 //  MyGame — фрактальная демка. Сцена выбирает фрактал (scene_fractal — 3D-губка
@@ -36,6 +40,21 @@ private:
 	float height = 0.0f;
 	float mouse_x = 0.0f;
 	float mouse_y = 0.0f;
+
+	// Сцена губки активна (MainIterate гоняет MengerTick + матрицы якорённых объектов).
+	bool fractal_scene = false;
+	// Ресурсы спавна якорённых кубов (этап 4): захвачены в MainInit — клавиша N создаёт
+	// энтити с FractalAnchorComponent из них (материал/модель общие для всех кубов).
+	Material*  anchor_material = nullptr;
+	ModelData* cube_model      = nullptr;
+
+	// Переноска (этап 8b, HUD-вариант): G забирает выбор у UI (гизмо гаснет само), и куб
+	// ВЫКЛЮЧАЕТСЯ из мира — рисуется в фиксированной части экрана всегда одинаково (HUD-поза
+	// в ForEach-контуре MainIterate); свои ориентация и пропорции (model_scale) сохраняются.
+	// Повторное G кладёт его в мир заново спавн-позой (1.5σ перед камерой, σ/2) — личная
+	// логика масштаба доводит размер под окружение сама. Несём один объект за раз.
+	bool     carrying = false;
+	uint32_t carried  = 0;
 
 	std::vector<InputManager::KeyEvent> key_events_scratch;
 	std::vector<SDL_Scancode>           held_keys_scratch;

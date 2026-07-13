@@ -13,6 +13,27 @@ namespace ui {
     bool      g_show_internal = false;
 }
 
+// Обмен выбором с игрой (sim-поток) — контракт и модель потокобезопасности в заголовке.
+std::vector<uint32_t> UI_ImGui::GetSelectedEntities()
+{
+    using namespace ui;
+    std::vector<uint32_t> out;
+    if (g_sel.kind == SelKind::Entity) {
+        out.push_back(g_sel.entity);
+        g_sel.kind = SelKind::None;   // «ворота» закрываются первыми; name не трогаем
+    }
+    return out;
+}
+
+void UI_ImGui::SetSelectedEntities(const std::vector<uint32_t>& entities)
+{
+    using namespace ui;
+    if (entities.empty()) return;
+    g_sel.entity = entities.front();   // порядок важен: entity ДО kind («ворота» открываются последними)
+    g_sel.index  = -1;
+    g_sel.kind   = SelKind::Entity;
+}
+
 void UI_ImGui::Iterate(EngineContext* ctx)
 {
     ImGuizmo::BeginFrame();

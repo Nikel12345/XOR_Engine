@@ -31,6 +31,14 @@ StructuredBuffer<Light>       LightBlock    : LIGHT_BLOCK_REGISTER;
 struct ShadowCamera { float4x4 view; float4x4 proj; };
 StructuredBuffer<ShadowCamera> ShadowCameras : SHADOW_CAMERAS_REGISTER;
 
+// Опциональный ТУМАН ФРАКТАЛА (включает вариант main_pass/fractal/surface.hlsl — объекты,
+// якорённые в губке Менгера, гаснут той же атмосферой, что и сама губка). Кадр губки
+// (раскладка — menger.frag.hlsl); отсюда нужен только [1].z = 1/дальность тумана. Регистр
+// t9 — следом за Camera t8 ТЕКСТУРНОГО пролога (вариант существует только текстурный).
+#ifdef FRACTAL_FOG
+StructuredBuffer<float4> FractalFrame : register(t9, space2);
+#endif
+
 // Camera объявлена в ПРОЛОГЕ (material_api), чтобы getSurface мог посчитать view-вектор для POM
 // до включения базы. Здесь она только используется (camPos = -R^T·t из view — rigid-inverse).
 
@@ -251,6 +259,21 @@ PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
     // Диффуз гаснет на металле: проводник почти не имеет диффузного отражения, вся энергия — в зеркальном.
     float3 diffuse  = surface.baseColor * lighting * (1.0 - surface.metallic);
     float3 color    = diffuse + specSum + surface.emission;   // диффуз + спекуляр/отражение + эмиссия
+
+#ifdef FRACTAL_FOG
+    // Туман фрактала: формула и небо — КОПИЯ menger.frag.hlsl, объект гаснет ровно синхронно
+    // с губкой. Растровая камера стоит в НУЛЕ кадра якоря (матрицы якорённых объектов
+    // камерно-относительны, view — чистая ротация), поэтому дистанция и направление луча —
+    // прямо из v_worldPos. Эмиссия гаснет тем же фактором: сквозь туман не светится ничто.
+    {
+        float3 rdF  = normalize(input.v_worldPos);
+        float3 skyF = lerp(float3(0.05, 0.06, 0.12), float3(0.010, 0.012, 0.030),
+                           saturate(rdF.y * 2.0 + 0.2));
+        float  fogF = saturate(length(input.v_worldPos) * FractalFrame[1].z);
+        color             = lerp(color, skyF, fogF);
+        surface.emission *= (1.0 - fogF);
+    }
+#endif
 
     PSOutput o;
     o.color    = float4(color, surface.alpha);
