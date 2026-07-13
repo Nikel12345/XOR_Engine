@@ -1,17 +1,23 @@
 {
     "textures": [
         {
-            "name": "env_skybox_cube",
-            "atlas": "env_skybox",
-            "path": "textures/skybox.png",
-            "conv": "AsIs",
-            "cube": true
-        },
-        {
             "name": "wood_albedo",
             "atlas": "albedo_atlas",
             "path": "C:\\Users\\Nikita\\Desktop\\SDL_Engine\\src\\game\\textures\\blocks\\wood_base.png",
             "conv": "AsIs"
+        },
+        {
+            "name": "norm",
+            "atlas": "normal_atlas",
+            "path": "textures/assets/car_norm.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "_env_skybox_cube",
+            "atlas": "env_skybox",
+            "path": "textures/skybox.png",
+            "conv": "AsIs",
+            "cube": true
         },
         {
             "name": "new_car_glass",
@@ -20,15 +26,15 @@
             "conv": "AsIs"
         },
         {
-            "name": "wood_normal",
-            "atlas": "normal_atlas",
-            "path": "C:\\Users\\Nikita\\Desktop\\SDL_Engine\\src\\game\\textures\\blocks\\wood_normal_h.png",
-            "conv": "AsIs"
-        },
-        {
             "name": "block",
             "atlas": "albedo_atlas",
             "path": "C:\\Users\\Nikita\\Desktop\\SDL_Engine\\src\\game\\textures\\blocks\\hull.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "wood_normal",
+            "atlas": "normal_atlas",
+            "path": "C:\\Users\\Nikita\\Desktop\\SDL_Engine\\src\\game\\textures\\blocks\\wood_normal_h.png",
             "conv": "AsIs"
         },
         {
@@ -41,12 +47,6 @@
             "name": "albedo_cube",
             "atlas": "albedo_atlas",
             "path": "textures/assets/cube_test.png",
-            "conv": "AsIs"
-        },
-        {
-            "name": "norm",
-            "atlas": "normal_atlas",
-            "path": "textures/assets/car_norm.png",
             "conv": "AsIs"
         },
         {

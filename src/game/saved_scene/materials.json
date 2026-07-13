@@ -1,9 +1,9 @@
 {
     "materials": [
         {
-            "name": "skybox",
+            "name": "_skybox",
             "shaders": [
-                "Skybox"
+                "_skybox"
             ],
             "textures": [],
             "params_kind": "None"
@@ -15,51 +15,6 @@
             ],
             "textures": [],
             "params_kind": "None"
-        },
-        {
-            "name": "car",
-            "shaders": [
-                "sp",
-                "sp_shadow"
-            ],
-            "textures": [
-                {
-                    "role": "Albedo",
-                    "texture": "new_car"
-                },
-                {
-                    "role": "Normal",
-                    "texture": "norm"
-                },
-                {
-                    "role": "ORM",
-                    "texture": "default_orm"
-                },
-                {
-                    "role": "Emissive",
-                    "texture": "default_emissive"
-                }
-            ],
-            "params_kind": "Opaque",
-            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
-        },
-        {
-            "name": "transparent",
-            "shaders": [
-                "sp_transparent"
-            ],
-            "textures": [
-                {
-                    "role": "Albedo",
-                    "texture": "new_car_glass"
-                },
-                {
-                    "role": "Normal",
-                    "texture": "norm"
-                }
-            ],
-            "params_kind": "Transparent",
-            "params": "3333b33ecccccccccccccccccccccccc"
         },
         {
             "name": "car2",
@@ -115,6 +70,51 @@
             "params": "0000803f0000803f0000803f0000803fa4707d3f9a99593f6666e63e00000000000000000000803f0000000000000000"
         },
         {
+            "name": "transparent",
+            "shaders": [
+                "sp_transparent"
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "texture": "new_car_glass"
+                },
+                {
+                    "role": "Normal",
+                    "texture": "norm"
+                }
+            ],
+            "params_kind": "Transparent",
+            "params": "3333b33ecccccccccccccccccccccccc"
+        },
+        {
+            "name": "car",
+            "shaders": [
+                "sp",
+                "sp_shadow"
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "texture": "new_car"
+                },
+                {
+                    "role": "Normal",
+                    "texture": "norm"
+                },
+                {
+                    "role": "ORM",
+                    "texture": "default_orm"
+                },
+                {
+                    "role": "Emissive",
+                    "texture": "default_emissive"
+                }
+            ],
+            "params_kind": "Opaque",
+            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
+        },
+        {
             "name": "ground",
             "shaders": [
                 "sp",
@@ -161,6 +161,16 @@
             "params": "0000803f6666e63ecdcccc3d0000803f0000803fdcda5a3f0000000000000000ae47613e000000000000000000000000"
         },
         {
+            "name": "m_gray",
+            "shaders": [
+                "sp_untextured",
+                "sp_shadow"
+            ],
+            "textures": [],
+            "params_kind": "Opaque",
+            "params": "0000803f0000803f0000803f0000803f8b8d0d3f8b8d0d3f8b8d0d3f0000000039b4283ff853a33e0000000000000000"
+        },
+        {
             "name": "brick",
             "shaders": [
                 "sp",
@@ -186,16 +196,6 @@
             ],
             "params_kind": "Opaque",
             "params": "cecd4d3fcecd4d3fcecd4d3f0000803f0000000000000000000000000000803f0000803f0000803f0ad7a33d00002040"
-        },
-        {
-            "name": "m_gray",
-            "shaders": [
-                "sp_untextured",
-                "sp_shadow"
-            ],
-            "textures": [],
-            "params_kind": "Opaque",
-            "params": "0000803f0000803f0000803f0000803f8b8d0d3f8b8d0d3f8b8d0d3f0000000039b4283ff853a33e0000000000000000"
         },
         {
             "name": "metal1",
@@ -278,7 +278,7 @@
                 }
             ],
             "params_kind": "Opaque",
-            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f0000803f0000803f0000000000000000"
+            "params": "0000003f0000003f0000003f0000803f0000000000000000000000000000803f0000803f0000803f0ad7a33d00002040"
         }
     ]
 }

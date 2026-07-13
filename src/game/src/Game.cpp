@@ -184,7 +184,7 @@ SDL_AppResult Game::MainInit()
 
     {
         MaterialManager* mm = ctx->GetMaterialManager();
-        //ctx->SetMaterialParams(mm->GetMaterial("material_sprite"),  OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.08f, /*pomBias*/2.5f });
+        ctx->SetMaterialParams(mm->GetMaterial("wood"),  OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.08f, /*pomBias*/2.5f });
         //ctx->SetMaterialParams(mm->GetMaterial("material_sprite2"), OpaqueMaterialParams{ {1,1,1,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f });
         //ctx->SetMaterialParams(mm->GetMaterial("transparent"),      TransparentMaterialParams{ 0.35f });
         //ctx->SetMaterialParams(mm->GetMaterial("material_sun"),     OpaqueMaterialParams{ {1,1,1,1}, {0.99f,0.85f,0.45f}, 2.4f, /*metallic*/0.0f, /*roughness*/1.0f });
@@ -199,17 +199,6 @@ SDL_AppResult Game::MainInit()
         //ctx->SetMaterialParams(mm->GetMaterial("car2"),             OpaqueMaterialParams{});
         //ctx->SetMaterialParams(mm->GetMaterial("ground"),           OpaqueMaterialParams{});
     }
-
-    Material* metal2 = ctx->GetMaterialManager()->GetMaterial("metal2");   // из сцены (было кодовым)
-    Entity sun = ctx->CreateEntity("main_menu",
-        MaterialComponent{ { metal2 } },
-        ModelComponent{ sphere },
-        PositionProxy16{ 1,0,0,0.0f, 0,1,0,0.7f, 0,0,1,0, 0,0,0,1 },
-        ShadowComponent{},
-        ColliderComponent{ { Collider::Sphere(1.0f)} },
-        DrawComponent{},
-        GeneratedComponent{}
-    );
 
     //ctx->CreateEntity("main_menu",
     //    ParentComponent{ sun },
