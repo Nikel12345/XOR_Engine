@@ -65,9 +65,9 @@ SDL_AppResult MyGame::MainInit()
     const std::string scene_name = "scene_fractal";
     BufferManager* bm = ctx->GetBufferManager();
     if (scene_name == "scene_fractal") {
+        // Без usage: GRAPHICS_STORAGE_READ выведется из sp манифеста, который назовёт этот буфер.
         bm->CreateBufferData(FractalUpdateSet::MENGER_FRAME_BUFFER,
-            FractalUpdateSet::MENGER_FRAME_BYTES,
-            SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
+            FractalUpdateSet::MENGER_FRAME_BYTES, BufferDataType::Dynamic);
         FractalUpdateSet::SetMengerFrameUpdater(ctx);
         // Атлас под альбедо якорённого куба — кодовая инфраструктура (как в Game.cpp), ДО
         // LoadScene: текстура iron из textures.json садится в него при загрузке. Роли
@@ -78,8 +78,7 @@ SDL_AppResult MyGame::MainInit()
     }
     else if (scene_name == "scene_mandelbrot") {
         bm->CreateBufferData(FractalUpdateSet::MANDELBROT_ORBIT_BUFFER,
-            FractalUpdateSet::MANDELBROT_ORBIT_BYTES,
-            SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
+            FractalUpdateSet::MANDELBROT_ORBIT_BYTES, BufferDataType::Dynamic);
         FractalUpdateSet::SetMandelbrotOrbitUpdater(ctx);
     }
 

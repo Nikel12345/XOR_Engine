@@ -117,8 +117,8 @@ ComputeShaderProgram* GpuTaskContext::CreateComputeShaderProgram(const std::stri
 }
 
 // --- Буферы: форвард в BufferManager ---
-BufferData* GpuTaskContext::CreateBufferData(BufferDataName name, Uint32 size, SDL_GPUBufferUsageFlags usage, BufferDataType type, ResizeBehaviour resize_behaviour) {
-	return buffer_manager->CreateBufferData(name, size, usage, type, resize_behaviour);
+BufferData* GpuTaskContext::CreateBufferData(BufferDataName name, Uint32 size, BufferDataType type, ResizeBehaviour resize_behaviour) {
+	return buffer_manager->CreateBufferData(name, size, type, resize_behaviour);
 }
 
 BufferData* GpuTaskContext::GetBufferData(BufferDataName name) {

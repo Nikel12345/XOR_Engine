@@ -29,22 +29,22 @@ void RenderPassTexturesInfo::SetColorTexture(TextureAtlas* atlas, uint32_t index
 {
 	if (index < color_atlases.size())
 		color_atlases[index] = atlas;
-	// Сбор флагов: ресурс сам копит роль в месте, где на него сослались (union, без приоритетов).
-	if (atlas) atlas->debug_usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+	// Декларация usage (по ней создаётся GPU-текстура): ресурс копит роль там, где на него сослались.
+	if (atlas) atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 }
 
 void RenderPassTexturesInfo::SetDepthTexture(TextureAtlas* atlas)
 {
 	shared_depth = nullptr;
 	depth_atlas = atlas;
-	if (atlas) atlas->debug_usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+	if (atlas) atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
 }
 
 void RenderPassTexturesInfo::SetDepthTexture(SharedDepthTarget* dt)
 {
 	depth_atlas = nullptr;
 	shared_depth = dt;
-	if (dt) dt->debug_usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+	if (dt) dt->tci.usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
 }
 
 void RenderPassStep::SetGlobalTextures(std::vector<TextureAtlas*> atlases)
@@ -52,7 +52,7 @@ void RenderPassStep::SetGlobalTextures(std::vector<TextureAtlas*> atlases)
 	global_texture_bindings = std::move(atlases);
 	// Роль однозначна: поле потребляется ровно одним SDL_BindGPUFragmentSamplers.
 	for (TextureAtlas* atlas : global_texture_bindings)
-		if (atlas) atlas->debug_usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		if (atlas) atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 }
 
 // Атласы/shared-depth → актуальные SDL-текстуры. Зовётся на ИСПОЛНЕНИИ (RenderPassStandardBody),

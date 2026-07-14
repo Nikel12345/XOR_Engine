@@ -163,14 +163,12 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     g_pass_system.scene_emission = tm->CreateTextureAtlas("scene_emission", TexturePresets::EmissionHDR(width, height), env_sampler);
 
     // Bloom-пирамида: BLOOM_LEVELS отдельных текстур "bloom_L<i>". Уровень 0 = ½ окна, дальше /2.
+    // Флаги (в т.ч. SIMULTANEOUS только назначениям апсемпла) выведут декларации bloom-программ.
     for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
         uint32_t lw = width  >> (1 + i); if (lw == 0) lw = 1;
         uint32_t lh = height >> (1 + i); if (lh == 0) lh = 1;
-        // SIMULTANEOUS нужен только НАЗНАЧЕНИЯМ апсемпла (i = BLOOM_LEVELS-2 .. 0). Самый мелкий
-        // уровень — только источник, ему не нужен (см. TexturePresets::BloomLevel).
-        const bool simultaneous = (i + 1 < BLOOM_LEVELS);
         g_pass_system.bloom_levels[i] = tm->CreateTextureAtlas("bloom_L" + std::to_string(i),
-            TexturePresets::BloomLevel(lw, lh, simultaneous), env_sampler);
+            TexturePresets::BloomLevel(lw, lh), env_sampler);
     }
 
     g_pass_system.width  = width;
@@ -216,7 +214,7 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
 
 
     // Атласы, не биндинги: GPU-текстуру любого из них можно пересоздать, не трогая проход.
-    // Через сеттер — он же копит атласам SAMPLER в debug_usage.
+    // Через сеттер — он же декларирует атласам SAMPLER (usage, по которому их создаст бейк).
     mainPass->SetGlobalTextures({
         shadow_depth_flat_array,                            // слот 0 (t0/s0) — тень
         GetDefaultEnvAtlas(ctx)                             // слот 1 (t1/s1) — env-кубмапа
@@ -345,6 +343,9 @@ void DefaultRenderPassNamespace::ResizeSceneHDRTargets(EngineContext* ctx, uint3
     // проходам больше не нужно: они держат TextureAtlas* и резолвят текстуру на исполнении
     // (RenderPassTexturesInfo::ResolveTargets). То же — для блитов и compute-биндингов.
     auto recreate = [&](TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci) {
+        // Пресет даёт только ГЕОМЕТРИЮ: usage-декларации (собранные до бейка) живут в атласе,
+        // пересоздание обязано их сохранить — иначе таргет родился бы без ролей.
+        tci.usage = atlas->tci.usage;
         SDL_GPUTexture* old_tex = atlas->texture_binding.texture;
         atlas->texture_binding.texture = tm->CreateGPU_Texture(tci);
         atlas->tci    = tci;              // источник истины для будущих пересозданий
@@ -359,8 +360,7 @@ void DefaultRenderPassNamespace::ResizeSceneHDRTargets(EngineContext* ctx, uint3
         if (!g_pass_system.bloom_levels[i]) continue;
         uint32_t lw = width  >> (1 + i); if (lw == 0) lw = 1;
         uint32_t lh = height >> (1 + i); if (lh == 0) lh = 1;
-        const bool simultaneous = (i + 1 < BLOOM_LEVELS);   // как при создании
-        recreate(g_pass_system.bloom_levels[i], TexturePresets::BloomLevel(lw, lh, simultaneous));
+        recreate(g_pass_system.bloom_levels[i], TexturePresets::BloomLevel(lw, lh));
     }
     g_pass_system.width = width;
     g_pass_system.height = height;

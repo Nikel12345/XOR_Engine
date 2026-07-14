@@ -1,7 +1,7 @@
 ﻿#include "PCH.h"
 #include "ShaderManager.h"
 #include "BufferManager.h"
-#include "TextureData.h"   // TextureAtlas — полный тип: сбор debug_usage по compute-биндингам
+#include "TextureData.h"   // TextureAtlas — полный тип: декларации usage по compute-биндингам
 #include <filesystem>
 
 ShaderManager::ShaderManager(SDL_GPUDevice* device) {
@@ -58,7 +58,7 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
         auto collect = [bm](const std::vector<BufferDataName>& names) {
             for (BufferDataName n : names)
                 if (BufferData* bd = bm->GetBufferData(n))
-                    bd->debug_usage |= SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+                    bd->usage |= SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
         };
         collect(program->vertex_shader_buffer_names);
         collect(program->fragment_shader_buffer_names);
@@ -110,20 +110,20 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     // тексели, пока другие потоки их пишут), а bloom_up и bloom_composite регистрируются
     // одинаково. См. ComputeRWTextureBindingParametr::need_simultaneous.
     for (BufferData* bd : result->ro_storage_buffers)
-        if (bd) bd->debug_usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+        if (bd) bd->usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
     for (BufferData* bd : result->rw_storage_buffers)
-        if (bd) bd->debug_usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+        if (bd) bd->usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 
     for (TextureAtlas* a : result->ro_storage_textures)
-        if (a) a->debug_usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
+        if (a) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
     for (const ComputeShaderProgram::ComputeRWTextureBinding& b : result->rw_storage_textures) {
         if (!b.texture_atlas) continue;
-        b.texture_atlas->debug_usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+        b.texture_atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
         if (b.need_simultaneous)
-            b.texture_atlas->debug_usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE;
+            b.texture_atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE;
     }
     for (TextureAtlas* a : result->texture_samplers)
-        if (a) a->debug_usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        if (a) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
     ComputeShaderProgram* ptr = result.get();
     compute_shader_programs.push_back(std::move(result));

@@ -40,11 +40,12 @@ void Engine::PrepareFunc(uint8_t slot)
 	}
 
 	// ── БЕЙК GPU-РЕСУРСОВ ──
-	// Create* только ОБЪЯВЛЯЮТ обёртки (BufferData/TextureAtlas) с их usage-флагами; сами
-	// SDL_GPUBuffer/SDL_GPUTexture рождаются здесь. Место выбрано так, что:
+	// Create* только ОБЪЯВЛЯЮТ обёртки (BufferData/TextureAtlas); usage-флаги им наполняют
+	// ДЕКЛАРАЦИИ (sp/материалы/проходы/блиты), и сами SDL_GPUBuffer/SDL_GPUTexture рождаются
+	// здесь — уже по собранным флагам. Место выбрано так, что:
 	//   — игровой апдейт (game_iter_callback: создание ресурсов, ExecuteCommands, LoadScene) идёт
 	//     РАНЬШЕ prepare на этом же sim-потоке → всё, объявленное в кадре N, создаётся в кадре N;
-	//   — все декларации, дающие ресурсу флаги (sp, материалы, проходы), к этому моменту сделаны;
+	//   — все декларации, дающие ресурсу флаги, к этому моменту сделаны;
 	//   — а PackAtlases и сборка батчей НИЖЕ уже требуют готовые GPU-хэндлы (они копируют
 	//     texture_binding по значению в upload-таски и в слепок), поэтому бейк обязан быть до них.
 	// Дренаж пер-кадровый, а не разовый: игра может завести новый буфер/атлас в любой момент.
@@ -52,13 +53,6 @@ void Engine::PrepareFunc(uint8_t slot)
 		PROF_SCOPE(Sim, " bake_gpu_resources");
 		buffer_manager->BakePending();
 		texture_manager->BakePending();
-		// Сверка ручных флагов с авто-собранными — один раз, после первого дренажа (к нему сцена
-		// уже загружена: LoadScene идёт из игрового апдейта, то есть до первого prepare).
-		if (!usage_report_done) {
-			buffer_manager->ReportUsageMismatch();
-			texture_manager->ReportUsageMismatch();
-			usage_report_done = true;
-		}
 	}
 
 	{

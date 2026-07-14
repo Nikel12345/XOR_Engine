@@ -48,18 +48,17 @@ class BufferManager
 {
 public:
 	BufferManager(SDL_GPUDevice* device, TransferManager* transfer_manager);
-	BufferData* CreateBufferData(BufferDataName name, Uint32 size, SDL_GPUBufferUsageFlags usage, BufferDataType type, ResizeBehaviour resize_behaviour = ResizeBehaviour::RESIZE_ONLY);
+	// Usage-флагов в сигнатуре НЕТ: BufferData::usage наполняют ДЕКЛАРАЦИИ (CreateVertexShader,
+	// Create*Program, ручной тег INDIRECT) до бейка — GPU-буфер создаётся по ним (см. BufferData.h).
+	BufferData* CreateBufferData(BufferDataName name, Uint32 size, BufferDataType type, ResizeBehaviour resize_behaviour = ResizeBehaviour::RESIZE_ONLY);
 
-	// Отложенная инициализация GPU-ресурсов. CreateBufferData только РЕГИСТРИРУЕТ обёртку (usage +
-	// размеры) и кладёт её в pending_bakes; сам SDL_GPUBuffer создаёт этот дренаж. Зовётся КАЖДЫЙ
+	// Отложенная инициализация GPU-ресурсов. CreateBufferData только РЕГИСТРИРУЕТ обёртку (размеры)
+	// и кладёт её в pending_bakes; сам SDL_GPUBuffer создаёт этот дренаж. Зовётся КАЖДЫЙ
 	// кадр в начале Engine::PrepareFunc — до PackAtlases и сборки батчей, которые уже требуют
 	// готовые GPU-хэндлы. Игровой апдейт идёт раньше prepare на том же sim-потоке
 	// (ThreadController), поэтому ресурс, созданный в кадре N, создаётся на GPU в том же кадре N —
 	// и все объявления (sp/материалы), сделанные до этого момента, успевают дать ему свои флаги.
 	void BakePending();
-	// Диагностика перехода на автовывод флагов: печатает буферы, у которых ручной usage расходится
-	// с авто-собранным debug_usage. Ресурсы создаются по РУЧНОМУ usage — это только сверка.
-	void ReportUsageMismatch();
 
 	void CreatePrePassUpdateInstruction(BufferData& buffer_data, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
 	void CreatePrePassUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);

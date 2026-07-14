@@ -200,17 +200,16 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
     SDL_free(spv);
 
     vs.vertex_buffer_names = std::move(canonical_names);
-    // Сбор usage-флагов: перечисление здесь — ДЕКЛАРАЦИЯ «эти буфера биндятся вершинными»,
-    // а заодно «дроу этим vs индексируются из индексного буфера ИХ пула» — ровно этот вывод
-    // делает сборка батча (IndexBufferForStream), отсюда INDEX. Интентом он не эхуется:
-    // эхо ручного флага сделало бы сверку по нему пустой.
+    // Декларация usage (по ней и СОЗДАЮТСЯ буферы — см. BufferData.h): перечисление здесь =
+    // «эти буфера биндятся вершинными», а заодно «дроу этим vs индексируются из индексного
+    // буфера ИХ пула» — ровно этот вывод делает сборка батча (IndexBufferForStream).
     if (bm)
         for (BufferDataName canon : vs.vertex_buffer_names) {
             if (BufferData* bd = bm->GetBufferData(canon))
-                bd->debug_usage |= SDL_GPU_BUFFERUSAGE_VERTEX;
+                bd->usage |= SDL_GPU_BUFFERUSAGE_VERTEX;
             if (const char* ib = IndexBufferForStream(canon))
                 if (BufferData* ibd = bm->GetBufferData(ib))
-                    ibd->debug_usage |= SDL_GPU_BUFFERUSAGE_INDEX;
+                    ibd->usage |= SDL_GPU_BUFFERUSAGE_INDEX;
         }
 
     vertex_shaders[name] = std::move(vs);

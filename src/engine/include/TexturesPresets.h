@@ -39,6 +39,11 @@ enum class TexturePreset {
 };
 
 namespace TexturePresets {
+    // usage В ПРЕСЕТАХ = ТОЛЬКО НАМЕРЕНИЕ SAMPLER (атлас под текстуры материалов заводится пустым,
+    // его цель иначе не узнать — см. TextureData.h). ВСЁ остальное CreateTextureAtlas СТРИЖЁТ:
+    // роли таргетов/компьюта GPU-текстуре дают ДЕКЛАРАЦИИ (SetColorTexture/SetDepthTexture,
+    // Create*Program, CreateBlitPass, материалы) до бейка. Флаги, оставшиеся в старых пресетах
+    // ниже, — инертны.
     inline SDL_GPUTextureCreateInfo GetCreateInfo(TexturePreset preset) {
         SDL_GPUTextureCreateInfo info = {};
         info.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -88,7 +93,9 @@ namespace TexturePresets {
         case TexturePreset::Depth_FlatArray1024_8Layers:
             info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
             info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-            info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+            // Без флагов: DEPTH — из SetDepthTexture теневых проходов, SAMPLER — из
+            // SetGlobalTextures main-прохода (декларации).
+            info.usage = 0;
             info.width = 1024;
             info.height = 1024;
             info.layer_count_or_depth = 8;
@@ -170,7 +177,7 @@ namespace TexturePresets {
         case TexturePreset::ShadowRG32_FlatArray1024_8Layers:
             info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
             info.format = SDL_GPU_TEXTUREFORMAT_R32G32_FLOAT;
-            info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+            info.usage = 0;   // роли выведут декларации (проход/компьют/глобальный бинд)
             info.width = 1024;
             info.height = 1024;
             info.layer_count_or_depth = 8;
@@ -210,10 +217,8 @@ namespace TexturePresets {
         case TexturePreset::SingleDepth2048:
             info.type = SDL_GPU_TEXTURETYPE_2D;
             info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-            // Только DEPTH_STENCIL_TARGET: depth сцены используется как аттачмент (тест глубины
-            // в main/transparent/debug), но НИКЕМ не сэмплится. SAMPLER снят — авто-сбор флагов
-            // не выводит его ни из одной декларации.
-            info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+            // Без флагов: DEPTH_STENCIL_TARGET доложит SetDepthTexture прохода (декларация).
+            info.usage = 0;
             info.width = 2048;
             info.height = 2048;
             info.layer_count_or_depth = 1;
@@ -243,7 +248,7 @@ namespace TexturePresets {
         case TexturePreset::TempShadowRG32_1024:
             info.type = SDL_GPU_TEXTURETYPE_2D;
             info.format = SDL_GPU_TEXTUREFORMAT_R32G32_FLOAT;
-            info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+            info.usage = 0;   // роли выведут декларации (проход/компьют/глобальный бинд)
             info.width = 1024;
             info.height = 1024;
             info.layer_count_or_depth = 1;
@@ -283,7 +288,7 @@ namespace TexturePresets {
         case TexturePreset::TempDepth1024:
             info.type = SDL_GPU_TEXTURETYPE_2D;
             info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-            info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+            info.usage = 0;   // DEPTH — из SetDepthTexture прохода (декларация)
             info.width = 1024;
             info.height = 1024;
             info.layer_count_or_depth = 1;
@@ -292,7 +297,7 @@ namespace TexturePresets {
         case TexturePreset::Albedo_Atlas4096_3Layer:
             info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
             info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
-            info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+            info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;   // намерение; COLOR_TARGET при мипах даст мип-правило
             info.width = 4096;
             info.height = 4096;
             info.layer_count_or_depth = 3;
@@ -301,7 +306,7 @@ namespace TexturePresets {
         case TexturePreset::Albedo_Atlas2048_1Layer:
             info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
             info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
-            info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+            info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;   // намерение; COLOR_TARGET при мипах даст мип-правило
 			info.width = 2048;
 			info.height = 2048;
 			info.layer_count_or_depth = 1;
@@ -373,12 +378,8 @@ namespace TexturePresets {
     }
     inline SDL_GPUTextureCreateInfo _MaterialAtlas(uint32_t resolution, uint32_t layers,
                                                    uint32_t mip_levels, SDL_GPUTextureUsageFlags usage) {
-        // Мип-генерация (SDL_GenerateMipmapsForGPUTexture) реализована как отрисовка в уровни и
-        // требует ОБА флага — SAMPLER и COLOR_TARGET (проверено зондом, SDL_gpu.c:2498; одного
-        // COLOR_TARGET мало). Добавляем их ровно тогда, когда мипы запрошены: немипованному атласу
-        // COLOR_TARGET не нужен, а безусловная раздача = лишнее право.
-        if (mip_levels > 1)
-            usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        // usage здесь = НАМЕРЕНИЕ (SAMPLER). Мип-правило (num_levels>1 → SAMPLER|COLOR_TARGET,
+        // мип-ген требует оба — зонд) применяет сам CreateTextureAtlas, дублировать не нужно.
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
         info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
@@ -427,13 +428,13 @@ namespace TexturePresets {
     }
 
     // Env-кубмап для отражений металла: квадратные грани faceSize×faceSize, полная мип-цепочка
-    // (мипы = roughness-размытие, считаются от faceSize), COLOR_TARGET — чтобы GenerateMipmaps мог
-    // в него писать. faceSize — единственный источник истины о разрешении env-куба.
+    // (мипы = roughness-размытие, считаются от faceSize). SAMPLER|COLOR_TARGET даст мип-правило
+    // CreateTextureAtlas (num_levels>1). faceSize — единственный источник истины о разрешении.
     inline SDL_GPUTextureCreateInfo EnvCube(uint32_t faceSize) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_CUBE;
         info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
-        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+        info.usage = 0;
         info.width = faceSize;
         info.height = faceSize;
         info.layer_count_or_depth = 6;
@@ -452,12 +453,10 @@ namespace TexturePresets {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;
         info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-        // COLOR_TARGET — основной выход main-прохода; SAMPLER — present-blit и bloom-prefilter
-        // (сэмплит scene_hdr); COMPUTE_STORAGE_WRITE — bloom-composite биндит его как RW и пишет.
-        // COMPUTE_STORAGE_READ СНЯТ: он нужен лишь для SDL_BindGPUComputeStorageTextures (RO-бинд),
-        // а им никто не пользуется — RW-биндинг требует WRITE (или SIMULTANEOUS), см. SDL_gpu.h:2055.
-        info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER
-                   | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+        // Без флагов — все роли выводятся из деклараций: COLOR_TARGET — SetColorTexture main-прохода;
+        // SAMPLER — present-blit (CreateBlitPass src) и bloom-prefilter (сэмплер compute-sp);
+        // COMPUTE_STORAGE_WRITE — rw-биндинг bloom-composite.
+        info.usage = 0;
         info.width = width;
         info.height = height;
         info.layer_count_or_depth = 1;
@@ -473,7 +472,7 @@ namespace TexturePresets {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;
         info.format = SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT;
-        info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        info.usage = 0;   // COLOR_TARGET — MRT main-прохода, SAMPLER — bloom-prefilter (декларации)
         info.width = width;
         info.height = height;
         info.layer_count_or_depth = 1;
@@ -490,19 +489,14 @@ namespace TexturePresets {
     // Отдельные текстуры исключают алиасинг по построению.
     // Формат согласован с [[vk::image_format("rgba16f")]] в bloom-шейдерах.
     //
-    // simultaneous — ТОЛЬКО для уровней, которые являются НАЗНАЧЕНИЕМ апсемпла (bloom_up делает по
-    // ним честный RMW: tent-фильтр читает соседние тексели, пока другие потоки их пишут). Цикл
-    // апсемпла идёт i = BLOOM_LEVELS-2 .. 0, поэтому САМЫЙ МЕЛКИЙ уровень — только источник, и
-    // SIMULTANEOUS ему не нужен. Раньше пресет раздавал флаг всем уровням оптом; авто-сбор
-    // (need_simultaneous на rw-биндинге) показал, что последнему он не требуется.
-    // COMPUTE_STORAGE_READ снят — см. SceneHDR: RO-биндом storage-текстур никто не пользуется.
-    inline SDL_GPUTextureCreateInfo BloomLevel(uint32_t width, uint32_t height, bool simultaneous) {
+    // Без флагов — их выводят декларации bloom-программ: SAMPLER/COMPUTE_STORAGE_WRITE из
+    // сэмплер/rw-списков, SIMULTANEOUS — из тега need_simultaneous на rw-биндинге bloom_up
+    // (его получают только НАЗНАЧЕНИЯ апсемпла; самый мелкий уровень — лишь источник).
+    inline SDL_GPUTextureCreateInfo BloomLevel(uint32_t width, uint32_t height) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;
         info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
-        if (simultaneous)
-            info.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE;
+        info.usage = 0;
         info.width = width;
         info.height = height;
         info.layer_count_or_depth = 1;

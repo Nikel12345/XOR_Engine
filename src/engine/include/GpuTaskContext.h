@@ -35,7 +35,8 @@ public:
 		const ComputePassName& associated_compute_pass);
 
 	// --- Буферы: создание и инструкции жизненного цикла (форвард в BufferManager) ---
-	BufferData* CreateBufferData(BufferDataName name, Uint32 size, SDL_GPUBufferUsageFlags usage, BufferDataType type, ResizeBehaviour resize_behaviour);
+	// Без usage-флагов: BufferData::usage наполняют декларации до бейка (см. BufferData.h).
+	BufferData* CreateBufferData(BufferDataName name, Uint32 size, BufferDataType type, ResizeBehaviour resize_behaviour);
 	BufferData* GetBufferData(BufferDataName name);
 
 	void CreateUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn, UpdateInstructionOffsetFunc offset_fn = nullptr);

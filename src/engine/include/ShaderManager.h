@@ -22,7 +22,7 @@ public:
 	// (порядок списка = порядок слотов пайплайна; раскладка слота — из таблицы PosUVNormPool).
 	// Тени перечисляют один Pos-стрим; main — все три. ПОРЯДОК КРИТИЧЕН: слот со сдвинутым
 	// буфером = чтение чужого страйда = UB. bm — на вызове (не полем): каждому названному буферу
-	// собирается usage-флаг VERTEX (см. BufferData::debug_usage).
+	// декларируется VERTEX, индексному буферу их пула — INDEX (см. BufferData::usage).
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::vector<std::string>& vertex_buffer_names, BufferManager* bm);
 	void CreateFragmentShader(const std::string& name, const char* path);
 

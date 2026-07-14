@@ -96,23 +96,19 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
     atlas->tci = tci;
     atlas->debug_name = name;
 
-    // ── НАМЕРЕНИЕ (declared at creation), а не выведенное использование ──
-    // SAMPLER материального атласа граф вывести НЕ МОЖЕТ, и это принципиально: атлас заводится
-    // ПУСТЫМ, текстуры и материалы приезжают позже (другая сцена, рантайм-загрузка), а GPU-текстура
-    // после создания неизменяема. Если ждать фактического использования, атлас, в который на этой
-    // сцене ничего не положили, родится без SAMPLER — и сломается, как только текстуру в него
-    // загрузят. Отличить «атлас под материалы» от «атласа-таргета» по факту наличия TextureHandle
-    // тоже нельзя: пустые они неразличимы.
-    // Поэтому SAMPLER берём из tci — это ЗАЯВЛЕНИЕ ЦЕЛИ, зашитое в пресет (AlbedoAtlas/ORMAtlas/…
-    // объявляют себя сэмплируемыми). Фактическое использование параллельно собирает
-    // MaterialManager::CollectSamplerUsage — оно ловит обратный случай: атлас, который материалы
-    // сэмплят, а пресет SAMPLER не объявил.
-    atlas->debug_usage |= (tci.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER);
+    // РУЧНЫХ ФЛАГОВ БОЛЬШЕ НЕТ: из пришедшего tci.usage остаётся только НАМЕРЕНИЕ — SAMPLER.
+    // Его граф вывести НЕ МОЖЕТ, и это принципиально: атлас заводится ПУСТЫМ, текстуры и материалы
+    // приезжают позже (другая сцена, рантайм-загрузка), а GPU-текстура после создания неизменяема.
+    // Если ждать фактического использования, атлас, в который на этой сцене ничего не положили,
+    // родится без SAMPLER — и сломается, как только текстуру в него загрузят. Пустой атлас-под-
+    // материалы и пустой атлас-таргет неразличимы, поэтому цель заявляет ПРЕСЕТ (AlbedoAtlas/…).
+    // Остальные роли доложат ДЕКЛАРАЦИИ до бейка (проходы/sp/материалы/блиты — см. TextureData.h).
+    atlas->tci.usage &= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
     // Самовыводимый флаг: мип-ген требует ОБА — SAMPLER и COLOR_TARGET (SDL_gpu.c:2498, зонд).
     // Это факт о самом ресурсе (его num_levels), а не о графе биндов, поэтому берётся здесь.
     if (tci.num_levels > 1)
-        atlas->debug_usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+        atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 
     // GPU-текстуру создаст ближайший BakePending (начало PrepareFunc) — к тому моменту все
     // объявления, дающие атласу флаги (sp/материалы/проходы), уже сделаны.
@@ -149,9 +145,10 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, Textur
     // Свою GPU-текстуру не создаём — делим чужую. На момент вызова её может ещё не быть (источник
     // сам ждёт бейка), поэтому запоминаем ИСТОЧНИК: BakePending создаст его первым и скопирует хэндл.
     atlas->shares_with = existing_atlas;
+    // tci (включая usage-декларации, собранные источником к этому моменту) — копией; свои
+    // декларации совладельца BakePending дольёт источнику перед созданием его текстуры.
     atlas->tci = existing_atlas->tci;
     atlas->debug_name = name;
-    atlas->debug_usage |= (existing_atlas->tci.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER);   // намерение — как у источника
     atlas->texture_binding.sampler = sampler;
     atlas->width = existing_atlas->width;
     atlas->height = existing_atlas->height;
@@ -172,10 +169,25 @@ void TextureManager::BakePending()
 {
     if (pending_atlas_bakes.empty() && pending_depth_bakes.empty()) return;
 
+    // Совладельцы (shares_with) доливают СВОИ декларации источнику ДО его создания: GPU-текстура
+    // одна, и она обязана покрыть роли всех, кто её делит.
+    for (TextureAtlas* atlas : pending_atlas_bakes) {
+        if (atlas && atlas->shares_with)
+            atlas->shares_with->tci.usage |= atlas->tci.usage;
+    }
+
     // Сначала ВЛАДЕЛЬЦЫ текстур, потом совладельцы (shares_with): источник обязан существовать.
     // Источник мог быть создан в прошлом дренаже — тогда его тут уже нет, и хэндл просто копируется.
     for (TextureAtlas* atlas : pending_atlas_bakes) {
         if (!atlas || atlas->shares_with || atlas->texture_binding.texture) continue;
+        // Ни одна декларация атлас не назвала — создавать не с чем (usage=0 SDL не примет).
+        if (atlas->tci.usage == 0) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                "TextureManager::BakePending: atlas '%s' has NO declared usage "
+                "(no pass/program/material referenced it) — GPU texture NOT created.",
+                atlas->debug_name.c_str());
+            continue;
+        }
         atlas->texture_binding.texture = CreateGPU_Texture(atlas->tci);
         if (!atlas->texture_binding.texture)
             SDL_Log("TextureManager::BakePending: atlas creation failed: %s", SDL_GetError());
@@ -190,6 +202,12 @@ void TextureManager::BakePending()
 
     for (SharedDepthTarget* target : pending_depth_bakes) {
         if (!target || target->texture) continue;
+        if (target->tci.usage == 0) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                "TextureManager::BakePending: shared depth target has NO declared usage "
+                "(no pass set it as depth) — GPU texture NOT created.");
+            continue;
+        }
         target->texture = CreateGPU_Texture(target->tci);
         if (!target->texture)
             SDL_Log("TextureManager::BakePending: shared depth target failed: %s", SDL_GetError());
@@ -245,68 +263,12 @@ SDL_GPUTexture* TextureManager::CreateGPU_Texture(SDL_GPUTextureCreateInfo tci)
     return tex;
 }
 
-// Имя одного бита usage-флага текстуры.
-static const char* TextureUsageFlagName(SDL_GPUTextureUsageFlags bit)
-{
-    switch (bit) {
-    case SDL_GPU_TEXTUREUSAGE_SAMPLER:                                 return "SAMPLER";
-    case SDL_GPU_TEXTUREUSAGE_COLOR_TARGET:                            return "COLOR_TARGET";
-    case SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET:                    return "DEPTH_STENCIL_TARGET";
-    case SDL_GPU_TEXTUREUSAGE_GRAPHICS_STORAGE_READ:                   return "GRAPHICS_STORAGE_READ";
-    case SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ:                    return "COMPUTE_STORAGE_READ";
-    case SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE:                   return "COMPUTE_STORAGE_WRITE";
-    case SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE: return "SIMULTANEOUS_READ_WRITE";
-    default:                                                           return "UNKNOWN";
-    }
-}
-
-static std::string TextureUsageFlagsToString(SDL_GPUTextureUsageFlags flags)
-{
-    std::string out;
-    for (uint32_t bit = 1; bit; bit <<= 1) {
-        if (!(flags & bit)) continue;
-        if (!out.empty()) out += "|";
-        out += TextureUsageFlagName(bit);
-    }
-    return out.empty() ? "-" : out;
-}
-
-// ASCII-only: SDL_Log в Windows-консоли калечит кириллицу.
-void TextureManager::ReportUsageMismatch()
-{
-    SDL_Log("=== TEXTURE usage flags: manual (tci.usage) vs auto-collected (debug_usage) ===");
-    size_t mismatches = 0;
-
-    auto report = [&](const char* name, SDL_GPUTextureUsageFlags manual, SDL_GPUTextureUsageFlags autoflags) {
-        const SDL_GPUTextureUsageFlags missed = manual & ~autoflags;   // задано вручную, НЕ выведено
-        const SDL_GPUTextureUsageFlags extra  = autoflags & ~manual;   // выведено, вручную НЕТ
-        if (!missed && !extra) return;
-        ++mismatches;
-        SDL_Log("  %-30s mismatch: manual=[%s] auto=[%s] | NOT_DERIVED=[%s] | EXTRA=[%s]",
-            name,
-            TextureUsageFlagsToString(manual).c_str(),
-            TextureUsageFlagsToString(autoflags).c_str(),
-            TextureUsageFlagsToString(missed).c_str(),
-            TextureUsageFlagsToString(extra).c_str());
-    };
-
-    for (const auto& [name, atlas] : atlases_data) {
-        if (!atlas) continue;
-        report(name.c_str(), atlas->tci.usage, atlas->debug_usage);
-    }
-    for (const auto& target : shared_depth_targets) {
-        if (!target) continue;
-        report("<shared_depth_target>", target->tci.usage, target->debug_usage);
-    }
-
-    if (mismatches == 0) SDL_Log("  no mismatches: intent (SAMPLER from preset) + derived (targets/compute/blit/mips) == manual.");
-    else SDL_Log("  %zu mismatch(es) -- each one is a real over-grant or a real gap.", mismatches);
-}
-
 SharedDepthTarget* TextureManager::CreateSharedDepthTarget(SDL_GPUTextureCreateInfo tci)
 {
     auto target = std::make_unique<SharedDepthTarget>();
     target->tci = tci;
+    // Ручных флагов нет: DEPTH_STENCIL_TARGET доложит SetDepthTexture прохода до бейка.
+    target->tci.usage = 0;
     target->owner = this;
     // Отложенное создание — как у атласов (см. BakePending). Проходы ссылаются на таргет косвенно
     // и резолвят texture на исполнении, поэтому nullptr до бейка их не ломает.

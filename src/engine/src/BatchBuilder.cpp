@@ -123,17 +123,18 @@ void BatchBuilder::SetDummyTexture(const std::string& name, TextureManager* tm)
     TextureAtlas* atlas = it->second->atlas;
     if (!atlas) return;
 
-    atlas->debug_usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
-
-    // Та же диагностика, что в MaterialManager::CollectSamplerUsage: dummy будет забинден
-    // сэмплером, и если его атлас создан без SAMPLER — бинд упадёт абортом без имени ресурса.
-    if (!(atlas->tci.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
+    // Та же диагностика, что в MaterialManager::CollectSamplerUsage: опоздавшая декларация —
+    // атлас уже СОЗДАН без SAMPLER, бинд упадёт абортом без имени ресурса (проверка ДО доливки).
+    if (atlas->texture_binding.texture && !(atlas->tci.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-            "USAGE VIOLATION: dummy texture '%s' lives in atlas '%s', which was created WITHOUT "
-            "SDL_GPU_TEXTUREUSAGE_SAMPLER. It IS bound as a fragment sampler (fallback for missing "
-            "material slots) - the bind will abort. Declare SAMPLER in that atlas tci.",
+            "USAGE VIOLATION: dummy texture '%s' lives in atlas '%s', whose GPU texture was ALREADY "
+            "CREATED without SDL_GPU_TEXTUREUSAGE_SAMPLER. It IS bound as a fragment sampler "
+            "(fallback for missing material slots) - the bind will abort. "
+            "Declare SAMPLER at atlas creation.",
             name.c_str(), atlas->debug_name.c_str());
     }
+
+    atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;   // декларация: dummy биндится сэмплером
 }
 
 void BatchBuilder::QueueCreate(Entity entity)

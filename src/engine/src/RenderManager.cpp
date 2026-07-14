@@ -103,11 +103,11 @@ BlitPassStep* PassManager::CreateBlitPass(const BlitPassName& name, TextureAtlas
 		return nullptr;
 	}
 
-	// Сбор флагов: SDL требует у источника блита SAMPLER, у назначения — COLOR_TARGET
+	// Декларация usage: SDL требует у источника блита SAMPLER, у назначения — COLOR_TARGET
 	// (проверено зондом sandbox/BlitUsageProbe.cpp; в докстрингах SDL этого нет).
 	// Свопчейн-атлас движок не создаёт — флаги ему безразличны, но union'у это не мешает.
-	src->debug_usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
-	dst->debug_usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+	src->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
+	dst->tci.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 
 	auto data = std::make_unique<BlitPassStep>();
 	data->src = src;

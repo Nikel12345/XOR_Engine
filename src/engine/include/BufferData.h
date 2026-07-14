@@ -38,21 +38,16 @@ struct BufferData {
         Uint32 used_buffer_size[BUFFERING_LEVEL]{};
     } Dynamic;
 
-    SDL_GPUBufferUsageFlags usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-
-    // Флаги, собранные АВТОМАТИЧЕСКИ (пока только для сверки — ресурс создаётся по usage выше).
-    // Складываются из ДВУХ источников, и различие между ними принципиально:
-    //
-    //   НАМЕРЕНИЕ  — заявлено в момент создания (CreateBufferData): VERTEX / INDEX / INDIRECT.
-    //                Граф их вывести не может: вершинный и индексный буферы биндятся напрямую по
-    //                имени, источник indirect-draw зашит в RenderPassStandardBody — деклараций нет.
-    //   ИСПОЛЬЗОВАНИЕ — выведено из объявлений: CreateShaderProgram (буферы стадий →
-    //                GRAPHICS_STORAGE_READ), CreateComputeShaderProgram (ro → COMPUTE_STORAGE_READ,
-    //                rw → COMPUTE_STORAGE_WRITE).
-    //
+    // ЕДИНСТВЕННОЕ поле флагов: ручной задачи usage больше нет, GPU-буфер создаётся (BakePending)
+    // ровно по тому, что сюда сложили ДЕКЛАРАЦИИ до бейка:
+    //   CreateVertexShader        — перечисленные стримы → VERTEX, индексный буфер их пула → INDEX
+    //   CreateShaderProgram       — буферы стадий → GRAPHICS_STORAGE_READ
+    //   CreateComputeShaderProgram — ro → COMPUTE_STORAGE_READ, rw → COMPUTE_STORAGE_WRITE
+    //   ручной тег INDIRECT       — у владельца индирект-буфера в точке создания (источник
+    //                               indirect-draw = свойство раскладки батчей, декларации нет)
     // Слияние — чистый union, без приоритетов: RO и RW независимы, каждый SDL_Bind* проверяет СВОЙ
     // бит, уронить один ради другого = сломать чужой бинд.
-    // Расхождение usage vs debug_usage печатается один раз после первого бейка (ReportUsageMismatch)
-    // и означает либо лишнее право, либо непокрытую роль — «ожидаемых» расхождений больше нет.
-    SDL_GPUBufferUsageFlags debug_usage = 0;
+    // После бейка GPU-буфер неизменяем: опоздавшая декларация уронит бинд валидацией SDL
+    // (девайс создаётся с debug=true). Буфер вовсе без деклараций бейк пропускает с логом.
+    SDL_GPUBufferUsageFlags usage = 0;
 };
