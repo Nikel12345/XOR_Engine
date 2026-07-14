@@ -54,6 +54,9 @@ namespace RenderSnap {
         // Вершинные СТРИМЫ пула из объявления vs (порядок = слоты пайплайна). Пустой список =
         // резолв сорвался → draw пропускается (бинд не того стрима в слот = UB, не деградация).
         std::vector<BufferData*> vertexBuffers;
+        // Индексный буфер пула, которому принадлежат стримы (у одного пула — один; резолв на
+        // сборке батча). nullptr = резолв сорвался → draw пропускается, как у стримов.
+        BufferData* indexBuffer = nullptr;
         std::vector<BufferData*> vertexStorageBuffers;
         std::vector<BufferData*> fragmentStorageBuffers;
         uint32_t frag_uniform_count = 0;                // гейт пуша params (как в дереве)
@@ -76,6 +79,10 @@ namespace RenderSnap {
     // изменении дерева, стамп слота — присваивание указателя, O(1)).
     struct BatchLayout {
         std::vector<PassDrawList> passes;   // индекс = RenderPassStep::ordinal (порядок ordered_passes)
+        // Индирект-буфер раскладки: GPU-двойник её команд (нумерация сквозная через все проходы,
+        // поэтому свойство ВСЕЙ раскладки, не прохода/батча). Резолв на сборке — в цикле
+        // отрисовки остаётся только пер-кадровый _GetGPUBufferForFrame, без лукапа по имени.
+        BufferData* indirectBuffer = nullptr;
         uint32_t num_commands = 0;          // всего индирект-команд на камеру
         uint32_t num_instances = 0;         // всего PIB-записей (сумма инстансов всех батчей)
     };

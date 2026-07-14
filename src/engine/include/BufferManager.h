@@ -15,8 +15,8 @@
 
 namespace DefaultBuffersNames {
 	// Вершинного буфера-монолита больше нет: геометрия моделей лежит ПО СТРИМАМ пула
-	// PosUVNormPool (Pos/UV/NormTan — имена в PositionStructure.h, GeometryStreams::*).
-	inline constexpr const char* DEFAULT_INDEX_BUFFER = "_DefaultIndexBuffer";
+	// PosUVNormPool (Pos/UV/NormTan) + его ИНДЕКСНЫЙ буфер — имена в PositionStructure.h
+	// (GeometryStreams::*, PosUVNormPool::INDEX_BUFFER). У одного пула — один индексный буфер.
 	inline constexpr const char* DEFAULT_TRANSFORM_BUFFER = "_DefaultTransformBuffer";
 	inline constexpr const char* DEFAULT_CAMERA_BUFFER = "_cameraBuffer";
 	inline constexpr const char* DEFAULT_LIGHT_BUFFER = "_lightBuffer";
@@ -95,7 +95,9 @@ public:
 	TransferBufferData* ExecutePostReadbackInstructions(SDL_GPUCopyPass* cp);
 	void ExecutePostreadBackUploadTasks(SDL_GPUCopyPass* cp, uint8_t idx);
 
-	void BindGPUIndexBuffer(SDL_GPURenderPass* rp, Uint32 offset);
+	// Индексный буфер пула — из слепка батча (резолв принадлежностью пулу на сборке батча).
+	// false = бинда НЕ было — вызывающий обязан пропустить draw (indexed indirect без индексов).
+	bool BindGPUIndexBuffer(SDL_GPURenderPass* rp, const BufferData* buffer_data, Uint32 offset);
 	// Вершинные стримы батча ОДНИМ вызовом со слота 0; порядок списка = порядок слотов пайплайна.
 	// false = резолв сорвался, бинд НЕ сделан — вызывающий обязан пропустить draw (иначе UB:
 	// пайплайн ждёт в слоте k страйд стрима k, а там мусор/чужой буфер).

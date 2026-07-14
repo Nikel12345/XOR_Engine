@@ -91,7 +91,7 @@ private:
 	// delta was applied.
 	bool ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
 		TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene);
-	void FinalizeOffsets(PassManager* pass_manager);
+	void FinalizeOffsets(PassManager* pass_manager, BufferManager* bm);
 
 	// Find-or-create the batch nodes for a single entity and record its slots.
 	// Shared by full rebuild and incremental add.

@@ -14,7 +14,9 @@ BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_ma
 	CreateBufferData(GeometryStreams::VERTEX_POS_BUFFER,     BASE_VERTEX_CAPACITY * 12, SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 	CreateBufferData(GeometryStreams::VERTEX_UV_BUFFER,      BASE_VERTEX_CAPACITY * 8,  SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 	CreateBufferData(GeometryStreams::VERTEX_NORMTAN_BUFFER, BASE_VERTEX_CAPACITY * 24, SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
-	CreateBufferData(DEFAULT_INDEX_BUFFER, 8190006, SDL_GPU_BUFFERUSAGE_INDEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
+	// Индексный буфер пула (у одного пула — один): общее индексное пространство всех его моделей,
+	// финализируется индексным апдейтером вместе со стримами. Имя — в PositionStructure.h.
+	CreateBufferData(PosUVNormPool::INDEX_BUFFER, 8190006, SDL_GPU_BUFFERUSAGE_INDEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 	// PIB/трансформы/камеры читает и графика, и culling_pib.comp → оба usage-флага.
 	CreateBufferData(DEFAULT_TRANSFORM_BUFFER, BASE_TB_SIZE / 10, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_LIGHT_BUFFER, sizeof(LightLayout) * 2, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, BufferDataType::Dynamic);
@@ -29,7 +31,10 @@ BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_ma
 	
     // Индирект теперь ПО-КАМЕРНО и правится компьютом (scatter атомарно пишет num_instances),
     // поэтому + COMPUTE_STORAGE_WRITE. Заливается per-frame с num_instances=0, scatter накапливает.
-    CreateBufferData(DEFAULT_INDIRECT_BUFFER, sizeof(SDL_GPUIndexedIndirectDrawCommand) * 10, SDL_GPU_BUFFERUSAGE_INDIRECT | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE, BufferDataType::Dynamic);
+    // РУЧНОЙ тег INDIRECT в debug_usage: источник indirect-draw — свойство раскладки батчей
+    // (BatchLayout::indirectBuffer, резолв после бейка), Create*-декларации нет и не будет.
+    CreateBufferData(DEFAULT_INDIRECT_BUFFER, sizeof(SDL_GPUIndexedIndirectDrawCommand) * 10, SDL_GPU_BUFFERUSAGE_INDIRECT | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE, BufferDataType::Dynamic)
+        ->debug_usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
     // GPU-каллинг: сферы по строкам трансформов + КОМПАКТНЫЙ out_pib + entity->cmd.
     // Все Dynamic (per-slot). out_pib пишет scatter (RW). entity->cmd — RO вход scatter.
     CreateBufferData(DEFAULT_BOUND_SPHERE_BUFFER, BASE_TB_SIZE / 40, SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, BufferDataType::Dynamic);
@@ -51,14 +56,12 @@ BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, SD
     data->usage = usage;
 	data->debug_name = name;
 
-    // ── НАМЕРЕНИЕ (declared at creation), а не выведенное использование ──
-    // INDEX: индексный буфер биндится напрямую по имени (BindGPUIndexBuffer), деклараций нет.
-    // INDIRECT: источник indirect-draw зашит в RenderPassStandardBody — декларации пока нет.
-    // VERTEX сюда БОЛЬШЕ НЕ ВХОДИТ: вершинные буфера объявляются перечислением в
-    // CreateVertexShader (стримы пула) — флаг выводится там, как storage-буфера у sp.
-    constexpr SDL_GPUBufferUsageFlags kIntent = SDL_GPU_BUFFERUSAGE_INDEX
-                                              | SDL_GPU_BUFFERUSAGE_INDIRECT;
-    data->debug_usage |= (usage & kIntent);
+    // debug_usage наполняют ТОЛЬКО декларации — никакого эха ручного usage (эхо делает сверку
+    // по флагу пустой): VERTEX и INDEX выводятся в CreateVertexShader (перечисление стримов +
+    // индексный буфер их пула), storage — в Create*Program/global_bindings. Единственный флаг
+    // без Create*-декларации — INDIRECT (источник indirect-draw = свойство раскладки батчей,
+    // резолв после бейка): его владелец индирект-буфера ставит РУКАМИ в точке создания,
+    // как need_simultaneous у compute-текстур. Несовпадение ЛЮБОГО флага попадает в отчёт.
 
     // ОТЛОЖЕННОЕ СОЗДАНИЕ: здесь только РАЗМЕРЫ, сам SDL_GPUBuffer создаст BakePending (начало
     // PrepareFunc). Потребителям это безразлично: они держат BufferData* и берут GPU-хэндл через
@@ -158,7 +161,7 @@ void BufferManager::ReportUsageMismatch()
             BufferUsageFlagsToString(missed).c_str(),
             BufferUsageFlagsToString(extra).c_str());
     }
-    if (mismatches == 0) SDL_Log("  no mismatches: intent (INDEX/INDIRECT) + derived (VERTEX + storage) == manual.");
+    if (mismatches == 0) SDL_Log("  no mismatches: derived (VERTEX/INDEX + storage) + hand-tag (INDIRECT) == manual.");
     else SDL_Log("  %zu mismatch(es) -- each one is a real over-grant or a real gap.", mismatches);
 }
 

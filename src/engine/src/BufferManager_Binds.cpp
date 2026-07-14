@@ -1,30 +1,23 @@
 #include "PCH.h"
 #include "BufferManager.h"
 
-void BufferManager::BindGPUIndexBuffer(SDL_GPURenderPass* rp, Uint32 offset)
+// Индексный буфер пула шейдер-батча: отрезолвлен на сборке батча (принадлежность пулу по
+// стримам vs) и приезжает из слепка. false = бинда НЕ было — вызывающий обязан пропустить
+// draw: indexed indirect со стейлым/несбинженным индексным буфером — UB, не деградация.
+bool BufferManager::BindGPUIndexBuffer(SDL_GPURenderPass* rp, const BufferData* buffer_data, Uint32 offset)
 {
-    BufferData* data = GetBufferData(DefaultBuffersNames::DEFAULT_INDEX_BUFFER);
-    if (!data) {
-        SDL_Log("BindGPUIndexBuffer::Index buffer 'DefaultIndexBuffer' not found");
-        return;
-    }
-
-    if (data->type != BufferDataType::Static) {
-        SDL_Log("Index buffer 'DefaultIndexBuffer' is not static");
-        return;
-    }
-
-    SDL_GPUBuffer* buf = data->Static.buffer;
-    if (!buf) {
-        SDL_Log("Index buffer 'DefaultIndexBuffer' has null buffer pointer");
-        return;
+    if (!buffer_data || buffer_data->type != BufferDataType::Static || !buffer_data->Static.buffer) {
+        SDL_Log("BindGPUIndexBuffer: index buffer '%s' is missing/not static/null — bind skipped",
+            buffer_data ? buffer_data->debug_name.c_str() : "<null>");
+        return false;
     }
 
     SDL_GPUBufferBinding ibind{};
-    ibind.buffer = buf;
+    ibind.buffer = buffer_data->Static.buffer;
     ibind.offset = offset;
 
     SDL_BindGPUIndexBuffer(rp, &ibind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+    return true;
 }
 
 // Вершинные стримы шейдер-батча: список объявлен вершинником (CreateVertexShader, перечисление

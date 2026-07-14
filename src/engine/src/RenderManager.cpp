@@ -367,6 +367,14 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 	if (!render_layout || render_pass_step.ordinal >= render_layout->passes.size()) return;
 	const RenderSnap::PassDrawList& pass_list = render_layout->passes[render_pass_step.ordinal];
 
+	// Индирект-буфер раскладки — из слепка (BufferData* отрезолвлен в FinalizeOffsets); здесь
+	// только пер-кадровый хэндл. Нет буфера — рисовать нечем (все дроу этого слепка — indirect).
+	SDL_GPUBuffer* indirect_buf = bm->_GetGPUBufferForFrame(render_layout->indirectBuffer, render_frame);
+	if (!indirect_buf) {
+		SDL_Log("ExecuteRenderBatches: indirect buffer is missing — pass draw list skipped");
+		return;
+	}
+
 	// Глобальные сэмплеры прохода — из СЛЕПКА (отрезолвлены на сборке батча), не из живого
 	// прохода: их GPU-текстуры могут пересоздаваться, а рендер обязан видеть согласованный слот.
 	const std::vector<SDL_GPUTextureSamplerBinding>& global_samplers = pass_list.global_texture_bindings;
@@ -385,7 +393,11 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 			SDL_Log("ExecuteRenderBatches: vertex stream bind failed — shader batch skipped");
 			continue;
 		}
-		bm->BindGPUIndexBuffer(rp, 0);
+		// Индексный буфер пула батча — из слепка (та же дисциплина, что у стримов).
+		if (!bm->BindGPUIndexBuffer(rp, shader_batch.indexBuffer, 0)) {
+			SDL_Log("ExecuteRenderBatches: index buffer bind failed — shader batch skipped");
+			continue;
+		}
 
 		PushConstantBinder binder{ cb, render_frame };
 		if (shader_batch.push_func) {
@@ -426,7 +438,7 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 				}
 
 				SDL_DrawGPUIndexedPrimitivesIndirect(rp,
-					bm->_GetGPUBufferForFrame(bm->GetBufferData(DefaultBuffersNames::DEFAULT_INDIRECT_BUFFER), render_frame),
+					indirect_buf,
 					safe_u32(additional_offset +
 						texture_batch.indirect_command_index * sizeof(SDL_GPUIndexedIndirectDrawCommand)),
 					texture_batch.draw_count

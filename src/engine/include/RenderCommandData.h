@@ -44,6 +44,8 @@ struct ShaderBatchData {
     std::function<void(const PushConstantBinder&, const void*)> push_func = {};
     std::unordered_map<BatchKeys::AtlasBatchKey, AtlasBatchData> atlases_batches;
 	std::vector<BufferData*> vertexBuffers;
+	// Индексный буфер пула, которому принадлежат стримы vs (у одного пула — один).
+	BufferData* indexBuffer = nullptr;
     std::vector<BufferData*> vertexStorageBuffers;
     std::vector<BufferData*> fragmentStorageBuffers;
     SDL_GPUGraphicsPipeline* pipeline = nullptr;

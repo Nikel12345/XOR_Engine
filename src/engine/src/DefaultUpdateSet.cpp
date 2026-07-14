@@ -196,7 +196,9 @@ void DefaultUpdateSet::SetDefaultIndexUpdater(EngineContext& ctx)
     }
     auto* bm = ctx.GetBufferManager();
     auto* mm = ctx.GetModelManager();
-    bm->CreateUpdateInstruction(DEFAULT_INDEX_BUFFER,
+    // Индексный буфер — ПУЛА (PosUVNormPool), не глобальный: финализирует цикл дозагрузки
+    // своего пула (см. инвариант порядка у SetDefaultVertexUpdater выше).
+    bm->CreateUpdateInstruction(PosUVNormPool::INDEX_BUFFER,
         [mm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
         mm->UploadModelIndexBuffer(bm, &task);

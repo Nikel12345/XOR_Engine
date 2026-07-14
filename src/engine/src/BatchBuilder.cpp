@@ -8,6 +8,7 @@
 #include "ShaderManager.h"
 #include "TextureManager.h"   // резолв имён текстур материала → TextureHandle на сборке батча
 #include "BufferManager.h"    // резолв имён storage-буферов sp → BufferData* на сборке батча
+#include "PositionStructure.h" // IndexBufferForStream — индексный буфер пула по стримам vs
 #include "ModelData.h"
 #include "TextureData.h"
 #include <unordered_set>
@@ -210,8 +211,14 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
                 // Вершинные СТРИМЫ пула — из объявления вершинника (vs.vertex_buffer_names,
                 // порядок = слоты пайплайна). Резолв здесь же; пустой список = vs не найден или
                 // стрим-имя протухло → бинд-шаг пропустит draw (сдвиг слота = UB).
-                if (VertexShaderData* vsd = sm->GetVertexShader(sp->vs_name))
+                // Индексный буфер — принадлежность ПУЛА: у одного пула — один, определяется
+                // стримами vs (все стримы объявления из одного пула — валидирует CreateVertexShader).
+                if (VertexShaderData* vsd = sm->GetVertexShader(sp->vs_name)) {
                     new_batch.vertexBuffers = resolve_buffers(vsd->vertex_buffer_names);
+                    if (!vsd->vertex_buffer_names.empty())
+                        if (const char* ib = IndexBufferForStream(vsd->vertex_buffer_names.front()))
+                            new_batch.indexBuffer = bm->GetBufferData(ib);
+                }
                 FragmentShaderData* fsd = sm->GetFragmentShader(sp->fs_name);   // fs по имени из реестра
                 new_batch.frag_uniform_count = fsd ? fsd->shader_data.num_uniform_buffers : 0u;
                 shader_map[sp_key] = std::move(new_batch);
@@ -359,14 +366,14 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
     bool changed = false;
     if (dirty_batches.exchange(false)) {
         BuildRenderBatches(pm, pass_manager, om, tm, sm, bm, scene);
-        FinalizeOffsets(pass_manager);
+        FinalizeOffsets(pass_manager, bm);
         // Полная пересборка переклеила ВСЮ раскладку (indirect_command_index, firstInstance).
         // Бампим эпоху — слоты, залитые под старой раскладкой, рендер больше не покажет.
         ++rebuild_epoch;
         changed = true;
     }
     else if (ApplyIncremental(pm, pass_manager, om, tm, sm, bm, scene)) {
-        FinalizeOffsets(pass_manager);
+        FinalizeOffsets(pass_manager, bm);
         changed = true;
     }
 
@@ -472,7 +479,7 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
     return true;
 }
 
-void BatchBuilder::FinalizeOffsets(PassManager* pass_manager)
+void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
 {
     uint32_t offset = 0;
     uint32_t command_index = 0;
@@ -483,6 +490,9 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager)
     // слота k рисует ровно по раскладке, под которую залит его indirect_buffer[k].
     auto layout = std::make_shared<RenderSnap::BatchLayout>();
     layout->passes.reserve(pass_manager->GetOrderedRenderPasses().size());
+    // Индирект-буфер раскладки — свойство всей раскладки (сквозная нумерация команд), резолв
+    // здесь: цикл отрисовки не лазит в реестр по имени на каждый texture batch.
+    layout->indirectBuffer = bm->GetBufferData(DefaultBuffersNames::DEFAULT_INDIRECT_BUFFER);
 
     for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses())
     {
@@ -509,6 +519,7 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager)
             sg.pipeline = shader_batch.pipeline;
             sg.push_func = shader_batch.push_func;
             sg.vertexBuffers = shader_batch.vertexBuffers;
+            sg.indexBuffer = shader_batch.indexBuffer;
             sg.vertexStorageBuffers = shader_batch.vertexStorageBuffers;
             sg.fragmentStorageBuffers = shader_batch.fragmentStorageBuffers;
             sg.frag_uniform_count = shader_batch.frag_uniform_count;

@@ -57,6 +57,11 @@ inline const ShaderBase::VertexFormat FMT_NormTanStream = {
 };
 
 namespace PosUVNormPool {
+    // Индексный буфер пула: у ОДНОГО пула — ОДИН. Индексное пространство общее для всех моделей
+    // пула (first_index индирект-команд — сквозной), а заливка финализируется индексным
+    // апдейтером ВМЕСТЕ со стримами — чужому пулу в этот цикл не встать.
+    inline constexpr const char* INDEX_BUFFER = "_PosUVNormIndexBuffer";
+
     struct Stream {
         const char* buffer_name;
         const ShaderBase::VertexFormat* format;
@@ -90,13 +95,10 @@ namespace PosUVNormPool {
     }
 }
 
-
-//std::vector<PosUV> MakeCubeVertices();
-std::vector<PosUVNormal> MakeCubeVerticesNorm();
-
-//std::vector<PosUV> MakeSphereVertices();
-std::vector<Uint16> MakeSphereIndices();
-
-
-extern const std::vector<Uint16> IndicesCube;
-extern const std::vector<Uint16> IndicesSquare;
+// Индексный буфер пула, которому принадлежит стрим (nullptr — стрим неизвестен). Пул шейдер-батча
+// определяется его стримами, отсюда сборка батча резолвит индексный буфер в слепок. Появится
+// второй пул — добавить его проверку здесь.
+inline const char* IndexBufferForStream(std::string_view stream_buffer_name) {
+    if (PosUVNormPool::FindStream(stream_buffer_name)) return PosUVNormPool::INDEX_BUFFER;
+    return nullptr;
+}
