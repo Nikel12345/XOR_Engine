@@ -278,12 +278,12 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
     return ptr;
 }
 
-uint32_t ModelManager::CalculateModelsVerticesSize()
+uint32_t ModelManager::CalculateModelsVerticesSize(uint32_t stream_stride)
 {
-    // Чистый геттер: staging заполнен жадно в CreateModel.
+    // Чистый геттер: staging заполнен жадно в CreateModel. Размер — на ОДИН стрим пула.
     if (!dirty)
         return 0;
-    return safe_u32(staging_vertices.size() * sizeof(PosUVNormal));
+    return safe_u32(staging_vertices.size() * stream_stride);
 }
 
 uint32_t ModelManager::CalculateModelsIndicesSize()
@@ -293,11 +293,17 @@ uint32_t ModelManager::CalculateModelsIndicesSize()
     return safe_u32(staging_indices.size() * sizeof(Uint32));
 }
 
-void ModelManager::UploadModelVertexBuffer(BufferManager* bm, UploadTask* task)
+void ModelManager::UploadModelVertexStream(BufferManager* bm, UploadTask* task, uint32_t src_offset, uint32_t stream_stride)
 {
     if (!dirty || staging_vertices.empty()) return;
-    uint32_t bytes = safe_u32(staging_vertices.size() * sizeof(PosUVNormal));
-    bm->UploadToTransferBuffer(task, bytes, staging_vertices.data());
+    // Стейджинг — интерлив (формат ЗАГРУЗКИ, PosUVNormal); стрим — плотный срез каждой вершины.
+    // Гатер прямо в mapped transfer-буфер (write-combined: только писать), без промежуточной копии.
+    const uint32_t bytes = safe_u32(staging_vertices.size() * stream_stride);
+    std::byte* dst = static_cast<std::byte*>(bm->AcquireTransferWritePtr(task, bytes));
+    if (!dst) return;
+    const std::byte* src = reinterpret_cast<const std::byte*>(staging_vertices.data()) + src_offset;
+    for (size_t i = 0; i < staging_vertices.size(); ++i)
+        SDL_memcpy(dst + i * stream_stride, src + i * sizeof(PosUVNormal), stream_stride);
 }
 
 void ModelManager::UploadModelIndexBuffer(BufferManager* bm, UploadTask* task)
@@ -306,12 +312,12 @@ void ModelManager::UploadModelIndexBuffer(BufferManager* bm, UploadTask* task)
     uint32_t ibytes = safe_u32(staging_indices.size() * sizeof(Uint32));
     bm->UploadToTransferBuffer(task, ibytes, staging_indices.data());
 
-    // Индексный апдейтер идёт последним — финализируем цикл дозагрузки.
+    // Индексный апдейтер идёт последним (после ВСЕХ стрим-заливок) — финализируем цикл дозагрузки.
     // Счётчики двигаем только здесь, после реальной заливки: пока модели лежат в staging,
     // CreateModel считает их смещения от total_* + размера staging (см. курсоры там).
     total_vertices_count += safe_u32(staging_vertices.size());
     total_indices_count += safe_u32(staging_indices.size());
-    gpu_vertices_bytes += safe_u32(staging_vertices.size() * sizeof(PosUVNormal));
+    gpu_vertices_count += safe_u32(staging_vertices.size());
     gpu_indices_bytes += ibytes;
 
     staging_vertices.clear();

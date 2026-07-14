@@ -311,8 +311,8 @@ void EngineContext::CreateFragmentShader(const std::string& name, const char* pa
 	if (auto* d = shader_manager->GetFragmentShader(name)) d->dont_save = dont_save;
 }
 
-void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<VertexBufferBinding> vertex_buffer_layout, bool dont_save) {
-	gpu_ctx->CreateVertexShader(name, hlsl_path, vertex_buffer_layout);
+void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<const char*> vertex_buffer_names, bool dont_save) {
+	gpu_ctx->CreateVertexShader(name, hlsl_path, vertex_buffer_names);
 	if (auto* d = shader_manager->GetVertexShader(name)) d->dont_save = dont_save;
 }
 

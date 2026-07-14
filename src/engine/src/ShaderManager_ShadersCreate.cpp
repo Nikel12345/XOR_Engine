@@ -1,5 +1,7 @@
 ﻿#include "PCH.h"
 #include "ShaderManager.h"
+#include "BufferManager.h"        // сбор usage-флага VERTEX по перечислению стримов vs
+#include "PositionStructure.h"    // PosUVNormPool — раскладки стримов для слотов vs
 #include <string_view>
 
 using namespace ShaderBase;
@@ -163,13 +165,48 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
 }
 
 void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl_path,
-    const std::vector<VertexBufferBinding>& bindings)
+    const std::vector<std::string>& vertex_buffer_names, BufferManager* bm)
 {
+    // Имена стримов → биндинги слотов: раскладку каждого слота даёт таблица пула. Слот получает
+    // ВСЕ семантики своего стрима (лишние атрибуты валидны — HLSL может их не читать; обратное —
+    // чтение необъявленного — ловит рефлексия в BuildVertexShader). Неизвестное имя = отказ
+    // ЦЕЛИКОМ: собрать пайплайн с пропущенным слотом = UB со сдвинутыми страйдами.
+    // Резолвим ИМЕНА (в т.ч. динамические строки из манифеста/UI) в записи таблицы пула.
+    // stream->buffer_name — КАНОНИЧНЫЙ BufferDataName (тот же inline-constexpr литерал, которым
+    // буфер создан): реестр BufferManager ключуется по указателю, динамическая строка мимо.
+    std::vector<VertexBufferBinding> bindings;
+    std::vector<BufferDataName> canonical_names;
+    bindings.reserve(vertex_buffer_names.size());
+    canonical_names.reserve(vertex_buffer_names.size());
+    for (const std::string& buf_name : vertex_buffer_names) {
+        const PosUVNormPool::Stream* stream = PosUVNormPool::FindStream(buf_name);
+        if (!stream) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                "CreateVertexShader '%s': '%s' is not a vertex stream of any geometry pool — shader NOT created.",
+                name.c_str(), buf_name.c_str());
+            return;
+        }
+        std::vector<VertexSemantic> pull;
+        pull.reserve(stream->format->attrs.size());
+        for (const auto& a : stream->format->attrs) pull.push_back(a.semantic);
+        bindings.push_back({ stream->format, std::move(pull) });
+        canonical_names.push_back(stream->buffer_name);
+    }
+
     size_t n = 0;
     Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_VERTEX, n);
     if (!spv) return;
-    vertex_shaders[name] = BuildVertexShader(spv, n, hlsl_path, bindings);   // в реестр по имени
+    VertexShaderData vs = BuildVertexShader(spv, n, hlsl_path, bindings);   // в реестр по имени
     SDL_free(spv);
+
+    vs.vertex_buffer_names = std::move(canonical_names);
+    // Сбор usage-флагов: перечисление здесь — ДЕКЛАРАЦИЯ «эти буфера биндятся вершинными».
+    if (bm)
+        for (BufferDataName canon : vs.vertex_buffer_names)
+            if (BufferData* bd = bm->GetBufferData(canon))
+                bd->debug_usage |= SDL_GPU_BUFFERUSAGE_VERTEX;
+
+    vertex_shaders[name] = std::move(vs);
 }
 
 void ShaderManager::CreateFragmentShader(const std::string& name, const char* hlsl_path)

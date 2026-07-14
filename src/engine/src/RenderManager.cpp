@@ -378,7 +378,13 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 		SDL_BindGPUGraphicsPipeline(rp, shader_batch.pipeline);
 		SDL_BindGPUFragmentSamplers(rp, 0, global_samplers.data(), global_sampler_count);
 
-		bm->BindGPUVertexBuffer(rp, 0, 0);
+		// Вершинные стримы — список из объявления vs (слепок), порядок = слоты пайплайна.
+		// Сбой бинда = ПРОПУСК шейдер-батча целиком: пайплайн ждёт в слоте k страйд стрима k,
+		// рисовать с несбинженными/сдвинутыми слотами — UB, а не деградация.
+		if (!bm->BindGPUVertexBuffers(rp, shader_batch.vertexBuffers)) {
+			SDL_Log("ExecuteRenderBatches: vertex stream bind failed — shader batch skipped");
+			continue;
+		}
 		bm->BindGPUIndexBuffer(rp, 0);
 
 		PushConstantBinder binder{ cb, render_frame };

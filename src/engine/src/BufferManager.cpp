@@ -2,10 +2,18 @@
 #include "BufferManager.h"
 #include "CameraStruct.h"
 #include "LightStruct.h"
+#include "PositionStructure.h"   // GeometryStreams::* — имена стрим-буферов пула
 
 BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_manager) : dev(device), trm(transfer_manager) {
     using namespace DefaultBuffersNames;
-	CreateBufferData(DEFAULT_VERTEX_BUFFER, 8190600, SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
+	// Стримы пула PosUVNormPool (см. PositionStructure.h): вершины моделей по группам, каждый
+	// стрим — свой буфер (растут независимо через RESIZE_AND_COPY, но В НОГУ по элементам —
+	// канон продвижения у ModelManager). Ёмкости = общий запас вершин × страйд стрима, чтобы
+	// стримы вмещали одинаковое число вершин (старый монолит: 8190600 Б / 44 Б ≈ 186k вершин).
+	constexpr Uint32 BASE_VERTEX_CAPACITY = 186150;
+	CreateBufferData(GeometryStreams::VERTEX_POS_BUFFER,     BASE_VERTEX_CAPACITY * 12, SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
+	CreateBufferData(GeometryStreams::VERTEX_UV_BUFFER,      BASE_VERTEX_CAPACITY * 8,  SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
+	CreateBufferData(GeometryStreams::VERTEX_NORMTAN_BUFFER, BASE_VERTEX_CAPACITY * 24, SDL_GPU_BUFFERUSAGE_VERTEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 	CreateBufferData(DEFAULT_INDEX_BUFFER, 8190006, SDL_GPU_BUFFERUSAGE_INDEX, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 	// PIB/трансформы/камеры читает и графика, и culling_pib.comp → оба usage-флага.
 	CreateBufferData(DEFAULT_TRANSFORM_BUFFER, BASE_TB_SIZE / 10, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, BufferDataType::Dynamic);
@@ -44,13 +52,11 @@ BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, SD
 	data->debug_name = name;
 
     // ── НАМЕРЕНИЕ (declared at creation), а не выведенное использование ──
-    // Структурные роли буфера граф вывести не может, и не сможет: вершинный и индексный буферы
-    // биндятся напрямую по имени (BindGPUVertexBuffer/BindGPUIndexBuffer), а источник indirect-draw
-    // зашит в RenderPassStandardBody — деклараций, из которых это следует, попросту нет. Это
-    // ЗАЯВЛЕНИЕ ЦЕЛИ в момент создания, симметрично SAMPLER'у материального атласа.
-    // Всё остальное (GRAPHICS/COMPUTE storage) собирается из объявлений шейдерных программ.
-    constexpr SDL_GPUBufferUsageFlags kIntent = SDL_GPU_BUFFERUSAGE_VERTEX
-                                              | SDL_GPU_BUFFERUSAGE_INDEX
+    // INDEX: индексный буфер биндится напрямую по имени (BindGPUIndexBuffer), деклараций нет.
+    // INDIRECT: источник indirect-draw зашит в RenderPassStandardBody — декларации пока нет.
+    // VERTEX сюда БОЛЬШЕ НЕ ВХОДИТ: вершинные буфера объявляются перечислением в
+    // CreateVertexShader (стримы пула) — флаг выводится там, как storage-буфера у sp.
+    constexpr SDL_GPUBufferUsageFlags kIntent = SDL_GPU_BUFFERUSAGE_INDEX
                                               | SDL_GPU_BUFFERUSAGE_INDIRECT;
     data->debug_usage |= (usage & kIntent);
 
@@ -152,7 +158,7 @@ void BufferManager::ReportUsageMismatch()
             BufferUsageFlagsToString(missed).c_str(),
             BufferUsageFlagsToString(extra).c_str());
     }
-    if (mismatches == 0) SDL_Log("  no mismatches: intent (VERTEX/INDEX/INDIRECT) + derived (storage) == manual.");
+    if (mismatches == 0) SDL_Log("  no mismatches: intent (INDEX/INDIRECT) + derived (VERTEX + storage) == manual.");
     else SDL_Log("  %zu mismatch(es) -- each one is a real over-grant or a real gap.", mismatches);
 }
 

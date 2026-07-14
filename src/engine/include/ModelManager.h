@@ -48,17 +48,19 @@ public:
 	// переживает загрузку). Возвращает число успешно загруженных.
 	size_t LoadSceneModels(const std::vector<SceneModelEntry>& entries);
 
-	uint32_t CalculateModelsVerticesSize();
+	// Размер заливки ОДНОГО стрима пула (staging_count × stride стрима) и её append-точка
+	// (уже залито вершин × stride). Страйд приходит от вызывающего (DefaultUpdateSet берёт его
+	// из таблицы пула PosUVNormPool) — MM знает только элементный счётчик, канон продвижения.
+	uint32_t CalculateModelsVerticesSize(uint32_t stream_stride);
 	uint32_t CalculateModelsIndicesSize();
 
-	// Базовое смещение (в байтах) для дозаписи в конец GPU-буфера — append-точка.
-	// Менеджер сам знает конец своих буферов; это число прокидывается в offset_fn,
-	// чтобы EnsureBufferCapacity учёл его при расчёте ёмкости.
-	// Base offset (in bytes) for appending to the end of the GPU buffer — the append point.
-	uint32_t GetVertexBaseOffset() const { return gpu_vertices_bytes; }
+	uint32_t GetVertexBaseOffset(uint32_t stream_stride) const { return gpu_vertices_count * stream_stride; }
 	uint32_t GetIndexBaseOffset()  const { return gpu_indices_bytes; }
 
-	void UploadModelVertexBuffer(BufferManager* bm, UploadTask* task);
+	// Заливка одного стрима: выдирает из интерлив-стейджинга (PosUVNormal) срез
+	// [src_offset, src_offset + stream_stride) каждой вершины и пишет плотно в transfer-буфер.
+	// src_offset/stride — из таблицы пула (Stream::src_offset / format->stride).
+	void UploadModelVertexStream(BufferManager* bm, UploadTask* task, uint32_t src_offset, uint32_t stream_stride);
 	void UploadModelIndexBuffer(BufferManager* bm, UploadTask* task);
 	bool CheckDirty() const { return dirty; };
 	bool CheckDirtySpheres() const { return dirty_spheres; };
@@ -85,6 +87,8 @@ private:
 	// Счётчики, растущие за каждую загрузку модели (а не размер CPU-буфера).
 	uint32_t total_vertices_count = 0;   // всего зарегистрировано вершин (элементы) — для submesh offset
 	uint32_t total_indices_count = 0;    // всего зарегистрировано индексов (элементы)
-	uint32_t gpu_vertices_bytes = 0;     // уже залито на GPU (байты) — база append для вершин
-	uint32_t gpu_indices_bytes = 0;      // уже залито на GPU (байты) — база append для индексов
+	// Уже залито на GPU. Вершины — В ЭЛЕМЕНТАХ (канон lockstep-продвижения всех стримов пула:
+	// байтовая append-точка стрима = счётчик × его stride); индексы — в байтах, буфер один.
+	uint32_t gpu_vertices_count = 0;
+	uint32_t gpu_indices_bytes = 0;
 };

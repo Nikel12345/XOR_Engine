@@ -162,20 +162,29 @@ void DefaultUpdateSet::SetDefaultVertexUpdater(EngineContext& ctx)
     }
     auto* bm = ctx.GetBufferManager();
     auto* mm = ctx.GetModelManager();
-    bm->CreateUpdateInstruction(DEFAULT_VERTEX_BUFFER,
-        [mm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
-    {
-        mm->UploadModelVertexBuffer(bm, &task);
-    },
-        [mm]() -> uint32_t
-    {
-        return mm->CalculateModelsVerticesSize();
-    },
-        [mm]() -> uint32_t
-    {
-        return mm->GetVertexBaseOffset();
+    // По инструкции НА КАЖДЫЙ СТРИМ пула: стейджинг один (интерлив PosUVNormal), каждая заливка
+    // выдирает свой срез (src_offset/stride из таблицы пула). Индексный апдейтер регистрируется
+    // ПОЗЖЕ (см. Engine::InitDefaultBufferUpdaters) — он финализирует счётчики и чистит стейджинг,
+    // поэтому все стрим-инструкции обязаны отработать до него (порядок регистрации = порядок
+    // исполнения в _ExecuteUpdateInstructions).
+    for (const PosUVNormPool::Stream& s : PosUVNormPool::streams) {
+        const uint32_t src_offset = s.src_offset;
+        const uint32_t stride = s.format->stride;
+        bm->CreateUpdateInstruction(s.buffer_name,
+            [mm, src_offset, stride](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+        {
+            mm->UploadModelVertexStream(bm, &task, src_offset, stride);
+        },
+            [mm, stride]() -> uint32_t
+        {
+            return mm->CalculateModelsVerticesSize(stride);
+        },
+            [mm, stride]() -> uint32_t
+        {
+            return mm->GetVertexBaseOffset(stride);
+        }
+        );
     }
-    );
     vertex_update_inited = true;
 }
 

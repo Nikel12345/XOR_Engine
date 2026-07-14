@@ -8,3 +8,5 @@ scripts/texture_packer/venv
 scripts/scene_gen/venv
 !scripts/model_loader/raw/.gitkeep
 todo.txt
+osd
+osd/

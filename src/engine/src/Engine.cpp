@@ -184,7 +184,8 @@ void Engine::InitDefaultResources()
 		using namespace DefaultBuffersNames;
 		engine_context->CreateVertexShader("_fallback_vs",
 			"../engine/shaders_code/main_pass/main_pass.vert.hlsl",
-			{ { &FMT_PosUVNormal, { POSITION, UV, NORMAL, TANGENT } } }, /*dont_save=*/true);
+			{ GeometryStreams::VERTEX_POS_BUFFER, GeometryStreams::VERTEX_UV_BUFFER, GeometryStreams::VERTEX_NORMTAN_BUFFER },
+			/*dont_save=*/true);
 		engine_context->CreateFragmentShader("_fallback_fs", "../engine/shaders_code/main_pass/untextured/surface.hlsl", /*dont_save=*/true);
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry()->DoesNotCull();

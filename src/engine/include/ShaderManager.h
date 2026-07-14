@@ -16,9 +16,14 @@ public:
 	ShaderManager(SDL_GPUDevice* device);
 	// Create*Shader компилируют и КЛАДУТ результат в именованный реестр (vertex_shaders/
 	// fragment_shaders/compute_shaders); sp/csp ссылаются на них по ИМЕНИ. Повтор с тем же именем
-	// перезаписывает запись. bindings/texture_slots — vector (не initializer_list), вызовы из кода
-	// с braced-init { … } по-прежнему компилируются.
-	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::vector<ShaderBase::VertexBufferBinding>& bindings);
+	// перезаписывает запись.
+	//
+	// Вершинник объявляет ПОТРЕБЛЯЕМЫЕ СТРИМЫ пула перечислением имён вершинных буферов
+	// (порядок списка = порядок слотов пайплайна; раскладка слота — из таблицы PosUVNormPool).
+	// Тени перечисляют один Pos-стрим; main — все три. ПОРЯДОК КРИТИЧЕН: слот со сдвинутым
+	// буфером = чтение чужого страйда = UB. bm — на вызове (не полем): каждому названному буферу
+	// собирается usage-флаг VERTEX (см. BufferData::debug_usage).
+	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::vector<std::string>& vertex_buffer_names, BufferManager* bm);
 	void CreateFragmentShader(const std::string& name, const char* path);
 
 	// bm передаётся НА ВЫЗОВЕ (не хранится полем): sp ссылается на буферы по имени, а usage-флаг

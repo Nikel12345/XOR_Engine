@@ -10,7 +10,7 @@
 #include "PipeManager.h"       // инвалидация пайплайна при merge-upsert sp
 #include "RenderManager.h"     // PassManager — резолв прохода sp по имени
 #include "BufferManager.h"     // резолв имён буферов sp → каноничный BufferDataName
-#include "PositionStructure.h" // FMT_PosUVNormal — фиксированная раскладка вершин при загрузке VSD
+#include "PositionStructure.h" // PosUVNormPool — семантики pull манифеста → стримы пула (загрузка VSD)
 #include "BatchBuilder.h"
 #include "EngineContext.h"
 #include <fstream>      // Save/LoadScene: файлы сцены-папки
@@ -278,8 +278,10 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 			yyjson_mut_obj_add_strcpy(doc, e, "name", name.c_str());
 			yyjson_mut_obj_add_strcpy(doc, e, "path", d.source_path.c_str());
 			yyjson_mut_val* pull = yyjson_mut_obj_add_arr(doc, e, "pull");
-			if (!d.bindings.empty())
-				for (VertexSemantic s : d.bindings.front().pull)
+			// Все биндинги, не только первый: со стримами пула их несколько (Pos/UV/NormTan —
+			// по слоту на стрим), а pull манифеста — объединение семантик по всем слотам.
+			for (const auto& b : d.bindings)
+				for (VertexSemantic s : b.pull)
 					yyjson_mut_arr_add_str(doc, pull, SemToStr(s));
 		}
 		// -- FSD / CSD: имя + путь --
@@ -475,9 +477,15 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 						size_t pi, pm; yyjson_val* ps;
 						yyjson_arr_foreach(pa, pi, pm, ps) pull.push_back(SemFromStr(yyjson_get_str(ps)));
 					}
-					if (pull.empty()) pull.push_back(POSITION);
-					std::vector<VertexBufferBinding> binds = { { &FMT_PosUVNormal, pull } };   // формат пока фиксирован
-					sm->CreateVertexShader(name, path.c_str(), binds);
+					if (pull.empty()) {
+						// ДОБАВИТЬ ЛОГ!
+					}
+					// Манифест говорит СЕМАНТИКАМИ (pull) — язык стабилен, файлы сцен не мигрируются.
+					// Семантики → имена стрим-буферов пула (POSITION→Pos, UV→UV, NORMAL/TANGENT→NormTan):
+					// shadow_vs [POSITION] получает один Pos-стрим — 12 байт/вершину вместо интерлива.
+					std::vector<const char*> stream_names = PosUVNormPool::StreamsForSemantics(pull);
+					std::vector<std::string> buf_names(stream_names.begin(), stream_names.end());
+					sm->CreateVertexShader(name, path.c_str(), buf_names, buffer_manager);
 					invalidate_vs(name);
 				}
 			}

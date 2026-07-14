@@ -126,7 +126,7 @@ public:
 	// ссылается на них по имени (vs_name/fs_name/cs_name). dont_save=true — движковый дефолт
 	// (_fallback_vs/_fallback_fs/_FallbackShader), в shaders.json не пишется (см. *ShaderData::dont_save).
 	void CreateFragmentShader(const std::string& name, const char* hlsl_path, bool dont_save = false);
-	void CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<ShaderBase::VertexBufferBinding> vertex_buffer_layout, bool dont_save = false);
+	void CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<const char*> vertex_buffer_names, bool dont_save = false);
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 		const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 		const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,

@@ -207,6 +207,11 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
                 };
                 new_batch.vertexStorageBuffers   = resolve_buffers(sp->vertex_shader_buffer_names);
                 new_batch.fragmentStorageBuffers = resolve_buffers(sp->fragment_shader_buffer_names);
+                // Вершинные СТРИМЫ пула — из объявления вершинника (vs.vertex_buffer_names,
+                // порядок = слоты пайплайна). Резолв здесь же; пустой список = vs не найден или
+                // стрим-имя протухло → бинд-шаг пропустит draw (сдвиг слота = UB).
+                if (VertexShaderData* vsd = sm->GetVertexShader(sp->vs_name))
+                    new_batch.vertexBuffers = resolve_buffers(vsd->vertex_buffer_names);
                 FragmentShaderData* fsd = sm->GetFragmentShader(sp->fs_name);   // fs по имени из реестра
                 new_batch.frag_uniform_count = fsd ? fsd->shader_data.num_uniform_buffers : 0u;
                 shader_map[sp_key] = std::move(new_batch);
@@ -503,6 +508,7 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager)
             RenderSnap::ShaderGroup sg;
             sg.pipeline = shader_batch.pipeline;
             sg.push_func = shader_batch.push_func;
+            sg.vertexBuffers = shader_batch.vertexBuffers;
             sg.vertexStorageBuffers = shader_batch.vertexStorageBuffers;
             sg.fragmentStorageBuffers = shader_batch.fragmentStorageBuffers;
             sg.frag_uniform_count = shader_batch.frag_uniform_count;

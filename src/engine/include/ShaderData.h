@@ -40,6 +40,11 @@ struct VertexShaderData {
     // указатели на глобальные имена/форматы), поэтому переживают программу. Пусто у SPV/дефолтных.
     std::string source_path;
     std::vector<ShaderBase::VertexBufferBinding> bindings;
+    // Потребляемые вершинные СТРИМЫ пула — КАНОНИЧНЫЕ имена буферов (BufferDataName = ключ
+    // реестра BufferManager, указатель на inline-литерал из таблицы пула). ПОРЯДОК = порядок
+    // слотов пайплайна; бинд-шаг рендера биндит ровно этот список с нулевого слота
+    // (BufferManager::BindGPUVertexBuffers). Заполняется CreateVertexShader из перечисления имён.
+    std::vector<BufferDataName> vertex_buffer_names;
     bool dont_save = false;   // движковый дефолт (_fallback_vs) — в shaders.json не пишется
 };
 

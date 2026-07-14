@@ -874,8 +874,11 @@ namespace {
             VertexShaderData* d = ctx->GetShaderManager()->GetVertexShader(g_sel.name);
             std::snprintf(pathBuf, sizeof pathBuf, "%s", d ? d->source_path.c_str() : "");
             pull.clear();
-            if (d && !d->bindings.empty()) pull = d->bindings.front().pull;   // раскладка первого слота
-            else pull.push_back(POSITION);                                    // дефолт для новой
+            // Все слоты (со стримами пула биндингов несколько — Pos/UV/NormTan): pull формы =
+            // объединение семантик по слотам, как в манифесте.
+            if (d) for (const auto& b : d->bindings)
+                for (VertexSemantic s : b.pull) pull.push_back(s);
+            if (pull.empty()) pull.push_back(POSITION);                       // дефолт для новой
         }
         TakePickedPath(PickTarget::ShaderVert, pathBuf, sizeof pathBuf);
 

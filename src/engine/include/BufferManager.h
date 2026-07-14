@@ -14,7 +14,8 @@
 #include "BufferUpdateStruct.h"
 
 namespace DefaultBuffersNames {
-	inline constexpr const char* DEFAULT_VERTEX_BUFFER = "_DefaultVertexBuffer";
+	// Вершинного буфера-монолита больше нет: геометрия моделей лежит ПО СТРИМАМ пула
+	// PosUVNormPool (Pos/UV/NormTan — имена в PositionStructure.h, GeometryStreams::*).
 	inline constexpr const char* DEFAULT_INDEX_BUFFER = "_DefaultIndexBuffer";
 	inline constexpr const char* DEFAULT_TRANSFORM_BUFFER = "_DefaultTransformBuffer";
 	inline constexpr const char* DEFAULT_CAMERA_BUFFER = "_cameraBuffer";
@@ -95,7 +96,10 @@ public:
 	void ExecutePostreadBackUploadTasks(SDL_GPUCopyPass* cp, uint8_t idx);
 
 	void BindGPUIndexBuffer(SDL_GPURenderPass* rp, Uint32 offset);
-	void BindGPUVertexBuffer(SDL_GPURenderPass* rp, Uint32 offset, Uint32 slot);
+	// Вершинные стримы батча ОДНИМ вызовом со слота 0; порядок списка = порядок слотов пайплайна.
+	// false = резолв сорвался, бинд НЕ сделан — вызывающий обязан пропустить draw (иначе UB:
+	// пайплайн ждёт в слоте k страйд стрима k, а там мусор/чужой буфер).
+	bool BindGPUVertexBuffers(SDL_GPURenderPass* rp, const std::vector<BufferData*>& buffers_data);
 	void BindGPUVertexStorageBuffers(SDL_GPURenderPass* rp, Uint32 offset, const std::vector<BufferData*>& buffers_data, uint8_t render_frame);
 	void BindGPUVertexStorageBuffers(SDL_GPURenderPass* rp, Uint32 offset, std::initializer_list<const char*> names, uint8_t render_frame);
 

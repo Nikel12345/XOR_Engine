@@ -4,7 +4,7 @@
 #include "InputCommands.h"     // payload-структуры команд
 #include "EngineContext.h"     // фасад + (транзитивно) все менеджеры
 #include "MaterialParams.h"    // OpaqueMaterialParams — блоб дефолт-params нового материала
-#include "PositionStructure.h" // FMT_PosUVNormal — раскладка pull вершинника из формы SD
+#include "PositionStructure.h" // PosUVNormPool — семантики pull → стримы пула (UpsertVertexShader)
 // EngineContext.h держит менеджеры forward-декларациями — полные типы тянет этот TU.
 #include "MaterialManager.h"
 #include "ShaderManager.h"
@@ -13,7 +13,7 @@
 #include "PipeManager.h"
 #include "RenderManager.h"
 
-using namespace ShaderBase;   // VertexBufferBinding/FMT_* в UpsertVertexShader
+using namespace ShaderBase;   // VertexSemantic (pull в UpsertVertexShader)
 
 // Дефолтная текстура по роли слота (движковые из Engine::InitDefaultResources). Custom* → dummy.
 static const char* DefaultTextureForRole(TextureSlotRole r)
@@ -351,8 +351,10 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
 				if (!c->oldName.empty() && c->oldName != c->name) sm->DeleteVertexShader(c->oldName);
-				std::vector<VertexBufferBinding> binds = { { &FMT_PosUVNormal, c->pull } };   // формат пока фиксирован
-				sm->CreateVertexShader(c->name, c->path.c_str(), binds);
+				// UI говорит семантиками (pull) — как манифест; резолв в стримы пула здесь.
+				std::vector<const char*> stream_names = PosUVNormPool::StreamsForSemantics(c->pull);
+				std::vector<std::string> buf_names(stream_names.begin(), stream_names.end());
+				sm->CreateVertexShader(c->name, c->path.c_str(), buf_names, ctx->GetBufferManager());
 				for (auto& [sn, spp] : sm->GetShaderPrograms())   // пересобрать пайплайны sp на этом vs
 					if (spp->vs_name == c->name || spp->vs_name == c->oldName)
 						ctx->GetPipeManager()->InvalidatePipeline(spp.get(), ctx->GetBatchBuilder()->RebuildEpoch());

@@ -17,7 +17,8 @@ public:
 	GpuTaskContext(BufferManager* bm, ShaderManager* sm, PassManager* pm, TextureManager* tm);
 
 	void CreateFragmentShader(const std::string& name, const char* hlsl_path);
-	void CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<ShaderBase::VertexBufferBinding> vertex_buffer_layout);
+	// Вершинник перечисляет потребляемые стримы пула ИМЕНАМИ вершинных буферов (порядок = слоты).
+	void CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<const char*> vertex_buffer_names);
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 		const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 		const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,

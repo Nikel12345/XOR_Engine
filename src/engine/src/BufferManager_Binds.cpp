@@ -27,30 +27,34 @@ void BufferManager::BindGPUIndexBuffer(SDL_GPURenderPass* rp, Uint32 offset)
     SDL_BindGPUIndexBuffer(rp, &ibind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 }
 
-void BufferManager::BindGPUVertexBuffer(SDL_GPURenderPass* rp, Uint32 offset, Uint32 slot)
+// Вершинные стримы шейдер-батча: список объявлен вершинником (CreateVertexShader, перечисление
+// имён буферов) и приезжает сюда из слепка. ПОРЯДОК СПИСКА = ПОРЯДОК СЛОТОВ пайплайна: биндим
+// одним вызовом с нулевого слота. Любой сбой резолва — ПРОПУСК ВСЕГО бинда, не сдвиг: слот со
+// сдвинутым буфером = чтение чужого страйда = UB (вызывающий обязан пропустить и draw).
+bool BufferManager::BindGPUVertexBuffers(SDL_GPURenderPass* rp, const std::vector<BufferData*>& buffers_data_vec)
 {
-    BufferData* data = GetBufferData(DefaultBuffersNames::DEFAULT_VERTEX_BUFFER);
-    if (!data) {
-        SDL_Log("BindGPUVertexBuffer::Vertex buffer 'DefaultVertexBuffer' not found");
-        return;
+    if (buffers_data_vec.empty()) {
+        SDL_Log("BindGPUVertexBuffers: empty vertex stream list");
+        return false;
     }
 
-    if (data->type != BufferDataType::Static) {
-        SDL_Log("Vertex buffer 'DefaultVertexBuffer' is not static");
-        return;
+    std::vector<SDL_GPUBufferBinding> binds;
+    binds.reserve(buffers_data_vec.size());
+    for (const BufferData* data : buffers_data_vec)
+    {
+        if (!data || data->type != BufferDataType::Static || !data->Static.buffer) {
+            SDL_Log("BindGPUVertexBuffers: vertex stream '%s' is missing/not static/null — bind skipped",
+                data ? data->debug_name.c_str() : "<null>");
+            return false;
+        }
+        SDL_GPUBufferBinding vbind{};
+        vbind.buffer = data->Static.buffer;
+        vbind.offset = 0;
+        binds.push_back(vbind);
     }
 
-    SDL_GPUBuffer* buf = data->Static.buffer;
-    if (!buf) {
-        SDL_Log("Vertex buffer 'DefaultVertexBuffer' has null buffer pointer");
-        return;
-    }
-
-    SDL_GPUBufferBinding vbind{};
-    vbind.buffer = buf;
-    vbind.offset = offset;
-
-    SDL_BindGPUVertexBuffers(rp, slot, &vbind, 1);
+    SDL_BindGPUVertexBuffers(rp, 0, binds.data(), safe_u32(binds.size()));
+    return true;
 }
 
 
