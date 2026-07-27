@@ -47,6 +47,8 @@ enum class CommandId : uint32_t {
     DeleteComputeShader,  // payload: ShaderDataNameCmd*
     CreateEntity,         // payload: CreateEntityCmd* — json одной сущности из staging-формы;
                           // sim: ObjectManager::LoadScene + фиксап указателей ассетов + пересборка
+    NudgeUINode,          // payload: UINodeNudgeCmd* — += смещение узла UI_Yoga (offset px XY + z-bias);
+                          // sim: ui_yoga->NudgeNode + MarkDirty (гизмо XY / кнопки Z в инспекторе)
 
     COUNT
 };

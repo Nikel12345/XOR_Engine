@@ -3,7 +3,9 @@ add_executable(Sandbox)
 # Площадки для запуска подсистем движка по отдельности.
 # Каждый сценарий — свой .cpp; main решает, что именно запустить.
 set(SANDBOX_SRC
-    src/main.cpp
+    src/CopyComputeBarrierProbe.cpp   # зонд: порядок нескольких операций над одним буфером в одном cb, без fence (см. шапку файла)
+    # src/main.cpp              # зонд: TDM store под контеншеном памяти
+    # src/SceneJsonProbe.cpp    # зонд: round-trip scene.json (раскладка файла + сохранность данных), без GPU
     # src/BlitUsageProbe.cpp    # зонд: какие usage-флаги требуют blit/copy/mip-gen (см. шапку файла)
     # src/CameraScene.cpp
     # src/BufferScene.cpp

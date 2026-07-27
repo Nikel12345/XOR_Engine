@@ -12,6 +12,9 @@
 #include "InstanceDataModule.h"
 #include "IndirectDataModule.h"
 #include "BoundSphereDataModule.h"
+#include "UI_DataModule.h"
+#include "FontManager.h"
+#include "ObjectManager.h"   // BuildStaging(om): активная сцена
 
 namespace DefaultUpdateSet
 {
@@ -337,4 +340,34 @@ void DefaultUpdateSet::SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModu
     }
     );
     out_pib_update_inited = true;
+}
+
+void DefaultUpdateSet::SetUITextUpdaters(EngineContext& ctx, UI_DataModule* uidm, FontManager* fm, const std::string& fontName)
+{
+    auto* bm = ctx.GetBufferManager();
+    auto* om = ctx.GetObjectManager();
+
+    // BITS — ПЕРВЫЙ: его size-фаза строит staging (BuildStaging по активной сцене), остальные три
+    // текстовых буфера лишь читают уже готовый staging (тот же контракт, что LIGHT_CAMERA_BUFFER).
+    bm->CreateUpdateInstruction(UI_TEXT_BITS_BUFFER,
+        [uidm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { uidm->StoreBits(bm, &task); },
+        [uidm, om]() -> uint32_t { uidm->BuildStaging(om); return uidm->CalcBitsSize(); });
+
+    bm->CreateUpdateInstruction(UI_TEXT_WORDBASE_BUFFER,
+        [uidm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { uidm->StoreWordBase(bm, &task); },
+        [uidm]() -> uint32_t { return uidm->CalcWordBaseSize(); });
+
+    bm->CreateUpdateInstruction(UI_TEXT_INDEX_BUFFER,
+        [uidm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { uidm->StoreIndex(bm, &task); },
+        [uidm]() -> uint32_t { return uidm->CalcIndexSize(); });
+
+    bm->CreateUpdateInstruction(UI_TEXT_BUFFER,
+        [uidm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { uidm->StoreText(bm, &task); },
+        [uidm]() -> uint32_t { return uidm->CalcTextSize(); });
+
+    // GlyphUVL — из FontManager по имени шрифта (резолв на лету: до создания шрифта size 0, апдейт
+    // пропускается). Валидно после PackAtlases — ExecuteUpdateInstructions идёт позже в PrepareFunc.
+    bm->CreateUpdateInstruction(UI_FONT_UVL_BUFFER,
+        [fm, fontName](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { fm->StoreGlyphUVL(fm->GetFont(fontName), bm, &task); },
+        [fm, fontName]() -> uint32_t { return fm->GlyphUvlBytes(fm->GetFont(fontName)); });
 }

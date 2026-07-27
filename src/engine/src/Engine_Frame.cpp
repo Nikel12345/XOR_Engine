@@ -11,6 +11,7 @@
 #include "ObjectManager.h"
 #include "BatchBuilder.h"
 #include "EngineContext.h"
+#include "UI_Yoga.h"   // ui_yoga->Emit (flex-раскладка UI → энтити перед сборкой батчей)
 #include "DefaultRenderPassSet.h"
 #include "UI_ImGui.h"
 #include "imgui.h"
@@ -27,6 +28,11 @@ void Engine::PrepareFunc(uint8_t slot)
 	// Слот уже зарезервирован (RESERVED) в момент выдачи — Get/WaitFreeSlotIndex
 	// делает это атомарно с выбором, отдельного состояния PREPARING больше нет.
 	buffer_manager->logic_index = slot;
+
+	// UI-раскладка (Yoga): считает rect'ы и создаёт/пересоздаёт UI-энтити ДО сборки батчей, чтобы
+	// новые/изменённые элементы попали в этот же кадр. No-op, если не грязно (грязь ставят
+	// построение дерева игрой и ресайз окна). Размер кадра — из Engine (width/height).
+	ui_yoga->Emit(engine_context, width, height);
 
 	// Отложенные удаления GPU-ресурсов: каждый трэш дренирует ПОТОК-ВЛАДЕЛЕЦ, локов нет.
 	// Буферы/пайплайны — sim (пуш и дренаж здесь); текстуры — render (пуш и дренаж в RenderFunc:

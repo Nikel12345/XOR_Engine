@@ -15,13 +15,14 @@
 #include "ModelManager.h"
 #include "ShaderManager.h"
 #include "BatchBuilder.h"
-#include "MaterialParams.h"          // раскладки факторов: разбор params по полям в инспекторе материала
-#include "MaterialParamsRegistry.h"  // реестр типов params для дропдауна Kind
+#include "MaterialParamsSpec.h"      // реестр ТИПОВ params: дропдаун Type + схема полей материала
 #include "ComponentSerializer.h"     // ComponentSpecRegistry — цикл по компонентам энтити
 #include "UI_ComponentEditor.h"      // generic-редактор полей компонента по схеме
 #include "RenderManager.h"           // PassManager + RenderPassStep — дропдаун прохода у sp
+#include "UI_Yoga.h"                 // инспектор/гизмо UI-узла (SelKind::UINode)
 #include "ImGuizmo.h"
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_transform.hpp>   // glm::translate для гизмо UI-узла
 #include <cstring>            // memcpy матрицы в payload команды
 #include <mutex>              // потокобезопасный приём пути из файл-диалога
 #include <atomic>
@@ -252,30 +253,33 @@ namespace {
         }
 
         // ================= Params (сверху) =================
-        // Смена ТИПА params (kind) = SetMaterialParams<T> с дефолт-блобом (IN-PLACE, без ребилда:
-        // RenderManager читает params->data()/size() живо; kind — фиксированный enum из реестра).
+        // Смена ТИПА params = дефолтный блоб типа из реестра (IN-PLACE, без ребилда дерева:
+        // RenderManager читает params->data()/size() живо, а ключ батча — адрес вектора).
+        // Список типов — весь реестр: и движковые, и зарегистрированные кодом игры.
         ImGui::SeparatorText("Params");
-        const auto& kinds = MaterialParamsRegistry::Get().All();
-        const MaterialParamsTypeDesc* cur = nullptr;
-        for (auto& d : kinds) if (d.kind == mat->params_kind) { cur = &d; break; }
-        if (ImGui::BeginCombo("Kind", cur ? cur->label.c_str() : "?")) {
-            for (auto& d : kinds) {
-                bool is_cur = (d.kind == mat->params_kind);
-                if (ImGui::Selectable(d.label.c_str(), is_cur) && !is_cur) d.applyDefault(ctx, mat);
+        const auto& specs = MaterialParamsSpecRegistry::Get().All();
+        const MaterialParamsSpec* cur = MaterialParamsSpecRegistry::Get().ByName(mat->params_type);
+        // Тип назван, но не зарегистрирован (сцена от сборки, где он был) — не молчим: блоб
+        // рисовать нечем, а SaveScene его не сохранит.
+        const bool unknown_type = !mat->params_type.empty() && !cur;
+        if (ImGui::BeginCombo("Type", cur ? cur->name.c_str()
+                                          : (unknown_type ? mat->params_type.c_str() : "(none)"))) {
+            if (ImGui::Selectable("(none)", mat->params_type.empty()) && !mat->params_type.empty())
+                ClearMaterialParams(mat);
+            for (const MaterialParamsSpec& s : specs) {
+                const bool is_cur = (&s == cur);
+                if (ImGui::Selectable(s.name.c_str(), is_cur) && !is_cur) ApplyMaterialParamsSpec(mat, s);
                 if (is_cur) ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();
         }
-        if (mat->params.empty()) ImGui::TextDisabled("(no params)");
-        else if (cur && cur->edit) cur->edit(mat);   // тип сам рисует свои поля (registry-driven)
-        else {
-            float* f = reinterpret_cast<float*>(mat->params.data());   // фолбэк: сырые float
-            const size_t n = mat->params.size() / sizeof(float);
-            for (size_t k = 0; k < n; ++k) {
-                char l[16]; snprintf(l, sizeof(l), "p%u", static_cast<unsigned>(k));
-                ImGui::SliderFloat(l, &f[k], 0.0f, 1.0f);
-            }
-        }
+        if (unknown_type)
+            MissingRefMark("params type is not registered — fields cannot be edited and will NOT be saved");
+
+        if (mat->params.empty())      ImGui::TextDisabled("(no params)");
+        else if (!cur)                ImGui::TextDisabled("(%zu bytes, unknown layout)", mat->params.size());
+        else if (cur->custom_edit)    cur->custom_edit(mat->params.data());   // escape hatch типа
+        else                          DrawMaterialParamsFields(*cur, mat->params);
 
         // ================= Шейдеры + слоты (снизу) =================
         // Материал = набор sp (проходов). Слоты диктует required_slots КАЖДОГО sp, но текстура берётся
@@ -996,6 +1000,30 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
     case SelKind::Fsd: FsdEditor(ctx); break;
     case SelKind::Csd: CsdEditor(ctx); break;
 
+    case SelKind::UINode:
+    {
+        // Узел дерева UI_Yoga: XY двигает гизмо, Z (слой) — кнопками (стрелка Z в упор не берётся).
+        UI_Yoga* yg = ctx->GetUIYoga();
+        if (!yg) { ImGui::TextDisabled("no UI tree"); break; }
+        const UI_Yoga::Node n = g_sel.ui_node;
+        ImGui::Text("UI node: %s", yg->NodeLabel(n).c_str());
+        float dx, dy, dz; yg->GetOffset(n, dx, dy, dz);
+        ImGui::Text("Offset: X=%.0f  Y=%.0f px  (тащи гизмо по XY)", dx, dy);
+        ImGui::Separator();
+        auto nudge_z = [&](float ddz) {
+            ctx->GetInputManager()->PushCommand(CommandId::NudgeUINode,
+                new UINodeNudgeCmd{ n, 0.0f, 0.0f, ddz });
+        };
+        ImGui::Text("Z-слой (bias %.3f):", dz);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("-"))         nudge_z(+0.01f);   // дальше (больше z, под другими)
+        ImGui::SameLine();
+        if (ImGui::SmallButton("+"))         nudge_z(-0.01f);   // ближе (меньше z, поверх)
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Deselect"))  g_sel = Selection{};
+        break;
+    }
+
     default:
         ImGui::TextDisabled("Nothing selected.");
         break;
@@ -1006,6 +1034,42 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
 
 void UI_ImGui::DrawGizmo(EngineContext* ctx)
 {
+    // UI-узел: свой гизмо. UI живёт в NDC (матрица = clip напрямую, без камеры) → скармливаем
+    // ЕДИНИЧНЫЕ view/proj, иначе ImGuizmo прогнал бы NDC-позицию через мировую камеру и ручки
+    // улетели бы в другое пространство. Только XY (TRANSLATE_X|Y): Z в упор не берётся, он в
+    // инспекторе кнопками. Двигаем OFFSET узла (командой в sim), а не матрицу энтити.
+    if (g_sel.kind == SelKind::UINode) {
+        UI_Yoga* yg = ctx->GetUIYoga();
+        if (!yg) return;
+        const UI_Yoga::Node n = g_sel.ui_node;
+        float cx, cy, z;
+        if (!yg->GetNodeNdc(n, cx, cy, z)) return;   // узел ещё не эмитился
+
+        ImGuiIO& io = ImGui::GetIO();
+        glm::mat4 view(1.0f), proj(1.0f);
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(cx, cy, z));
+
+        ImGuizmo::SetOrthographic(true);
+        ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
+        ImGuizmo::SetRect(0.0f, 0.0f, io.DisplaySize.x, io.DisplaySize.y);
+
+        const ImGuizmo::OPERATION op =
+            static_cast<ImGuizmo::OPERATION>(ImGuizmo::TRANSLATE_X | ImGuizmo::TRANSLATE_Y);
+        float delta[16];
+        if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(proj),
+                                 op, ImGuizmo::WORLD, glm::value_ptr(model), delta))
+        {
+            const float dtx = delta[12], dty = delta[13];   // приращение переноса за кадр (в NDC)
+            if (dtx != 0.0f || dty != 0.0f) {
+                // NDC → px (Y флип: NDC вверх, layout-px вниз). Двигаем offset узла командой.
+                ctx->GetInputManager()->PushCommand(CommandId::NudgeUINode,
+                    new UINodeNudgeCmd{ n,  dtx * io.DisplaySize.x * 0.5f,
+                                           -dty * io.DisplaySize.y * 0.5f, 0.0f });
+            }
+        }
+        return;
+    }
+
     // Гизмо — для выбранной сущности (свет = тоже сущность). Для материала/текстуры/… нет.
     if (g_sel.kind != SelKind::Entity) return;
     Entity selected = g_sel.entity;

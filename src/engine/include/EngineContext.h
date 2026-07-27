@@ -5,12 +5,11 @@
 #include <string>
 #include <utility>
 #include <initializer_list>
-#include <cstring>          // std::memcpy в SetMaterialParams<T>
 #include "Aliases.h"
 #include "ObjectManager.h"  // тело шаблона CreateEntity (ECS-типажи считаются на компиляции)
 #include "BatchBuilder.h"   // QueueCreate в теле CreateEntity
 #include "ShaderTypes.h"    // spd/VertexBufferBinding/TextureSlotRole/ComputeRWTextureBindingParametr в сигнатурах
-#include "MaterialData.h"   // Material::params — тело SetMaterialParams<T>
+#include "MaterialParamsSpec.h"   // ::SetMaterialParams<T> + Material (через MaterialData.h)
 #include "TextureData.h"    // ChannelConvention::AsIs — дефолтный аргумент CreateTextureFromFile
 #include "ModelData.h"      // AnchorShift::Keep — дефолтный аргумент + ModelGeneratorFn
 
@@ -31,6 +30,9 @@ struct ShaderProgram;          // тяжёлая половина (ShaderData.h)
 struct ComputeShaderProgram;
 class InputManager;
 class TextureLoader;
+class FontManager;
+struct FontData;               // возвращаем указателем (как TextureHandle*/Material*)
+class UI_Yoga;                 // держим указателем (создаёт Engine, садит сеттером)
 class Engine;
 
 class EngineContext {
@@ -60,15 +62,15 @@ public:
 	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders, bool dont_save = false);
 
 	// Тип-безопасная упаковка per-material факторов (T = раскладка cbuffer MaterialBlock) в
-	// Material::params. Тело — прямой memcpy (зеркало MaterialManager::SetMaterialParams),
-	// чтобы заголовок фасада не зависел от MaterialManager.h ради одного шаблона.
+	// Material::params. Реализация одна на всех — свободный ::SetMaterialParams из
+	// MaterialParamsSpec.h (он же проставляет имя типа из реестра); фасад лишь пробрасывает,
+	// не завися от MaterialManager.h ради одного шаблона.
 	template<class T>
-	void SetMaterialParams(Material* m, const T& p) {
-		if (!m) return;
-		m->params.resize(sizeof(T));
-		std::memcpy(m->params.data(), &p, sizeof(T));
-		m->params_kind = T::kind;   // тег для UI-разбора (рендер его не читает)
-	}
+	void SetMaterialParams(Material* m, const T& p) { ::SetMaterialParams(m, p); }
+
+	// Кроссменеджерская операция: растеризовать шрифт. Живёт на контексте (менеджеры не владеют
+	// друг другом — см. CLAUDE.md), передаёт TextureManager/BufferManager параметрами в FontManager.
+	FontData* CreateFont(const std::string& name, const char* path, float px, bool sdf = false);
 
 	ModelData* CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor = AnchorShift::Keep);
 	// dont_save=true — движковая/кодовая процедурная модель (sphere/quad/cubes), в models.json не пишется.
@@ -158,6 +160,16 @@ public:
 	void SetInputManager(InputManager* im) { input_manager = im; }
 	InputManager* GetInputManager() const { return input_manager; }
 
+	// FontManager создаётся Engine и садится сюда сеттером (как InputManager) — контекст его
+	// не создаёт, только держит для кроссменеджерского CreateFont.
+	void SetFontManager(FontManager* fm) { font_manager = fm; }
+	FontManager* GetFontManager() const { return font_manager; }
+
+	// UI_Yoga создаётся Engine и садится сюда сеттером (как FontManager). Игра берёт его отсюда,
+	// чтобы декларативно строить UI-дерево; сам Yoga наружу не течёт (см. UI_Yoga.h).
+	void SetUIYoga(UI_Yoga* y) { ui_yoga = y; }
+	UI_Yoga* GetUIYoga() const { return ui_yoga; }
+
 	// Бэк-поинтер на Engine — только для делегирования Save/LoadScene (оркестрация по менеджерам).
 	void SetEngine(Engine* e) { engine = e; }
 
@@ -176,6 +188,8 @@ private:
 
 	InputManager* input_manager = nullptr;
 	TextureLoader* texture_loader = nullptr;
+	FontManager* font_manager = nullptr;   // см. SetFontManager (создаёт Engine)
+	UI_Yoga* ui_yoga = nullptr;   // см. SetUIYoga (создаёт Engine)
 	Engine* engine = nullptr;   // см. SetEngine
 
 	GpuTaskContext* gpu_ctx = nullptr;   // указателем: заголовок не тянет GpuTaskContext.h

@@ -86,23 +86,29 @@
     ],
     "render_shader_programs": [
         {
-            "name": "sp_debug_collider",
-            "vs": "debug_collider_vs",
-            "fs": "debug_collider_fs",
-            "pass": "_DefaultDebugRenderPass",
+            "name": "sp_untextured",
+            "vs": "main_pass_vs",
+            "fs": "untextured_surface_fs",
+            "pass": "_DefaultMainRenderPass",
             "vs_buffers": [
                 "_DefaultTransformBuffer",
                 "DefaultOutPibBuffer",
+                "_cameraBuffer",
+                "_DefaultInstanceBuffer",
+                "DefaultLightCameraBuffer"
+            ],
+            "fs_buffers": [
+                "_lightBuffer",
+                "DefaultLightCameraBuffer",
                 "_cameraBuffer"
             ],
-            "fs_buffers": [],
             "slots": [],
             "spd": {
                 "cull_mode": 0,
                 "fill_mode": 0,
-                "primitive_type": 2,
-                "depth_test": false,
-                "depth_write": false,
+                "primitive_type": 0,
+                "depth_test": true,
+                "depth_write": true,
                 "depth_compare": 2,
                 "stencil_test": false,
                 "color_blend": false,
@@ -130,6 +136,33 @@
                 "primitive_type": 0,
                 "depth_test": true,
                 "depth_write": true,
+                "depth_compare": 2,
+                "stencil_test": false,
+                "color_blend": false,
+                "bias_enable": false,
+                "bias_constant": 0.0,
+                "bias_slope": 0.0,
+                "bias_clamp": 0.0
+            }
+        },
+        {
+            "name": "sp_debug_collider",
+            "vs": "debug_collider_vs",
+            "fs": "debug_collider_fs",
+            "pass": "_DefaultDebugRenderPass",
+            "vs_buffers": [
+                "_DefaultTransformBuffer",
+                "DefaultOutPibBuffer",
+                "_cameraBuffer"
+            ],
+            "fs_buffers": [],
+            "slots": [],
+            "spd": {
+                "cull_mode": 0,
+                "fill_mode": 0,
+                "primitive_type": 2,
+                "depth_test": false,
+                "depth_write": false,
                 "depth_compare": 2,
                 "stencil_test": false,
                 "color_blend": false,
@@ -204,39 +237,6 @@
                 "depth_compare": 2,
                 "stencil_test": false,
                 "color_blend": true,
-                "bias_enable": false,
-                "bias_constant": 0.0,
-                "bias_slope": 0.0,
-                "bias_clamp": 0.0
-            }
-        },
-        {
-            "name": "sp_untextured",
-            "vs": "main_pass_vs",
-            "fs": "untextured_surface_fs",
-            "pass": "_DefaultMainRenderPass",
-            "vs_buffers": [
-                "_DefaultTransformBuffer",
-                "DefaultOutPibBuffer",
-                "_cameraBuffer",
-                "_DefaultInstanceBuffer",
-                "DefaultLightCameraBuffer"
-            ],
-            "fs_buffers": [
-                "_lightBuffer",
-                "DefaultLightCameraBuffer",
-                "_cameraBuffer"
-            ],
-            "slots": [],
-            "spd": {
-                "cull_mode": 0,
-                "fill_mode": 0,
-                "primitive_type": 0,
-                "depth_test": true,
-                "depth_write": true,
-                "depth_compare": 2,
-                "stencil_test": false,
-                "color_blend": false,
                 "bias_enable": false,
                 "bias_constant": 0.0,
                 "bias_slope": 0.0,

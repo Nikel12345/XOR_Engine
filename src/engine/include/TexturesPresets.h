@@ -438,9 +438,7 @@ namespace TexturePresets {
         info.width = faceSize;
         info.height = faceSize;
         info.layer_count_or_depth = 6;
-        uint32_t levels = 1;
-        for (uint32_t s = faceSize; s > 1; s >>= 1) ++levels;
-        info.num_levels = levels;
+        info.num_levels = 1;
         info.sample_count = SDL_GPU_SAMPLECOUNT_1;
         info.props = 0;
         return info;

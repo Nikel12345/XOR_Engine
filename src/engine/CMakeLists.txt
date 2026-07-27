@@ -36,6 +36,14 @@ target_include_directories(yyjson PUBLIC
     "${CMAKE_SOURCE_DIR}/external/yyjson"
 )
 
+# Yoga — flex-раскладка UI (Meta, MIT). Компилируем исходники напрямую (external/yoga/yoga/*.cpp),
+# include-корень external/yoga (#include <yoga/...>). Требует C++20. Линкует только Engine (PRIVATE):
+# Yoga-типы прячет UI_Yoga (pimpl), в игру не течёт — как SDL_ttf в FontManager.
+file(GLOB_RECURSE YOGA_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/external/yoga/yoga/*.cpp")
+add_library(yoga STATIC ${YOGA_SRC})
+target_include_directories(yoga PUBLIC "${CMAKE_SOURCE_DIR}/external/yoga")
+target_compile_features(yoga PUBLIC cxx_std_20)
+
 # ============================================================
 #  EngineEcs — ECS-ядро: ObjectManager + компоненты + сцены.
 #  Лист: не зависит ни от рендера, ни от GPU. Линкуется и Engine, и Physics.
@@ -103,6 +111,7 @@ set(ENGINEGPU_SRC
     src/ShaderManager_ShadersCreate.cpp
     src/ShaderManager_SPVLoad.cpp
     src/TextureManager.cpp
+    src/PreviewPacker.cpp
     src/RenderManager.cpp
     src/RenderCommandData.cpp
     src/GpuTaskContext.cpp
@@ -118,6 +127,7 @@ set(ENGINEGPU_HDR
     include/ShaderTypes.h
     include/TextureManager.h
     include/TextureData.h
+    include/PreviewPacker.h
     include/RenderManager.h
     include/RenderCommandData.h
     include/GpuTaskContext.h
@@ -175,6 +185,7 @@ set(ENGINE_MANAGERS_SRC
     src/ThreadController.cpp
     src/SlotController.cpp
     src/InputManager.cpp
+    src/FontManager.cpp
 )
 set(ENGINE_MANAGERS_HDR
     include/CameraManager.h
@@ -187,13 +198,17 @@ set(ENGINE_MANAGERS_HDR
     include/InputManager.h
     include/InputCommands.h
     include/TextureLoader.h
+    include/FontManager.h
 )
 set(ENGINE_STRUCTS_SRC
     src/CameraStruct.cpp
+    src/MaterialParamsSpec.cpp
 )
 set(ENGINE_STRUCTS_HDR
     include/CameraStruct.h
     include/MaterialData.h
+    include/MaterialParams.h
+    include/MaterialParamsSpec.h
     include/ModelData.h
     include/PositionStructure.h
     include/LightStruct.h
@@ -206,6 +221,7 @@ set(ENGINE_DATAMODULES_SRC
     src/PIB_DataModule.cpp
     src/TransformDataModule.cpp
     src/InstanceDataModule.cpp
+    src/UI_DataModule.cpp
 )
 set(ENGINE_DATAMODULES_HDR
     include/BoundSphereDataModule.h
@@ -214,6 +230,7 @@ set(ENGINE_DATAMODULES_HDR
     include/PIB_DataModule.h
     include/TransformDataModule.h
     include/InstanceDataModule.h
+    include/UI_DataModule.h
     include/ModeleDataModule.h
 )
 set(ENGINE_PRESETS_HDR
@@ -248,6 +265,7 @@ set(ENGINE_CORE_SRC
     src/PCH.cpp
     src/EngineContext.cpp
     src/TextureLoader.cpp
+    src/UI_Yoga.cpp
 )
 set(ENGINE_CORE_HDR
     include/Engine.h
@@ -261,6 +279,7 @@ set(ENGINE_CORE_HDR
     include/PCH.h
     include/PCH_Engine.h
     include/EngineContext.h
+    include/UI_Yoga.h
 )
 
 # Абсолютим всё одинаково — иначе source_group не совпадёт с target_sources.
@@ -303,6 +322,8 @@ target_include_directories(Engine PUBLIC
 )
 target_include_directories(Engine PRIVATE
     "${CMAKE_SOURCE_DIR}/external/SDL3_image/include"   # только TextureLoader.cpp
+    "${CMAKE_SOURCE_DIR}/external/SDL3_ttf/include"     # только FontManager.cpp (растеризация глифов)
+    "${CMAKE_SOURCE_DIR}/external/yoga"                 # только UI_Yoga.cpp (#include <yoga/...>)
 )
 
 # Свой PCH верхнего слоя: PCH.h + imgui.h (~8 TU таргета зовут ImGui). EngineGpu/EngineEcs
@@ -318,7 +339,9 @@ target_link_libraries(Engine PUBLIC
 )
 target_link_libraries(Engine PRIVATE
     "${CMAKE_SOURCE_DIR}/external/SDL3_image/lib/x64/SDL3_image.lib"  # только TextureLoader
+    "${CMAKE_SOURCE_DIR}/external/SDL3_ttf/lib/x64/SDL3_ttf.lib"      # только FontManager (SDL_ttf)
     yyjson                                                            # файлы сцены/ресурсов (Save/LoadScene)
+    yoga                                                              # только UI_Yoga (flex-раскладка; pimpl прячет типы)
 )
 
 target_compile_definitions(Engine PRIVATE

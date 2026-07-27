@@ -12,6 +12,7 @@
 #include "ModelManager.h"
 #include "PipeManager.h"
 #include "RenderManager.h"
+#include "UI_Yoga.h"           // NudgeUINode → ui_yoga->NudgeNode
 
 using namespace ShaderBase;   // VertexSemantic (pull в UpsertVertexShader)
 
@@ -69,6 +70,17 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 				P.e[i] = m[2]; P.f[i] = m[6]; P.g[i] = m[10]; P.h[i] = m[14];
 				P.i[i] = m[3]; P.j[i] = m[7]; P.k[i] = m[11]; P.l[i] = m[15];
 			}
+			delete c;
+		});
+
+	// Смещение UI-узла (гизмо XY / кнопки Z). Правим дерево UI_Yoga (не ECS) — оно источник UI,
+	// энтити пересоздаст ближайший Emit по dirty (его взводит NudgeNode). Payload на куче — удаляем.
+	im.RegisterCommand(CommandId::NudgeUINode,
+		[](EngineContext* ctx, const void* data)
+		{
+			const UINodeNudgeCmd* c = static_cast<const UINodeNudgeCmd*>(data);
+			if (UI_Yoga* yg = ctx->GetUIYoga())
+				yg->NudgeNode(c->node, c->ddx, c->ddy, c->ddz);
 			delete c;
 		});
 
@@ -216,9 +228,13 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 		{
 			const UpsertTextureCmd* c = static_cast<const UpsertTextureCmd*>(data);
 			if (!c->name.empty() && !c->atlas.empty() && !c->path.empty()) {
-				if (!c->old_name.empty() && c->old_name != c->name)
+				if (!c->old_name.empty() && c->old_name != c->name) {
 					ctx->GetTextureManager()->DeleteTextureHandle(c->old_name);   // переименование → снять старую
+					ctx->GetTextureManager()->ReleasePreview(c->old_name);        // старого имени больше нет — превью тоже
+				}
 				ctx->GetTextureManager()->DeleteTextureHandle(c->name);           // replace под новым именем (no-op, если нет)
+				// ReleasePreview(name) НЕ зовём: это replace того же имени, слот превью должен пережить
+				// пересоздание (иначе плитка мигнёт затычкой до нового блита).
 				ctx->CreateTextureFromFile(c->name, c->atlas, c->path.c_str(), static_cast<ChannelConvention>(c->conv));
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
@@ -231,6 +247,7 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 		{
 			const DeleteTextureCmd* c = static_cast<const DeleteTextureCmd*>(data);
 			ctx->GetTextureManager()->DeleteTextureHandle(c->name);
+			ctx->GetTextureManager()->ReleasePreview(c->name);   // реальное удаление → освободить превью-ячейку
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
 		});

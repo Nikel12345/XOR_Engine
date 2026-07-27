@@ -7,9 +7,15 @@
             "conv": "AsIs"
         },
         {
-            "name": "norm",
+            "name": "albedo_cube",
+            "atlas": "albedo_atlas",
+            "path": "textures/assets/cube_test.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "brick_norm",
             "atlas": "normal_atlas",
-            "path": "textures/assets/car_norm.png",
+            "path": "C:\\Users\\Nikita\\Desktop\\SDL_Engine\\src\\game\\textures\\blocks\\brick_normal_h.png",
             "conv": "AsIs"
         },
         {
@@ -23,6 +29,12 @@
             "name": "new_car_glass",
             "atlas": "albedo_atlas",
             "path": "textures/assets/Tex_Glass.jpg",
+            "conv": "AsIs"
+        },
+        {
+            "name": "norm",
+            "atlas": "normal_atlas",
+            "path": "textures/assets/car_norm.png",
             "conv": "AsIs"
         },
         {
@@ -41,12 +53,6 @@
             "name": "new_car",
             "atlas": "albedo_atlas",
             "path": "textures/assets/new_car.png",
-            "conv": "AsIs"
-        },
-        {
-            "name": "albedo_cube",
-            "atlas": "albedo_atlas",
-            "path": "textures/assets/cube_test.png",
             "conv": "AsIs"
         },
         {
@@ -78,12 +84,6 @@
             "atlas": "orm_atlas",
             "path": "textures/blocks/brick_orm.png",
             "conv": "SmoothnessInGreen"
-        },
-        {
-            "name": "brick_norm",
-            "atlas": "normal_atlas",
-            "path": "C:\\Users\\Nikita\\Desktop\\SDL_Engine\\src\\game\\textures\\blocks\\brick_normal_h.png",
-            "conv": "AsIs"
         }
     ]
 }

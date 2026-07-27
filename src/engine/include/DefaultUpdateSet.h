@@ -1,7 +1,10 @@
 #pragma once
+#include <string>
 
 class ObjectManager;
 class BufferManager;
+class UI_DataModule;
+class FontManager;
 class CameraManager;
 class Camera;
 class PIB_DataModule;
@@ -33,4 +36,10 @@ namespace DefaultUpdateSet
 	void SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSphereDataModule* bdm);
 	void SetDefaultEntityToCmdUpdater(EngineContext& ctx, PIB_DataModule* pib_dm);
 	void SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModule* ldm);
+
+	// UI-текст: 4 буфера разреженного канала (bits/wordbase/index/text из UI_DataModule) +
+	// GlyphUVL (из FontManager по имени шрифта). BITS регистрируется первым — его size-фаза
+	// строит staging (BuildStaging), остальные лишь читают. Буферы бейкаются, когда их объявит
+	// UI-SP (usage) — поэтому SP создаётся ДО первого BakePending (в MainInit).
+	void SetUITextUpdaters(EngineContext& ctx, UI_DataModule* uidm, FontManager* fm, const std::string& fontName);
 };

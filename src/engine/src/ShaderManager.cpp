@@ -16,7 +16,9 @@ ShaderManager::ShaderManager(SDL_GPUDevice* device) {
 
     std::filesystem::create_directories(m_cacheBasePath);
     SDL_Log("[Shader] Shader cache directory: %s", m_cacheBasePath.c_str());
-    SDL_free((void*)base);
+    // НЕ освобождать base: в SDL3 (в отличие от SDL2) строка SDL_GetBasePath принадлежит SDL
+    // (кэш, освобождается в SDL_Quit). SDL_free здесь = double free → heap corruption на выходе
+    // у любого процесса, который корректно зовёт SDL_Quit (зонды песочницы).
 };
 
 ShaderProgram* ShaderManager::CreateShaderProgram(
@@ -223,6 +225,14 @@ ShaderProgramDescription* ShaderProgramDescription::BehavesAsDepthPrepass() {
 ShaderProgramDescription* ShaderProgramDescription::BehavesAsFullscreenEffect() {
     depth_test = false; depth_write = false;
     color_blend = false;
+    cull_mode = SDL_GPU_CULLMODE_NONE;
+    return this;
+}
+// UI-оверлей: перекрытие решает Z (depth_test+write ON), прозрачность — блендом, а прозрачные
+// пиксели ОТБРАСЫВАЮТСЯ в шейдере (clip) — иначе depth_write запечатал бы дыры. См. ui.frag.
+ShaderProgramDescription* ShaderProgramDescription::BehavesAsUIOverlay() {
+    depth_test = true;  depth_write = true;
+    color_blend = true;
     cull_mode = SDL_GPU_CULLMODE_NONE;
     return this;
 }

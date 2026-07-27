@@ -31,4 +31,9 @@ namespace DefaultShaderProgramSet
     // Проход создаёт engine (DefaultRenderPassNamespace::SetDefaultBloomPass); сюда вынесены сами
     // программы и их push/dispatch — атласы берутся по имени, локальных зависимостей от прохода нет.
     void SetBloomPrograms(EngineContext* ctx);
+
+    // UI-рендер-программа sp_ui (ui_vs/ui_fs), привязка к UI_PASS. Объявляет UI-буферы (transform/
+    // outpib/instance у VS; bits/wordbase/index/text/glyphUVL у FS) — их usage бейкает эти буферы.
+    // Слот Albedo = фон. Вызывать ДО первого BakePending (в MainInit).
+    void SetUIProgram(EngineContext* ctx);
 }

@@ -5,16 +5,14 @@
             "shaders": [
                 "Skybox"
             ],
-            "textures": [],
-            "params_kind": "None"
+            "textures": []
         },
         {
             "name": "debug_collider",
             "shaders": [
                 "sp_debug_collider"
             ],
-            "textures": [],
-            "params_kind": "None"
+            "textures": []
         },
         {
             "name": "car",
@@ -40,8 +38,25 @@
                     "texture": "default_emissive"
                 }
             ],
-            "params_kind": "Opaque",
-            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "emissive": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "emissiveStrength": 1.0,
+                "metallic": 0.0,
+                "roughness": 1.0,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         },
         {
             "name": "transparent",
@@ -58,8 +73,10 @@
                     "texture": "norm"
                 }
             ],
-            "params_kind": "Transparent",
-            "params": "3333b33ecccccccccccccccccccccccc"
+            "params_type": "Transparent",
+            "params": {
+                "alpha": 0.35
+            }
         },
         {
             "name": "car2",
@@ -85,8 +102,25 @@
                     "texture": "default_emissive"
                 }
             ],
-            "params_kind": "Opaque",
-            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "emissive": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "emissiveStrength": 1.0,
+                "metallic": 0.0,
+                "roughness": 1.0,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         },
         {
             "name": "material_sun",
@@ -111,8 +145,25 @@
                     "texture": "default_emissive"
                 }
             ],
-            "params_kind": "Opaque",
-            "params": "0000803f0000803f0000803f0000803fa4707d3f9a99593f6666e63e9a991940000000000000803f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "emissive": [
+                    0.99,
+                    0.85,
+                    0.45
+                ],
+                "emissiveStrength": 2.4,
+                "metallic": 0.0,
+                "roughness": 1.0,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         },
         {
             "name": "ground",
@@ -138,8 +189,25 @@
                     "texture": "default_emissive"
                 }
             ],
-            "params_kind": "Opaque",
-            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "emissive": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "emissiveStrength": 1.0,
+                "metallic": 0.0,
+                "roughness": 1.0,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         },
         {
             "name": "material_sprite",
@@ -165,8 +233,25 @@
                     "texture": "default_emissive"
                 }
             ],
-            "params_kind": "Opaque",
-            "params": "0000003f0000003f0000003f0000803f0000000000000000000000000000803f0000803f0000803f0ad7a33d00002040"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    0.5,
+                    0.5,
+                    0.5,
+                    1.0
+                ],
+                "emissive": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "emissiveStrength": 1.0,
+                "metallic": 1.0,
+                "roughness": 1.0,
+                "heightScale": 0.08,
+                "pomBias": 2.5
+            }
         },
         {
             "name": "material_sprite2",
@@ -192,8 +277,25 @@
                     "texture": "default_emissive"
                 }
             ],
-            "params_kind": "Opaque",
-            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f0000803f0000803f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "emissive": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "emissiveStrength": 1.0,
+                "metallic": 1.0,
+                "roughness": 1.0,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         },
         {
             "name": "ship",
@@ -201,8 +303,25 @@
                 "sp_untextured"
             ],
             "textures": [],
-            "params_kind": "Opaque",
-            "params": "cdcc0c3f9a99193f3333333f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    0.55,
+                    0.6,
+                    0.7,
+                    1.0
+                ],
+                "emissive": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "emissiveStrength": 1.0,
+                "metallic": 0.0,
+                "roughness": 1.0,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         },
         {
             "name": "m_orange",
@@ -211,8 +330,25 @@
                 "sp_shadow"
             ],
             "textures": [],
-            "params_kind": "Opaque",
-            "params": "0000803f6666e63ecdcccc3d0000803f0000803fdcda5a3f00000000a01a2f3e000000000000803f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    1.0,
+                    0.45,
+                    0.1,
+                    1.0
+                ],
+                "emissive": [
+                    1.0,
+                    0.854902,
+                    0.0
+                ],
+                "emissiveStrength": 0.171,
+                "metallic": 0.0,
+                "roughness": 1.0,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         },
         {
             "name": "m_gray",
@@ -221,8 +357,25 @@
                 "sp_shadow"
             ],
             "textures": [],
-            "params_kind": "Opaque",
-            "params": "0000003f0000003f0000003f0000803f8b8d0d3f8b8d0d3f8b8d0d3f9a99993f000000000000803f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    0.5,
+                    0.5,
+                    0.5,
+                    1.0
+                ],
+                "emissive": [
+                    0.552941,
+                    0.552941,
+                    0.552941
+                ],
+                "emissiveStrength": 1.2,
+                "metallic": 0.0,
+                "roughness": 1.0,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         },
         {
             "name": "metal1",
@@ -231,8 +384,25 @@
                 "sp_shadow"
             ],
             "textures": [],
-            "params_kind": "Opaque",
-            "params": "0000803f0000003f0000003f0000803f0000803f00000000000000000681153e0000803f8fc2753f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    1.0,
+                    0.5,
+                    0.5,
+                    1.0
+                ],
+                "emissive": [
+                    1.0,
+                    0.0,
+                    0.0
+                ],
+                "emissiveStrength": 0.146,
+                "metallic": 1.0,
+                "roughness": 0.96,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         },
         {
             "name": "metal2",
@@ -241,8 +411,25 @@
                 "sp_shadow"
             ],
             "textures": [],
-            "params_kind": "Opaque",
-            "params": "0000003f0000003f0000003f0000803f000000000000000000000000000000000000803f8fc2753f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    0.5,
+                    0.5,
+                    0.5,
+                    1.0
+                ],
+                "emissive": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "emissiveStrength": 0.0,
+                "metallic": 1.0,
+                "roughness": 0.96,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         },
         {
             "name": "emission",
@@ -251,8 +438,25 @@
                 "sp_shadow"
             ],
             "textures": [],
-            "params_kind": "Opaque",
-            "params": "0000000000000000000000000000803f9faeae3e9faeae3ea9a5253f9a99d93f000000000000803f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "emissive": [
+                    0.341176,
+                    0.341176,
+                    0.647059
+                ],
+                "emissiveStrength": 1.7,
+                "metallic": 0.0,
+                "roughness": 1.0,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         }
     ]
 }

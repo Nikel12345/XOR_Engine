@@ -6,6 +6,7 @@
 #include "TextureManager.h"
 #include "ModelManager.h"
 #include "MaterialManager.h"
+#include "MaterialParamsSpec.h" // materials.json: params пишутся/читаются по схеме своего типа
 #include "ShaderManager.h"     // shaders.json: реестры VSD/FSD/CSD/SP
 #include "PipeManager.h"       // инвалидация пайплайна при merge-upsert sp
 #include "RenderManager.h"     // PassManager — резолв прохода sp по имени
@@ -123,42 +124,65 @@ static void WriteSpd(yyjson_mut_doc* doc, yyjson_mut_val* obj, const ShaderProgr
 	yyjson_mut_obj_add_real(doc, obj, "bias_slope",     d.rasterizer_bias.depth_bias_slope_factor);
 	yyjson_mut_obj_add_real(doc, obj, "bias_clamp",     d.rasterizer_bias.depth_bias_clamp);
 }
-// MaterialParamsKind ↔ строка (тег UI-разбора params).
-static const char* KindToStr(MaterialParamsKind k) {
-	switch (k) {
-	case MaterialParamsKind::Opaque:      return "Opaque";
-	case MaterialParamsKind::Transparent: return "Transparent";
-	default:                              return "None";
+// ── params материала ↔ json ПО СХЕМЕ ТИПА (MaterialParamsSpec) ──
+// Тип называет себя строкой (params_type = имя в реестре), поля пишутся ПО ИМЕНАМ: скаляр —
+// числом/булем, вектор/цвет — массивом лейнов. Раскладку блоба знает схема, а не этот файл,
+// поэтому тип, зарегистрированный кодом игры, сериализуется здесь без единой правки движка.
+// Плюс к читаемости — устойчивость: поле, добавленное/удалённое/переставленное в структуре,
+// не ломает старые сцены (на загрузке недостающее остаётся дефолтом, лишнее игнорируется).
+static bool JsonNum(yyjson_val* v, double& out) {
+	if (yyjson_is_real(v)) { out = yyjson_get_real(v); return true; }
+	if (yyjson_is_sint(v)) { out = (double)yyjson_get_sint(v); return true; }
+	if (yyjson_is_uint(v)) { out = (double)yyjson_get_uint(v); return true; }
+	if (yyjson_is_bool(v)) { out = yyjson_get_bool(v) ? 1.0 : 0.0; return true; }
+	return false;
+}
+static void WriteMaterialParams(yyjson_mut_doc* doc, yyjson_mut_val* obj,
+                                const MaterialParamsSpec& s, const std::vector<uint8_t>& blob)
+{
+	for (const MatFieldSpec& f : s.fields) {
+		const void* p = MatFieldPtr(blob, f);
+		if (!p) continue;                       // блоб короче схемы — поле пропускаем
+		const uint32_t lanes = MatFieldLanes(f.kind);
+		if (lanes > 1) {
+			yyjson_mut_val* arr = yyjson_mut_obj_add_arr(doc, obj, f.key);
+			const float* v = static_cast<const float*>(p);
+			for (uint32_t i = 0; i < lanes; ++i) yyjson_mut_arr_add_real(doc, arr, v[i]);
+		}
+		else if (f.kind == MatFieldKind::Bool)
+			yyjson_mut_obj_add_bool(doc, obj, f.key, *static_cast<const uint32_t*>(p) != 0);
+		else if (f.kind == MatFieldKind::U32)
+			yyjson_mut_obj_add_uint(doc, obj, f.key, *static_cast<const uint32_t*>(p));
+		else
+			yyjson_mut_obj_add_real(doc, obj, f.key, *static_cast<const float*>(p));
 	}
 }
-static MaterialParamsKind KindFromStr(const char* s) {
-	if (s && std::strcmp(s, "Opaque") == 0)      return MaterialParamsKind::Opaque;
-	if (s && std::strcmp(s, "Transparent") == 0) return MaterialParamsKind::Transparent;
-	return MaterialParamsKind::None;
-}
-// params — НЕПРОЗРАЧНЫЙ блоб (layout у автора шейдера); сериализуем сырые байты hex-строкой
-// (точный round-trip без допущения про float-раскладку).
-static std::string BytesToHex(const std::vector<uint8_t>& b) {
-	static const char* H = "0123456789abcdef";
-	std::string s; s.reserve(b.size() * 2);
-	for (uint8_t x : b) { s.push_back(H[x >> 4]); s.push_back(H[x & 0xF]); }
-	return s;
-}
-static std::vector<uint8_t> HexToBytes(const char* s) {
-	std::vector<uint8_t> b;
-	if (!s) return b;
-	auto nyb = [](char c) -> int {
-		if (c >= '0' && c <= '9') return c - '0';
-		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-		return -1;
-	};
-	for (size_t i = 0; s[i] && s[i + 1]; i += 2) {
-		int hi = nyb(s[i]), lo = nyb(s[i + 1]);
-		if (hi < 0 || lo < 0) break;
-		b.push_back((uint8_t)((hi << 4) | lo));
+// Блоб приходит уже заполненным дефолтами типа (s.defaults) — здесь только перекрываем найденное.
+static void ReadMaterialParams(yyjson_val* obj, const MaterialParamsSpec& s, std::vector<uint8_t>& blob)
+{
+	if (!obj) return;
+	for (const MatFieldSpec& f : s.fields) {
+		yyjson_val* v = yyjson_obj_get(obj, f.key);
+		if (!v) continue;                       // ключа нет → остаётся дефолт
+		void* p = MatFieldPtr(blob, f);
+		if (!p) continue;
+		auto put = [&](uint32_t lane, double d) {
+			if (f.clamp_on_load && f.lo < f.hi) d = d < f.lo ? f.lo : (d > f.hi ? f.hi : d);
+			if (f.kind == MatFieldKind::Bool || f.kind == MatFieldKind::U32)
+				static_cast<uint32_t*>(p)[lane] = (uint32_t)(d < 0 ? 0 : d);
+			else
+				static_cast<float*>(p)[lane] = (float)d;
+		};
+		const uint32_t lanes = MatFieldLanes(f.kind);
+		if (lanes > 1) {
+			size_t i, max; yyjson_val* e;
+			yyjson_arr_foreach(v, i, max, e) {
+				if (i >= lanes) break;          // длиннее схемы → усечь
+				double d; if (JsonNum(e, d)) put((uint32_t)i, d);
+			}
+		}
+		else { double d; if (JsonNum(v, d)) put(0, d); }
 	}
-	return b;
 }
 
 // Имя буфера из файла (std::string) → КАНОНИЧНЫЙ BufferDataName (ключ реестра = const char*
@@ -332,7 +356,7 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 	}
 
 	// ── Материалы → materials.json. Скип dont_save (кодовая инфраструктура). Текстуры — по роли,
-	//    sp — по имени, params — hex-блоб + params_kind (тег UI). ──
+	//    sp — по имени, params — объект именованных полей по схеме типа (params_type). ──
 	{
 		yyjson_mut_doc* doc = yyjson_mut_doc_new(nullptr);
 		yyjson_mut_val* root = yyjson_mut_obj(doc);
@@ -351,9 +375,17 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 				yyjson_mut_obj_add_str   (doc, t, "role",    RoleToStr(role));
 				yyjson_mut_obj_add_strcpy(doc, t, "texture", tn.c_str());
 			}
-			yyjson_mut_obj_add_str(doc, e, "params_kind", KindToStr(m->params_kind));
-			if (!m->params.empty())
-				yyjson_mut_obj_add_strcpy(doc, e, "params", BytesToHex(m->params).c_str());
+			// Тип params назван строкой из реестра; поля пишет его схема. Незарегистрированный
+			// тип сохранить нечем (раскладка неизвестна) — громко говорим об этом, а не пишем
+			// молча битую запись: материал загрузится без params.
+			if (const MaterialParamsSpec* ps = MaterialParamsSpecRegistry::Get().ByName(m->params_type)) {
+				yyjson_mut_obj_add_strcpy(doc, e, "params_type", m->params_type.c_str());
+				WriteMaterialParams(doc, yyjson_mut_obj_add_obj(doc, e, "params"), *ps, m->params);
+			}
+			else if (!m->params_type.empty() || !m->params.empty())
+				SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+					"SaveScene: material '%s' has params of unregistered type '%s' (%zu bytes) - NOT saved",
+					name.c_str(), m->params_type.c_str(), m->params.size());
 			++saved;
 		}
 		yyjson_write_err werr;
@@ -589,8 +621,21 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 						if (RoleFromStr(JsonStr(t, "role"), role))
 							me.textures.emplace_back(role, TextureName(JsonStr(t, "texture")));
 				}
-				me.params_kind = KindFromStr(JsonStr(e, "params_kind"));
-				me.params = HexToBytes(yyjson_get_str(yyjson_obj_get(e, "params")));
+				// params: стартуем с ДЕФОЛТОВ типа (member-инициализаторы структуры) и накатываем
+				// поля из файла по именам. Тип не зарегистрирован → params нет: раскладки нет,
+				// а гадать про байты нельзя (сообщаем, чтобы это не выглядело как «поля потерялись»).
+				me.params_type = JsonStr(e, "params_type");
+				if (const MaterialParamsSpec* ps = MaterialParamsSpecRegistry::Get().ByName(me.params_type)) {
+					me.params = ps->defaults;
+					ReadMaterialParams(yyjson_obj_get(e, "params"), *ps, me.params);
+				}
+				else if (!me.params_type.empty()) {
+					SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+						"LoadScene: material '%s' wants params type '%s' - not registered "
+						"(register it before LoadScene); loaded without params",
+						me.name.c_str(), me.params_type.c_str());
+					me.params_type.clear();
+				}
 				entries.push_back(std::move(me));
 			}
 			yyjson_doc_free(doc);

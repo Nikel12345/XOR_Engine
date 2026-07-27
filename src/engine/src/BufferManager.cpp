@@ -6,38 +6,41 @@
 
 BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_manager) : dev(device), trm(transfer_manager) {
     using namespace DefaultBuffersNames;
-	// Стримы пула PosUVNormPool (см. PositionStructure.h): вершины моделей по группам, каждый
-	// стрим — свой буфер (растут независимо через RESIZE_AND_COPY, но В НОГУ по элементам —
-	// канон продвижения у ModelManager). Ёмкости = общий запас вершин × страйд стрима, чтобы
-	// стримы вмещали одинаковое число вершин (старый монолит: 8190600 Б / 44 Б ≈ 186k вершин).
-	// USAGE-ФЛАГОВ ЗДЕСЬ НЕТ: BufferData::usage наполняют декларации до бейка (CreateVertexShader —
-	// VERTEX/INDEX; Create*Program — storage-роли), см. BufferData.h. Здесь — только размеры и типы.
 	constexpr Uint32 BASE_VERTEX_CAPACITY = 186150;
 	CreateBufferData(GeometryStreams::VERTEX_POS_BUFFER,     BASE_VERTEX_CAPACITY * 12, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 	CreateBufferData(GeometryStreams::VERTEX_UV_BUFFER,      BASE_VERTEX_CAPACITY * 8,  BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 	CreateBufferData(GeometryStreams::VERTEX_NORMTAN_BUFFER, BASE_VERTEX_CAPACITY * 24, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
-	// Индексный буфер пула (у одного пула — один): общее индексное пространство всех его моделей,
-	// финализируется индексным апдейтером вместе со стримами. Имя — в PositionStructure.h.
 	CreateBufferData(PosUVNormPool::INDEX_BUFFER, 8190006, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 	CreateBufferData(DEFAULT_TRANSFORM_BUFFER, BASE_TB_SIZE / 10, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_LIGHT_BUFFER, sizeof(LightLayout) * 2, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_CAMERA_BUFFER, sizeof(CameraData), BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_POSITION_INDEX_BUFFER, BASE_TB_SIZE / 16/ 10, BufferDataType::Dynamic);
-	// Per-instance данные (8 байт/строку). Dynamic — возможны удаления; авторесайз как у трансформов.
 	CreateBufferData(DEFAULT_INSTANCE_BUFFER, BASE_TB_SIZE / 80, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_LIGHT_CAMERA_BUFFER, sizeof(CameraData) * 6, BufferDataType::Dynamic);
 
-    // Индирект ПО-КАМЕРНО, правится компьютом (scatter пишет num_instances) — COMPUTE_STORAGE_WRITE
-    // выведется из декларации scatter-программы. РУЧНОЙ тег INDIRECT: источник indirect-draw —
-    // свойство раскладки батчей (BatchLayout::indirectBuffer, резолв после бейка),
-    // Create*-декларации нет и не будет.
     CreateBufferData(DEFAULT_INDIRECT_BUFFER, sizeof(SDL_GPUIndexedIndirectDrawCommand) * 10, BufferDataType::Dynamic)
         ->usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
-    // GPU-каллинг: сферы по строкам трансформов + КОМПАКТНЫЙ out_pib + entity->cmd.
-    // Все Dynamic (per-slot). out_pib пишет scatter (RW). entity->cmd — RO вход scatter.
+
     CreateBufferData(DEFAULT_BOUND_SPHERE_BUFFER, BASE_TB_SIZE / 40, BufferDataType::Dynamic);
     CreateBufferData(DEFAULT_OUT_PIB_BUFFER, BASE_TB_SIZE / 16 / 10, BufferDataType::Dynamic);
     CreateBufferData(DEFAULT_ENTITY_TO_CMD_BUFFER, BASE_TB_SIZE / 16 / 10, BufferDataType::Dynamic);
+
+    // ── UI-текст (концепт): 4 буфера разреженного текст-канала (см. UI_DataModule).
+    // Только РЕГИСТРАЦИЯ обёрток (имена+размеры) под будущий UI-проход. usage НЕ трогаем —
+    // буфер ещё не участвует ни в одной шейдер-программе, значит флаги ему не нужны и GPU-буфер
+    // сейчас не создаётся (BakePending пропустит с логом «нет деклараций» — это честный сигнал
+    // «потребителя пока нет»). Флаги придут из декларации UI-SP, когда она появится.
+    // NB: BakePending одноразовый (очищает pending_bakes), поэтому при реальной проводке буферы
+    // надо будет либо создавать РЯДОМ с UI-SP (декларация в том же кадре запросит их бейк), либо
+    // повторно поставить в очередь — иначе поздняя декларация usage сама по себе не пере-бейкнет.
+    CreateBufferData(UI_TEXT_BITS_BUFFER,     sizeof(uint32_t) * 64,      BufferDataType::Dynamic);
+    CreateBufferData(UI_TEXT_WORDBASE_BUFFER, sizeof(uint32_t) * 64,      BufferDataType::Dynamic);
+    CreateBufferData(UI_TEXT_INDEX_BUFFER,    sizeof(uint32_t) * 2 * 256, BufferDataType::Dynamic);
+    CreateBufferData(UI_TEXT_BUFFER,          sizeof(uint32_t) * 4096,    BufferDataType::Dynamic);
+
+    // GlyphUVL шрифта (FontManager::StoreGlyphUVL). Тоже только обёртка без usage — флаг придёт
+    // от декларации UI-SP, когда она появится (как остальные UI-буферы).
+    CreateBufferData(UI_FONT_UVL_BUFFER, sizeof(uint32_t) * 4 * 256, BufferDataType::Dynamic);
 }
 
 BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, BufferDataType type, ResizeBehaviour resize_behaviour)

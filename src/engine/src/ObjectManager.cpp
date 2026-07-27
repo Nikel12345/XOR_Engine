@@ -129,6 +129,66 @@ SceneData* ObjectManager::GetScene(const SceneName& name)
 // ============================================================
 //  Сериализация сцены
 // ============================================================
+
+// Пост-обработка pretty-вывода yyjson: массив БЕЗ вложенных массивов/объектов схлопывается в
+// одну строку ("x": [1.0, 2.0, 3.0]). Своего флага для этого у yyjson нет (см. YYJSON_WRITE_*),
+// а колонка поля — ровно такой массив: в столбик scene.json раздувается до строки на ЗНАЧЕНИЕ
+// (архетип из N сущностей × M полей). Структура файла при этом не меняется — только раскладка.
+// Проход строкоосознанный: '[' и ']' внутри json-строки не считаются скобками (перевод строки
+// внутри строки yyjson всегда экранирует, а вот скобка там — обычный литерал).
+static std::string InlineScalarArrays(const std::string& s)
+{
+    std::string out;
+    out.reserve(s.size());
+    bool in_str = false;
+    for (size_t i = 0; i < s.size(); ++i) {
+        const char c = s[i];
+        if (in_str) {
+            out += c;
+            if (c == '\\') { if (i + 1 < s.size()) out += s[++i]; }   // экранированная пара — целиком
+            else if (c == '"') in_str = false;
+            continue;
+        }
+        if (c == '"') { in_str = true; out += c; continue; }
+        if (c != '[')  { out += c; continue; }
+
+        // Парная ']' + заодно проверка на вложенные структуры внутри.
+        size_t j = i + 1;
+        bool nested = false, closed = false, str = false;
+        for (; j < s.size(); ++j) {
+            const char d = s[j];
+            if (str) {
+                if (d == '\\') ++j;
+                else if (d == '"') str = false;
+                continue;
+            }
+            if (d == '"') { str = true; continue; }
+            if (d == '[' || d == '{') { nested = true; break; }
+            if (d == ']') { closed = true; break; }
+        }
+        // Есть вложенность (напр. зубчатый массив имён у Material) — отдаём внешний уровень
+        // pretty-выводу как есть, а вложенные скалярные массивы схлопнутся сами на своей итерации.
+        if (nested || !closed) { out += c; continue; }
+
+        str = false;                                   // скалярный массив → без переносов и отступов
+        for (size_t k = i; k <= j; ++k) {
+            const char d = s[k];
+            if (str) {
+                out += d;
+                if (d == '\\') { if (k + 1 <= j) out += s[++k]; }
+                else if (d == '"') str = false;
+                continue;
+            }
+            if (d == '"') { str = true; out += d; continue; }
+            if (d == ' ' || d == '\t' || d == '\n' || d == '\r') continue;
+            out += d;
+            if (d == ',') out += ' ';
+        }
+        i = j;
+    }
+    return out;
+}
+
 std::string ObjectManager::SaveScene(SceneData* scene)
 {
     if (!scene) return {};
@@ -174,7 +234,7 @@ std::string ObjectManager::SaveScene(SceneData* scene)
     }
 
     char* js = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, nullptr);
-    std::string out = js ? std::string(js) : std::string{};
+    std::string out = js ? InlineScalarArrays(js) : std::string{};   // колонки — в строчку
     if (js) free(js);
     yyjson_mut_doc_free(doc);
     return out;

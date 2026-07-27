@@ -3,17 +3,18 @@
 #include <vector>
 #include <cstring>
 #include <string>
-#include "MaterialData.h"   // Material + TextureSlotRole (через ShaderTypes.h)
+#include "MaterialData.h"       // Material + TextureSlotRole (через ShaderTypes.h)
+#include "MaterialParamsSpec.h" // ::SetMaterialParams<T> — общая реализация упаковки блоба
 
 class TextureManager;   // только в сигнатуре CollectSamplerUsage — передаётся на вызове
 
-// Запись манифеста материалов сцены (materials.json): всё для пересоздания. params — сырой блоб
-// (layout задаёт автор шейдера, движок видит только байты), params_kind — тег UI-разбора.
+// Запись манифеста материалов сцены (materials.json): всё для пересоздания. params — блоб,
+// уже собранный по схеме типа params_type (разбор json ↔ поля — в Engine_Scene).
 struct SceneMaterialEntry {
 	std::string name;
 	std::vector<std::pair<TextureSlotRole, TextureName>> textures;
 	std::vector<ShaderName> shaders;
-	MaterialParamsKind      params_kind = MaterialParamsKind::None;
+	std::string             params_type;   // имя типа в MaterialParamsSpecRegistry; пусто = без params
 	std::vector<uint8_t>    params;
 };
 
@@ -27,7 +28,7 @@ public:
 
 	// Merge-upsert материалов из манифеста (см. SceneMaterialEntry). Существующий обновляется
 	// В МЕСТЕ (указатель у энтити жив — MaterialComponent.materials перепривяжется на пересборке,
-	// но и так тот же адрес), новый создаётся. params/params_kind проставляются напрямую. Материалы
+	// но и так тот же адрес), новый создаётся. params/params_type проставляются напрямую. Материалы
 	// вне манифеста не трогаются. Возвращает число обработанных.
 	size_t LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries);
 
@@ -62,14 +63,10 @@ public:
 	}
 
 	// Тип-безопасная упаковка per-material факторов в Material::params (непрозрачный блоб).
-	// T должен совпадать по размеру/раскладке с cbuffer MaterialBlock в шейдере.
+	// T должен совпадать по размеру/раскладке с cbuffer MaterialBlock в шейдере И быть
+	// зарегистрирован в MaterialParamsSpecRegistry (оттуда берётся имя типа для тега).
 	template<class T>
-	void SetMaterialParams(Material* m, const T& p) {
-		if (!m) return;
-		m->params.resize(sizeof(T));
-		std::memcpy(m->params.data(), &p, sizeof(T));
-		m->params_kind = T::kind;   // тег для UI-разбора (рендер его не читает)
-	}
+	void SetMaterialParams(Material* m, const T& p) { ::SetMaterialParams(m, p); }
 
 	~MaterialManager();
 private:

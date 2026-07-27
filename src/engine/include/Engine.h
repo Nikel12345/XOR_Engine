@@ -27,6 +27,7 @@ class ThreadController;
 class MaterialManager;
 class InputManager;
 class TextureLoader;
+class FontManager;
 class BatchBuilder;
 class PIB_DataModule;
 class TransformDataModule;
@@ -34,6 +35,8 @@ class InstanceDataModule;
 class LightDataModule;
 class IndirectDataModule;
 class BoundSphereDataModule;
+class UI_DataModule;
+class UI_Yoga;
 class EngineContext;
 struct TransferBufferData;
 struct PrepassTimingReport;
@@ -64,6 +67,8 @@ public:
 	PIB_DataModule* GetPIBDataModule() const { return pib_data_module; }
 	TransformDataModule* GetTransformDataModule() const { return transform_data_module; }
 	LightDataModule* GetLightDataModule() const { return light_data_module; }
+	UI_DataModule* GetUIDataModule() const { return ui_data_module; }
+	UI_Yoga* GetUIYoga() const { return ui_yoga; }
 
 
     // Сохранение/загрузка сцены-папки (dir): scene.json (ECS через om) + файлы ресурсов рядом
@@ -109,8 +114,6 @@ private:
 	void InitDefaultBufferUpdaters();
     void InitPasses();
     void InitUICommands();
-    // Билтин-типы material-params (None/Opaque/Transparent) в реестр для UI-дропдауна Kind.
-    void InitDefaultMaterialParams();
     // Движковые дефолтные текстуры (albedo/normal/orm/emissive) в _FallbackAtlas — чтобы редактор
     // мог создавать материалы и заполнять слоты по ролям без ассетов игры.
     void InitDefaultResources();
@@ -137,6 +140,7 @@ private:
 	MaterialManager* material_manager = nullptr;
 	InputManager* input_manager = nullptr;
 	TextureLoader* texture_loader = nullptr;
+	FontManager* font_manager = nullptr;
 
     BatchBuilder* batch_builder = nullptr;
 
@@ -146,6 +150,8 @@ private:
 	LightDataModule* light_data_module = nullptr;
 	IndirectDataModule* indirect_data_module = nullptr;
     BoundSphereDataModule* bound_sphere_data_module = nullptr;
+	UI_DataModule* ui_data_module = nullptr;
+	UI_Yoga* ui_yoga = nullptr;
 
 	EngineContext* engine_context;
 	std::function<void()> bind_shader_functions;   // см. SetBindShaderFunctions

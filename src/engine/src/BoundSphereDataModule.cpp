@@ -62,13 +62,18 @@ void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, Ob
 		const size_t n = arch.entities.size();
 		if (n == 0) continue;
 
+		// UI-элементы живут в NDC (трансформ = экранная матрица, не мировая), поэтому фрустум-тест
+		// камеры мира их бы мис-каллил. Пишем им вырожденную сферу w<0 → culling считает has_geom=false
+		// и скаттерит безусловно (как transformless). Так UI не отсекается камерой.
+		const bool is_ui = arch.get_array<UIComponent>() != nullptr;
+
 		auto* model_arr = arch.get_array<ModelComponent>();
 		glm::vec4* dst = static_cast<glm::vec4*>(
 			bm->AcquireTransferWritePtr(task, safe_u32(n * sizeof(glm::vec4))));
 		if (!dst) return;
 
 		for (size_t i = 0; i < n; ++i)
-			dst[i] = model_arr ? ModelSphere((*model_arr)[i].model)
-			                   : glm::vec4(0.0f, 0.0f, 0.0f, -1.0f);
+			dst[i] = (is_ui || !model_arr) ? glm::vec4(0.0f, 0.0f, 0.0f, -1.0f)
+			                               : ModelSphere((*model_arr)[i].model);
 	}
 }

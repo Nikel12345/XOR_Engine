@@ -10,7 +10,7 @@
 #include "ShaderManager.h"
 #include "InputManager.h"   // PushCommand + CommandId
 #include "InputCommands.h"  // CreateMaterialCmd и прочие payload-структуры
-#include "MaterialParams.h" // OpaqueMaterialParams — тинт превью материала (baseColor)
+#include "MaterialParamsSpec.h" // схема типа params — цветовое поле для тинта превью материала
 #include <functional>       // резолвер превью плитки (preview_of)
 
 using namespace ui;
@@ -46,15 +46,14 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
             }
         };
 
-        // Превью текстуры по имени: ячейка превью-атласа (см. TextureManager::BlitPendingPreviews).
-        // tex==0 (нет хэндла/ячейки) → плитка нарисует затычку. Поиск через карту (без лог-спама Get*).
+        // Превью текстуры ПО ИМЕНИ: ячейка превью-атласа подсистемы PreviewPacker. Хэндл не нужен —
+        // это и снимает моргание при LoadScene: пока sim декодит файл (хэндла ещё нет), слот превью
+        // по имени жив, и плитка показывает прежнюю картинку. Невалидный UV → плитка нарисует затычку.
         TextureManager* tm = ctx->GetTextureManager();
         auto texture_preview = [&](const std::string& texName) -> TilePreview
         {
             TilePreview pv{};
-            auto it = tm->GetTextureHandles().find(texName);
-            if (it == tm->GetTextureHandles().end() || !it->second) return pv;
-            TextureManager::PreviewUV uv = tm->GetPreviewUV(it->second.get());
+            PreviewPacker::UV uv = tm->GetPreviewUV(texName);
             if (!uv.valid) return pv;
             pv.tex = (ImTextureID)(intptr_t)tm->GetPreviewAtlasTexture();
             pv.uv0 = ImVec2(uv.u0, uv.v0);
@@ -75,12 +74,19 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
             auto tit = m->textures.find(TextureSlotRole::Albedo);
             if (tit == m->textures.end()) return pv;                // безальбедный → затычка
             pv = texture_preview(tit->second);
-            if (pv.tex) {                                           // настоящий albedo → тинт baseColor
-                if (m->params_kind == MaterialParamsKind::Opaque
-                    && m->params.size() >= sizeof(OpaqueMaterialParams)) {
-                    const auto* p = reinterpret_cast<const OpaqueMaterialParams*>(m->params.data());
-                    pv.tint = ImVec4(p->baseColor[0], p->baseColor[1], p->baseColor[2], 1.0f);
-                }
+            if (pv.tex) {                                           // настоящий albedo → тинт цветом материала
+                // Тинт берём из ПЕРВОГО цветового поля схемы типа params (у Opaque это baseColor,
+                // у типа из кода игры — его собственный цвет). Нет цветовых полей / тип не
+                // зарегистрирован → превью без тинта. Раскладку тут не знаем и знать не должны.
+                if (const MaterialParamsSpec* s = MaterialParamsSpecRegistry::Get().ByName(m->params_type))
+                    for (const MatFieldSpec& f : s->fields) {
+                        if (f.kind != MatFieldKind::Color3 && f.kind != MatFieldKind::Color4) continue;
+                        if (const void* fp = MatFieldPtr(m->params, f)) {
+                            const float* c = static_cast<const float*>(fp);
+                            pv.tint = ImVec4(c[0], c[1], c[2], 1.0f);
+                        }
+                        break;
+                    }
             }
             else pv = texture_preview("_NoTextureDummy");           // битая ссылка → dummy, БЕЗ тинта
             return pv;

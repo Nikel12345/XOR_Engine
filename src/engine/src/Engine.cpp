@@ -14,6 +14,7 @@
 #include "ThreadController.h"
 #include "MaterialManager.h"
 #include "InputManager.h"
+#include "FontManager.h"   // new FontManager() в ctor
 #include "TextureLoader.h"
 #include "BatchBuilder.h"
 #include "PIB_DataModule.h"
@@ -22,13 +23,14 @@
 #include "LightDataModule.h"
 #include "IndirectDataModule.h"
 #include "BoundSphereDataModule.h"
+#include "UI_DataModule.h"
+#include "UI_Yoga.h"   // new UI_Yoga() в ctor + Emit (flex-раскладка UI → энтити)
 #include "EngineContext.h"
 #include "DefaultUpdateSet.h"
 #include "DefaultRenderPassSet.h"
 #include "TexturesPresets.h"
 #include "ComponentSerializer.h"
-#include "MaterialParams.h"           // Opaque/TransparentMaterialParams — билтин-типы params
-#include "MaterialParamsRegistry.h"   // реестр типов params (дропдаун Kind)
+#include "MaterialParamsSpec.h"       // RegisterBuiltinMaterialParamsSpecs — схемы типов params
 #include "PositionStructure.h"        // FMT_PosUVNormal — раскладка вершин для fallback-sp
 #include "DefaultCommandSet.h"        // регистрация билтин UI-команд (вынесено из класса)
 #include "imgui.h"
@@ -47,6 +49,9 @@ void Engine::OnWindowResized(Sint32 w, Sint32 h)
 {
 	width = safe_sint32_f(w);
 	height = safe_sint32_f(h);
+
+	// UI-раскладка зависит от размера кадра (px→NDC) → пересчитать на следующем Emit.
+	if (ui_yoga) ui_yoga->MarkDirty();
 
 	// GPU-таргеты (depth + HDR) ресайзятся НЕ здесь, а в RenderFunc по размеру реально полученного
 	// свопчейна — раз на отрисованный кадр. Событие resized летит сотнями за drag; пересоздавать
@@ -74,6 +79,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	material_manager = new MaterialManager();
 	input_manager = new InputManager();
 	texture_loader = new TextureLoader();
+	font_manager = new FontManager();   // TTF_Init/Quit — в его ctor/dtor
 
 	batch_builder = new BatchBuilder();
 
@@ -83,19 +89,23 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	light_data_module = new LightDataModule();
 	indirect_data_module = new IndirectDataModule();
 	bound_sphere_data_module = new BoundSphereDataModule();
+	ui_data_module = new UI_DataModule();
+	ui_yoga = new UI_Yoga();   // flex-раскладка UI (Yoga) → UI-энтити; Emit в PrepareFunc
 
 	engine_context = new EngineContext(buffer_manager, texture_manager, pass_manager, material_manager, object_manager, shader_manager, model_manager, camera_manager, pipe_manager, batch_builder, texture_loader);
 	engine_context->SetInputManager(input_manager);
+	engine_context->SetFontManager(font_manager);   // кроссменеджерский CreateFont (см. CLAUDE.md)
+	engine_context->SetUIYoga(ui_yoga);   // игра берёт его отсюда для декларативной сборки UI
 	engine_context->SetEngine(this);   // делегирование Save/LoadScene (оркестрация сцены-папки)
 	InitDefaultBufferUpdaters();
 	InitPasses();
 	InitUICommands();
-	RegisterBuiltinComponentSpecs();   // спецификации компонентов: save/load сцены + схема полей для UI
+	RegisterBuiltinComponentSpecs();          // спецификации компонентов:  save/load сцены + схема полей для UI
+	RegisterBuiltinMaterialParamsSpecs();     // спецификации params материалов: то же самое для блоба факторов
 	// Staging-сцена формы создания энтити (UI_Hierarchy): НИКОГДА не активна — дата-модули и
 	// батчи её не видят, поэтому UI-поток монопольно правит её содержимое. Создаётся здесь,
 	// до старта потоков: карту сцен после старта не мутируем (GetActiveScene её итерирует).
 	object_manager->CreateScene("_staging")->is_active = false;
-	InitDefaultMaterialParams();             // билтин-типы params для UI-дропдауна Kind
 	pass_manager->FillRenderPasses();
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});
@@ -132,34 +142,6 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	// Бейк GPU-ресурсов здесь НЕ делаем: игра объявляет свои ресурсы и шейдерные программы позже
 	// (атласы в Game::Init, sp — в манифесте сцены), а именно объявления sp несут usage-флаги.
 	// Точка бейка — конец первого Engine::LoadScene.
-}
-
-// Билтин-типы params для UI-дропдауна Kind. Пользователь дорегистрирует свои из кода игры
-// (MaterialParamsRegistry::Get().Register{...}) — движок трогать не надо.
-void Engine::InitDefaultMaterialParams()
-{
-	auto& r = MaterialParamsRegistry::Get();
-	// None: applyDefault чистит блоб; edit пустой (нечего рисовать).
-	r.Register({ MaterialParamsKind::None, "None",
-		[](EngineContext*, Material* m){ m->params.clear(); m->params_kind = MaterialParamsKind::None; } });
-	r.Register({ MaterialParamsKind::Opaque, "Opaque",
-		[](EngineContext* ctx, Material* m){ ctx->SetMaterialParams(m, OpaqueMaterialParams{}); },
-		[](Material* m){
-			if (m->params.size() < sizeof(OpaqueMaterialParams)) return;   // защита от рассинхрона kind/блоба
-			auto* p = reinterpret_cast<OpaqueMaterialParams*>(m->params.data());
-			ImGui::ColorEdit3("Base Color", p->baseColor);
-			ImGui::ColorEdit3("Emissive", p->emissive);
-			ImGui::SliderFloat("Emissive Strength", &p->emissiveStrength, 0.0f, 8.0f);
-			ImGui::SliderFloat("Metallic", &p->metallic, 0.0f, 1.0f);
-			ImGui::SliderFloat("Roughness", &p->roughness, 0.0f, 1.0f);
-		} });
-	r.Register({ MaterialParamsKind::Transparent, "Transparent",
-		[](EngineContext* ctx, Material* m){ ctx->SetMaterialParams(m, TransparentMaterialParams{}); },
-		[](Material* m){
-			if (m->params.size() < sizeof(TransparentMaterialParams)) return;
-			auto* p = reinterpret_cast<TransparentMaterialParams*>(m->params.data());
-			ImGui::SliderFloat("Alpha", &p->alpha, 0.0f, 1.0f);
-		} });
 }
 
 void Engine::InitDefaultResources()
@@ -268,6 +250,10 @@ void Engine::InitDefaultBufferUpdaters()
 	SetDefaultBoundSphereUpdater(*engine_context, bound_sphere_data_module);
 	SetDefaultEntityToCmdUpdater(*engine_context, pib_data_module);
 	SetDefaultOutPibUpdater(*engine_context, light_data_module);
+
+	// UI-текст: bits/wordbase/index/text (UI_DataModule) + GlyphUVL (FontManager, шрифт "default").
+	// Буферы бейкаются, когда sp_ui объявит их usage (создаётся в Game::MainInit до старта потоков).
+	SetUITextUpdaters(*engine_context, ui_data_module, font_manager, "default");
 }
 
 void Engine::InitPasses()
@@ -282,6 +268,7 @@ void Engine::InitPasses()
 		SetTransparentPass(engine_context);
 		SetDebugColliderPass(engine_context);
 		SetDefaultBloomPass(engine_context);       // bloom от эмиссии (compute) + composite/tonemap в scene_hdr
+		SetUIPass(engine_context);                 // UI-оверлей (NDC-квады) в scene_hdr после bloom, до present
 		SetPresentPass(engine_context);            // финал: HDR-сцену в свопчейн (blit)
 	}
 	//SetDefaultShadowVSMRenderPass(pass_manager, texture_manager, buffer_manager, object_manager, batch_builder);
@@ -317,9 +304,12 @@ Engine::~Engine()
 	delete material_manager;
 	delete input_manager;
 	delete texture_loader;
+	delete font_manager;   // dtor: TTF_CloseFont всех шрифтов + TTF_Quit
 	delete pib_data_module;
 	delete transform_data_module;
 	delete light_data_module;
+	delete ui_data_module;
+	delete ui_yoga;   // YGNodeFreeRecursive дерева + YGConfigFree (в его dtor)
 
 	dev = nullptr;
 	win = nullptr;

@@ -10,6 +10,7 @@
 #include "config.h"
 #include "TransferManager.h"
 #include "TextureData.h"
+#include "PreviewPacker.h"   // подсистема превью ассетов UI (поле-по-значению — нужен полный тип)
 
 struct UploadTaskTexture {
 	SDL_GPUTextureRegion dst{};
@@ -34,6 +35,14 @@ namespace DefaultSamplersNames {
 	inline constexpr const char* DEFAULT_SHADOW_SAMPLER = "_DefaultShadowSampler";
 	inline constexpr const char* VSM_SAMPLER = "_VsmSampler";
 	inline constexpr const char* ENV_SAMPLER = "_EnvSampler";
+};
+
+namespace DefaultAtlasNames {
+	// Единый текстовый атлас: глифы ВСЕХ шрифтов пакуются сюда (packer гарантирует уникальные
+	// координаты). Создаётся ЗАРАНЕЕ в конструкторе TextureManager (как дефолт-буферы в
+	// BufferManager ctor); FontManager в него только пакует, свой атлас не заводит. Ресайза
+	// (выделения новой текстуры при переполнении) пока нет — размер фиксированный.
+	inline constexpr const char* TEXT_ATLAS = "__TextAtlas";
 };
 
 struct PendingTextureDestroy {
@@ -79,6 +88,13 @@ public:
 	// �������� ������ GPU ��������
 	SDL_GPUTexture* CreateGPU_Texture(SDL_GPUTextureCreateInfo tci);
 
+	// Конвертит SDL-поверхность в произвольный пиксельформат и отдаёт ПЛОТНЫЕ пиксели
+	// (w*h*bpp, без padding'а строк) — готовые для CreateTexture. Статик/стейтлес: чистое
+	// CPU-преобразование, состояние TM не трогает. Входную поверхность не забирает/не разрушает.
+	// Пусто при ошибке. bpp берётся из формата (SDL_BYTESPERPIXEL). Общая утилита (FontManager,
+	// импорт текстур и т.п.) — чтобы конверсия не переписывалась в каждом вызывающем.
+	static std::vector<std::byte> SurfaceToPixels(SDL_Surface* surface, SDL_PixelFormat format);
+
 	// Отложенная инициализация GPU-ресурсов: Create* только РЕГИСТРИРУЮТ обёртку
 	// (TextureAtlas/SharedDepthTarget) с её tci и кладут в pending; сами SDL-текстуры создаёт этот
 	// дренаж — КАЖДЫЙ кадр, в начале Engine::PrepareFunc (до PackAtlases и сборки батчей, которым
@@ -122,19 +138,16 @@ public:
 	void QueueDeleteTexture(SDL_GPUTexture* texture);
 	void TrashTextures(uint64_t fences_done);
 
-	// ── Превью-атлас UI: общий 2D (атласы движка — 2D_ARRAY, ImGui сэмплит только texture2D).
-	//    Сетка фиксированных ячеек PREVIEW_CELL px; регион текстуры блитится в её ячейку
-	//    (SDL_BlitGPUTexture, LINEAR) на upload-cb сразу после GenerateMipmaps — тот же поток
-	//    (sim/prepare) и fence-цикл, очередь одно-поточная, без замков. ──
-	static constexpr uint32_t PREVIEW_ATLAS_SIZE = 2048;
-	static constexpr uint32_t PREVIEW_CELL = 64;                                    // 16×16 = 256 превью
-	static constexpr uint32_t PREVIEW_PER_ROW = PREVIEW_ATLAS_SIZE / PREVIEW_CELL;
-	// Дренаж дёрти-превью: блит региона атласа (слой+UVL) в ячейку. Зовётся с upload-cb.
-	void BlitPendingPreviews(SDL_GPUCommandBuffer* cb);
-	SDL_GPUTexture* GetPreviewAtlasTexture() const { return preview_atlas; }
-	// UV ячейки превью хэндла в превью-атласе (для ImGui::Image/AddImage). valid=false — превью нет.
-	struct PreviewUV { bool valid = false; float u0 = 0, v0 = 0, u1 = 0, v1 = 0; };
-	PreviewUV GetPreviewUV(const TextureHandle* h) const;
+	// ── Превью ассетов UI — самостоятельная подсистема PreviewPacker (ключ = ИМЯ текстуры, не хэндл).
+	//    TM только проксирует: дренаж дёрти-блитов на upload-cb (после GenerateMipmaps — тот же поток
+	//    sim/prepare и fence-цикл, очередь одно-поточная), выдачу UV/текстуры для ImGui и явное
+	//    освобождение при реальном удалении. Заявку на превью TM ставит в _PlaceTask (UVL готов). ──
+	void BlitPendingPreviews(SDL_GPUCommandBuffer* cb) { preview.Blit(cb); }
+	SDL_GPUTexture* GetPreviewAtlasTexture() const { return preview.Texture(); }
+	// UV ячейки превью ПО ИМЕНИ (для ImGui::Image/AddImage). valid=false — превью для имени нет.
+	PreviewPacker::UV GetPreviewUV(const std::string& name) const { return preview.GetUV(name); }
+	// Освободить превью-ячейку имени — при РЕАЛЬНОМ удалении/переименовании текстуры (не при replace).
+	void ReleasePreview(const std::string& name) { preview.Release(name); }
 
 	~TextureManager();
 
@@ -182,14 +195,9 @@ private:
 	std::unordered_map<TextureAtlas*, std::unique_ptr<AtlasPacker>> atlas_packers;  // персистентное состояние упаковки
 	std::vector<UploadTaskTexture> upload_tasks;
 
-	// Превью-атлас UI (см. публичный блок): владение здесь, ячейки — счётчик + фрилист.
-	// preview_dirty пушится в _PlaceTask (UVL готов) и дренится BlitPendingPreviews —
-	// оба на sim/prepare, одно-поточно.
-	void QueuePreviewBlit(TextureHandle* h);
-	SDL_GPUTexture* preview_atlas = nullptr;
-	std::vector<TextureHandle*> preview_dirty;
-	std::vector<int32_t> preview_free_cells;
-	int32_t preview_next_cell = 0;
+	// Превью ассетов UI: самодостаточная подсистема (владеет GPU-текстурой + сеткой по имени).
+	// Заявку ставит _PlaceTask (UVL готов), дренаж/UV/release — через прокси публичного блока.
+	PreviewPacker preview;
 
 	std::vector<std::unique_ptr<SharedDepthTarget>> shared_depth_targets;
 	// Очередь ЦЕЛИКОМ владеется render-потоком: оба пуша (ResizeSceneHDRTargets / Resize depth —

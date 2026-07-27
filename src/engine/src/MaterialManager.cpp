@@ -57,7 +57,7 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 		for (auto& [role, tex] : e.textures) m->textures[role] = tex;
 		m->shader_programs = e.shaders;
 		m->params = e.params;
-		m->params_kind = e.params_kind;
+		m->params_type = e.params_type;
 		m->dont_save = false;   // пришёл из файла — сохраняемый
 		++n;
 	}

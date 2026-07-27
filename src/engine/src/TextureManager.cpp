@@ -67,18 +67,25 @@ TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_
 	CreateSampler(ENV_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::ENV_SAMPLER));
     CreateSampler("_SimpleSampler", SamplerPresets::GetSamplerCreateInfo(SamplerPreset::SIMPLE_SAMPLER));
 
-    // Превью-атлас UI: обычный 2D (ImGui сэмплит только texture2D). COLOR_TARGET — приёмник
-    // SDL_BlitGPUTexture (блит рендерит в назначение), SAMPLER — чтение ImGui-конвейером.
-    SDL_GPUTextureCreateInfo pci{};
-    pci.type = SDL_GPU_TEXTURETYPE_2D;
-    pci.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
-    pci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
-    pci.width = PREVIEW_ATLAS_SIZE;
-    pci.height = PREVIEW_ATLAS_SIZE;
-    pci.layer_count_or_depth = 1;
-    pci.num_levels = 1;
-    preview_atlas = SDL_CreateGPUTexture(dev, &pci);
-    if (!preview_atlas) SDL_Log("TextureManager: preview atlas creation failed (%s) — UI previews disabled", SDL_GetError());
+    // Единый текстовый атлас для глифов ВСЕХ шрифтов (см. DefaultAtlasNames::TEXT_ATLAS).
+    // Заводится заранее, как дефолт-буферы в BufferManager ctor; FontManager лишь пакует в него.
+    // ОДНОКАНАЛЬНЫЙ R8: у глифа значим один канал (покрытие/SDF), RGB не нужен → 4× экономия
+    // против BGRA. usage=SAMPLER — намерение (CreateTextureAtlas оставляет только его).
+    {
+        SDL_GPUTextureCreateInfo tci{};
+        tci.type                 = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+        tci.format               = SDL_GPU_TEXTUREFORMAT_R8_UNORM;   // покрытие/SDF в канале R
+        tci.usage                = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        tci.width                = 2048;
+        tci.height               = 2048;
+        tci.layer_count_or_depth = 1;
+        tci.num_levels           = 1;
+        tci.sample_count         = SDL_GPU_SAMPLECOUNT_1;
+        TextureAtlas* text_atlas = CreateTextureAtlas(DefaultAtlasNames::TEXT_ATLAS, tci, GetSampler("_SimpleSampler"));
+        text_atlas->padding = 0;   // ТЕСТ: без gutter между глифами (логику packer'а не трогаем, передаём 0)
+    }
+
+    preview.Create(dev);   // подсистема превью ассетов UI (владеет своей GPU-текстурой)
 }
 
 TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler)
@@ -191,6 +198,8 @@ void TextureManager::BakePending()
         atlas->texture_binding.texture = CreateGPU_Texture(atlas->tci);
         if (!atlas->texture_binding.texture)
             SDL_Log("TextureManager::BakePending: atlas creation failed: %s", SDL_GetError());
+        else
+            SDL_SetGPUTextureName(dev, atlas->texture_binding.texture, atlas->debug_name.c_str());   // имя в RenderDoc
     }
     for (TextureAtlas* atlas : pending_atlas_bakes) {
         if (!atlas || !atlas->shares_with || atlas->texture_binding.texture) continue;
@@ -261,6 +270,25 @@ SDL_GPUTexture* TextureManager::CreateGPU_Texture(SDL_GPUTextureCreateInfo tci)
 {
     SDL_GPUTexture* tex = SDL_CreateGPUTexture(dev, &tci);
     return tex;
+}
+
+std::vector<std::byte> TextureManager::SurfaceToPixels(SDL_Surface* surface, SDL_PixelFormat format)
+{
+    std::vector<std::byte> out;
+    if (!surface) return out;
+
+    SDL_Surface* c = SDL_ConvertSurface(surface, format);   // не трогает вход; c — новая поверхность
+    if (!c) { SDL_Log("TextureManager::SurfaceToPixels: SDL_ConvertSurface failed: %s", SDL_GetError()); return out; }
+
+    const int    w   = c->w, h = c->h;
+    const size_t bpp = SDL_BYTESPERPIXEL(format);
+    const size_t row = static_cast<size_t>(w) * bpp;
+    out.resize(row * h);
+    const uint8_t* src = static_cast<const uint8_t*>(c->pixels);
+    for (int y = 0; y < h; ++y)   // построчно: pitch поверхности ≥ плотной ширины строки
+        SDL_memcpy(out.data() + static_cast<size_t>(y) * row, src + static_cast<size_t>(y) * c->pitch, row);
+    SDL_DestroySurface(c);
+    return out;
 }
 
 SharedDepthTarget* TextureManager::CreateSharedDepthTarget(SDL_GPUTextureCreateInfo tci)
@@ -395,7 +423,9 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     td.layer = placed_layer;
     td._pad  = 0;
 
-    QueuePreviewBlit(task.target_handle);   // UVL готов → превью в дёрти (блит после заливки пикселей)
+    // Превью-заявка ПО ИМЕНИ: внутренний регион (без gutter'а) в пикселях — то, что видит материал.
+    // UVL уже записан, размещение фиксировано (task.placed ниже), так что регион больше не сдвинется.
+    preview.Request(task.name, atlas, outer.x + pad, outer.y + pad, w, h, placed_layer);
 
     // Заполняем gutter репликацией кромки: грузим (w+2p)×(h+2p) вместо w×h. Без этого паддинг
     // остаётся мусором/чёрным, и мип-генерация (она идёт по атласу целиком) подмешивает его в
@@ -583,70 +613,10 @@ void TextureManager::DeleteTextureHandle(const std::string& name)
                        [handle](const UploadTaskTexture& t) { return t.target_handle == handle; }),
         upload_tasks.end());
 
-    // Превью: ячейку — во фрилист, недоблитенное — из дёрти (указатель умирает с erase ниже).
-    if (handle->preview_cell >= 0) preview_free_cells.push_back(handle->preview_cell);
-    preview_dirty.erase(
-        std::remove(preview_dirty.begin(), preview_dirty.end(), handle), preview_dirty.end());
-
+    // Превью НЕ трогаем: его подсистема ключуется ИМЕНЕМ, а не хэндлом. При replace (пересоздание
+    // того же имени) слот обязан пережить удаление — иначе плитка мигнёт. Реальное удаление
+    // освобождает превью отдельным ReleasePreview(name) в вызывающем (DeleteTexture-команда).
     handles_data.erase(it);   // уничтожает TextureHandle вместе с его TextureData (по значению)
-}
-
-void TextureManager::QueuePreviewBlit(TextureHandle* h)
-{
-    if (!preview_atlas || !h) return;
-    if (h->preview_cell < 0) {                       // выделить ячейку: фрилист, затем счётчик
-        if (!preview_free_cells.empty()) { h->preview_cell = preview_free_cells.back(); preview_free_cells.pop_back(); }
-        else if (preview_next_cell < (int32_t)(PREVIEW_PER_ROW * PREVIEW_PER_ROW)) h->preview_cell = preview_next_cell++;
-        else { SDL_Log("TextureManager: preview atlas full — no preview for '%s'", h->source_path.c_str()); return; }
-    }
-    if (std::find(preview_dirty.begin(), preview_dirty.end(), h) == preview_dirty.end())
-        preview_dirty.push_back(h);
-}
-
-void TextureManager::BlitPendingPreviews(SDL_GPUCommandBuffer* cb)
-{
-    // Дренаж на upload-cb ПОСЛЕ заливки пикселей (copy pass) и GenerateMipmaps того же cb:
-    // порядок внутри cb гарантирует, что источник уже содержит пиксели. ImGui читает превью-атлас
-    // на рендере — те же гарантии, что у самих атласов (upload раньше рендера по таймлайну).
-    if (!preview_atlas || preview_dirty.empty()) return;
-    for (TextureHandle* h : preview_dirty) {
-        if (!h->atlas || !h->atlas->texture_binding.texture || h->preview_cell < 0) continue;
-        const TextureAtlas* a = h->atlas;
-        // ВНУТРЕННИЙ регион (без gutter'а) прямо из UVL — то, что видит материал.
-        auto lo = [](uint32_t p) { return (float)(p & 0xFFFFu) / 65535.0f; };
-        auto hi = [](uint32_t p) { return (float)(p >> 16)      / 65535.0f; };
-        const TextureData& td = h->texture_data;
-        SDL_GPUBlitInfo bi{};
-        bi.source.texture = a->texture_binding.texture;
-        bi.source.mip_level = 0;
-        bi.source.layer_or_depth_plane = td.layer;
-        bi.source.x = (Uint32)(lo(td.uv_packed_offset) * a->width  + 0.5f);
-        bi.source.y = (Uint32)(hi(td.uv_packed_offset) * a->height + 0.5f);
-        bi.source.w = (Uint32)(lo(td.uv_packed_scale)  * a->width  + 0.5f);
-        bi.source.h = (Uint32)(hi(td.uv_packed_scale)  * a->height + 0.5f);
-        bi.destination.texture = preview_atlas;
-        bi.destination.x = (Uint32)(h->preview_cell % PREVIEW_PER_ROW) * PREVIEW_CELL;
-        bi.destination.y = (Uint32)(h->preview_cell / PREVIEW_PER_ROW) * PREVIEW_CELL;
-        bi.destination.w = PREVIEW_CELL;
-        bi.destination.h = PREVIEW_CELL;
-        bi.load_op = SDL_GPU_LOADOP_LOAD;   // соседние ячейки не трогаем
-        bi.filter = SDL_GPU_FILTER_LINEAR;
-        SDL_BlitGPUTexture(cb, &bi);
-    }
-    preview_dirty.clear();
-}
-
-TextureManager::PreviewUV TextureManager::GetPreviewUV(const TextureHandle* h) const
-{
-    PreviewUV r{};
-    if (!preview_atlas || !h || h->preview_cell < 0) return r;
-    const float cell = 1.0f / (float)PREVIEW_PER_ROW;
-    r.valid = true;
-    r.u0 = (float)(h->preview_cell % PREVIEW_PER_ROW) * cell;
-    r.v0 = (float)(h->preview_cell / PREVIEW_PER_ROW) * cell;
-    r.u1 = r.u0 + cell;
-    r.v1 = r.v0 + cell;
-    return r;
 }
 
 size_t TextureManager::LoadSceneTextures(const std::vector<SceneTextureEntry>& entries,
@@ -682,7 +652,7 @@ void TextureManager::DeleteTexture(SDL_GPUTexture* texture)
 
 TextureManager::~TextureManager()
 {
-    if (preview_atlas) SDL_ReleaseGPUTexture(dev, preview_atlas);   // превью-атлас UI
+    preview.Destroy(dev);   // подсистема превью ассетов UI
 
     // Дочищаем то, что ещё висело в отложенном удалении, и текстуры разделяемых depth-таргетов.
     for (auto& pending : texture_trash) {

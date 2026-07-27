@@ -35,6 +35,20 @@ namespace DefaultBuffersNames {
 	// entity -> глобальный индекс команды (model_batch) для scatter. Индекс сам кодирует
 	// проход (команды сгруппированы по проходам; shadow первый → [0,S)). Гейт по ревизии.
 	inline constexpr const char* DEFAULT_ENTITY_TO_CMD_BUFFER = "DefaultEntityToCmdBuffer";
+
+	// ── UI-текст (концепт). Разреженный канал: текст есть лишь у малой доли энтити, поэтому
+	// не держим полноразмерный массив на КАЖДЫЙ row трансформа, а раскладываем на 4 буфера
+	// (см. UI_DataModule). Вершинник по row из OutPib проверяет бит присутствия, при попадании
+	// считает rank (по WordBase) и читает INDEX[rank] → срез TEXT-буфера.
+	inline constexpr const char* UI_TEXT_BITS_BUFFER     = "UITextBits";       // 1 бит присутствия на row (по 32 в uint)
+	inline constexpr const char* UI_TEXT_WORDBASE_BUFFER = "UITextWordBase";   // пословный префикс-popcount (rank за O(1))
+	inline constexpr const char* UI_TEXT_INDEX_BUFFER    = "UITextIndex";      // {offset,count} на текст-элемент (компактно, индекс = rank)
+	inline constexpr const char* UI_TEXT_BUFFER          = "UITextBuffer";     // коды глифов всех строк подряд
+
+	// GlyphUVL шрифта: code(glyph_index) → UVL глифа в глиф-атласе. Заполняет FontManager
+	// (StoreGlyphUVL) из handle->texture_data после PackAtlases. Один общий буфер (реестр keyed
+	// по стабильному const char*, per-font имя не завести — мультишрифт позже).
+	inline constexpr const char* UI_FONT_UVL_BUFFER      = "__FontUVL";
 };
 
 struct PendingDestroy {
@@ -113,10 +127,16 @@ public:
 
 	// Пишет в transfer-буфер самого таска (task->tbd) — одна функция на все фазы.
 	void UploadToTransferBuffer(UploadTask* task, Uint32 size, const void* data);
+	// ⚠️ ПО УМОЛЧАНИЮ НЕ ИСПОЛЬЗУЙ (в т.ч. нейросети): это перф-КОМПРОМИСС для ГОРЯЧЕГО пути с
+	// большими объёмами (transform/instance/bound-sphere — тысячи-миллионы строк за кадр), где
+	// лишний memcpy и промежуточный буфер реально стоят. Для обычной/редкой заливки бери
+	// UploadToTransferBuffer — проще и безопаснее. Подводные камни прямого указателя: mapped-память
+	// может быть write-combined (ТОЛЬКО писать, не читать — чтение медленное/некогерентное), и легко
+	// ошибиться с размером/выравниванием (никто не проверит за тебя).
+	//
 	// Резервирует size байт в transfer-буфере таска (те же проверки и учёт written_size/
-	// used_buffer_size, что у UploadToTransferBuffer) и возвращает указатель для прямой
-	// записи — без промежуточного staging и лишнего memcpy. nullptr при ошибке.
-	// ВНИМАНИЕ: mapped-память может быть write-combined — только писать, не читать.
+	// used_buffer_size, что у UploadToTransferBuffer) и возвращает указатель для прямой записи —
+	// без промежуточного staging и лишнего memcpy. nullptr при ошибке.
 	void* AcquireTransferWritePtr(UploadTask* task, Uint32 size);
 	std::span<const std::byte> ReadFromTransferBuffer(ReadBackTask* task, uint32_t size);
 

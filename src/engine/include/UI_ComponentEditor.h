@@ -7,8 +7,14 @@
 // свет-редакторов) и дёргает spec.after_edit. ui_readonly-поля показываются задизейбленными.
 // Потребители: инспектор сущности (цикл по компонентам архетипа) и форма создания (фаза 3).
 #include "ComponentSerializer.h"   // ComponentSpec/FieldSpec (EngineEcs; ImGui сюда не протекает)
+#include "MaterialParamsSpec.h"    // MaterialParamsSpec/MatFieldSpec — то же самое для params материала
 
 namespace ui {
     // true — хотя бы одно поле изменено в этом кадре (after_edit уже вызван).
     bool DrawComponentFields(const ComponentSpec& spec, Archetype& arch, size_t row);
+
+    // Тот же generic-редактор, но по схеме ТИПА params материала: поля адресуются смещением
+    // в блобе (он плоский POD), правка идёт in-place — адрес вектора не меняется, значит ключ
+    // texture-батча цел и пересборка дерева не нужна. true — что-то изменено в этом кадре.
+    bool DrawMaterialParamsFields(const MaterialParamsSpec& spec, std::vector<uint8_t>& blob);
 }

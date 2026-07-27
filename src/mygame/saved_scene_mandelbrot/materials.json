@@ -5,8 +5,7 @@
             "shaders": [
                 "Mandelbrot"
             ],
-            "textures": [],
-            "params_kind": "None"
+            "textures": []
         }
     ]
 }

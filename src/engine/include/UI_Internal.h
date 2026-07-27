@@ -13,13 +13,15 @@ namespace ui {
 // Виды — только «сущность vs ресурс». Shader = graphics sp, Compute = compute sp
 // (2 типа, отдельные вкладки-фильтры).
 enum class SelKind { None, Entity, Camera, Material, Texture, Model, Shader, Compute,
-                     Vsd, Fsd, Csd };   // именованные шейдер-данные (список; своё окно редактирования — позже)
+                     Vsd, Fsd, Csd,     // именованные шейдер-данные (список; своё окно редактирования — позже)
+                     UINode };          // узел дерева UI_Yoga (UI-вкладка; двигается гизмо, см. UI_Yoga.h)
 
 struct Selection {
-    SelKind     kind   = SelKind::None;
-    Entity      entity = static_cast<Entity>(-1);  // для Entity (включая свет)
-    int         index  = -1;                       // для Camera (порядковый)
-    std::string name;                              // для Material / Texture / Model
+    SelKind     kind    = SelKind::None;
+    Entity      entity  = static_cast<Entity>(-1);  // для Entity (включая свет)
+    int         index   = -1;                       // для Camera (порядковый)
+    std::string name;                               // для Material / Texture / Model
+    uint32_t    ui_node = 0xFFFFFFFFu;              // для UINode (handle = UI_Yoga::Node; kInvalid по умолчанию)
 };
 
 // Определения — в UI_ImGui.cpp (якорный TU панелей).

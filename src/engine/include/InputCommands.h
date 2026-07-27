@@ -122,3 +122,11 @@ struct SetTransformCmd {
     uint32_t entity;
     float    matrix[16];
 };
+
+// Смещение UI-узла (дерево UI_Yoga). Гизмо (XY) и кнопки Z в инспекторе шлют ПРИРАЩЕНИЕ:
+// offset px по XY (применяется пост-layout в EmitNode) + z-bias (слой). sim-поток: ui_yoga->
+// NudgeNode(+=) + MarkDirty. POD влезал бы и в упаковку, но три float удобнее структурой.
+struct UINodeNudgeCmd {
+    uint32_t node;
+    float    ddx, ddy, ddz;
+};

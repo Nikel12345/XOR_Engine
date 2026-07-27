@@ -297,3 +297,23 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
 
     inited = true;
 }
+
+void DefaultShaderProgramSet::SetUIProgram(EngineContext* ctx)
+{
+    using namespace DefaultBuffersNames;
+    namespace RP = DefaultRenderPassNamespace;
+
+    // VS тянет POSITION+UV (юнит-квад); матрица даёт NDC. FS: обычный albedo (без света) + текст.
+    ctx->CreateVertexShader("ui_vs", "../engine/shaders_code/ui/ui.vert.hlsl",
+        { GeometryStreams::VERTEX_POS_BUFFER, GeometryStreams::VERTEX_UV_BUFFER }, /*dont_save=*/true);
+    ctx->CreateFragmentShader("ui_fs", "../engine/shaders_code/ui/ui.frag.hlsl", /*dont_save=*/true);
+
+    ShaderProgramDescription spd;
+    spd.BehavesAsUIOverlay();
+    // VS-буферы: transform/outpib/instance. FS-буферы: разреженный текст-канал + GlyphUVL. Их
+    // объявление здесь = usage, по которому BakePending создаёт эти буферы. Слот Albedo = фон.
+    ctx->CreateShaderProgram("sp_ui", spd, RP::UI_PASS,
+        "ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_INSTANCE_BUFFER },
+        "ui_fs", { UI_TEXT_BITS_BUFFER, UI_TEXT_WORDBASE_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER },
+        { TextureSlotRole::Albedo }, /*dont_save=*/true);
+}

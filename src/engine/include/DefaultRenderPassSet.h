@@ -10,6 +10,7 @@ namespace DefaultRenderPassNamespace
     inline constexpr const char* DEBUG_PASS = "_DefaultDebugRenderPass";
     inline constexpr const char* PRESENT_PASS = "_DefaultPresentPass";
     inline constexpr const char* BLOOM_PASS = "_DefaultBloomPass";
+    inline constexpr const char* UI_PASS = "_DefaultUIPass";
 
     // Число уровней bloom-пирамиды (bloom_0 = ½ окна, каждый следующий ещё вдвое меньше).
     inline constexpr uint32_t BLOOM_LEVELS = 4;
@@ -50,6 +51,10 @@ namespace DefaultRenderPassNamespace
     void SetDebugColliderPass(EngineContext* ctx);
 
     void SetTransparentPass(EngineContext* ctx);
+
+    // UI-оверлей: рендер UI-энтити (NDC-квады) в scene_hdr ПОСЛЕ bloom, ДО present (не блумится).
+    // Своя глубина (main_depth с CLEAR — z-пространство UI отдельное), __TextAtlas как глобалка.
+    void SetUIPass(EngineContext* ctx);
 
     // Финальный проход: blit HDR-сцены (scene_hdr) в свопчейн с конвертацией формата.
     // Регистрируется последним (приоритет 30). Тонмаппинг появится на этапе bloom-composite.

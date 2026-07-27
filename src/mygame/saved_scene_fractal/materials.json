@@ -5,8 +5,7 @@
             "shaders": [
                 "Fractal"
             ],
-            "textures": [],
-            "params_kind": "None"
+            "textures": []
         },
         {
             "name": "iron_block",
@@ -31,8 +30,25 @@
                     "texture": "default_emissive"
                 }
             ],
-            "params_kind": "Opaque",
-            "params": "0000803f0000803f0000803f0000803f0000000000000000000000000000803f000000000000803f0000000000000000"
+            "params_type": "Opaque",
+            "params": {
+                "baseColor": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "emissive": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "emissiveStrength": 1.0,
+                "metallic": 0.0,
+                "roughness": 1.0,
+                "heightScale": 0.0,
+                "pomBias": 0.0
+            }
         }
     ]
 }

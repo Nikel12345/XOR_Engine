@@ -15,6 +15,16 @@
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
 #include "MaterialParams.h"        // SetMaterialParams + раскладки факторов материалов
+#include "BufferManager.h"         // DefaultBuffersNames (буферы UI-SP)
+#include "DefaultRenderPassSet.h"  // UI_PASS
+#include "PositionStructure.h"     // GeometryStreams (стримы вершин UI-VS)
+#include "FontManager.h"           // ShapeString/FontData (текст тест-энтити)
+#include "UI_DataModule.h"         // MarkDirty после создания UI-энтити
+#include "UI_Yoga.h"               // декларативная сборка UI-дерева (flex → энтити)
+#include "Engine.h"                // engine->GetUIDataModule()
+// Свой тип params регистрируется отсюда же одной записью, движок для этого не правится:
+//   MaterialParamsSpecRegistry::Get().Register(MakeMaterialParamsSpec<MyParams>("MyType", {...}));
+// см. MaterialParamsSpec.h
 #include "Colliders.h"             // из либы Physics: компоненты коллайдеров
 #include "ContactSystem.h"         // детекция контактов
 #include "DebugColliderSystem.h"   // отладочные рамки
@@ -62,11 +72,24 @@ SDL_AppResult Game::MainInit()
 	// Текстуры (хендлы) грузятся из сцены (textures.json) — атласы выше остаются кодовыми (инфра,
 	// не сериализуются; текстуры садятся в них при загрузке). default_* — движковые (InitDefaultResources).
 
+	// --- Шрифт: растеризуется в общий __TextAtlas (CWD=src/game → путь fonts/…). ---
+	ctx->CreateFont("default", "fonts/cuyabra-Regular.otf", 48.0f);
+
     {
         using namespace DefaultShaderProgramSet;
         SetBloomPrograms(ctx);
         SetCullingPibPrograms(ctx, engine->GetLightDataModule());   // GPU-каллинг: out_pib
+        SetUIProgram(ctx);   // sp_ui (ui_vs/ui_fs): объявляет UI-буферы → они бейкаются, обновлялки наполнят
     }
+
+	// UI-материал (тип UI: bg/text цвета, albedo=default_albedo). ПОСЛЕ SetUIProgram — sp_ui уже есть.
+	{
+		Material* ui_mat = ctx->CreateMaterial("ui_mat",
+			{ { TextureSlotRole::Albedo, "default_albedo" } }, { "sp_ui" }, /*dont_save=*/true);
+		// Посадку/размер теперь считает Yoga (rect узла), поэтому text_height/anchor нейтральны
+		// (1,0) — шейдер просто заливает узел текстом. Цвета: тёмный фон + золотой текст.
+		ctx->SetMaterialParams(ui_mat, UIMaterialParams{ { 0.10f, 0.10f, 0.15f, 1.0f }, { 1.0f, 0.85f, 0.2f, 1.0f }, 1.0f, 0.0f });
+	}
 
     ModelData* sphere = (*ctx->GetModelManager())["sphere"];
 
@@ -179,12 +202,35 @@ SDL_AppResult Game::MainInit()
 
     debug_collider_material = ctx->GetMaterialManager()->GetMaterial("debug_collider");
 
+    // --- UI: декларативное дерево через Yoga (flex-раскладка → энтити). Строим ПОСЛЕ LoadScene, в
+    //     активной сцене. Engine::PrepareFunc зовёт ui->Emit каждый кадр (пересчёт по dirty). ---
+    if (FontData* uifont = ctx->GetFontManager()->GetFont("default")) {
+        UI_Yoga*      ui    = ctx->GetUIYoga();
+        FontManager*  fm    = ctx->GetFontManager();
+        Material*     uimat = ctx->GetMaterialManager()->GetMaterial("ui_mat");
+        ModelData*    quad  = (*ctx->GetModelManager())["quad"];
+
+        // Экран: колонка, дети прижаты к низу и по центру по горизонтали.
+        UIStyle screen; screen.dir = UIDir::Column; screen.justify = UIJustify::End; screen.align = UIAlign::Center;
+        UI_Yoga::Node root = ui->Root(screen);
+
+        // Панель у нижнего края: колонка, внутренний отступ + зазор между строками, по центру.
+        UIStyle panelS; panelS.dir = UIDir::Column; panelS.align = UIAlign::Center;
+        panelS.padding = 16.0f; panelS.gap = 8.0f; panelS.margin = 40.0f;
+        UI_Yoga::Node panel = ui->Box(root, panelS, uimat, quad);
+
+        // Две текстовые строки (intrinsic-размер из метрик шрифта).
+        UIStyle textS;
+        ui->Text(panel, textS, "Hello UI",    uimat, quad, uifont, fm);
+        ui->Text(panel, textS, "Yoga layout", uimat, quad, uifont, fm);
+    }
+
     // BindDefaultPushFuncs здесь больше не зовём: движок дёргает зарегистрированный колбэк
     // сам в конце LoadScene (см. SetBindShaderFunctions выше).
 
     {
         MaterialManager* mm = ctx->GetMaterialManager();
-        ctx->SetMaterialParams(mm->GetMaterial("wood"),  OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.08f, /*pomBias*/2.5f });
+        //ctx->SetMaterialParams(mm->GetMaterial("wood"),  OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.08f, /*pomBias*/2.5f });
         //ctx->SetMaterialParams(mm->GetMaterial("material_sprite2"), OpaqueMaterialParams{ {1,1,1,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f });
         //ctx->SetMaterialParams(mm->GetMaterial("transparent"),      TransparentMaterialParams{ 0.35f });
         //ctx->SetMaterialParams(mm->GetMaterial("material_sun"),     OpaqueMaterialParams{ {1,1,1,1}, {0.99f,0.85f,0.45f}, 2.4f, /*metallic*/0.0f, /*roughness*/1.0f });

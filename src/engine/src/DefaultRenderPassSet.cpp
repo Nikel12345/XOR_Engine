@@ -305,6 +305,42 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
     transparentPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 }
 
+void DefaultRenderPassNamespace::SetUIPass(EngineContext* ctx)
+{
+    PassManager*    pm = ctx->GetPassManager();
+    BufferManager*  bm = ctx->GetBufferManager();
+    TextureManager* tm = ctx->GetTextureManager();
+
+    if (!main_pass_inited || !g_pass_system.common_inited) {
+        SDL_Log("SetUIPass: MAIN_PASS / common resources must be initialized first.");
+        return;
+    }
+
+    // Цвет — scene_hdr (LOAD: рисуем поверх готового кадра). Глубина — main_depth с CLEAR: UI
+    // живёт в СВОЁМ z-пространстве (перекрытие элементов решает их z, а не глубина сцены). После
+    // main/transparent/debug глубина сцены больше не нужна (bloom — compute, present — blit).
+    RenderPassTexturesInfo ui_rptd{};
+    ui_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
+    ui_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_DONT_CARE, g_pass_system.main_depth_format);
+
+    auto uiPass = pm->CreateRenderPass(
+        UI_PASS,
+        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+    {
+        rp.renderPassTexsData.ResolveTargets();
+        if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
+        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
+    },
+        std::move(ui_rptd),
+        28   // после bloom (composite ~26), до present (30) — UI не блумится, но попадает в present
+    );
+
+    // Глобалка прохода: единый текстовый атлас (слот 0, t0/s0). Сеттер декларирует ему SAMPLER.
+    uiPass->SetGlobalTextures({ tm->GetTextureAtlas(DefaultAtlasNames::TEXT_ATLAS) });
+    uiPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr, 0);
+    uiPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
+}
+
 void DefaultRenderPassNamespace::SetPresentPass(EngineContext* ctx)
 {
     PassManager* pm = ctx->GetPassManager();

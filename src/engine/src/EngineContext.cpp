@@ -11,6 +11,7 @@
 #include "ModelManager.h"
 #include "ShaderManager.h"
 #include "PipeManager.h"
+#include "FontManager.h"      // CreateFont форвардит в FM, передавая TM/BM параметрами
 
 using namespace ShaderBase;   // VertexBufferBinding в сигнатурах Create*Shader
 
@@ -160,6 +161,14 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 	// Слот материала = фрагментный сэмплер → атласы его текстур получают SAMPLER (сбор usage-флагов).
 	material_manager->CollectSamplerUsage(m, texture_manager, material_name);
 	return m;
+}
+
+FontData* EngineContext::CreateFont(const std::string& name, const char* path, float px, bool sdf)
+{
+	if (!font_manager) { SDL_Log("EngineContext::CreateFont: font_manager not set"); return nullptr; }
+	// Кроссменеджерская связка: TextureManager уходит ПАРАМЕТРОМ, FM его не хранит (см. CLAUDE.md).
+	// BufferManager тут не нужен — GlyphUVL заливается позже, при проводке (StoreGlyphUVL).
+	return font_manager->CreateFont(texture_manager, name, path, px, sdf);
 }
 
 ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor)

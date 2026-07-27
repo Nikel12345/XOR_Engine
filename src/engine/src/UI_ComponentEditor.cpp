@@ -127,3 +127,67 @@ bool ui::DrawComponentFields(const ComponentSpec& spec, Archetype& arch, size_t 
     if (edited && spec.after_edit) spec.after_edit(arch, row);
     return edited;
 }
+
+bool ui::DrawMaterialParamsFields(const MaterialParamsSpec& spec, std::vector<uint8_t>& blob)
+{
+    ImGui::PushID(spec.name.c_str());
+    bool edited = false;
+
+    for (const MatFieldSpec& f : spec.fields) {
+        // Поле не влезает в блоб — блоб старше/младше схемы. Молча не рисуем: писать по этому
+        // смещению значило бы портить чужую память (реестр такие поля отбраковывает на
+        // регистрации, сюда доходит только рассинхрон размера самого блоба).
+        void* p = MatFieldPtr(blob, f);
+        if (!p) continue;
+
+        const bool  ranged = f.lo < f.hi;
+        const auto  flags  = ranged ? ImGuiSliderFlags_AlwaysClamp : 0;
+        const char* label  = f.UiLabel();
+        ImGui::BeginDisabled(f.ui_readonly);
+        switch (f.kind) {
+        case MatFieldKind::Color3:
+            edited |= ImGui::ColorEdit3(label, static_cast<float*>(p));
+            break;
+        case MatFieldKind::Color4:
+            edited |= ImGui::ColorEdit4(label, static_cast<float*>(p));
+            break;
+        case MatFieldKind::Vec2:
+            edited |= ImGui::DragFloat2(label, static_cast<float*>(p), f.speed, f.lo, f.hi, "%.3f", flags);
+            break;
+        case MatFieldKind::Vec3:
+            edited |= ImGui::DragFloat3(label, static_cast<float*>(p), f.speed, f.lo, f.hi, "%.3f", flags);
+            break;
+        case MatFieldKind::Vec4:
+            edited |= ImGui::DragFloat4(label, static_cast<float*>(p), f.speed, f.lo, f.hi, "%.3f", flags);
+            break;
+        case MatFieldKind::Angle: {   // радианы в блобе, слайдер в градусах (lo/hi схемы — градусы)
+            edited |= ImGui::SliderAngle(label, static_cast<float*>(p),
+                                         ranged ? f.lo : -360.0f, ranged ? f.hi : 360.0f);
+            break;
+        }
+        case MatFieldKind::U32: {
+            auto* u = static_cast<uint32_t*>(p);
+            int v = static_cast<int>(*u);
+            if (ImGui::DragInt(label, &v, f.speed < 1.0f ? 1.0f : f.speed, (int)f.lo, (int)f.hi, "%d", flags)) {
+                *u = static_cast<uint32_t>(v < 0 ? 0 : v);
+                edited = true;
+            }
+            break;
+        }
+        case MatFieldKind::Bool: {   // в cbuffer bool — 4 байта, на CPU держим uint32_t
+            auto* u = static_cast<uint32_t*>(p);
+            bool v = (*u != 0);
+            if (ImGui::Checkbox(label, &v)) { *u = v ? 1u : 0u; edited = true; }
+            break;
+        }
+        default:   // F32: слайдер при заданном диапазоне, иначе драг
+            if (ranged) edited |= ImGui::SliderFloat(label, static_cast<float*>(p), f.lo, f.hi);
+            else        edited |= ImGui::DragFloat(label, static_cast<float*>(p), f.speed);
+            break;
+        }
+        ImGui::EndDisabled();
+    }
+
+    ImGui::PopID();
+    return edited;
+}

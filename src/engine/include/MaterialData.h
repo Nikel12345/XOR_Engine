@@ -1,14 +1,10 @@
 #pragma once
 #include <unordered_map>
 #include <vector>
+#include <string>
 #include <cstdint>
 #include "ShaderTypes.h"   // TextureSlotRole (лёгкая половина; тяжёлый ShaderData.h не нужен)
 #include "Aliases.h"
-
-// Тег раскладки params — ТОЛЬКО для тулинга (UI/инспектор). Рендер params не интерпретирует
-// (непрозрачный блоб), но UI по тегу выбирает рукописный разбор полей. None → неизвестно
-// (UI крутит сырые float). Выставляется автоматически из T::kind в SetMaterialParams.
-enum class MaterialParamsKind : uint32_t { None = 0, Opaque, Transparent };
 
 struct Material {
     // Пользовательский ресурс ссылается на другой ТОЛЬКО по имени (правило редактора): не
@@ -25,7 +21,13 @@ struct Material {
     // ключуется texture-батч: мутация байт на месте НЕ меняет ключ (твики в рантайме без
     // перестройки дерева), а разные материалы дают разные адреса (не схлопываются).
     std::vector<uint8_t> params;
-    MaterialParamsKind   params_kind = MaterialParamsKind::None;   // тег для UI-разбора (см. выше)
+    // ИМЯ типа params в реестре MaterialParamsSpecRegistry (см. MaterialParamsSpec.h) — тег ТОЛЬКО
+    // для тулинга: по нему инспектор находит схему полей, а Save/LoadScene пишет и читает их
+    // по-именно. Рендер тег не читает (params для него — непрозрачные байты). Пусто = у материала
+    // нет params (шейдер без MaterialBlock). Строка, а не enum, именно ради открытой регистрации:
+    // тип, объявленный в коде игры, называет себя сам — движок для этого не правится.
+    // Выставляется автоматически из typeid(T) в SetMaterialParams.
+    std::string          params_type;
     // Не писать в materials.json при SaveScene (кодовая инфраструктура — напр. debug_collider,
     // используемый только генератором debug-рамок). UI/пересоздание → false («тронул = сохраняемый»).
     bool dont_save = false;

@@ -11,6 +11,7 @@
 #include "UI_ComponentEditor.h"    // generic-редактор полей staging-энтити
 #include "ModelManager.h"          // комбо моделей в форме
 #include "MaterialManager.h"       // комбо материалов в форме
+#include "UI_Yoga.h"               // UI-вкладка: дерево Yoga как редактируемый объект
 #include <set>
 
 using namespace ui;
@@ -185,6 +186,32 @@ namespace {
 
 // Левая панель: сцены + группы объектов (Entities / Lights / Cameras). Только ВЫБОР
 // (клик → g_sel); саму правку показывает Inspector.
+// Рекурсивный рендер дерева Yoga в UI-вкладке. Узел = объект дерева (не энтити); клик выбирает
+// его (SelKind::UINode) — под будущий гизмо, двигающий его offset (узел + поддерево).
+static void DrawUITree(UI_Yoga* yg, UI_Yoga::Node n)
+{
+    if (n == UI_Yoga::kInvalid) return;
+    const uint32_t child_count = yg->ChildCount(n);
+    const std::string label = yg->NodeLabel(n);
+
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_DefaultOpen
+                             | ImGuiTreeNodeFlags_SpanAvailWidth;
+    if (child_count == 0) flags |= ImGuiTreeNodeFlags_Leaf;
+    const bool selected = (g_sel.kind == SelKind::UINode && g_sel.ui_node == n);
+    if (selected) flags |= ImGuiTreeNodeFlags_Selected;
+
+    const bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(n)), flags, "%s", label.c_str());
+    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+        if (selected) g_sel = Selection{};
+        else { g_sel = Selection{}; g_sel.kind = SelKind::UINode; g_sel.ui_node = n; }
+    }
+    if (open) {
+        for (uint32_t i = 0; i < child_count; ++i)
+            DrawUITree(yg, yg->ChildAt(n, i));
+        ImGui::TreePop();
+    }
+}
+
 void UI_ImGui::DrawHierarchy(EngineContext* ctx)
 {
     ImGui::SetNextWindowBgAlpha(kPanelBgAlpha);
@@ -235,6 +262,7 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
             [&](Entity e, SoAElement<Positions>, MaterialComponent&, ModelComponent&)
         {
             if (om->Has<EditorHiddenComponent>(scene, e)) return;
+            if (om->Has<UIComponent>(scene, e)) return;   // UI живёт в своей вкладке (дерево Yoga), не тут
             char label[32];
             snprintf(label, sizeof(label), "Entity %u", static_cast<unsigned>(e));
             bool selected = (g_sel.kind == SelKind::Entity && g_sel.entity == e);
@@ -243,6 +271,16 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
                 else { g_sel = Selection{}; g_sel.kind = SelKind::Entity; g_sel.entity = e; }
             }
         });
+    }
+
+    // ---- UI (дерево Yoga: узлы = редактируемые объекты, не энтити; энтити — производные Emit) ----
+    if (ImGui::CollapsingHeader("UI", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        if (UI_Yoga* yg = ctx->GetUIYoga()) {
+            const UI_Yoga::Node root = yg->RootNode();
+            if (root == UI_Yoga::kInvalid) ImGui::TextDisabled("(нет UI-дерева)");
+            else DrawUITree(yg, root);
+        }
     }
 
     // ---- Света (все типы; выбор → Inspector определит тип по Has<>) ----
