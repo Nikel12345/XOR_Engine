@@ -26,6 +26,7 @@
 #include <cstring>            // memcpy матрицы в payload команды
 #include <mutex>              // потокобезопасный приём пути из файл-диалога
 #include <atomic>
+#include <filesystem>        // относительные пути ресурсов + копирование файла извне проекта
 
 using namespace ShaderBase;   // VertexSemantic в редакторе pull вершинника
 #include <SDL3/SDL_dialog.h>  // нативный SDL_ShowOpenFileDialog
@@ -356,27 +357,137 @@ namespace {
 
     // --- Приём пути из нативного файл-диалога. Колбэк SDL может прийти из ДРУГОГО потока, поэтому
     //     кладём через мьютекс+atomic, а UI забирает у себя на кадре. g_pick_target помечает, КАКОЕ
-    //     поле заполнять (у формы модели два пути) — активная форма забирает только «своё». ---
+    //     поле заполнять (у формы модели два пути) — активная форма забирает только «своё».
+    //
+    //     Пути ресурсов ХРАНЯТСЯ ОТНОСИТЕЛЬНО КОРНЯ ПРОЕКТА (current_path(): в dev его ставит cmake,
+    //     в install — папка exe), иначе scene.json не переносится через git/установку. Поэтому сырой
+    //     путь из диалога (диалог отдаёт абсолютный) прогоняется через финализацию ProcessPendingPick:
+    //       • файл ВНУТРИ проекта → относительный путь;
+    //       • файл СНАРУЖИ (другой диск / вне дерева) → лог + второй диалог (выбор папки внутри
+    //         проекта) → копия файла туда → относительный путь до копии.
+    //     Абсолютный путь наружу проекта НЕ сохраняется никогда (git его не заберёт). ---
     enum class PickTarget { None, TexPath, ModelVert, ModelIndex, ShaderVert, ShaderFrag, ShaderComp };
     PickTarget        g_pick_target = PickTarget::None;
-    std::mutex        g_pick_mtx;
-    std::string       g_picked_path;
+    std::mutex        g_pick_mtx;                 // охраняет все строковые буферы ниже
+    std::string       g_picked_path;             // ФИНАЛЬНЫЙ относительный путь для форм (ставит финализация)
     std::atomic<bool> g_picked_ready{ false };
 
+    std::string       g_raw_path;                // сырой (абсолютный) путь из первого диалога
+    std::atomic<bool> g_raw_ready{ false };
+    std::string       g_copy_src;                // исходник, ждущий копирования (файл вне проекта)
+    std::string       g_folder_path;             // папка назначения из второго диалога (пусто = отмена)
+    std::atomic<bool> g_folder_ready{ false };
+
+    // Первый диалог (выбор файла): кладём СЫРОЙ путь — финализация на кадре (см. ProcessPendingPick).
     void SDLCALL OnFilePicked(void*, const char* const* filelist, int)
     {
         if (filelist && filelist[0]) {                 // пусто = отмена, nullptr = ошибка
             std::lock_guard<std::mutex> lk(g_pick_mtx);
-            g_picked_path = filelist[0];
-            g_picked_ready.store(true, std::memory_order_release);
+            g_raw_path = filelist[0];
+            g_raw_ready.store(true, std::memory_order_release);
         }
     }
 
-    // Открыть нативный диалог, пометив целевое поле (SDL требует main-поток; результат — потокобезопасно).
+    // Второй диалог (выбор папки назначения для копии файла извне проекта). Отмену тоже отмечаем
+    // готовой — финализация на кадре снимет ожидание и отменит операцию.
+    void SDLCALL OnFolderPicked(void*, const char* const* filelist, int)
+    {
+        std::lock_guard<std::mutex> lk(g_pick_mtx);
+        g_folder_path = (filelist && filelist[0]) ? filelist[0] : std::string();
+        g_folder_ready.store(true, std::memory_order_release);
+    }
+
+    // Открыть нативный диалог выбора ФАЙЛА, пометив целевое поле (SDL требует main-поток; результат —
+    // потокобезопасно). Финализирует ProcessPendingPick.
     void OpenFileDialog(PickTarget target, const SDL_DialogFileFilter* filters, int nfilters)
     {
         g_pick_target = target;
         SDL_ShowOpenFileDialog(OnFilePicked, nullptr, nullptr, filters, nfilters, nullptr, false);
+    }
+
+    // SDL отдаёт пути в UTF-8, а MSVC std::filesystem трактует узкую строку как ACP → кириллица
+    // (G:\контент\...) бьётся и файл «не находится». Строим path из UTF-8 явно (C++20/23 aware),
+    // и обратно path→UTF-8 для хранения/JSON.
+    std::filesystem::path PathFromU8(const std::string& s)
+    {
+        return std::filesystem::path(reinterpret_cast<const char8_t*>(s.c_str()));
+    }
+    std::string U8FromPath(const std::filesystem::path& p)
+    {
+        std::u8string u = p.generic_u8string();
+        return std::string(u.begin(), u.end());
+    }
+
+    // «Внутри проекта» = relative(path, root) существует и не убегает вверх ('..'). Кроссдисковый путь
+    // relative() отдаёт пустым — тоже «снаружи». Пустая строка возврата = снаружи (UTF-8, '/').
+    std::string RelativeInsideProject(const std::filesystem::path& p, const std::filesystem::path& root)
+    {
+        std::error_code ec;
+        std::filesystem::path rel = std::filesystem::relative(p, root, ec);
+        if (ec) return {};
+        std::string s = U8FromPath(rel);                       // '/' — единообразно и портируемо в JSON
+        if (s.empty() || s.rfind("..", 0) == 0) return {};     // вне дерева проекта
+        return s;
+    }
+
+    // Раз в кадр (верх DrawInspector): превращаем сырой путь из диалога в финальный ОТНОСИТЕЛЬНЫЙ,
+    // при необходимости через копирование извне проекта. Только по завершении ставим g_picked_ready —
+    // формы (TakePickedPath / инлайн-приёмы) забирают уже готовый относительный путь.
+    void ProcessPendingPick()
+    {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const fs::path root = fs::current_path(ec);            // корень проекта (cmake в dev / exe в install)
+
+        // Этап 1: свежий файл из первого диалога.
+        if (g_raw_ready.exchange(false, std::memory_order_acquire)) {
+            std::string raw;
+            { std::lock_guard<std::mutex> lk(g_pick_mtx); raw = g_raw_path; }
+
+            std::string rel = RelativeInsideProject(PathFromU8(raw), root);
+            if (!rel.empty()) {                                // внутри проекта — сразу относительный
+                std::lock_guard<std::mutex> lk(g_pick_mtx);
+                g_picked_path = rel;
+                g_picked_ready.store(true, std::memory_order_release);
+            } else {                                           // снаружи — лог + запрос папки для копии
+                SDL_Log("[Path] '%s' is outside the project (%s) - pick a folder INSIDE the project to copy it into",
+                        raw.c_str(), U8FromPath(root).c_str());
+                { std::lock_guard<std::mutex> lk(g_pick_mtx); g_copy_src = raw; }
+                SDL_ShowOpenFolderDialog(OnFolderPicked, nullptr, nullptr, root.string().c_str(), false);
+            }
+        }
+
+        // Этап 2: выбрана папка назначения — копируем и берём относительный путь до копии.
+        if (g_folder_ready.exchange(false, std::memory_order_acquire)) {
+            std::string src, folder;
+            { std::lock_guard<std::mutex> lk(g_pick_mtx); src = g_copy_src; folder = g_folder_path; g_copy_src.clear(); }
+
+            if (folder.empty()) {                              // отмена выбора папки
+                SDL_Log("[Path] copy cancelled - path left unset");
+                g_pick_target = PickTarget::None;
+                return;
+            }
+            fs::path srcP = PathFromU8(src);
+            fs::path dstP = PathFromU8(folder) / srcP.filename();
+            fs::copy_file(srcP, dstP, fs::copy_options::overwrite_existing, ec);
+            if (ec) {
+                SDL_Log("[Path] copy failed: %s -> %s (%s)",
+                        src.c_str(), U8FromPath(dstP).c_str(), ec.message().c_str());
+                g_pick_target = PickTarget::None;
+                return;
+            }
+            std::string rel = RelativeInsideProject(dstP, root);
+            if (rel.empty()) {                                 // выбрал папку вне проекта — путь не сохраняем
+                SDL_Log("[Path] chosen folder is outside the project - path not stored (file copied to %s)",
+                        U8FromPath(dstP).c_str());
+                g_pick_target = PickTarget::None;
+                return;
+            }
+            SDL_Log("[Path] copied: %s -> %s", src.c_str(), rel.c_str());
+            std::lock_guard<std::mutex> lk(g_pick_mtx);
+            g_picked_path = rel;
+            g_picked_ready.store(true, std::memory_order_release);
+        }
     }
 
     // Форма создания/редактирования текстуры (одна и та же — см. upsert delete+create). Ничего не
@@ -946,21 +1057,43 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
     ImGui::SetNextWindowBgAlpha(kPanelBgAlpha);
     ImGui::Begin("Inspector");
 
+    ProcessPendingPick();   // сырой путь из диалога → финальный относительный (до приёма формами)
+
     ObjectManager* om = ctx->GetObjectManager();
     SceneData* scene = om->GetActiveScene();
 
     // Режим гизмо — только если у выбранной сущности есть Positions (иначе двигать нечего).
     if (g_sel.kind == SelKind::Entity && scene && om->Has<Positions>(scene, g_sel.entity)) {
         ImGui::TextUnformatted("Gizmo:");
-        ImGui::SameLine();
+
+        // Ряд из радиокнопок + Deselect. Кладём через SameLine, но переносим на новую
+        // строку, когда следующий элемент не влезает в ширину панели (штатный паттерн
+        // «manual wrapping» из imgui_demo: решаем по правому краю уже нарисованного).
+        const ImGuiStyle& st = ImGui::GetStyle();
+        const float square = ImGui::GetFrameHeight();                                  // диаметр кружка
+        const float right_x = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+        auto radio_w  = [&](const char* s) { return square + st.ItemInnerSpacing.x + ImGui::CalcTextSize(s).x; };
+        auto button_w = [&](const char* s) { return ImGui::CalcTextSize(s).x + st.FramePadding.x * 2.0f; };
+        auto keep_or_wrap = [&](float next_w) {                                         // перед следующим виджетом
+            if (ImGui::GetItemRectMax().x + st.ItemSpacing.x + next_w < right_x)
+                ImGui::SameLine();                                                      // влезает — продолжаем строку
+        };
+
+        keep_or_wrap(radio_w("Move"));
         if (ImGui::RadioButton("Move",    g_gizmo_op == ImGuizmo::TRANSLATE)) g_gizmo_op = ImGuizmo::TRANSLATE;
-        ImGui::SameLine();
+        keep_or_wrap(radio_w("Rotate"));
         if (ImGui::RadioButton("Rotate",  g_gizmo_op == ImGuizmo::ROTATE))    g_gizmo_op = ImGuizmo::ROTATE;
-        ImGui::SameLine();
+        keep_or_wrap(radio_w("Scale"));
         if (ImGui::RadioButton("Scale",   g_gizmo_op == ImGuizmo::SCALE))     g_gizmo_op = ImGuizmo::SCALE;
-        ImGui::SameLine();
+        keep_or_wrap(radio_w("Uniform"));
         if (ImGui::RadioButton("Uniform", g_gizmo_op == ImGuizmo::SCALEU))    g_gizmo_op = ImGuizmo::SCALEU;
-        ImGui::SameLine();
+        // Ориентация осей ручек: World — по мировым осям, Local — по текущему повороту
+        // объекта. Pivot в обоих случаях на объекте (см. DrawGizmo). На SCALE mode не влияет.
+        keep_or_wrap(radio_w("World"));
+        if (ImGui::RadioButton("World",   g_gizmo_mode == ImGuizmo::WORLD))   g_gizmo_mode = ImGuizmo::WORLD;
+        keep_or_wrap(radio_w("Local"));
+        if (ImGui::RadioButton("Local",   g_gizmo_mode == ImGuizmo::LOCAL))   g_gizmo_mode = ImGuizmo::LOCAL;
+        keep_or_wrap(button_w("Deselect"));
         if (ImGui::SmallButton("Deselect")) g_sel = Selection{};
         ImGui::Separator();
     }
@@ -1091,23 +1224,26 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
     const size_t i = el.i();
 
     glm::mat4 model = ReadPositionsMatrix(P, i);
-    const glm::mat4 model_before = model;   // матрица ДО манипуляции (для разворота поворота)
+    const glm::mat4 model_before = model;   // до манипуляции — база для инверсии поворота
 
     ImGuiIO& io = ImGui::GetIO();
     ImGuizmo::SetOrthographic(false);
     ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
     ImGuizmo::SetRect(0.0f, 0.0f, io.DisplaySize.x, io.DisplaySize.y);
 
-    float delta[16];   // приращение этого кадра (мировое), нужно для разворота вращения
+    // Перенос/скейл берём из родной матрицы ImGuizmo как есть (они верны, pivot на объекте).
+    // Поворот у ImGuizmo идёт в ПРОТИВОПОЛОЖНУЮ сторону (несовпадение хендедности рендера с тем,
+    // что ждёт ImGuizmo: translate ок, знак угла инвертирован). Инвертируем НАПРАВЛЕНИЕ, сохраняя
+    // пивот и масштаб: мировой поворот кадра вокруг пивота = model_after·model_before⁻¹ (жёсткий
+    // поворот — масштаб сокращается); берём его инверсию вокруг того же пивота →
+    // model_before·inverse(model_after)·model_before. Никакого delta и двойного учёта пивота.
     if (ImGuizmo::Manipulate(glm::value_ptr(view),
                              glm::value_ptr(proj),
                              g_gizmo_op, g_gizmo_mode,
-                             glm::value_ptr(model),
-                             delta))
+                             glm::value_ptr(model)))
     {
-        // Вращение у ImGuizmo идёт против курсора — применяем инверсию кадрового приращения.
-        if (g_gizmo_op == ImGuizmo::ROTATE)
-            model = glm::inverse(glm::make_mat4(delta)) * model_before;
+        if (g_gizmo_op == ImGuizmo::ROTATE)                 // model здесь = model_after от ImGuizmo
+            model = model_before * glm::inverse(model) * model_before;
 
         SetTransformCmd* cmd = new SetTransformCmd{};
         cmd->entity = selected;

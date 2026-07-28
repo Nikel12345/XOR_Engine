@@ -42,12 +42,12 @@
             "path": "../engine/shaders_code/skybox/skybox.frag.hlsl"
         },
         {
-            "name": "transparent_surface_fs",
-            "path": "../engine/shaders_code/transparent_pass/surface.hlsl"
-        },
-        {
             "name": "shadow_fs",
             "path": "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl"
+        },
+        {
+            "name": "transparent_surface_fs",
+            "path": "../engine/shaders_code/transparent_pass/surface.hlsl"
         },
         {
             "name": "untextured_surface_fs",
@@ -60,20 +60,20 @@
     ],
     "compute_shaders": [
         {
-            "name": "bloom_prefilter_cs",
-            "path": "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl"
-        },
-        {
             "name": "bloom_up_cs",
             "path": "../engine/shaders_code/comp/bloom_up.comp.hlsl"
         },
         {
-            "name": "bloom_down_cs",
-            "path": "../engine/shaders_code/comp/bloom_down.comp.hlsl"
+            "name": "bloom_prefilter_cs",
+            "path": "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl"
         },
         {
             "name": "culling_clear_cs",
             "path": "../engine/shaders_code/comp/culling_clear.comp.hlsl"
+        },
+        {
+            "name": "bloom_down_cs",
+            "path": "../engine/shaders_code/comp/bloom_down.comp.hlsl"
         },
         {
             "name": "bloom_composite_cs",

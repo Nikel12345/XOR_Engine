@@ -29,6 +29,11 @@ namespace {
     Entity g_ce_entity = kNoEntity;  // staging-черновик
     std::set<std::string> g_ce_checked;   // выбранные имена компонентов
 
+    // ---- Список энтити с виртуализацией (1М+ объектов) ----
+    // ImGui рисует КАЖДУЮ строку — на 1М энтити это роняет FPS. Список живёт в дочернем окне
+    // со скроллбаром, а ImGuiListClipper рисует только видимые строки (см. DrawHierarchy).
+    constexpr int kEntWindow = 10;   // высота списка в строках (сколько видно разом; скролл — на остальные)
+
     // Выбранные спеки в порядке регистрации (порядок секций формы детерминирован).
     std::vector<const ComponentSpec*> CheckedSpecs()
     {
@@ -258,19 +263,48 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
         }
         if (g_ce_open) DrawCreateEntityForm(ctx, om);
 
+        // Проход 1: считаем видимые энтити (фильтр тот же, что при отрисовке — счётчики
+        // обязаны совпадать). Скан 1М SoA-строк без ImGui-вызовов дёшев; дорого именно рисовать.
+        int total = 0;
         om->ForEach<Positions, MaterialComponent, ModelComponent>(scene,
             [&](Entity e, SoAElement<Positions>, MaterialComponent&, ModelComponent&)
         {
             if (om->Has<EditorHiddenComponent>(scene, e)) return;
-            if (om->Has<UIComponent>(scene, e)) return;   // UI живёт в своей вкладке (дерево Yoga), не тут
-            char label[32];
-            snprintf(label, sizeof(label), "Entity %u", static_cast<unsigned>(e));
-            bool selected = (g_sel.kind == SelKind::Entity && g_sel.entity == e);
-            if (ImGui::Selectable(label, selected)) {
-                if (selected) g_sel = Selection{};
-                else { g_sel = Selection{}; g_sel.kind = SelKind::Entity; g_sel.entity = e; }
-            }
+            if (om->Has<UIComponent>(scene, e)) return;
+            ++total;
         });
+        ImGui::Text("entities: %d", total);   // живой счётчик (ASCII: шрифт без кириллицы)
+
+        // Список — в дочернем окне со СВОИМ скроллбаром (как на панелях). ImGuiListClipper
+        // рисует ТОЛЬКО видимые строки (виртуализация на 1М), но держит полную высоту списка,
+        // поэтому скроллбар честный. Клиппер даёт диапазон [lo,hi); ForEach со счётчиком
+        // отдаёт по индексу нужную энтити (произвольного доступа по индексу у ForEach нет).
+        const float row_h = ImGui::GetTextLineHeightWithSpacing();
+        const int   rows  = std::max(1, std::min(total, kEntWindow));   // сколько строк видно разом
+        ImGui::BeginChild("ent_list", ImVec2(0.0f, row_h * rows + ImGui::GetStyle().FramePadding.y * 2.0f), true);
+
+        ImGuiListClipper clipper;
+        clipper.Begin(total, row_h);
+        while (clipper.Step()) {
+            const int lo = clipper.DisplayStart, hi = clipper.DisplayEnd;
+            int idx = 0;
+            om->ForEach<Positions, MaterialComponent, ModelComponent>(scene,
+                [&](Entity e, SoAElement<Positions>, MaterialComponent&, ModelComponent&)
+            {
+                if (om->Has<EditorHiddenComponent>(scene, e)) return;
+                if (om->Has<UIComponent>(scene, e)) return;   // UI живёт в своей вкладке (дерево Yoga), не тут
+                const int cur = idx++;
+                if (cur < lo || cur >= hi) return;            // вне видимого диапазона — пропуск
+                char label[32];
+                snprintf(label, sizeof(label), "Entity %u", static_cast<unsigned>(e));
+                bool selected = (g_sel.kind == SelKind::Entity && g_sel.entity == e);
+                if (ImGui::Selectable(label, selected)) {
+                    if (selected) g_sel = Selection{};
+                    else { g_sel = Selection{}; g_sel.kind = SelKind::Entity; g_sel.entity = e; }
+                }
+            });
+        }
+        ImGui::EndChild();
     }
 
     // ---- UI (дерево Yoga: узлы = редактируемые объекты, не энтити; энтити — производные Emit) ----

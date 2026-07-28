@@ -7,12 +7,6 @@
             "conv": "AsIs"
         },
         {
-            "name": "albedo_cube",
-            "atlas": "albedo_atlas",
-            "path": "textures/assets/cube_test.png",
-            "conv": "AsIs"
-        },
-        {
             "name": "brick_norm",
             "atlas": "normal_atlas",
             "path": "C:\\Users\\Nikita\\Desktop\\SDL_Engine\\src\\game\\textures\\blocks\\brick_normal_h.png",

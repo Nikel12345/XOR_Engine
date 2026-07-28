@@ -82,7 +82,7 @@ TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_
         tci.num_levels           = 1;
         tci.sample_count         = SDL_GPU_SAMPLECOUNT_1;
         TextureAtlas* text_atlas = CreateTextureAtlas(DefaultAtlasNames::TEXT_ATLAS, tci, GetSampler("_SimpleSampler"));
-        text_atlas->padding = 0;   // ТЕСТ: без gutter между глифами (логику packer'а не трогаем, передаём 0)
+        text_atlas->padding = 0;
     }
 
     preview.Create(dev);   // подсистема превью ассетов UI (владеет своей GPU-текстурой)
@@ -123,10 +123,14 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
     atlas->width = tci.width;
     atlas->height = tci.height;
     atlas->layers = tci.layer_count_or_depth;
-    // Мипованный атлас: GenerateMipmaps мипует атлас ЦЕЛИКОМ, на мипе L кромка тайла усредняется
-    // с соседями в радиусе ~2^L текселей. 16px паддинга (+заполнение кромкой в _BuildUploadTasks)
-    // держат мипы 0..4 чистыми; 3px хватало бы только для мипов 0..1 → тёмная рамка по краю тайла.
-    atlas->padding = (tci.num_levels > 1) ? 16 : 3;
+    // Рамка (gutter) нужна ТОЛЬКО мипованному атласу: GenerateMipmaps мипует атлас ЦЕЛИКОМ, и на
+    // мипе L кромка тайла усредняется с соседями в радиусе ~2^L текселей. P=2px/сторону — и это же
+    // ЕДИНСТВЕННЫЙ источник величины и для рамки в _PlaceTask, и для ужатия текстуры в
+    // CreateTextureFromFile, поэтому рассинхрона рамки и сжатия нет by design. Немипованный атлас
+    // усреднения по атласу не делает → P=0, рамки нет и ужатия нет. Ключевое: текстуры-степени-двойки
+    // ужимаются на 2·P в CreateTextureFromFile, поэтому след контент+2·P остаётся ровно степенью
+    // двойки и тайлится впритык.
+    atlas->padding = (tci.num_levels > 1) ? 16 : 0;
     atlas->mip_levels = tci.num_levels;
     atlas->format = tci.format;
     atlas->texture_type = tci.type;
@@ -369,10 +373,15 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     const uint32_t w = task.width, h = task.height;   // нативный размер (до gutter'а)
     if (w == 0 || h == 0) { task.placed = true; return true; }  // пустышка — задачу не грузим
 
-    // Паддинг — всем, КРОМЕ текстур точно в размер атласа (кубмап-грани/полнослойные: паддинг
-    // не влезает и не нужен — сосед у них не появится). Раньше pad=0 получал ПЕРВЫЙ тайл слоя —
-    // он оставался без gutter'а и ловил mip-bleed по краям, смежным с более поздними тайлами.
-    uint32_t pad = (w >= atlas->width || h >= atlas->height) ? 0 : atlas->padding;
+    // Рамка (gutter) — ПО-ОСЕВАЯ и завязана на ОДНУ переменную atlas->padding (P): та же P задаёт
+    // величину сжатия текстуры в CreateTextureFromFile, поэтому рассинхрона рамки и сжатия нет
+    // by design. Правило на ось: размер == размеру атласа → 0 (полнослойная/кубмап-грань: сосед по
+    // этой оси не появится, рамка не влезет и не нужна), иначе → P. padX/padY — ЧИСТАЯ функция от
+    // (w,h,atlas) и в точности повторяется в _DecodeOuterRect: извлечение восстанавливает ровно тот
+    // внешний прямоугольник, что уложен здесь (симметрия → carve при удалении освобождает точно
+    // занятое, без over-carve и утечки). Fallback'а на 0 нет — он бы сломал эту симметрию.
+    const uint32_t padX = (w >= atlas->width)  ? 0 : atlas->padding;
+    const uint32_t padY = (h >= atlas->height) ? 0 : atlas->padding;
 
     // Ищем ВНЕШНИЙ (с gutter'ом) прямоугольник слой за слоем от 0-го: текстура садится в ПЕРВЫЙ
     // слой, где помещается → ранние слои заполняются максимально, а очередь не «перескакивает» на
@@ -397,14 +406,10 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
         return false;
     };
 
-    bool ok = try_place(w + pad * 2, h + pad * 2, /*allow_new_layer=*/true);
-
-    // Почти-полнослойные: паддинг нигде не влез. Существующие слои всегда непусты (пустые не
-    // создаём), значит без паддинга сесть можно только на СВЕЖИЙ слой — пробуем его.
-    if (!ok && pad > 0) {
-        pad = 0;
-        ok = try_place(w, h, /*allow_new_layer=*/true);
-    }
+    // ВСЕГДА с рамкой (внешний прямоугольник) — симметрично _DecodeOuterRect. Почти-полнослойный
+    // тайл (w+2padX > width, но w < width) честно не влезет — при P=2 это лишь w ∈ {width-4..width-1},
+    // практически недостижимо; точно-в-размер (w >= width) сядет с padX=0 выше.
+    const bool ok = try_place(w + padX * 2, h + padY * 2, /*allow_new_layer=*/true);
 
     if (!ok) {
         SDL_Log("Failed to pack task '%s' (%ux%u) — atlas full", task.name.c_str(), w, h);
@@ -414,8 +419,8 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     // UVL считаем от ВНУТРЕННЕГО прямоугольника (outer + pad) и ДО расширения пикселей. Позицию
     // отдельно НЕ храним — регион точно восстанавливается из UVL при удалении (см. _DecodeOuterRect).
     TextureData& td = task.target_handle->texture_data;
-    float ox = (float)(outer.x + pad) / (float)atlas->width;
-    float oy = (float)(outer.y + pad) / (float)atlas->height;
+    float ox = (float)(outer.x + padX) / (float)atlas->width;
+    float oy = (float)(outer.y + padY) / (float)atlas->height;
     float sx = (float)w / (float)atlas->width;
     float sy = (float)h / (float)atlas->height;
     td.uv_packed_offset = PackUnorm16x2(ox, oy);
@@ -425,25 +430,26 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
 
     // Превью-заявка ПО ИМЕНИ: внутренний регион (без gutter'а) в пикселях — то, что видит материал.
     // UVL уже записан, размещение фиксировано (task.placed ниже), так что регион больше не сдвинется.
-    preview.Request(task.name, atlas, outer.x + pad, outer.y + pad, w, h, placed_layer);
+    preview.Request(task.name, atlas, outer.x + padX, outer.y + padY, w, h, placed_layer);
 
-    // Заполняем gutter репликацией кромки: грузим (w+2p)×(h+2p) вместо w×h. Без этого паддинг
+    // Заполняем gutter репликацией кромки: грузим (w+2padX)×(h+2padY) вместо w×h. Без этого паддинг
     // остаётся мусором/чёрным, и мип-генерация (она идёт по атласу целиком) подмешивает его в
     // кромку тайла на грубых мипах → тёмная рамка по периметру меша и битая POM-глубина у края.
-    if (pad > 0) {
+    // По-осевое: вертикаль реплицируется clamp'ом sy_row (padY), горизонталь — левой/правой кромкой (padX).
+    if (padX > 0 || padY > 0) {
         const uint32_t bpp   = (uint32_t)(task.pixels.size() / ((size_t)w * h));
-        const uint32_t new_w = w + pad * 2;
-        const uint32_t new_h = h + pad * 2;
+        const uint32_t new_w = w + padX * 2;
+        const uint32_t new_h = h + padY * 2;
         std::vector<std::byte> padded((size_t)new_w * new_h * bpp);
         for (uint32_t y = 0; y < new_h; ++y) {
-            const uint32_t sy_row = (uint32_t)SDL_clamp((int)y - (int)pad, 0, (int)h - 1);
+            const uint32_t sy_row = (uint32_t)SDL_clamp((int)y - (int)padY, 0, (int)h - 1);
             const std::byte* srow = task.pixels.data() + (size_t)sy_row * w * bpp;
             std::byte* drow = padded.data() + (size_t)y * new_w * bpp;
-            for (uint32_t x = 0; x < pad; ++x)                       // левая кромка
+            for (uint32_t x = 0; x < padX; ++x)                      // левая кромка
                 SDL_memcpy(drow + (size_t)x * bpp, srow, bpp);
-            SDL_memcpy(drow + (size_t)pad * bpp, srow, (size_t)w * bpp);   // центр
-            for (uint32_t x = 0; x < pad; ++x)                       // правая кромка
-                SDL_memcpy(drow + ((size_t)pad + w + x) * bpp, srow + (size_t)(w - 1) * bpp, bpp);
+            SDL_memcpy(drow + (size_t)padX * bpp, srow, (size_t)w * bpp);   // центр
+            for (uint32_t x = 0; x < padX; ++x)                      // правая кромка
+                SDL_memcpy(drow + ((size_t)padX + w + x) * bpp, srow + (size_t)(w - 1) * bpp, bpp);
         }
         task.pixels = std::move(padded);
         task.width  = new_w;
@@ -560,9 +566,9 @@ SDL_GPUSampler* TextureManager::GetSampler(const std::string& name)
 
 // Распаковать ВНЕШНИЙ (с gutter'ом) прямоугольник размещения из UVL. unorm16 при размере атласа
 // ≤ ~4096 даёт пиксель-в-пиксель (шаг unorm ≫ 1 текселя), поэтому отдельно позицию не храним.
-// pad восстанавливаем той же формулой, что и при укладке; для почти-полнослойных, уложенных без
-// паддинга (fallback), формула может дать pad>0 — но тогда получится лишь БОЛЬШИЙ прямоугольник
-// (с clamp по границам атласа), т.е. переоценка занятого → безопасно (место не выдастся повторно).
+// padX/padY восстанавливаем ТОЙ ЖЕ по-осевой формулой, что и при укладке (_PlaceTask) — чистая
+// функция от (w,h,atlas), поэтому декод даёт РОВНО уложенный внешний прямоугольник (без over-/under-
+// оценки): carve при удалении освобождает точно занятое место.
 static rectpack2D::rect_xywh _DecodeOuterRect(const TextureData& td, const TextureAtlas* atlas) {
     auto unpack_lo = [](uint32_t p) { return (float)(p & 0xFFFFu) / 65535.0f; };
     auto unpack_hi = [](uint32_t p) { return (float)(p >> 16)      / 65535.0f; };
@@ -570,12 +576,13 @@ static rectpack2D::rect_xywh _DecodeOuterRect(const TextureData& td, const Textu
     const int h  = (int)(unpack_hi(td.uv_packed_scale)  * atlas->height + 0.5f);
     const int ix = (int)(unpack_lo(td.uv_packed_offset) * atlas->width  + 0.5f);
     const int iy = (int)(unpack_hi(td.uv_packed_offset) * atlas->height + 0.5f);
-    const int pad = ((uint32_t)w >= atlas->width || (uint32_t)h >= atlas->height) ? 0 : atlas->padding;
+    const int padX = ((uint32_t)w >= atlas->width)  ? 0 : atlas->padding;
+    const int padY = ((uint32_t)h >= atlas->height) ? 0 : atlas->padding;
 
-    const int ox = std::max(0, ix - pad);
-    const int oy = std::max(0, iy - pad);
-    const int orr = std::min((int)atlas->width,  ix + w + pad);
-    const int ob = std::min((int)atlas->height, iy + h + pad);
+    const int ox = std::max(0, ix - padX);
+    const int oy = std::max(0, iy - padY);
+    const int orr = std::min((int)atlas->width,  ix + w + padX);
+    const int ob = std::min((int)atlas->height, iy + h + padY);
     return rectpack2D::rect_xywh(ox, oy, orr - ox, ob - oy);
 }
 

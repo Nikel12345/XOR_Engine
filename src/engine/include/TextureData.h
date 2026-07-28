@@ -70,7 +70,7 @@ struct TextureAtlas{
 	uint32_t width = 0;
 	uint32_t height = 0;
 	uint16_t layers = 0;
-	uint8_t padding = 3; // Пространство между текстурами в атласе
+	uint8_t padding = 0; // Рамка-gutter вокруг тайла; ставится в CreateTextureAtlas (мип → 1, иначе 0)
 	uint8_t mip_levels = 1;
 };
 

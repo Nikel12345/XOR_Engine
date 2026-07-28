@@ -81,6 +81,38 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 		return nullptr;
 	}
 
+	// Рамка атласа стоит P=atlas->padding пикселей с КАЖДОЙ стороны (эта же P — единственная величина
+	// и в _PlaceTask). Чтобы паддинговый след степени двойки (контент−2P + 2P) остался ровно этой
+	// степенью двойки и тайлился впритык — ужимаем такую сторону на 2P (по P с каждой стороны, ОДИН
+	// SDL_ScaleSurface на обе оси). Условие ужатия = условию рамки в _PlaceTask (ось-степень-двойки,
+	// НЕ в размер атласа) → рассинхрона нет. P=0 (немипованный атлас) → блок пропускается, текстуры
+	// как есть. Мелочь ≤ 2P не ужимаем (её след контент+2P и так степень двойки — см. 4px при P=2).
+	const uint32_t P = atlas->padding;
+	if (P > 0) {
+		auto is_pot = [](uint32_t v) { return v && (v & (v - 1)) == 0; };
+		const int shrink = 2 * (int)P;
+		const int nw = (is_pot(img.width)  && img.width  < atlas->width  && (int)img.width  > shrink) ? (int)img.width  - shrink : (int)img.width;
+		const int nh = (is_pot(img.height) && img.height < atlas->height && (int)img.height > shrink) ? (int)img.height - shrink : (int)img.height;
+		if (nw != (int)img.width || nh != (int)img.height) {
+			const SDL_PixelFormat fmt = PixelFormatForGpuFormat(atlas->format);
+			const int bpp = SDL_BYTESPERPIXEL(fmt);
+			SDL_Surface* src = SDL_CreateSurfaceFrom((int)img.width, (int)img.height, fmt, img.pixels.data(), (int)img.width * bpp);
+			SDL_Surface* dst = src ? SDL_ScaleSurface(src, nw, nh, SDL_SCALEMODE_LINEAR) : nullptr;
+			if (dst) {
+				std::vector<std::byte> px((size_t)nw * nh * bpp);
+				for (int y = 0; y < nh; ++y)
+					SDL_memcpy(px.data() + (size_t)y * nw * bpp, (const std::byte*)dst->pixels + (size_t)y * dst->pitch, (size_t)nw * bpp);
+				img.pixels = std::move(px);
+				img.width  = (uint32_t)nw;
+				img.height = (uint32_t)nh;
+			} else {
+				SDL_Log("EngineContext::CreateTextureFromFile: pot-fit scale failed for '%s': %s", path, SDL_GetError());
+			}
+			SDL_DestroySurface(dst);
+			SDL_DestroySurface(src);
+		}
+	}
+
 	// Нормализация исходной конвенции к канону движка (G = linear roughness; A = height).
 	// Инверсия канала формат-независима (G = индекс 1, A = индекс 3 и в RGBA, и в BGRA).
 	// Делается один раз здесь на CPU, поэтому шейдер/материалы остаются без веток и флагов.
