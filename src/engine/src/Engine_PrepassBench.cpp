@@ -82,9 +82,9 @@ struct FenceStats {
 		auto sp = Compute(spin);
 		auto ke = Compute(kernel);
 		auto to = Compute(total);
-		printf("  %-20s  spin  µs: avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", label, sp.avg, sp.p50, sp.p95, sp.max);
-		printf("  %-20s  kernel µs: avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", "", ke.avg, ke.p50, ke.p95, ke.max);
-		printf("  %-20s  total  µs: avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", "", to.avg, to.p50, to.p95, to.max);
+		printf("  %-20s  spin  us: avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", label, sp.avg, sp.p50, sp.p95, sp.max);
+		printf("  %-20s  kernel us: avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", "", ke.avg, ke.p50, ke.p95, ke.max);
+		printf("  %-20s  total  us: avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", "", to.avg, to.p50, to.p95, to.max);
 	}
 };
 
@@ -110,21 +110,21 @@ struct VariantStats {
 	FenceStats::Agg TotalAgg() const { return FenceStats::Compute(total_func); }
 
 	void Print() const {
-		printf("\n┌── [%s]  %d samples ──────────────────────────────────────────\n", variant, n);
+		printf("\n== [%s]  %d samples ==========================================\n", variant, n);
 		fence_prepass_task.PrintRow("fence_prepass_task");
-		printf("  ──────────────────────\n");
+		printf("  ----------------------\n");
 		if (prepass_eliminated)
-			printf("  %-20s  [устранён — объединён в cb01]\n", "fence_prepass");
+			printf("  %-20s  [eliminated - merged into cb01]\n", "fence_prepass");
 		else
 			fence_prepass.PrintRow("fence_prepass");
-		printf("  ──────────────────────\n");
+		printf("  ----------------------\n");
 		fence_download.PrintRow("fence_download");
-		printf("  ──────────────────────\n");
+		printf("  ----------------------\n");
 		fence_postreadback.PrintRow("fence_postreadback");
-		printf("  ══════════════════════\n");
+		printf("  ======================\n");
 		auto t = TotalAgg();
-		printf("  %-20s         avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", "TOTAL FUNC µs:", t.avg, t.p50, t.p95, t.max);
-		printf("└──────────────────────────────────────────────────────────────\n");
+		printf("  %-20s         avg=%5lld  p50=%5lld  p95=%5lld  max=%6lld\n", "TOTAL FUNC us:", t.avg, t.p50, t.p95, t.max);
+		printf("================================================================\n");
 	}
 };
 

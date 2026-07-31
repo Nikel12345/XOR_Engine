@@ -195,7 +195,7 @@ void TextureManager::BakePending()
         if (atlas->tci.usage == 0) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                 "TextureManager::BakePending: atlas '%s' has NO declared usage "
-                "(no pass/program/material referenced it) — GPU texture NOT created.",
+                "(no pass/program/material referenced it) - GPU texture NOT created.",
                 atlas->debug_name.c_str());
             continue;
         }
@@ -218,7 +218,7 @@ void TextureManager::BakePending()
         if (target->tci.usage == 0) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                 "TextureManager::BakePending: shared depth target has NO declared usage "
-                "(no pass set it as depth) — GPU texture NOT created.");
+                "(no pass set it as depth) - GPU texture NOT created.");
             continue;
         }
         target->texture = CreateGPU_Texture(target->tci);
@@ -412,7 +412,7 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     const bool ok = try_place(w + padX * 2, h + padY * 2, /*allow_new_layer=*/true);
 
     if (!ok) {
-        SDL_Log("Failed to pack task '%s' (%ux%u) — atlas full", task.name.c_str(), w, h);
+        SDL_Log("Failed to pack task '%s' (%ux%u) - atlas full", task.name.c_str(), w, h);
         return false;
     }
 
@@ -536,7 +536,7 @@ void TextureManager::GenerateMipmaps(SDL_GPUCommandBuffer* cb)
 
         if ((atlas->tci.usage & kMipUsage) != kMipUsage) {
             SDL_Log("TextureManager::GenerateMipmaps: atlas has num_levels=%u but usage lacks "
-                    "SAMPLER|COLOR_TARGET — mip generation skipped (would abort on SDL assert).",
+                    "SAMPLER|COLOR_TARGET - mip generation skipped (would abort on SDL assert).",
                     atlas->mip_levels);
             continue;
         }
@@ -633,7 +633,7 @@ size_t TextureManager::LoadSceneTextures(const std::vector<SceneTextureEntry>& e
     size_t created = 0;
     for (const SceneTextureEntry& e : entries) {
         if (e.name.empty() || e.atlas.empty() || e.path.empty()) {
-            SDL_Log("LoadSceneTextures: incomplete entry ('%s') — skipped", e.name.c_str());
+            SDL_Log("LoadSceneTextures: incomplete entry ('%s') - skipped", e.name.c_str());
             continue;
         }
         if (e.cube) {

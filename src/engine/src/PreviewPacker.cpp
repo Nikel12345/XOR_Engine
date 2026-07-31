@@ -16,7 +16,7 @@ void PreviewPacker::Create(SDL_GPUDevice* dev)
     pci.layer_count_or_depth = 1;
     pci.num_levels = 1;
     atlas_ = SDL_CreateGPUTexture(dev, &pci);
-    if (!atlas_) SDL_Log("PreviewPacker: creation failed (%s) — UI previews disabled", SDL_GetError());
+    if (!atlas_) SDL_Log("PreviewPacker: creation failed (%s) - UI previews disabled", SDL_GetError());
 }
 
 void PreviewPacker::Destroy(SDL_GPUDevice* dev)
@@ -43,7 +43,7 @@ void PreviewPacker::Request(const std::string& name, TextureAtlas* src,
     Slot& s = slots_[name];   // существующий переиспользуем (ячейка на месте), новый — заводим
     if (s.cell < 0) {
         s.cell = Alloc();
-        if (s.cell < 0) { slots_.erase(name); SDL_Log("PreviewPacker: full — no preview for '%s'", name.c_str()); return; }
+        if (s.cell < 0) { slots_.erase(name); SDL_Log("PreviewPacker: full - no preview for '%s'", name.c_str()); return; }
     }
     s.src = src; s.x = x; s.y = y; s.w = w; s.h = h; s.layer = layer;
 

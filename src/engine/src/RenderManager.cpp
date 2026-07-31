@@ -88,7 +88,7 @@ BlitPassStep* PassManager::CreateBlitPass(const BlitPassName& name, TextureAtlas
 		return nullptr;
 	}
 	if (!src || !dst) {
-		SDL_Log("PassManager::CreateBlitPass: '%s' — src/dst atlas is null.", name.c_str());
+		SDL_Log("PassManager::CreateBlitPass: '%s' - src/dst atlas is null.", name.c_str());
 		return nullptr;
 	}
 	auto it_blit = blit_steps.find(name);
@@ -371,7 +371,7 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 	// только пер-кадровый хэндл. Нет буфера — рисовать нечем (все дроу этого слепка — indirect).
 	SDL_GPUBuffer* indirect_buf = bm->_GetGPUBufferForFrame(render_layout->indirectBuffer, render_frame);
 	if (!indirect_buf) {
-		SDL_Log("ExecuteRenderBatches: indirect buffer is missing — pass draw list skipped");
+		SDL_Log("ExecuteRenderBatches: indirect buffer is missing - pass draw list skipped");
 		return;
 	}
 
@@ -390,12 +390,12 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 		// Сбой бинда = ПРОПУСК шейдер-батча целиком: пайплайн ждёт в слоте k страйд стрима k,
 		// рисовать с несбинженными/сдвинутыми слотами — UB, а не деградация.
 		if (!bm->BindGPUVertexBuffers(rp, shader_batch.vertexBuffers)) {
-			SDL_Log("ExecuteRenderBatches: vertex stream bind failed — shader batch skipped");
+			SDL_Log("ExecuteRenderBatches: vertex stream bind failed - shader batch skipped");
 			continue;
 		}
 		// Индексный буфер пула батча — из слепка (та же дисциплина, что у стримов).
 		if (!bm->BindGPUIndexBuffer(rp, shader_batch.indexBuffer, 0)) {
-			SDL_Log("ExecuteRenderBatches: index buffer bind failed — shader batch skipped");
+			SDL_Log("ExecuteRenderBatches: index buffer bind failed - shader batch skipped");
 			continue;
 		}
 

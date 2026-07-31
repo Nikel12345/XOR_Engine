@@ -156,7 +156,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
     // разрешилось в указатель (пустое/неизвестное имя), приходит с model == nullptr.
     // Без этого гарда разыменование model->submeshes падает в сборке батчей.
     if (!model_component.model) {
-        SDL_Log("BatchBuilder: entity %u has null model — skipped (unresolved asset?)", entity);
+        SDL_Log("BatchBuilder: entity %u has null model - skipped (unresolved asset?)", entity);
         return;
     }
 
@@ -167,12 +167,12 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
         }
         // Границы + null материала (тоже может быть не разрешён по имени при загрузке).
         if (submesh.material_index >= material_component.materials.size()) {
-            SDL_Log("BatchBuilder: entity %u material_index out of range — skipped", entity);
+            SDL_Log("BatchBuilder: entity %u material_index out of range - skipped", entity);
             continue;
         }
         Material* material = material_component.materials[submesh.material_index];
         if (!material) {
-            SDL_Log("BatchBuilder: entity %u has null material — skipped (unresolved asset?)", entity);
+            SDL_Log("BatchBuilder: entity %u has null material - skipped (unresolved asset?)", entity);
             continue;
         }
 
@@ -183,7 +183,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
             ShaderProgram* sp = sm ? sm->GetShaderProgram(sp_name) : nullptr;
             if (!sp) {
                 // sp удалена → fallback ПО ИМЕНИ (резолвим как обычную sp; удалён и он → пустой рендер, без краша).
-                SDL_Log("BatchBuilder::Material references deleted shader program '%s' — using fallback", sp_name.c_str());
+                SDL_Log("BatchBuilder::Material references deleted shader program '%s' - using fallback", sp_name.c_str());
                 sp = (sm && !fallback_shader_name.empty()) ? sm->GetShaderProgram(fallback_shader_name) : nullptr;
                 if (!sp) continue;
             }
@@ -257,7 +257,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
                     new_tex.texture_binding.push_back(h->atlas->texture_binding);
                 }
                 if (!bindable) {
-                    SDL_Log("BuildBatches:: dummy texture missing too — sp draw skipped for this material");
+                    SDL_Log("BuildBatches:: dummy texture missing too - sp draw skipped for this material");
                     continue;   // следующий sp материала: пустой рендер, без краша
                 }
 
@@ -292,7 +292,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
                     new_texb.texture_uvl.push_back(texture_handle->texture_data);   // КОПИЯ значения (см. инвариант в TextureBatchData)
                 }
                 if (!bindable) {
-                    SDL_Log("BuildBatches:: dummy texture missing too — sp draw skipped for this material");
+                    SDL_Log("BuildBatches:: dummy texture missing too - sp draw skipped for this material");
                     continue;   // пустой рендер, без краша
                 }
 
@@ -508,7 +508,7 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
         pass_list.global_texture_bindings.reserve(rp->global_texture_bindings.size());
         for (TextureAtlas* atlas : rp->global_texture_bindings) {
             if (!atlas || !atlas->texture_binding.texture) {
-                SDL_Log("BatchBuilder: pass '%s' — global sampler atlas is null/has no GPU texture, skipped.", rp->debug_name.c_str());
+                SDL_Log("BatchBuilder: pass '%s' - global sampler atlas is null/has no GPU texture, skipped.", rp->debug_name.c_str());
                 continue;
             }
             pass_list.global_texture_bindings.push_back(atlas->texture_binding);

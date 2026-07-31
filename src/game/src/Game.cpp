@@ -172,7 +172,9 @@ SDL_AppResult Game::MainInit()
                     vert.x = (fd.c[0] + uv[q][0]*fd.U[0] + uv[q][1]*fd.V[0]) * H[0];
                     vert.y = (fd.c[1] + uv[q][0]*fd.U[1] + uv[q][1]*fd.V[1]) * H[1];
                     vert.z = (fd.c[2] + uv[q][0]*fd.U[2] + uv[q][1]*fd.V[2]) * H[2];
-                    vert.u = uv[q][0]; vert.v = uv[q][1];
+                    // v-down канон (как quad/sphere): хранимый v = 1-параметр. Позиция выше считается
+                    // по исходному uv[q] — её НЕ трогаем, флипаем только текстурный v.
+                    vert.u = uv[q][0]; vert.v = 1.0f - uv[q][1];
                     vert.nx = fd.N[0]; vert.ny = fd.N[1]; vert.nz = fd.N[2];
                     vert.tx = tx;      vert.ty = ty;      vert.tz = tz;
                     v.push_back(vert);

@@ -172,7 +172,7 @@ static void FoldUpToRoot(FractalPos& fp)
 	fp.sigma *= std::pow(3.0, -(double)fp.addr.size());   // s неизменен: σ·3^-d → σ' при d=0
 	fp.local = q;
 	fp.addr.clear();
-	SDL_Log("Fractal: left the root cube at depth — folded to root frame");
+	SDL_Log("Fractal: left the root cube at depth - folded to root frame");
 }
 
 // Потолок глубины якоря ОТ АДРЕСА — фикс «телепорта в стену» при бесконечном подлёте к грани.

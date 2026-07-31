@@ -163,6 +163,10 @@ void BufferManager::_ExecuteUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadT
         if (task.size == 0 || task.resize_dst_buf_only || !task.tbd) continue;
         BufferData* buffer_data = task.dst_buffer_data;
         SDL_GPUBuffer* target_buffer = _GetGPUBufferForFrame(buffer_data, idx);
+        // Буфер мог не забейкаться (ни одна SP не объявила usage → GPU-хэндла нет; напр. UI-текст-
+        // буферы в игре без UI-шейдера). Заливать в null нельзя — SDL_UploadToGPUBuffer ассертит.
+        // Обновлялка на незабейканный буфер = безвредный no-op (потребителя всё равно нет).
+        if (!target_buffer) continue;
         SDL_GPUTransferBufferLocation src = { task.tbd->tb, task.tb_offset };
         SDL_GPUBufferRegion dstReg = { target_buffer, task.dst_offset, task.size };
         SDL_UploadToGPUBuffer(cp, &src, &dstReg, false);

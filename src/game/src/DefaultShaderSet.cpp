@@ -217,7 +217,7 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     // dst-уровень биндится RW-storage, src-уровень — сэмплером. Отдельные текстуры исключают
     // одновременный RW+sampled бинд одной (layout-ошибки валидации на общей мип-цепочке).
     // Размер диспатча — по живому атласу уровня (ресайз меняет width/height внутри атласа).
-    auto L = [](uint32_t i) { return "bloom_L" + std::to_string(i); };
+    auto L = [](uint32_t i) { return "__bloom_L" + std::to_string(i); };
 
     ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
         "bloom_down_0", "bloom_prefilter_cs",

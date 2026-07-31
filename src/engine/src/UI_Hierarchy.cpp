@@ -312,7 +312,7 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
     {
         if (UI_Yoga* yg = ctx->GetUIYoga()) {
             const UI_Yoga::Node root = yg->RootNode();
-            if (root == UI_Yoga::kInvalid) ImGui::TextDisabled("(нет UI-дерева)");
+            if (root == UI_Yoga::kInvalid) ImGui::TextDisabled("(no UI tree)");
             else DrawUITree(yg, root);
         }
     }

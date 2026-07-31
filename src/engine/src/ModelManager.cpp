@@ -127,7 +127,7 @@ size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries
     size_t loaded = 0;
     for (const SceneModelEntry& e : entries) {
         if (e.name.empty() || e.vertex_path.empty() || e.index_path.empty()) {
-            SDL_Log("LoadSceneModels: incomplete entry ('%s') — skipped", e.name.c_str());
+            SDL_Log("LoadSceneModels: incomplete entry ('%s') - skipped", e.name.c_str());
             continue;
         }
         // LoadModelFromFile = merge-upsert: существующую перезагружает В ТОТ ЖЕ объект (указатель

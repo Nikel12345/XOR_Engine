@@ -1141,13 +1141,13 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         const UI_Yoga::Node n = g_sel.ui_node;
         ImGui::Text("UI node: %s", yg->NodeLabel(n).c_str());
         float dx, dy, dz; yg->GetOffset(n, dx, dy, dz);
-        ImGui::Text("Offset: X=%.0f  Y=%.0f px  (тащи гизмо по XY)", dx, dy);
+        ImGui::Text("Offset: X=%.0f  Y=%.0f px", dx, dy);
         ImGui::Separator();
         auto nudge_z = [&](float ddz) {
             ctx->GetInputManager()->PushCommand(CommandId::NudgeUINode,
                 new UINodeNudgeCmd{ n, 0.0f, 0.0f, ddz });
         };
-        ImGui::Text("Z-слой (bias %.3f):", dz);
+        ImGui::Text("Z %.3f", dz);
         ImGui::SameLine();
         if (ImGui::SmallButton("-"))         nudge_z(+0.01f);   // дальше (больше z, под другими)
         ImGui::SameLine();

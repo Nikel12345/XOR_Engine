@@ -7,7 +7,7 @@
 bool BufferManager::BindGPUIndexBuffer(SDL_GPURenderPass* rp, const BufferData* buffer_data, Uint32 offset)
 {
     if (!buffer_data || buffer_data->type != BufferDataType::Static || !buffer_data->Static.buffer) {
-        SDL_Log("BindGPUIndexBuffer: index buffer '%s' is missing/not static/null — bind skipped",
+        SDL_Log("BindGPUIndexBuffer: index buffer '%s' is missing/not static/null - bind skipped",
             buffer_data ? buffer_data->debug_name.c_str() : "<null>");
         return false;
     }
@@ -36,7 +36,7 @@ bool BufferManager::BindGPUVertexBuffers(SDL_GPURenderPass* rp, const std::vecto
     for (const BufferData* data : buffers_data_vec)
     {
         if (!data || data->type != BufferDataType::Static || !data->Static.buffer) {
-            SDL_Log("BindGPUVertexBuffers: vertex stream '%s' is missing/not static/null — bind skipped",
+            SDL_Log("BindGPUVertexBuffers: vertex stream '%s' is missing/not static/null - bind skipped",
                 data ? data->debug_name.c_str() : "<null>");
             return false;
         }

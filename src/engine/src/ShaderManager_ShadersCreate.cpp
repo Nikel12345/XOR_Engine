@@ -182,7 +182,7 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
         const PosUVNormPool::Stream* stream = PosUVNormPool::FindStream(buf_name);
         if (!stream) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                "CreateVertexShader '%s': '%s' is not a vertex stream of any geometry pool — shader NOT created.",
+                "CreateVertexShader '%s': '%s' is not a vertex stream of any geometry pool - shader NOT created.",
                 name.c_str(), buf_name.c_str());
             return;
         }

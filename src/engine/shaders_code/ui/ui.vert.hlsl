@@ -36,8 +36,10 @@ VSOutput main(VSInput input)
 
     float4x4 m = ModelMatrixBlock[row];
     o.position = mul(m, float4(input.a_pos, 1.0));   // матрица даёт clip НАПРЯМУЮ (NDC), без view/proj
-    // UI — top-left origin (v вниз), а NDC-y вверх → флипаем v, иначе текст/текстуры вверх ногами.
-    o.v_uv     = float2(input.a_uv.x, 1.0 - input.a_uv.y);
+    // Квад теперь в КАНОНЕ развёртки (v-down, top-left origin — как glyph-атлас и albedo). UV идёт
+    // напрямую, без флипа: раньше квад был v-up и здесь стоял `1.0 - a_uv.y`; после канона это стало
+    // двойным флипом → текст/текстуры вверх ногами. См. канон в main_pass.vert (cross(T,N)).
+    o.v_uv     = input.a_uv;
     o.v_alpha  = InstanceDataBlock[row].alpha;
     o.v_row    = (uint)row;
     return o;

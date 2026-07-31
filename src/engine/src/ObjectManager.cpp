@@ -322,7 +322,7 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
         auto it = old_to_new.find(pc.parent);
         if (it == old_to_new.end()) {
             // Родитель не сохранён (напр. был скрыт/Generated). Самоссылка — существует, без падения.
-            SDL_Log("LoadScene: parent id %u unresolved for entity %u — hierarchy dropped", pc.parent, e);
+            SDL_Log("LoadScene: parent id %u unresolved for entity %u - hierarchy dropped", pc.parent, e);
             pc.parent = e;
             continue;
         }

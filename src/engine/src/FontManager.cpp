@@ -85,7 +85,7 @@ FontData* FontManager::CreateFont(TextureManager* tm,
 	// из хэндлов после PackAtlases — отдельной CPU-копии нет).
 
 	auto [it, ok] = fonts_.emplace(name, std::move(fd));
-	SDL_Log("FontManager: font '%s' rasterized — %zu glyphs into '%s'",
+	SDL_Log("FontManager: font '%s' rasterized - %zu glyphs into '%s'",
 	        name.c_str(), it->second.glyphs.size(), DefaultAtlasNames::TEXT_ATLAS);
 	return &it->second;
 }

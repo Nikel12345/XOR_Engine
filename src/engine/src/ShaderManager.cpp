@@ -43,7 +43,7 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
 	program->required_slots.reserve(texture_slots.size());
 	for (TextureSlotRole role : texture_slots) {
 		if (std::find(program->required_slots.begin(), program->required_slots.end(), role) != program->required_slots.end()) {
-			SDL_Log("ShaderManager::CreateShaderProgram '%s': duplicate texture slot role %d — skipped", name.c_str(), static_cast<int>(role));
+			SDL_Log("ShaderManager::CreateShaderProgram '%s': duplicate texture slot role %d - skipped", name.c_str(), static_cast<int>(role));
 			continue;
 		}
 		program->required_slots.push_back(role);
@@ -167,7 +167,7 @@ ComputeShaderData* ShaderManager::GetComputeShader(const std::string& name)
 bool ShaderManager::DeleteComputeShader(const std::string& name)
 {
     if (IsComputeShaderUsed(name)) {   // см. комментарий у DeleteVertexShader
-        SDL_Log("ShaderManager: compute shader '%s' is used by a compute program — delete refused", name.c_str());
+        SDL_Log("ShaderManager: compute shader '%s' is used by a compute program - delete refused", name.c_str());
         return false;
     }
     auto it = compute_shaders.find(name);

@@ -255,19 +255,21 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
 
         if (create) {
             Entity e;
+            // GeneratedComponent → SaveScene не пишет их в scene.json: узлы UI пересоздаёт
+            // UI_Yoga::Emit из дерева каждую сессию, копия в файле = дубли/баги при загрузке.
             if (!r.glyphs.empty())
                 e = ctx->CreateEntity(scene_name,
                         DrawComponent{ true, 1.0f, 0 },
                         ModelComponent{ r.quad },
                         MaterialComponent{ { r.material } },
-                        m, UIComponent{},
+                        m, UIComponent{}, GeneratedComponent{},
                         UITextComponent{ r.glyphs, r.font });
             else
                 e = ctx->CreateEntity(scene_name,
                         DrawComponent{ true, 1.0f, 0 },
                         ModelComponent{ r.quad },
                         MaterialComponent{ { r.material } },
-                        m, UIComponent{});
+                        m, UIComponent{}, GeneratedComponent{});
             r.entity = e;  r.has_entity = true;
             impl->created.push_back(e);
         }

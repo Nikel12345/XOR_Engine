@@ -30,11 +30,11 @@ int main() {
 
     // Проверяем, поддерживается ли нужный режим
     if (!SDL_WindowSupportsGPUPresentMode(dev, win, desired_mode)) {
-        SDL_Log("MAILBOX mode not supported — falling back to VSYNC");
+        SDL_Log("MAILBOX mode not supported - falling back to VSYNC");
         desired_mode = SDL_GPU_PRESENTMODE_VSYNC;
     }
     if (!SDL_WindowSupportsGPUSwapchainComposition(dev, win, desired_comp)) {
-        SDL_Log("SDR composition not supported — fallback to default");
+        SDL_Log("SDR composition not supported - fallback to default");
         desired_comp = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
     }
 
@@ -105,11 +105,11 @@ int main() {
 //
 //    // Проверяем, поддерживается ли нужный режим
 //    if (!SDL_WindowSupportsGPUPresentMode(dev, win, desired_mode)) {
-//        SDL_Log("IMMEDIATE mode not supported — falling back to VSYNC");
+//        SDL_Log("IMMEDIATE mode not supported - falling back to VSYNC");
 //        desired_mode = SDL_GPU_PRESENTMODE_VSYNC;
 //    }
 //    if (!SDL_WindowSupportsGPUSwapchainComposition(dev, win, desired_comp)) {
-//        SDL_Log("SDR composition not supported — fallback to default");
+//        SDL_Log("SDR composition not supported - fallback to default");
 //        desired_comp = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
 //    }
 //

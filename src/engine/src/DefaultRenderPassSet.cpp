@@ -167,7 +167,7 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
         uint32_t lw = width  >> (1 + i); if (lw == 0) lw = 1;
         uint32_t lh = height >> (1 + i); if (lh == 0) lh = 1;
-        g_pass_system.bloom_levels[i] = tm->CreateTextureAtlas("bloom_L" + std::to_string(i),
+        g_pass_system.bloom_levels[i] = tm->CreateTextureAtlas("__bloom_L" + std::to_string(i),
             TexturePresets::BloomLevel(lw, lh), env_sampler);
     }
 

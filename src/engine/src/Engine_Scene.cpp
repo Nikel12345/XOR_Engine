@@ -448,7 +448,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 				});
 			SDL_Log("LoadScene: %zu/%zu textures from manifest", created, entries.size());
 		}
-		else SDL_Log("LoadScene: no textures.json ('%s') — skipped", rerr.msg);
+		else SDL_Log("LoadScene: no textures.json ('%s') - skipped", rerr.msg);
 		tex_ms = Prof::MsSince(t_tex);
 	}
 
@@ -471,7 +471,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 			const size_t loaded_n = model_manager->LoadSceneModels(entries);
 			SDL_Log("LoadScene: %zu/%zu models from manifest", loaded_n, entries.size());
 		}
-		else SDL_Log("LoadScene: no models.json ('%s') — skipped", rerr.msg);
+		else SDL_Log("LoadScene: no models.json ('%s') - skipped", rerr.msg);
 		mdl_ms = Prof::MsSince(t_mdl);
 	}
 
@@ -583,7 +583,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 			//    а не имена → пока не грузим, только сообщаем, что запись пропущена. --
 			if (yyjson_val* arr = yyjson_obj_get(root, "compute_shader_programs")) {
 				yyjson_arr_foreach(arr, idx, max, e)
-					SDL_Log("LoadScene: compute shader program '%s' not supported yet — skipped", JsonStr(e, "name"));
+					SDL_Log("LoadScene: compute shader program '%s' not supported yet - skipped", JsonStr(e, "name"));
 			}
 			yyjson_doc_free(doc);
 
@@ -592,7 +592,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 			sm->SetDirtyComputeBatches(true);
 			SDL_Log("LoadScene: shaders from manifest");
 		}
-		else SDL_Log("LoadScene: no shaders.json ('%s') — skipped", rerr.msg);
+		else SDL_Log("LoadScene: no shaders.json ('%s') - skipped", rerr.msg);
 		shd_ms = Prof::MsSince(t_shd);
 	}
 
@@ -646,7 +646,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 				material_manager->CollectSamplerUsage(material_manager->GetMaterial(e.name), texture_manager, e.name);
 			SDL_Log("LoadScene: %zu/%zu materials from manifest", n, entries.size());
 		}
-		else SDL_Log("LoadScene: no materials.json ('%s') — skipped", rerr.msg);
+		else SDL_Log("LoadScene: no materials.json ('%s') - skipped", rerr.msg);
 		mat_ms = Prof::MsSince(t_mat);
 	}
 

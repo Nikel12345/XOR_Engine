@@ -72,7 +72,7 @@ void ThreadController::StartThreads()
         fence_thread  = std::thread(&ThreadController::FenceThread, this);
     }
     if (DISABLE_RENDER || DISABLE_UPLOAD)
-        SDL_Log("ThreadController: ДИАГ-режим — DISABLE_RENDER=%d DISABLE_UPLOAD=%d",
+        SDL_Log("ThreadController: DIAG mode - DISABLE_RENDER=%d DISABLE_UPLOAD=%d",
                 (int)DISABLE_RENDER, (int)DISABLE_UPLOAD);
 }
 

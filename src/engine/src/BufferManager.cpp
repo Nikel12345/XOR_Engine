@@ -93,7 +93,7 @@ void BufferManager::BakePending()
         if (data->usage == 0) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                 "BufferManager::BakePending: buffer '%s' has NO declared usage "
-                "(no shader/program/tag referenced it) — GPU buffer NOT created.",
+                "(no shader/program/tag referenced it) - GPU buffer NOT created.",
                 data->debug_name.c_str());
             continue;
         }
