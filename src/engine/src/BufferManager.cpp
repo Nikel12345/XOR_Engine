@@ -88,15 +88,9 @@ void BufferManager::BakePending()
 
     for (BufferData* data : pending_bakes) {
         if (!data) continue;
-        // Ни одна декларация буфер не назвала — создавать не с чем (usage=0 SDL не примет).
-        // Контракт: все декларации — до первого бейка после CreateBufferData.
-        if (data->usage == 0) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                "BufferManager::BakePending: buffer '%s' has NO declared usage "
-                "(no shader/program/tag referenced it) - GPU buffer NOT created.",
-                data->debug_name.c_str());
-            continue;
-        }
+        // Ни одна декларация буфер не назвала — usage=0, SDL такой не примет. НЕ создаём, но и НЕ
+        // выкидываем из очереди: если позже sp/материал/проход объявит usage, ближайший бейк создаст.
+        if (data->usage == 0) continue;
         switch (data->type) {
         case BufferDataType::Static:
             if (!data->Static.buffer) {
@@ -117,7 +111,15 @@ void BufferManager::BakePending()
         }
     }
 
-    pending_bakes.clear();
+    // Убираем из очереди ТОЛЬКО реально созданные. nullptr-ресурс (usage ещё не объявлен либо
+    // создание не удалось) остаётся ждать следующего кадра — создание гардится по !buffer, дубля нет.
+    std::erase_if(pending_bakes, [](BufferData* d) {
+        if (!d) return true;
+        if (d->type == BufferDataType::Static) return d->Static.buffer != nullptr;
+        for (int i = 0; i < BUFFERING_LEVEL; i++)
+            if (!d->Dynamic.buffers[i]) return false;
+        return true;
+    });
 }
 
 void BufferManager::TrashBuffers(uint64_t fences_done)

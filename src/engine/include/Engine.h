@@ -42,6 +42,41 @@ struct TransferBufferData;
 struct PrepassTimingReport;
 struct ImDrawData;
 
+// Размерное состояние движка, разделяемое потоками. ДВЕ НЕЗАВИСИМЫЕ величины (упаковка (w<<32)|h —
+// одна неделимая пара на атомик):
+//   render_size — ВНУТРЕННЕЕ разрешение таргетов (scene_hdr/depth/bloom). Меняет SIM-поток —
+//                 «полноценный ресайз» по кнопке игрового UI (команда). RENDER-поток читает и по
+//                 изменению зовёт ExecuteResizeInstructions (пересоздание таргетов).
+//   window_size — размер ОКНА. Меняет MAIN-поток (OnWindowResized, событие ОС). Свопчейн render-поток
+//                 берёт из acquire, present-блит растягивает render→окно. Таргеты этим НЕ пересоздаются.
+// Это разводит два разных события: смену окна (только презентация) и смену внутреннего разрешения игрой.
+struct EngineSizeState {
+    std::atomic<uint64_t> render_size{ 0 };   // ЖЕЛАЕМОЕ внутреннее разрешение (пишет sim)
+    std::atomic<uint64_t> window_size{ 0 };   // размер окна (пишет main)
+    uint64_t applied_render = 0;              // ПРИМЕНЁННОЕ render_size — «прошлое» гейта; трогает ТОЛЬКО render-поток
+
+    static uint64_t Pack(uint32_t w, uint32_t h) { return (static_cast<uint64_t>(w) << 32) | h; }
+    static uint32_t W(uint64_t v) { return static_cast<uint32_t>(v >> 32); }
+    static uint32_t H(uint64_t v) { return static_cast<uint32_t>(v & 0xFFFFFFFFu); }
+
+    // RENDER-поток: сравнивает ЖЕЛАЕМОЕ render_size со своим ПРОШЛЫМ (applied_render). Если изменилось —
+    // отмечает применённым, отдаёт (w,h) и true (пора пересоздать таргеты). Иначе false. Гейт целиком тут.
+    bool ConsumeRenderResize(uint32_t& w, uint32_t& h) {
+        const uint64_t want = render_size.load(std::memory_order_acquire);
+        if (want == applied_render || want == 0) return false;
+        applied_render = want;
+        w = W(want);  h = H(want);
+        return true;
+    }
+
+    // Единый источник истины для размеров как float (UI-раскладка/камера/создание таргетов читают render,
+    // презентация — window). Геттеры Engine делегируют СЮДА — отдельных размерных полей в движке нет.
+    float RenderW() const { return static_cast<float>(W(render_size.load(std::memory_order_relaxed))); }
+    float RenderH() const { return static_cast<float>(H(render_size.load(std::memory_order_relaxed))); }
+    float WindowW() const { return static_cast<float>(W(window_size.load(std::memory_order_relaxed))); }
+    float WindowH() const { return static_cast<float>(H(window_size.load(std::memory_order_relaxed))); }
+};
+
 class Engine
 {
 public:
@@ -99,9 +134,21 @@ public:
 	//void SetFrameIndex(uint8_t idx) { frame_index.store(idx); }
     //uint8_t GetFrameIndex() const { return frame_index.load(); }
 
-    float GetWidth()  const { return width; }
-    float GetHeight() const { return height; }
-    void OnWindowResized(Sint32 w, Sint32 h);
+    // ВНУТРЕННЕЕ (render) разрешение как float для UI-раскладки/камеры/первичного создания таргетов —
+    // читается ИЗ size_state_.render_size (единый источник истины, отдельных полей в движке нет). При
+    // «полноценном» ресайзе игрой (SetRenderResolution) эти геттеры сразу отражают новое значение.
+    float GetWidth()  const { return size_state_.RenderW(); }
+    float GetHeight() const { return size_state_.RenderH(); }
+    float GetWindowWidth()  const { return size_state_.WindowW(); }
+    float GetWindowHeight() const { return size_state_.WindowH(); }
+
+    // Событие ОС (MAIN-поток): публикует новый размер ОКНА. Только презентация (свопчейн+блит) —
+    // таргеты НЕ пересоздаёт. render_w/h ПОКА не используются (смену внутреннего разрешения делает
+    // SetRenderResolution из sim, а не событие окна) — оставлены под будущую симметрию.
+    void OnWindowResized(Sint32 window_w, Sint32 window_h, Sint32 render_w, Sint32 render_h);
+    // «Полноценный» ресайз (SIM-поток: игровой UI/команда) — сменить ВНУТРЕННЕЕ разрешение таргетов.
+    // RENDER-поток подхватит по изменению и пересоздаст таргеты. ЗАГОТОВКА: пока никто не зовёт.
+    void SetRenderResolution(uint32_t w, uint32_t h);
     ~Engine();
 
     const double targetUPS = 1000.0 / 60.0;
@@ -121,8 +168,10 @@ private:
     PrepassTimingReport PrepareFuncPrepassDepended_Original(uint8_t slot);
     PrepassTimingReport PrepareFuncPrepassDepended_Optimized(uint8_t slot);
 
-    float width;
-    float height;
+    // Размерное состояние движка ЦЕЛИКОМ (см. EngineSizeState): render_size (sim) / window_size (main) /
+    // applied_render (render-локальный «прошлый»). Удаление текстур вправе делать ТОЛЬКО render-поток →
+    // продьюсеры лишь ПУБЛИКУЮТ, а пересоздание таргетов исполняет RenderFunc по гейту ConsumeRenderResize.
+    EngineSizeState size_state_;
 
     SDL_Window* win = nullptr;
     SDL_GPUDevice* dev = nullptr;

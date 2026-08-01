@@ -60,10 +60,9 @@ namespace DefaultRenderPassNamespace
     // Регистрируется последним (приоритет 30). Тонмаппинг появится на этапе bloom-composite.
     void SetPresentPass(EngineContext* ctx);
 
-    // Пересоздаёт HDR-таргеты набора (scene_hdr/scene_emission + уровни bloom) под новый размер
-    // окна и переинъектит их во все проходы (MAIN/TRANSPARENT/DEBUG). Обязана вызываться из
-    // обработчика ресайза ВМЕСТЕ с ресайзом depth — иначе размеры color/depth аттачментов разойдутся.
-    void ResizeSceneHDRTargets(EngineContext* ctx, uint32_t width, uint32_t height);
+    // Ресайз экранных таргетов (scene_hdr/emission/bloom/depth) вынесен в ИНСТРУКЦИИ ресайза
+    // TextureManager (зарегистрированы в _SetDefaultCommonResources), исполняемые render-потоком
+    // через tm->ExecuteResizeInstructions — отдельной функции здесь больше нет.
 
     // Push-константы bloom-программ (один layout на все: down/up/composite). Раскладка совпадает с
     // cbuffer BloomParams в шейдерах comp/bloom_*.comp.hlsl.

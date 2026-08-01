@@ -178,7 +178,7 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, Textur
 // Дренаж отложенных созданий (каждый кадр, начало PrepareFunc). См. TextureManager.h.
 void TextureManager::BakePending()
 {
-    if (pending_atlas_bakes.empty() && pending_depth_bakes.empty()) return;
+    if (pending_atlas_bakes.empty()) return;
 
     // Совладельцы (shares_with) доливают СВОИ декларации источнику ДО его создания: GPU-текстура
     // одна, и она обязана покрыть роли всех, кто её делит.
@@ -191,14 +191,9 @@ void TextureManager::BakePending()
     // Источник мог быть создан в прошлом дренаже — тогда его тут уже нет, и хэндл просто копируется.
     for (TextureAtlas* atlas : pending_atlas_bakes) {
         if (!atlas || atlas->shares_with || atlas->texture_binding.texture) continue;
-        // Ни одна декларация атлас не назвала — создавать не с чем (usage=0 SDL не примет).
-        if (atlas->tci.usage == 0) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                "TextureManager::BakePending: atlas '%s' has NO declared usage "
-                "(no pass/program/material referenced it) - GPU texture NOT created.",
-                atlas->debug_name.c_str());
-            continue;
-        }
+        // Ни одна декларация атлас не назвала — usage=0, SDL такой не примет. НЕ создаём, но и НЕ
+        // выкидываем из очереди: если позже проход/sp/материал объявит usage, ближайший бейк создаст.
+        if (atlas->tci.usage == 0) continue;
         atlas->texture_binding.texture = CreateGPU_Texture(atlas->tci);
         if (!atlas->texture_binding.texture)
             SDL_Log("TextureManager::BakePending: atlas creation failed: %s", SDL_GetError());
@@ -211,21 +206,10 @@ void TextureManager::BakePending()
         if (!atlas->texture_binding.texture)
             SDL_Log("TextureManager::BakePending: shared atlas has no source texture.");
     }
-    pending_atlas_bakes.clear();
-
-    for (SharedDepthTarget* target : pending_depth_bakes) {
-        if (!target || target->texture) continue;
-        if (target->tci.usage == 0) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                "TextureManager::BakePending: shared depth target has NO declared usage "
-                "(no pass set it as depth) - GPU texture NOT created.");
-            continue;
-        }
-        target->texture = CreateGPU_Texture(target->tci);
-        if (!target->texture)
-            SDL_Log("TextureManager::BakePending: shared depth target failed: %s", SDL_GetError());
-    }
-    pending_depth_bakes.clear();
+    // Убираем из очереди ТОЛЬКО реально созданные. nullptr-текстура (usage ещё не объявлен, источник
+    // совладельца ещё не создан, либо создание не удалось) остаётся ждать следующего кадра —
+    // создание гардится по !texture_binding.texture, дубля нет.
+    std::erase_if(pending_atlas_bakes, [](TextureAtlas* a) { return !a || a->texture_binding.texture; });
 }
 
 TextureHandle* TextureManager::CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels)
@@ -295,22 +279,6 @@ std::vector<std::byte> TextureManager::SurfaceToPixels(SDL_Surface* surface, SDL
     return out;
 }
 
-SharedDepthTarget* TextureManager::CreateSharedDepthTarget(SDL_GPUTextureCreateInfo tci)
-{
-    auto target = std::make_unique<SharedDepthTarget>();
-    target->tci = tci;
-    // Ручных флагов нет: DEPTH_STENCIL_TARGET доложит SetDepthTexture прохода до бейка.
-    target->tci.usage = 0;
-    target->owner = this;
-    // Отложенное создание — как у атласов (см. BakePending). Проходы ссылаются на таргет косвенно
-    // и резолвят texture на исполнении, поэтому nullptr до бейка их не ломает.
-
-    SharedDepthTarget* ptr = target.get();
-    shared_depth_targets.push_back(std::move(target));
-    pending_depth_bakes.push_back(ptr);
-    return ptr;
-}
-
 void TextureManager::QueueDeleteTexture(SDL_GPUTexture* texture)
 {
     if (!texture) return;   // зовётся ТОЛЬКО render-потоком (владелец очереди — см. поле texture_trash)
@@ -331,16 +299,31 @@ void TextureManager::TrashTextures(uint64_t fences_done)
     }
 }
 
-void SharedDepthTarget::Resize(uint32_t w, uint32_t h)
+// ── Инструкции ресайза экранных таргетов (словарь по имени) ──
+void TextureManager::CreateResizeInstruction(const std::string& texture_name, TextureResizeFunc fn)
 {
-    if (!owner || w == 0 || h == 0) return;
-    if (texture && tci.width == w && tci.height == h) return;   // размер не изменился — нечего пересоздавать
+    resize_instructions_[texture_name] = std::move(fn);   // 1 текстура — 1 функция (перезапись)
+}
 
-    tci.width = w;
-    tci.height = h;
-    SDL_GPUTexture* old_texture = texture;
-    texture = owner->CreateGPU_Texture(tci);
-    owner->QueueDeleteTexture(old_texture);                      // старую — в отложенное удаление
+void TextureManager::ExecuteResizeInstructions(uint32_t w, uint32_t h)
+{
+    if (w == 0 || h == 0) return;
+    for (auto& [name, fn] : resize_instructions_)
+        if (fn) fn(*this, w, h);
+}
+
+void TextureManager::RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci)
+{
+    if (!atlas) return;
+    // Пресет даёт только ГЕОМЕТРИЮ; usage-флаги живут в атласе (собраны из деклараций sp/проходов/
+    // блитов) — пересоздание обязано их сохранить, иначе таргет родился бы без ролей.
+    tci.usage = atlas->tci.usage;
+    SDL_GPUTexture* old_tex = atlas->texture_binding.texture;
+    atlas->texture_binding.texture = CreateGPU_Texture(tci);
+    atlas->tci    = tci;              // источник истины для будущих пересозданий
+    atlas->width  = tci.width;
+    atlas->height = tci.height;
+    QueueDeleteTexture(old_tex);      // старую — в отложенное удаление (кадры in-flight)
 }
 
 static uint32_t PackUnorm16x2(float x, float y) {
@@ -661,15 +644,11 @@ TextureManager::~TextureManager()
 {
     preview.Destroy(dev);   // подсистема превью ассетов UI
 
-    // Дочищаем то, что ещё висело в отложенном удалении, и текстуры разделяемых depth-таргетов.
+    // Дочищаем то, что ещё висело в отложенном удалении.
     for (auto& pending : texture_trash) {
         if (pending.tex) SDL_ReleaseGPUTexture(dev, pending.tex);
     }
     texture_trash.clear();
-    for (auto& target : shared_depth_targets) {
-        if (target && target->texture) SDL_ReleaseGPUTexture(dev, target->texture);
-    }
-    shared_depth_targets.clear();
   //  for (auto& pair : textures_data) {
 		//auto& data = pair.second;
   //      if (data->texture.texture) {

@@ -20,7 +20,7 @@ namespace DefaultRenderPassNamespace
     // ниже концептуально "методы" этого псевдокласса, разделяющие данное состояние. Так формат и
     // depth-таргет живут в одном месте, а не переоткрываются в каждом проходе.
     struct PassSystemState {
-        SharedDepthTarget*   main_depth = nullptr;                                 // depth MAIN/TRANSPARENT/DEBUG
+        TextureAtlas*        main_depth = nullptr;                                 // depth MAIN/TRANSPARENT/DEBUG (обычный атлас)
         SDL_GPUTextureFormat main_depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;    // единый формат depth набора
         TextureAtlas*        scene_hdr = nullptr;       // HDR-цвет сцены (location 0 MAIN_PASS), общий для MAIN/TRANSPARENT/DEBUG
         TextureAtlas*        scene_emission = nullptr;  // HDR-эмиссия (location 1 MAIN_PASS, MRT) — источник bloom
@@ -150,9 +150,11 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     depth_tci.width = width;
     depth_tci.height = height;
 
-    g_pass_system.main_depth = tm->CreateSharedDepthTarget(depth_tci);
+    // Depth — обычный TextureAtlas (как shadow-depth). Сэмплер nullptr: depth основного прохода не
+    // сэмплится (debug-проход читает его как depth-attachment, не сэмплером). usage DEPTH_STENCIL_TARGET
+    // доложит декларация SetDepthTexture проходов до бейка (в самом tci он 0 — CreateTextureAtlas его стрижёт).
+    g_pass_system.main_depth = tm->CreateTextureAtlas("__main_depth", depth_tci, nullptr);
     g_pass_system.main_depth_format = depth_tci.format;
-    tm->main_pass_depth = g_pass_system.main_depth;
 
     // HDR-таргеты набора: сцена рендерится в линейный HDR (эмиссия/блики уходят за 1.0), на экран
     // выводится финальным present-проходом (blit). scene_emission — второй MRT-выход main-прохода,
@@ -170,6 +172,32 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
         g_pass_system.bloom_levels[i] = tm->CreateTextureAtlas("__bloom_L" + std::to_string(i),
             TexturePresets::BloomLevel(lw, lh), env_sampler);
     }
+
+    // Инструкции ресайза экранных таргетов: спец-логика вывода размера (в т.ч. i уровня bloom)
+    // захватывается в ЗАМЫКАНИЕ; исполняет их render-поток по изменению размера (Engine::RenderFunc).
+    // struct TextureAtlas остаётся чистым — ресайз живёт в инструкции, а не в методе таргета.
+    tm->CreateResizeInstruction("scene_hdr",
+        [a = g_pass_system.scene_hdr](TextureManager& t, uint32_t w, uint32_t h) {
+            t.RecreateAtlasTexture(a, TexturePresets::SceneHDR(w, h));
+        });
+    tm->CreateResizeInstruction("scene_emission",
+        [a = g_pass_system.scene_emission](TextureManager& t, uint32_t w, uint32_t h) {
+            t.RecreateAtlasTexture(a, TexturePresets::EmissionHDR(w, h));
+        });
+    for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
+        tm->CreateResizeInstruction("__bloom_L" + std::to_string(i),
+            [a = g_pass_system.bloom_levels[i], i](TextureManager& t, uint32_t w, uint32_t h) {
+                uint32_t lw = w >> (1 + i); if (lw == 0) lw = 1;   // уровень i = 1/2^(1+i) кадра
+                uint32_t lh = h >> (1 + i); if (lh == 0) lh = 1;
+                t.RecreateAtlasTexture(a, TexturePresets::BloomLevel(lw, lh));
+            });
+    }
+    tm->CreateResizeInstruction("__main_depth",
+        [a = g_pass_system.main_depth](TextureManager& t, uint32_t w, uint32_t h) {
+            auto tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
+            tci.width = w;  tci.height = h;                 // геометрия из пресета; usage сохранит RecreateAtlasTexture
+            t.RecreateAtlasTexture(a, tci);
+        });
 
     g_pass_system.width  = width;
     g_pass_system.height = height;
@@ -367,40 +395,8 @@ void DefaultRenderPassNamespace::SetPresentPass(EngineContext* ctx)
     );
 }
 
-void DefaultRenderPassNamespace::ResizeSceneHDRTargets(EngineContext* ctx, uint32_t width, uint32_t height)
-{
-    if (!g_pass_system.common_inited || !g_pass_system.scene_hdr) return;
-    if (g_pass_system.width == width && g_pass_system.height == height) return;
-    if (width == 0 || height == 0) return;
-
-    TextureManager* tm = ctx->GetTextureManager();
-
-    // Пересоздаём текстуру ВНУТРИ атласа — сам атлас (адрес) не меняется. Перебиндивать её по
-    // проходам больше не нужно: они держат TextureAtlas* и резолвят текстуру на исполнении
-    // (RenderPassTexturesInfo::ResolveTargets). То же — для блитов и compute-биндингов.
-    auto recreate = [&](TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci) {
-        // Пресет даёт только ГЕОМЕТРИЮ: usage-декларации (собранные до бейка) живут в атласе,
-        // пересоздание обязано их сохранить — иначе таргет родился бы без ролей.
-        tci.usage = atlas->tci.usage;
-        SDL_GPUTexture* old_tex = atlas->texture_binding.texture;
-        atlas->texture_binding.texture = tm->CreateGPU_Texture(tci);
-        atlas->tci    = tci;              // источник истины для будущих пересозданий
-        atlas->width  = tci.width;        // из tci: bloom-уровни меньше окна
-        atlas->height = tci.height;
-        tm->QueueDeleteTexture(old_tex);
-    };
-    recreate(g_pass_system.scene_hdr, TexturePresets::SceneHDR(width, height));
-    recreate(g_pass_system.scene_emission, TexturePresets::EmissionHDR(width, height));
-
-    for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
-        if (!g_pass_system.bloom_levels[i]) continue;
-        uint32_t lw = width  >> (1 + i); if (lw == 0) lw = 1;
-        uint32_t lh = height >> (1 + i); if (lh == 0) lh = 1;
-        recreate(g_pass_system.bloom_levels[i], TexturePresets::BloomLevel(lw, lh));
-    }
-    g_pass_system.width = width;
-    g_pass_system.height = height;
-}
+// (Ресайз экранных таргетов больше не отдельной функцией: он в инструкциях ресайза, зарегистрированных
+//  в _SetDefaultCommonResources и исполняемых render-потоком через tm->ExecuteResizeInstructions.)
 
 void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
 {

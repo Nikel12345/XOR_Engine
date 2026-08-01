@@ -12,6 +12,8 @@
 #include "BatchBuilder.h"
 #include "EngineContext.h"
 #include "UI_Yoga.h"   // ui_yoga->Emit (flex-раскладка UI → энтити перед сборкой батчей)
+#include "CameraManager.h"   // GetActiveCamera — aspect из render-размера каждый кадр
+#include "CameraStruct.h"    // Camera::SetAspect
 #include "DefaultRenderPassSet.h"
 #include "UI_ImGui.h"
 #include "imgui.h"
@@ -31,8 +33,16 @@ void Engine::PrepareFunc(uint8_t slot)
 
 	// UI-раскладка (Yoga): считает rect'ы и создаёт/пересоздаёт UI-энтити ДО сборки батчей, чтобы
 	// новые/изменённые элементы попали в этот же кадр. No-op, если не грязно (грязь ставят
-	// построение дерева игрой и ресайз окна). Размер кадра — из Engine (width/height).
-	ui_yoga->Emit(engine_context, width, height);
+	// построение дерева игрой и ресайз окна). Размер кадра — из size_state_.render_size (GetWidth/Height).
+	ui_yoga->Emit(engine_context, GetWidth(), GetHeight());
+
+	// Aspect камеры = соотношение render-разрешения (size_state_.render_size). Считалось 1 раз в ctor
+	// Camera и на ресайз не обновлялось → 3D растянут при смене render_size. Engine оркеструет (владеет
+	// и camera_manager, и размером), sim-поток монопольно мутирует камеру. GetProj() читает aspect вживую.
+	if (Camera* cam = camera_manager->GetActiveCamera()) {
+		const float h = GetHeight();
+		if (h > 0.0f) cam->SetAspect(GetWidth() / h);
+	}
 
 	// Отложенные удаления GPU-ресурсов: каждый трэш дренирует ПОТОК-ВЛАДЕЛЕЦ, локов нет.
 	// Буферы/пайплайны — sim (пуш и дренаж здесь); текстуры — render (пуш и дренаж в RenderFunc:
@@ -276,9 +286,14 @@ bool Engine::RenderFunc(uint8_t slot)
 		return false;
 	}
 
-	if (texture_manager->main_pass_depth)
-		texture_manager->main_pass_depth->Resize(w, h);
-	DefaultRenderPassNamespace::ResizeSceneHDRTargets(engine_context, w, h);
+	// Ресайз экранных таргетов — ТОЛЬКО здесь, на render-потоке (владельце трэш-очереди). Гейт целиком
+	// в структуре (ConsumeRenderResize сравнивает желаемое render_size со своим прошлым): пересоздаём
+	// таргеты лишь когда меняется ВНУТРЕННЕЕ разрешение (SetRenderResolution из sim — «полноценный
+	// ресайз» по кнопке игрового UI). Смена ОКНА (window_size, main) таргеты НЕ трогает — там только
+	// свопчейн + растяжение present-блитом. Логика per-таргет — в инструкциях (_SetDefaultCommonResources).
+	uint32_t rw, rh;
+	if (size_state_.ConsumeRenderResize(rw, rh))
+		texture_manager->ExecuteResizeInstructions(rw, rh);
 	// Текстурный трэш дренирует его владелец — render-поток (старые таргеты кладутся строками
 	// выше при ресайзе под свопчейн); буферы/пайплайны так же монопольно дренирует sim в PrepareFunc.
 	texture_manager->TrashTextures(slot_controller->RenderFencesDone());

@@ -70,7 +70,9 @@ int main() {
             // События окна/жизненного цикла — здесь, где есть engine и running.
             if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) { running = false; break; }
             if (event.type == SDL_EVENT_WINDOW_RESIZED)
-                engine->OnWindowResized(event.window.data1, event.window.data2);
+                // window-пара из события; render-пара (0,0) пока не используется — внутреннее
+                // разрешение зафиксировано в движке, картинка тянется на окно present-блитом.
+                engine->OnWindowResized(event.window.data1, event.window.data2, 0, 0);
 
             // Игровой ввод — в транспорт, дренит sim-поток.
             input->HandleEvent(event);

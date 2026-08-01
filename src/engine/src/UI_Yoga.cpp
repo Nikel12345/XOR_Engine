@@ -34,6 +34,9 @@ struct UI_Yoga::Impl {
     std::vector<NodeRec> nodes;
     std::vector<Entity>  created;                // энтити прошлого Emit (снимаются на пересборке)
     Node                 root = UI_Yoga::kInvalid;
+    // Размер экрана прошлой раскладки. Раскладка зависит от него (points-узлы дают разную ДОЛЮ экрана
+    // при разном разрешении) → его смена = layout-инвалидация, даже без dirty_. -1 = ещё не раскладывали.
+    float                last_w = -1.0f, last_h = -1.0f;
 };
 
 // ── Трансляция плоского UIStyle → Yoga-сеттеры. Yoga живёт ТОЛЬКО в этом .cpp. ──
@@ -284,7 +287,12 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
 
 void UI_Yoga::Emit(EngineContext* ctx, float screen_w, float screen_h)
 {
-    if (!dirty_ || !ctx) return;
+    if (!ctx) return;
+    // Смена размера экрана инвалидирует раскладку так же, как dirty_ (см. Impl::last_w/h): без этого
+    // ресайз не перекладывал UI — узлы держали NDC от стартового разрешения, отсюда «другой размер UI».
+    const bool size_changed = (screen_w != impl_->last_w) || (screen_h != impl_->last_h);
+    if (!dirty_ && !size_changed) return;
+    impl_->last_w = screen_w;  impl_->last_h = screen_h;
 
     ObjectManager* om       = ctx->GetObjectManager();
     SceneData*     scene    = om->GetActiveScene();

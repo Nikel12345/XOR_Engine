@@ -35,16 +35,8 @@ void RenderPassTexturesInfo::SetColorTexture(TextureAtlas* atlas, uint32_t index
 
 void RenderPassTexturesInfo::SetDepthTexture(TextureAtlas* atlas)
 {
-	shared_depth = nullptr;
 	depth_atlas = atlas;
 	if (atlas) atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
-}
-
-void RenderPassTexturesInfo::SetDepthTexture(SharedDepthTarget* dt)
-{
-	depth_atlas = nullptr;
-	shared_depth = dt;
-	if (dt) dt->tci.usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
 }
 
 void RenderPassStep::SetGlobalTextures(std::vector<TextureAtlas*> atlases)
@@ -55,9 +47,9 @@ void RenderPassStep::SetGlobalTextures(std::vector<TextureAtlas*> atlases)
 		if (atlas) atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 }
 
-// Атласы/shared-depth → актуальные SDL-текстуры. Зовётся на ИСПОЛНЕНИИ (RenderPassStandardBody),
-// а не на setup: GPU-текстуру таргета создаёт бейк (её ещё нет в момент объявления прохода) и
-// подменяет ресайз. Держать копию SDL_GPUTexture* в проходе поэтому нельзя — протухнет.
+// Атласы → актуальные SDL-текстуры. Зовётся на ИСПОЛНЕНИИ (RenderPassStandardBody), а не на setup:
+// GPU-текстуру таргета создаёт бейк (её ещё нет в момент объявления прохода) и подменяет ресайз.
+// Держать копию SDL_GPUTexture* в проходе поэтому нельзя — протухнет.
 void RenderPassTexturesInfo::ResolveTargets()
 {
 	const size_t n = color_atlases.size() < colorTargetInfos.size() ? color_atlases.size() : colorTargetInfos.size();
@@ -66,6 +58,5 @@ void RenderPassTexturesInfo::ResolveTargets()
 			colorTargetInfos[i].texture = color_atlases[i]->texture_binding.texture;
 	}
 
-	if (shared_depth)     depthTargetInfo.texture = shared_depth->texture;
-	else if (depth_atlas) depthTargetInfo.texture = depth_atlas->texture_binding.texture;
+	if (depth_atlas) depthTargetInfo.texture = depth_atlas->texture_binding.texture;
 }

@@ -111,17 +111,7 @@ struct TextureHandle : std::enable_shared_from_this<TextureHandle> {
 
 class TextureManager;
 
-// Depth-таргет, разделяемый несколькими проходами и привязанный к размеру свопчейна.
-// Владелец — TextureManager. Проходы ссылаются на него КОСВЕННО (RenderPassTexturesInfo::shared_depth)
-// и резолвят актуальный texture в момент begin прохода, поэтому ресайз = один вызов Resize(),
-// без поимённого переназначения по проходам. Старая текстура уходит в отложенное удаление
-// (живёт ещё BUFFERING_LEVEL кадров, пока её могут читать кадры in-flight).
-struct SharedDepthTarget {
-	SDL_GPUTexture* texture = nullptr;
-	// tci.usage — единое поле флагов, как у TextureAtlas: наполняет SetDepthTexture прохода
-	// (→ DEPTH_STENCIL_TARGET) до бейка; создание и Resize берут его отсюда.
-	SDL_GPUTextureCreateInfo tci{};
-	TextureManager* owner = nullptr;
-
-	void Resize(uint32_t w, uint32_t h);
-};
+// Depth-таргет — это ОБЫЧНЫЙ TextureAtlas (как shadow-depth): создаётся CreateTextureAtlas с
+// depth-tci и nullptr-сэмплером (depth основного прохода не сэмплится), usage DEPTH_STENCIL_TARGET
+// доложит декларация SetDepthTexture, ресайз — штатной инструкцией (RecreateAtlasTexture). Отдельного
+// типа под depth больше нет — свопчейн особый (внешняя текстура от SDL), а depth мы владеем сами.

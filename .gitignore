@@ -1,4 +1,4 @@
-build
+﻿build
 commands.txt
 src/engine/shaders/
 src/engine/textures/assets/
@@ -10,3 +10,4 @@ scripts/scene_gen/venv
 todo.txt
 osd
 osd/
+src/game/saved_scene/scene_1M.json

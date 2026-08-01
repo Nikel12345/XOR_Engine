@@ -257,7 +257,7 @@ SDL_AppResult Game::MainInit()
     //    ColliderComponent{}
     //);
 
-    ctx->ExecuteGenerators();
+    //ctx->ExecuteGenerators();
     ChangeState(GameState::MAIN_MENU);
     return SDL_APP_CONTINUE;
 }

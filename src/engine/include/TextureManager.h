@@ -96,7 +96,7 @@ public:
 	static std::vector<std::byte> SurfaceToPixels(SDL_Surface* surface, SDL_PixelFormat format);
 
 	// Отложенная инициализация GPU-ресурсов: Create* только РЕГИСТРИРУЮТ обёртку
-	// (TextureAtlas/SharedDepthTarget) с её tci и кладут в pending; сами SDL-текстуры создаёт этот
+	// (TextureAtlas) с её tci и кладут в pending; сами SDL-текстуры создаёт этот
 	// дренаж — КАЖДЫЙ кадр, в начале Engine::PrepareFunc (до PackAtlases и сборки батчей, которым
 	// GPU-текстура уже нужна). Смысл — к моменту создания усвоить все usage-флаги ресурса: игровой
 	// апдейт (вместе с объявлением sp/материалов) идёт раньше prepare на том же sim-потоке.
@@ -134,9 +134,21 @@ public:
 	size_t LoadSceneTextures(const std::vector<SceneTextureEntry>& entries,
 		const std::function<TextureHandle*(const SceneTextureEntry&)>& create_from_file);
 
-	SharedDepthTarget* CreateSharedDepthTarget(SDL_GPUTextureCreateInfo tci);
 	void QueueDeleteTexture(SDL_GPUTexture* texture);
 	void TrashTextures(uint64_t fences_done);
+
+	// ── Инструкции ресайза экранных таргетов (FK-паттерн, как UpdateInstruction у буферов, но
+	//    СЛОВАРЬ по имени: 1 текстура — 1 функция). Логика ресайза НЕ на struct TextureAtlas (он
+	//    остаётся чистым) — ресайзятся лишь те таргеты, кому зарегали инструкцию. Функтор получает
+	//    (tm, w, h) и пересоздаёт свой таргет, захватив свою спец-логику в замыкании при регистрации
+	//    (напр. i уровня bloom: w>>(1+i)). Исполнять ОБЯЗАН render-поток (владелец трэш-очереди) —
+	//    см. Engine::RenderFunc (гейт по изменению размера).
+	using TextureResizeFunc = std::function<void(TextureManager&, uint32_t w, uint32_t h)>;
+	void CreateResizeInstruction(const std::string& texture_name, TextureResizeFunc fn);
+	void ExecuteResizeInstructions(uint32_t w, uint32_t h);
+	// Пересоздать GPU-текстуру атласа под новый tci, СОХРАНИВ usage (он из деклараций, не из пресета)
+	// и отправив старую в отложенное удаление. Вспомогалка для инструкций ресайза атласов.
+	void RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci);
 
 	// ── Превью ассетов UI — самостоятельная подсистема PreviewPacker (ключ = ИМЯ текстуры, не хэндл).
 	//    TM только проксирует: дренаж дёрти-блитов на upload-cb (после GenerateMipmaps — тот же поток
@@ -150,9 +162,6 @@ public:
 	void ReleasePreview(const std::string& name) { preview.Release(name); }
 
 	~TextureManager();
-
-	// Разделяемый depth основного прохода (MAIN/TRANSPARENT/DEBUG). Ресайзится через ->Resize().
-	SharedDepthTarget* main_pass_depth = nullptr;
 
 public:
 	TextureHandle* GetTextureHandle(const std::string& name) {
@@ -199,17 +208,18 @@ private:
 	// Заявку ставит _PlaceTask (UVL готов), дренаж/UV/release — через прокси публичного блока.
 	PreviewPacker preview;
 
-	std::vector<std::unique_ptr<SharedDepthTarget>> shared_depth_targets;
-	// Очередь ЦЕЛИКОМ владеется render-потоком: оба пуша (ResizeSceneHDRTargets / Resize depth —
-	// по размеру свопчейна) и дренаж (TrashTextures в RenderFunc) живут в нём. Без замков —
-	// симметрично трэшам буферов/пайплайнов, которыми так же монопольно владеет sim.
+	// Инструкции ресайза экранных таргетов (ключ = имя текстуры). Наполняется на init (до старта
+	// потоков), исполняется render-потоком (ExecuteResizeInstructions) → мутация только на init, гонок нет.
+	std::unordered_map<std::string, TextureResizeFunc> resize_instructions_;
+
+	// Очередь ЦЕЛИКОМ владеется render-потоком: оба пуша (инструкции ресайза таргетов) и дренаж
+	// (TrashTextures в RenderFunc) живут в нём. Без замков — симметрично трэшам буферов/пайплайнов,
+	// которыми так же монопольно владеет sim.
 	std::deque<PendingTextureDestroy> texture_trash;
 
-	// Обёртки, ждущие создания GPU-текстуры (НЕвладеющие — владельцы atlases_data /
-	// shared_depth_targets). Дренирует BakePending. Атласы-совладельцы (shares_with) создаются
-	// после владельцев: источник обязан существовать.
+	// Обёртки, ждущие создания GPU-текстуры (НЕвладеющие — владелец atlases_data). Дренирует
+	// BakePending. Атласы-совладельцы (shares_with) создаются после владельцев: источник обязан существовать.
 	std::vector<TextureAtlas*> pending_atlas_bakes;
-	std::vector<SharedDepthTarget*> pending_depth_bakes;
 
 	SDL_GPUDevice* dev = nullptr;
 	TransferManager* trm = nullptr;

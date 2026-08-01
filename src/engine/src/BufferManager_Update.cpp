@@ -86,9 +86,21 @@ TransferBufferData* BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* c
 
     // ── ПРОФАЙЛ: фаза 1 — «замер размера» (size_fn) по каждому буферу отдельно.
     //    Метка "<buf> .size", плюс сам вычисленный размер в байтах (столбец KB).
+    const uint8_t li = logic_index.load();
     for (auto& instr : target_instr_vector) {
         UploadTask task{};
         task.dst_buffer_data = instr.buffer_data;
+        // Гейт незабейканного буфера: GPU-хэндла нет (ни одна SP не объявила usage → BakePending его
+        // не создал; напр. UI-текст-буферы в игре без UI-шейдера). Пропускаем инструкцию ЦЕЛИКОМ, а
+        // не только финальную заливку (та и так гейтится в _ExecuteUploadTasks): незачем считать
+        // size_fn, растить ёмкость, арендовать TB и гонять updater ради данных, которым некуда ехать.
+        // size=0 держит выравнивание instr↔task для фазы 2 и глушит апдейт вниз по конвейеру.
+        // Появится usage → BakePending создаст буфер, и обновлялка оживёт со следующего кадра сама.
+        if (!_GetGPUBufferForFrame(instr.buffer_data, li)) {
+            task.size = 0;
+            target_task_vector.push_back(task);
+            continue;
+        }
         {
             auto t = Prof::Clock::now();
             task.size = instr.size_fn ? instr.size_fn() : 0;

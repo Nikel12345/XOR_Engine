@@ -76,7 +76,11 @@ void PreviewPacker::Blit(SDL_GPUCommandBuffer* cb)
         bi.destination.w = CELL;
         bi.destination.h = CELL;
         bi.load_op = SDL_GPU_LOADOP_LOAD;   // соседние ячейки не трогаем
-        bi.filter = SDL_GPU_FILTER_LINEAR;
+        // Мелкий источник (меньше ячейки по обеим осям — дефолты 2×2/4×4, иконки) в LINEAR
+        // растягивается в мыльный градиент и подмешивает соседей по кромке региона → NEAREST даёт
+        // чёткие тексели без утечки. Крупный (уменьшение до CELL) оставляем LINEAR: NEAREST на
+        // даунскейле 2048→64 алиасит. Порог — ровно CELL: увеличение → NEAREST, уменьшение → LINEAR.
+        bi.filter = (s.w < CELL && s.h < CELL) ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
         SDL_BlitGPUTexture(cb, &bi);
     }
     dirty_.swap(retry);

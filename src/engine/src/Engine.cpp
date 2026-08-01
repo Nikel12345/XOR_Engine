@@ -46,26 +46,46 @@ using namespace ShaderBase;   // POSITION/UV/... в раскладке fallback-
 //  регистрация UI-команд — DefaultCommandSet.cpp.
 // ============================================================
 
-void Engine::OnWindowResized(Sint32 w, Sint32 h)
+void Engine::OnWindowResized(Sint32 window_w, Sint32 window_h, Sint32 render_w, Sint32 render_h)
 {
-	width = safe_sint32_f(w);
-	height = safe_sint32_f(h);
+	// Обновляем ТОЛЬКО window-пару. render-пара (width/height) ФИКСИРОВАНА — ресурсы, UI и камера
+	// работают во внутреннем разрешении, а окно другого размера получает растянутую картинку финальным
+	// present-блитом. Поэтому здесь больше НЕ трогаем render-размеры, НЕ ресайзим таргеты и НЕ дёргаем
+	// UI (UI не перекладывается на ресайз окна — тянется блитом). Событие resized летит сотнями за drag,
+	// но теперь это дёшево: только запись двух чисел.
+	// Публикуем размер ОКНА для render-потока (свопчейн + present-блит). Таргеты этим НЕ трогаем:
+	// смена окна — только презентация, картинка растягивается блитом render→окно. Атомик коалесит
+	// поток resize-событий за drag.
+	size_state_.window_size.store(EngineSizeState::Pack(static_cast<uint32_t>(window_w), static_cast<uint32_t>(window_h)),
+	                              std::memory_order_release);
+	// Будущая симметрия: публикация нового ВНУТРЕННЕГО разрешения (render_size) — пока вызывается тут.
+	size_state_.render_size.store(EngineSizeState::Pack(static_cast<uint32_t>(window_w), static_cast<uint32_t>(window_h)),
+		std::memory_order_release);
 
-	// UI-раскладка зависит от размера кадра (px→NDC) → пересчитать на следующем Emit.
-	if (ui_yoga) ui_yoga->MarkDirty();
+	(void)render_w;  (void)render_h;
+}
 
-	// GPU-таргеты (depth + HDR) ресайзятся НЕ здесь, а в RenderFunc по размеру реально полученного
-	// свопчейна — раз на отрисованный кадр. Событие resized летит сотнями за drag; пересоздавать
-	// большие текстуры на каждое = VRAM-захлёб и DEVICE_LOST. Здесь только обновляем width/height
-	// (для aspect-ratio камеры и пр.).
+void Engine::SetRenderResolution(uint32_t w, uint32_t h)
+{
+	// ЗАГОТОВКА (пока никто не зовёт): игровой UI (sim-поток) публикует новое ВНУТРЕННЕЕ разрешение —
+	// render-поток подхватит по изменению render_size и пересоздаст таргеты (ExecuteResizeInstructions).
+	// Удалять текстуры здесь (в sim) нельзя — поэтому только публикация.
+	if (w == 0 || h == 0) return;
+	size_state_.render_size.store(EngineSizeState::Pack(w, h), std::memory_order_release);
 }
 
 Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height)
 {
 	this->win = window;
 	this->dev = dev;
-	this->width = width;
-	this->height = height;
+	// Стартовый размер (аргументы ctor) кладём ТОЛЬКО в size_state_ — отдельных width/height в движке нет,
+	// геттеры GetWidth/GetHeight читают render_size оттуда (единый источник истины размеров).
+	// Экранные таргеты создаются в _SetDefaultCommonResources под этот стартовый размер, поэтому и
+	// render_size, и applied стартуют «уже применёнными» — первый НАСТОЯЩИЙ ресайз (render или window) их сдвинет.
+	const uint64_t start_size = EngineSizeState::Pack(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+	size_state_.render_size.store(start_size, std::memory_order_relaxed);
+	size_state_.window_size.store(start_size, std::memory_order_relaxed);
+	size_state_.applied_render = start_size;   // гейт стартует «уже применённым» (таргеты созданы под этот размер)
 	transfer_manager = new TransferManager(dev);
 	buffer_manager = new BufferManager(dev, transfer_manager);
 	texture_manager = new TextureManager(dev, transfer_manager);
@@ -324,7 +344,7 @@ void Engine::InitPasses()
 	using namespace DefaultRenderPassNamespace;
 
 	{
-		_SetDefaultCommonResources(engine_context, safe_f_u32(width), safe_f_u32(height));
+		_SetDefaultCommonResources(engine_context, safe_f_u32(GetWidth()), safe_f_u32(GetHeight()));
 		SetDefaultCullingPass(engine_context);     // GPU-каллинг: out_pib до SHADOW_PASS (индекс 5)
 		SetDefaultShadowPCFRenderPass(engine_context, light_data_module);
 		SetDefaultMainRenderPass(engine_context);

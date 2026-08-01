@@ -10,7 +10,6 @@ struct SubMeshData;
 struct BufferData;
 struct TextureData;
 struct TextureAtlas;
-struct SharedDepthTarget;
 
 class PassManager;
 
@@ -62,9 +61,7 @@ struct RenderPassTexturesInfo {
     // (ResolveTargets), поэтому ни бейк, ни ресайз не требуют переназначать таргеты по проходам.
     void SetColorTexture(TextureAtlas* atlas, uint32_t index = 0);
     void SetDepthTexture(TextureAtlas* atlas);
-    // Привязка к разделяемому depth-таргету (тот же приём, что и для атласов).
-    void SetDepthTexture(SharedDepthTarget* dt);
-    // Атласы/shared_depth → colorTargetInfos[i].texture / depthTargetInfo.texture.
+    // Атласы → colorTargetInfos[i].texture / depthTargetInfo.texture.
     void ResolveTargets();
 
     void SetColorTargetInfoLayer(uint32_t layer, uint32_t index = 0) { colorTargetInfos[index].layer_or_depth_plane = layer; };
@@ -77,8 +74,7 @@ struct RenderPassTexturesInfo {
     std::vector<TextureAtlas*>          color_atlases;
     SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUDepthStencilTargetInfo depthTargetInfo{};
-    // Источник depth: ровно один из двух (или ни одного — прохода без depth).
-    SharedDepthTarget* shared_depth = nullptr;
+    // Источник depth: атлас (или nullptr — проход без depth). depth-таргет — обычный TextureAtlas.
     TextureAtlas*      depth_atlas = nullptr;
 };
 

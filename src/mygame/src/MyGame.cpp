@@ -62,7 +62,7 @@ SDL_AppResult MyGame::MainInit()
     // апдейтер (FractalUpdateSet) и пуши шейдеров (в BindDefaultPushFuncs) — под if'ом
     // с её именем. Буфер — ДО LoadScene: sp из манифеста сцены ссылается на него по имени,
     // резолв идёт по уже существующим. Рендер-ресурсы (vs/fs/sp/материал) — в манифестах.
-    const std::string scene_name = "scene_mandelbrot";
+    const std::string scene_name = "scene_fractal";
     BufferManager* bm = ctx->GetBufferManager();
     if (scene_name == "scene_fractal") {
         // Без usage: GRAPHICS_STORAGE_READ выведется из sp манифеста, который назовёт этот буфер.

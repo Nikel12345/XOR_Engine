@@ -263,22 +263,32 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
         }
         if (g_ce_open) DrawCreateEntityForm(ctx, om);
 
-        // Проход 1: считаем видимые энтити (фильтр тот же, что при отрисовке — счётчики
-        // обязаны совпадать). Скан 1М SoA-строк без ImGui-вызовов дёшев; дорого именно рисовать.
+        // АРХЕТИПНЫЙ доступ вместо пер-энтити сканов. Сигнатура (Positions+Material+Model)
+        // и фильтры (EditorHidden/UI) — свойства АРХЕТИПА, у всех его строк они одинаковы,
+        // проверять их на каждой энтити бессмысленно. Собираем диапазоны подходящих архетипов
+        // с префикс-суммой: счёт = сумма размеров (O(архетипов)), а клиппер адресует видимую
+        // строку НАПРЯМУЮ через arch->entities[row - base] (O(видимых строк) ~ 10).
+        // Старый вариант гнал 2+ ПОЛНЫХ прохода по 1М энтити с двумя Has<> на каждую
+        // (find в entity_to_archetype на 1М записей + get_array по type_index) КАЖДЫЙ кадр —
+        // сотни мс на UI-потоке, панель роняла FPS на порядок при 10 видимых строках.
+        struct EntRange { Archetype* arch; int base; };   // base = префикс-сумма строк до архетипа
+        std::vector<EntRange> ranges;
         int total = 0;
-        om->ForEach<Positions, MaterialComponent, ModelComponent>(scene,
-            [&](Entity e, SoAElement<Positions>, MaterialComponent&, ModelComponent&)
-        {
-            if (om->Has<EditorHiddenComponent>(scene, e)) return;
-            if (om->Has<UIComponent>(scene, e)) return;
-            ++total;
-        });
+        for (auto& [sig, arch] : scene->archetypes) {
+            if (!arch.get_array<Positions>() || !arch.get_array<MaterialComponent>()
+                || !arch.get_array<ModelComponent>()) continue;
+            if (arch.get_array<EditorHiddenComponent>()) continue;
+            if (arch.get_array<UIComponent>()) continue;   // UI живёт в своей вкладке (дерево Yoga), не тут
+            if (arch.entities.empty()) continue;
+            ranges.push_back({ &arch, total });
+            total += static_cast<int>(arch.entities.size());
+        }
         ImGui::Text("entities: %d", total);   // живой счётчик (ASCII: шрифт без кириллицы)
 
         // Список — в дочернем окне со СВОИМ скроллбаром (как на панелях). ImGuiListClipper
         // рисует ТОЛЬКО видимые строки (виртуализация на 1М), но держит полную высоту списка,
-        // поэтому скроллбар честный. Клиппер даёт диапазон [lo,hi); ForEach со счётчиком
-        // отдаёт по индексу нужную энтити (произвольного доступа по индексу у ForEach нет).
+        // поэтому скроллбар честный. Строка row → архетип линейным поиском по ranges
+        // (их единицы), внутри — прямой индекс.
         const float row_h = ImGui::GetTextLineHeightWithSpacing();
         const int   rows  = std::max(1, std::min(total, kEntWindow));   // сколько строк видно разом
         ImGui::BeginChild("ent_list", ImVec2(0.0f, row_h * rows + ImGui::GetStyle().FramePadding.y * 2.0f), true);
@@ -286,15 +296,12 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
         ImGuiListClipper clipper;
         clipper.Begin(total, row_h);
         while (clipper.Step()) {
-            const int lo = clipper.DisplayStart, hi = clipper.DisplayEnd;
-            int idx = 0;
-            om->ForEach<Positions, MaterialComponent, ModelComponent>(scene,
-                [&](Entity e, SoAElement<Positions>, MaterialComponent&, ModelComponent&)
-            {
-                if (om->Has<EditorHiddenComponent>(scene, e)) return;
-                if (om->Has<UIComponent>(scene, e)) return;   // UI живёт в своей вкладке (дерево Yoga), не тут
-                const int cur = idx++;
-                if (cur < lo || cur >= hi) return;            // вне видимого диапазона — пропуск
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                const EntRange* r = nullptr;   // ranges упорядочены по base → первый вмещающий
+                for (const EntRange& rr : ranges)
+                    if (row < rr.base + static_cast<int>(rr.arch->entities.size())) { r = &rr; break; }
+                if (!r) break;                 // за концом списка (страховка от рассинхрона клиппера)
+                Entity e = r->arch->entities[row - r->base];
                 char label[32];
                 snprintf(label, sizeof(label), "Entity %u", static_cast<unsigned>(e));
                 bool selected = (g_sel.kind == SelKind::Entity && g_sel.entity == e);
@@ -302,7 +309,7 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
                     if (selected) g_sel = Selection{};
                     else { g_sel = Selection{}; g_sel.kind = SelKind::Entity; g_sel.entity = e; }
                 }
-            });
+            }
         }
         ImGui::EndChild();
     }
