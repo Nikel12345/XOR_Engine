@@ -30,7 +30,7 @@
 #include <cstddef>
 #include <cstring>
 #include <type_traits>
-#include "MaterialData.h"   // Material — типизированные хелперы в конце файла
+#include "MaterialData.h"
 
 // Вид поля: сколько 4-байтовых лейнов занимает в блобе и каким виджетом рисуется.
 // Все лейны по 4 байта — как в cbuffer (bool в HLSL тоже 4 байта, на CPU держим uint32_t).

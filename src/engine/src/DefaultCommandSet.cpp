@@ -1,10 +1,10 @@
 #include "PCH.h"
 #include "DefaultCommandSet.h"
-#include "InputManager.h"      // CommandId + очередь команд
-#include "InputCommands.h"     // payload-структуры команд
-#include "EngineContext.h"     // фасад + (транзитивно) все менеджеры
-#include "MaterialParams.h"    // OpaqueMaterialParams — блоб дефолт-params нового материала
-#include "PositionStructure.h" // PosUVNormPool — семантики pull → стримы пула (UpsertVertexShader)
+#include "InputManager.h"
+#include "InputCommands.h"
+#include "EngineContext.h"
+#include "MaterialParams.h"
+#include "PositionStructure.h"
 // EngineContext.h держит менеджеры forward-декларациями — полные типы тянет этот TU.
 #include "MaterialManager.h"
 #include "ShaderManager.h"
@@ -12,7 +12,7 @@
 #include "ModelManager.h"
 #include "PipeManager.h"
 #include "RenderManager.h"
-#include "UI_Yoga.h"           // NudgeUINode → ui_yoga->NudgeNode
+#include "UI_Yoga.h"
 
 using namespace ShaderBase;   // VertexSemantic (pull в UpsertVertexShader)
 
@@ -87,7 +87,13 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 	// Создание сущности из staging-формы: json одной сущности идёт ТЕМ ЖЕ путём, что файл
 	// сцены (ObjectManager::LoadScene), затем фиксап указателей ассетов по именам — зеркало
 	// Engine::LoadScene (ECS-ядро менеджеров не знает). Незарезолвленное имя → nullptr,
-	// сборщик батчей такие пропускает. Полный ребилд: одна сущность, дёшево и без края.
+	// сборщик батчей такие пропускает.
+	//
+	// Добавление — ИНКРЕМЕНТАЛЬНОЕ (QueueCreate), как у EngineContext::CreateEntity: путь через
+	// ObjectManager идёт мимо него, поэтому дельту ставим здесь руками. Новый батч (свой материал/
+	// модель) инкремент заводит сам — AddEntityToBatches создаёт недостающие узлы дерева. Полная
+	// пересборка тут была бы обходом ВСЕЙ сцены ради одной сущности: на тяжёлой сцене это фриз
+	// (батч-дерево сносится и строится заново по 1М энтити), а даёт ровно тот же результат.
 	im.RegisterCommand(CommandId::CreateEntity,
 		[](EngineContext* ctx, const void* data)
 		{
@@ -95,6 +101,9 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 			ObjectManager* om = ctx->GetObjectManager();
 			SceneData* scene = om->GetScene(c->scene);
 			if (scene) {
+				// Дельту берёт только активная сцена — она одна кормит батч-дерево (тот же гейт,
+				// что в CreateEntity/DeleteEntity: id чужой сцены совпал бы с чужим объектом).
+				const bool feeds_batches = (scene == om->GetActiveScene());
 				const std::vector<Entity> created = om->LoadScene(c->scene, c->json);
 				for (Entity e : created) {
 					if (om->Has<ModelComponent>(scene, e)) {
@@ -113,8 +122,11 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 							mc.materials.push_back(mat);
 						}
 					}
+					// ПОСЛЕ фиксапа указателей: инкремент читает model/materials на ближайшем
+					// prepare. Отбор (Draw+visible, Model, Material) перепроверяет ApplyIncremental
+					// сам — здесь очередь дешевле фильтра.
+					if (feeds_batches) ctx->GetBatchBuilder()->QueueCreate(e);
 				}
-				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 			delete c;
 		});

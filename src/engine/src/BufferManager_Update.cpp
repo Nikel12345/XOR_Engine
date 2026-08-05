@@ -298,7 +298,6 @@ void BufferManager::ExecuteDownloadTasks(SDL_GPUCopyPass* cp, uint8_t idx) {
         SDL_GPUBuffer* source_buffer = _GetGPUBufferForFrame(buffer_data, idx);
         SDL_GPUBufferRegion srcReg = { source_buffer, task.src_offset, task.size };
         SDL_GPUTransferBufferLocation dst = { task.tbd->tb, task.tb_offset };
-        //SDL_Log("Download source buffer ptr: %p", (void*)source_buffer);
 
         SDL_DownloadFromGPUBuffer(cp, &srcReg, &dst);
     }

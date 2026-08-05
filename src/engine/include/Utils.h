@@ -24,7 +24,7 @@ inline Uint32 safe_f_u32(float val) {
     assert(std::isfinite(val));
     assert(val >= 0.0f);
     assert(val <= static_cast<float>(std::numeric_limits<Uint32>::max()));
-    assert(std::floor(val) == val); // нет дробной части
+    assert(std::floor(val) == val);
     return static_cast<Uint32>(val);
 }
 

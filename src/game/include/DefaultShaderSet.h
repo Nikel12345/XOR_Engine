@@ -21,7 +21,6 @@ namespace DefaultShaderProgramSet
     // единственная точка привязки push (в Set*-функциях его больше нет). Промах sp → пропуск.
     void BindDefaultPushFuncs(EngineContext* ctx);
 
-    // Compute shader programs
     // GPU-каллинг (culling_pib.comp): пишет out_pib блоками по камерам (0 — игрок, 1..N — световые).
     // Проход создаёт engine (SetDefaultCullingPass); здесь программа + её push/dispatch.
     void SetCullingPibPrograms(EngineContext* ctx, LightDataModule* ldm);

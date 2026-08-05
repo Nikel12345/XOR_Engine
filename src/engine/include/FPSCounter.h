@@ -1,4 +1,4 @@
-﻿// FPSCounter.h
+﻿
 
 
 #include <string>
@@ -7,7 +7,6 @@
 class AvgRateCounter
 {
 public:
-    // Типы для удобства и читаемости
     using hr_clock = std::chrono::high_resolution_clock;
     using time_point = hr_clock::time_point;
     using float_seconds = std::chrono::duration<float>;

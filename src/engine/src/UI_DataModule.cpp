@@ -1,9 +1,9 @@
 #include "PCH.h"
 #include "UI_DataModule.h"
-#include "Utils.h"           // safe_u32
-#include "BufferManager.h"   // UploadToTransferBuffer, UploadTask
-#include "ObjectManager.h"   // ForEach/ForEachArchetype/Has, GetActiveScene, SceneData
-#include <bit>               // std::popcount
+#include "Utils.h"
+#include "BufferManager.h"
+#include "ObjectManager.h"
+#include <bit>
 
 UI_DataModule::UI_DataModule() {}
 

@@ -1,27 +1,11 @@
 #include "PCH.h"
 #include "MaterialManager.h"
-#include "TextureData.h"   // полное определение TextureHandle: нужно для weak_from_this()
-#include "TextureManager.h"   // резолв имени текстуры в атлас (CollectSamplerUsage)
+#include "TextureData.h"
+#include "TextureManager.h"
 
 MaterialManager::MaterialManager()
 {
 }
-
-//Material* MaterialManager::CreateMaterial(std::string name, TextureHandle* albedo, TextureHandle* normal, std::vector<ShaderProgram*> shader_programs){
-//	auto it = materials.find(name);
-//	if (it == materials.end()) {
-//		auto data = std::make_unique<Material>();
-//		data->shader_programs.insert(shader_programs.begin(), shader_programs.end());
-//		data->albedo = albedo;
-//		data->normal_texture = normal;
-//		materials[name] = std::move(data);
-//		return materials[name].get();
-//	}
-//	else {
-//		SDL_Log("Material '%s' already exists.", name.c_str());
-//		return it->second.get();
-//	}
-//}
 
 Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, TextureName>> textures, std::vector<ShaderName> shaders)
 {

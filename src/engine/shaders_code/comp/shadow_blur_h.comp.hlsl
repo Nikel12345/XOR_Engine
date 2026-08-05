@@ -1,11 +1,11 @@
 [[vk::combinedImageSampler]]
-Texture2DArray<float2> u_input   : register(t0, space0);   // было space2
+Texture2DArray<float2> u_input   : register(t0, space0);
 [[vk::combinedImageSampler]]
-SamplerState           u_sampler : register(s0, space0);   // было space2
+SamplerState           u_sampler : register(s0, space0);
 
-RWTexture2D<float2> u_output : register(u0, space1);       // ок
+RWTexture2D<float2> u_output : register(u0, space1);
 
-cbuffer BlurParams : register(b0, space2) {                // было space3
+cbuffer BlurParams : register(b0, space2) {
     uint layerIndex;
 };
 

@@ -6,24 +6,23 @@
 #include "TextureManager.h"
 #include "ModelManager.h"
 #include "MaterialManager.h"
-#include "MaterialParamsSpec.h" // materials.json: params пишутся/читаются по схеме своего типа
-#include "ShaderManager.h"     // shaders.json: реестры VSD/FSD/CSD/SP
-#include "PipeManager.h"       // инвалидация пайплайна при merge-upsert sp
-#include "RenderManager.h"     // PassManager — резолв прохода sp по имени
-#include "BufferManager.h"     // резолв имён буферов sp → каноничный BufferDataName
-#include "PositionStructure.h" // PosUVNormPool — семантики pull манифеста → стримы пула (загрузка VSD)
+#include "MaterialParamsSpec.h"
+#include "ShaderManager.h"
+#include "PipeManager.h"
+#include "RenderManager.h"
+#include "BufferManager.h"
+#include "PositionStructure.h"
 #include "BatchBuilder.h"
 #include "EngineContext.h"
-#include <fstream>      // Save/LoadScene: файлы сцены-папки
-#include <filesystem>   // SaveScene: create_directories папки сцены
-#include "yyjson.h"     // json-манифесты ресурсов сцены (textures.json, ...)
+#include "UI_Yoga.h"   // MarkSceneReset после ECS-swap (UI-энтити производны от дерева)
+#include <fstream>
+#include <filesystem>
+#include "yyjson.h"
 
 using namespace ShaderBase;   // VertexSemantic/POSITION/VertexBufferBinding (в хедере using убран намеренно)
 
-// ============================================================
 //  Сцена-папка: scene.scene (ECS) + файлы ресурсов рядом (json, по менеджерам — поэтапно).
 //  Публичная точка входа — ctx->Save/LoadScene (тонкий прокси сюда).
-// ============================================================
 
 // ChannelConvention ↔ строка манифеста (в json — читаемое имя, не число).
 static const char* ConvToStr(ChannelConvention c)
@@ -402,6 +401,11 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 
 void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 {
+	// Рендер-поток встаёт на всю загрузку (см. Engine::scene_swap_mutex). На всю, а не только
+	// на ECS-своп: фазы манифестов перезаливают словари TextureManager/ModelManager/
+	// MaterialManager/ShaderManager, а панели редактора их перечисляют с рендер-потока.
+	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
+
 	// ── Тайминг фаз загрузки (диагностика 5-секундной загрузки 100k). Load — событие
 	// разовое, поэтому не через кадровый Prof, а прямым SDL_Log сразу после. ──
 	const auto t_read = Prof::Clock::now();
@@ -499,7 +503,6 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 					if (sp->fs_name == n) pipe_manager->InvalidatePipeline(sp.get(), batch_builder->RebuildEpoch());
 			};
 
-			// -- VSD --
 			if (yyjson_val* arr = yyjson_obj_get(root, "vertex_shaders")) {
 				yyjson_arr_foreach(arr, idx, max, e) {
 					const std::string name = JsonStr(e, "name"), path = JsonStr(e, "path");
@@ -510,7 +513,6 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 						yyjson_arr_foreach(pa, pi, pm, ps) pull.push_back(SemFromStr(yyjson_get_str(ps)));
 					}
 					if (pull.empty()) {
-						// ДОБАВИТЬ ЛОГ!
 					}
 					// Манифест говорит СЕМАНТИКАМИ (pull) — язык стабилен, файлы сцен не мигрируются.
 					// Семантики → имена стрим-буферов пула (POSITION→Pos, UV→UV, NORMAL/TANGENT→NormTan):
@@ -521,7 +523,6 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 					invalidate_vs(name);
 				}
 			}
-			// -- FSD --
 			if (yyjson_val* arr = yyjson_obj_get(root, "fragment_shaders")) {
 				yyjson_arr_foreach(arr, idx, max, e) {
 					const std::string name = JsonStr(e, "name"), path = JsonStr(e, "path");
@@ -530,7 +531,6 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 					invalidate_fs(name);
 				}
 			}
-			// -- CSD --
 			if (yyjson_val* arr = yyjson_obj_get(root, "compute_shaders")) {
 				yyjson_arr_foreach(arr, idx, max, e) {
 					const std::string name = JsonStr(e, "name"), path = JsonStr(e, "path");
@@ -699,6 +699,12 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 			ptr_ms = Prof::MsSince(t_ptr);
 
 			object_manager->SetSceneState(scene_name, true);
+
+			// UI — часть сцены и уходит вместе с ней: clear выше снёс его энтити, здесь сносим
+			// дерево. Раньше дерево переживало загрузку (живёт в UI_Yoga, не в ECS) — на экране
+			// UI пропадал, а его узлы продолжали висеть в панели иерархии. Новый UI появится,
+			// когда дерево начнёт грузиться из файлов сцены.
+			if (ui_yoga) ui_yoga->Reset();
 
 			// Скайбокс движок больше НЕ создаёт: фон — обычная сущность сцены (scene.json,
 			// Draw+Material+Model БЕЗ Positions — transformless-дровабл, PIB=-1), а его модель/

@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "RenderManager.h"
-#include "BufferManager.h"   // DefaultBuffersNames + BufferManager (через параметр)
-#include "RenderSnapshot.h"  // header-only типы слепков (линковку не расширяет)
+#include "BufferManager.h"
+#include "RenderSnapshot.h"
 // MaterialManager/PipeManager/ObjectManager/ModelData здесь не использовались — убраны,
 // чтобы PassManager не тянул render/model/object на уровне линковки (нужно для EngineGpu).
 
@@ -409,13 +409,11 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 			bm->BindGPUVertexStorageBuffers(rp, 0, shader_batch.vertexStorageBuffers, render_frame);
 		}
 		else {
-			//SDL_Log("No vertex storage buffers found for render command");
 		}
 		if (!shader_batch.fragmentStorageBuffers.empty()) {
 			bm->BindGPUFragmentStorageBuffers(rp, 0, shader_batch.fragmentStorageBuffers, render_frame);
 		}
 		else {
-			//SDL_Log("No fragment storage buffers found for render command");
 		}
 
 		for (const RenderSnap::AtlasGroup& atlas_batch : shader_batch.atlases) {
@@ -449,5 +447,4 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 			}
 		}
 	}
-	//std::cout << "Draw calls: " << draw_calls << " for pass" << render_pass_step.pass_index << std::endl;
 }

@@ -1,5 +1,5 @@
 #include "CollisionShapes.h"
-#include "BaseComponents.h"   // полное определение Positions
+#include "BaseComponents.h"
 #include <algorithm>
 #include <cmath>
 

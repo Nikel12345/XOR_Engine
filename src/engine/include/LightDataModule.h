@@ -2,8 +2,8 @@
 #include <vector>
 #include <glm/glm.hpp>
 #include "LightStruct.h"
-#include "RenderSnapshot.h"   // RenderSnap::LightCams — пер-слотовый слепок теневых камер
-#include "config.h"           // BUFFERING_LEVEL
+#include "RenderSnapshot.h"
+#include "config.h"
 
 struct UploadTask;
 struct SceneData;

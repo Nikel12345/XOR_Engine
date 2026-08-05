@@ -4,10 +4,11 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <functional>  // bind_shader_functions — колбэк пере-привязки push после LoadScene
+#include <functional>
+#include <mutex>
 #include <string>
-#include "config.h"    // BUFFERING_LEVEL — размер pending_upload_tbs
-#include "Aliases.h"   // SceneName
+#include "config.h"
+#include "Aliases.h"
 
 // ТОЛЬКО forward-декларации: все члены — указатели, геттеры отдают указатели, полные
 // определения заголовку не нужны. Каждый cpp (движка и игры) сам инклюдит те менеджеры,
@@ -118,7 +119,6 @@ public:
     // сериализуются, а перенос со старой sp по имени ломался бы на переименовании.
     void SetBindShaderFunctions(std::function<void()> fn) { bind_shader_functions = std::move(fn); }
 
-    //void Iterate();
     void PrepareFunc(uint8_t idx);
 
     void UploadFunc(uint8_t slot);
@@ -130,9 +130,6 @@ public:
     void BeginImGuiFrame();
 
     void EndImGuiFrame();
-
-	//void SetFrameIndex(uint8_t idx) { frame_index.store(idx); }
-    //uint8_t GetFrameIndex() const { return frame_index.load(); }
 
     // ВНУТРЕННЕЕ (render) разрешение как float для UI-раскладки/камеры/первичного создания таргетов —
     // читается ИЗ size_state_.render_size (единый источник истины, отдельных полей в движке нет). При
@@ -172,6 +169,19 @@ private:
     // applied_render (render-локальный «прошлый»). Удаление текстур вправе делать ТОЛЬКО render-поток →
     // продьюсеры лишь ПУБЛИКУЮТ, а пересоздание таргетов исполняет RenderFunc по гейту ConsumeRenderResize.
     EngineSizeState size_state_;
+
+    // Рендер-поток стоит на время загрузки сцены. НЕ противоречит компромиссу «редактор читает
+    // живой ECS без замков» (см. RenderFunc): тот рассчитан на рваное ЗНАЧЕНИЕ — прочитать
+    // матрицу в момент записи безвредно. LoadScene же РАЗРУШАЕТ сами структуры, по которым
+    // редактор ходит: архетипы ECS, дерево UI_Yoga, словари менеджеров ресурсов (текстуры/модели/
+    // материалы/шейдеры перезаливаются манифестами, а панели их перечисляют). Это use-after-free,
+    // и окно тем шире, чем тяжелее сцена: на 1М снос архетипов и раздача заново — секунды,
+    // рендер за это время успевает десятки кадров ВНУТРИ окна (на малой сцене — микросекунды,
+    // отсюда «на маленьких не падает»).
+    // Замок ВРЕМЕННЫЙ и грубый — держится весь кадр рендера и всю загрузку. Загрузка и так
+    // означает ожидание, а в штатном кадре это незанятый lock/unlock. Настоящее закрытие —
+    // UI-слепок или построение UI в sim-потоке (см. там же).
+    std::mutex scene_swap_mutex;
 
     SDL_Window* win = nullptr;
     SDL_GPUDevice* dev = nullptr;

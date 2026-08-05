@@ -43,38 +43,4 @@ void CameraManager::StoreActiveCamera(BufferManager* bm, UploadTask* task)
 
 	bm->UploadToTransferBuffer(task, sizeof(CameraData), &data);
 }
-
-//void CameraManager::StoreActiveCamera(BufferManager* bm, UploadTask* task, SDL_GPUCommandBuffer* cb)
-//{
-//    BufferData* light_buffer = (*bm)[DEFAULT_LIGHT_CAMERA_BUFFER];
-//    BufferData* camera_buffer = (*bm)[DEFAULT_CAMERA_BUFFER];
-//    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
-//    SDL_GPUBufferLocation src{
-//        bm->_GetGPUBufferForFrame(light_buffer, bm->logic_index),
-//        0
-//    };
-//    SDL_GPUBufferLocation dst{
-//        bm->_GetGPUBufferForFrame(camera_buffer, bm->logic_index),
-//        0
-//    };
-//    SDL_CopyGPUBufferToBuffer(cp, &src, &dst, 128, false);
-//    SDL_EndGPUCopyPass(cp);
-//}
-
-
-//void CameraManager::StoreActiveCamera(BufferManager* bm, SDL_GPUCopyPass* cp)
-//{
-//    BufferData* light_buffer = (*bm)[DEFAULT_LIGHT_CAMERA_BUFFER];
-//    BufferData* camera_buffer = (*bm)[DEFAULT_CAMERA_BUFFER];
-//
-//    SDL_GPUBufferLocation src{
-//        bm->_GetGPUBufferForFrame(light_buffer, bm->logic_index),
-//        0
-//    };
-//    SDL_GPUBufferLocation dst{
-//        bm->_GetGPUBufferForFrame(camera_buffer, bm->logic_index),
-//        0
-//    };
-//    SDL_CopyGPUBufferToBuffer(cp, &src, &dst, 128, false);
-//    SDL_EndGPUCopyPass(cp);
-//}
+

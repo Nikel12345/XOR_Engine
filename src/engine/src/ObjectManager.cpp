@@ -3,12 +3,12 @@
 #include "TextureData.h"
 #include "ModelData.h"
 #include "ComponentSerializer.h"
-#include "EngineProfiler.h"   // Prof::Clock/MsSince — тайминг фаз парса (без GPU-зависимостей, безопасно для ECS-ядра)
-#include <algorithm>   // std::remove (отцепление ребёнка), std::sort (ключ-сигнатура архетипа)
-#include <cstring>     // strcmp — отсев служебных ключей count/entities
-#include <cstdlib>     // free — строка от yyjson_mut_write
-#include <set>         // std::set<type_index> — ключ архетипа в scene->archetypes
-#include <unordered_map>   // old_to_new (файл-локальный id → Entity)
+#include "EngineProfiler.h"
+#include <algorithm>
+#include <cstring>
+#include <cstdlib>
+#include <set>
+#include <unordered_map>
 // RenderManager.h/PipeManager.h не использовались — убраны, чтобы ECS-ядро
 // (EngineEcs) не тянуло GPU-заголовки.
 
@@ -74,7 +74,6 @@ void ObjectManager::DeleteEntity(SceneData* scene, Entity e) {
     }
     arch->entities.pop_back();
 
-    // выкинуть удаляемого из карт
     scene->entity_to_index.erase(e);
     scene->entity_to_archetype.erase(e);
 
@@ -125,10 +124,6 @@ SceneData* ObjectManager::GetScene(const SceneName& name)
         return nullptr;
 	}
 }
-
-// ============================================================
-//  Сериализация сцены
-// ============================================================
 
 // Пост-обработка pretty-вывода yyjson: массив БЕЗ вложенных массивов/объектов схлопывается в
 // одну строку ("x": [1.0, 2.0, 3.0]). Своего флага для этого у yyjson нет (см. YYJSON_WRITE_*),

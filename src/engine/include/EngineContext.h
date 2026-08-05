@@ -1,17 +1,17 @@
 #pragma once
-#include <SDL3/SDL_gpu.h>   // SDL_GPUTextureCreateInfo — по значению в CreateTextureAtlas
+#include <SDL3/SDL_gpu.h>
 #include <functional>
 #include <vector>
 #include <string>
 #include <utility>
 #include <initializer_list>
 #include "Aliases.h"
-#include "ObjectManager.h"  // тело шаблона CreateEntity (ECS-типажи считаются на компиляции)
-#include "BatchBuilder.h"   // QueueCreate в теле CreateEntity
-#include "ShaderTypes.h"    // spd/VertexBufferBinding/TextureSlotRole/ComputeRWTextureBindingParametr в сигнатурах
-#include "MaterialParamsSpec.h"   // ::SetMaterialParams<T> + Material (через MaterialData.h)
-#include "TextureData.h"    // ChannelConvention::AsIs — дефолтный аргумент CreateTextureFromFile
-#include "ModelData.h"      // AnchorShift::Keep — дефолтный аргумент + ModelGeneratorFn
+#include "ObjectManager.h"
+#include "BatchBuilder.h"
+#include "ShaderTypes.h"
+#include "MaterialParamsSpec.h"
+#include "TextureData.h"
+#include "ModelData.h"
 
 // Менеджеры — ТОЛЬКО forward: контекст держит их указателями, а сигнатуры фасада отдают
 // указатели/принимают имена. Полные заголовки инклюдит тот cpp, который реально зовёт

@@ -1,12 +1,9 @@
 #include "PCH.h"
 #include "ComponentSerializer.h"
-#include <cfloat>     // FLT_MAX — верхние границы драгов
+#include <cfloat>
 #include <string>
 #include <vector>
 
-// ============================================================
-//  Реестр
-// ============================================================
 ComponentSpecRegistry& ComponentSpecRegistry::Get()
 {
     static ComponentSpecRegistry instance;
@@ -34,9 +31,7 @@ const ComponentSpec* ComponentSpecRegistry::ByType(std::type_index t) const
     return it == by_type_.end() ? nullptr : &specs_[it->second];
 }
 
-// ============================================================
 //  FieldSpec — фабрики (агрегат с парой get/set по виду поля)
-// ============================================================
 FieldSpec FieldSpec::Num(const char* key, FieldKind kind,
                          double (*get)(Archetype&, size_t), void (*set)(Archetype&, size_t, double),
                          float lo, float hi, float speed)
@@ -58,9 +53,7 @@ FieldSpec FieldSpec::Str(const char* key,
     return f;
 }
 
-// ============================================================
 //  Генераторы: интерпретация схемы полей (scene.json колоночный)
-// ============================================================
 namespace {
 
 // Число из json (real/int/uint/bool). Не-число → false: поле строки остаётся дефолтным.
@@ -126,11 +119,9 @@ void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count) const
     }
 }
 
-// ============================================================
 //  Аксессоры полей: пара (get, set) каптурлесс-лямбдами.
 //  AoS — поле по цепочке членов компонента T; SoA — колонка col хранилища S.
 //  set приводит double к фактическому типу поля (float/int/uint32_t/bool).
-// ============================================================
 #define AOS_NUM(T, path) \
     [](Archetype& a, size_t i) -> double { return (double)(*a.get_array<T>())[i].path; }, \
     [](Archetype& a, size_t i, double v) { auto& r = (*a.get_array<T>())[i].path; r = (std::decay_t<decltype(r)>)v; }
@@ -141,10 +132,8 @@ void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count) const
     [](Archetype& a, size_t i) -> const std::string& { return (*a.get_array<T>())[i].path; }, \
     [](Archetype& a, size_t i, std::string v) { (*a.get_array<T>())[i].path = std::move(v); }
 
-// ============================================================
 //  Material — escape hatch: список имён на сущность не колонка одного поля,
 //  а зубчатый массив array-of-arrays. Схемой не выражается — рукописная пара.
-// ============================================================
 namespace {
 
 void SaveMaterial(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
@@ -175,10 +164,8 @@ void LoadMaterial(Archetype& arch, yyjson_val* comp, size_t count)
 
 } // namespace
 
-// ============================================================
 //  Регистрация встроенных компонентов: вся правда о компоненте — одна запись.
 //  Порядок fields = порядок колонок в файле (сохраняем прежний формат байт-в-байт).
-// ============================================================
 void RegisterBuiltinComponentSpecs()
 {
     using enum FieldKind;

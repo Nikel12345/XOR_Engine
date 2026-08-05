@@ -13,8 +13,6 @@ SlotController::SlotController()
 
 SlotController::~SlotController() = default;
 
-// ====================== Sim: захват слота под prepare ======================
-
 uint8_t SlotController::AcquireFreeSlotUnsafe(bool allow_frame_skip)
 {
     // Два прохода по логической очереди готовности:
@@ -45,7 +43,6 @@ uint8_t SlotController::AcquireFreeSlotUnsafe(bool allow_frame_skip)
             continue;
         }
 
-        // Слот без флагов — берём сразу.
         slots_data[i].flags = SLOT_FLAG_RESERVED;
         next_free_slot_index = static_cast<uint8_t>((i + 1) % BUFFERING_LEVEL);
         return i;
@@ -82,8 +79,6 @@ uint8_t SlotController::WaitFreeSlotIndex(bool allow_frame_skip)
         cv_free_.wait(lock);
     }
 }
-
-// ====================== Render: выбор кадра ================================
 
 // latest_wins (skip-режим): СВЕЖАЙШИЙ PREPARED; более старые кандидаты при этом
 // скипаются насовсем (PREPARED снимается) — показывать кадр старее выбранного
@@ -208,8 +203,6 @@ bool SlotController::IsRenderingSlot(uint8_t slot)
     return (slots_data[slot].flags & SLOT_FLAG_IS_RENDERING) != 0;
 }
 
-// ====================== Переходы состояний =================================
-
 void SlotController::HandleUploading(uint8_t slot)
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -280,8 +273,6 @@ void SlotController::StampSlotEpoch(uint8_t slot, uint64_t epoch)
     if (epoch > required_epoch_)
         required_epoch_ = epoch;
 }
-
-// ====================== Отладка ============================================
 
 void SlotController::DebugDump(const char* tag)
 {

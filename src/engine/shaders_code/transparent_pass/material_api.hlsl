@@ -1,11 +1,9 @@
 #ifndef TRANSPARENT_MATERIAL_API_HLSL
 #define TRANSPARENT_MATERIAL_API_HLSL
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Движковый ПРОЛОГ material-API для прозрачного пасса. Регистры материальных текстур — t0/t1
 // (теней нет, глобалок на слоте 0 нет → сэмплеры с t0). Контракт PSInput/SurfaceData тот же,
 // что в main-прологе (продублирован ниже). User-surface = `cbuffer MaterialBlock` + `getSurface`.
-// ─────────────────────────────────────────────────────────────────────────────
 
 #include "main_pass/math.hlsl"
 #include "main_pass/material.hlsl"

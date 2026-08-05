@@ -1,22 +1,21 @@
 #include "PCH.h"
 #include "UI_ImGui.h"
 #include "UI_Internal.h"
-#include "UI_Widgets.h"      // IsInternalName — фильтр служебных ассетов в комбо формы
-#include "imgui.h"           // раньше транзитивно из UI_ImGui.h
-#include "ObjectManager.h"   // иерархия читает сцену
+#include "UI_Widgets.h"
+#include "imgui.h"
+#include "ObjectManager.h"
 #include "EngineContext.h"
-#include "InputManager.h"   // PushCommand + CommandId
-#include "InputCommands.h"  // SceneIOCmd + CreateEntityCmd
-#include "ComponentSerializer.h"   // реестр спецификаций — чекбоксы набора компонентов
-#include "UI_ComponentEditor.h"    // generic-редактор полей staging-энтити
-#include "ModelManager.h"          // комбо моделей в форме
-#include "MaterialManager.h"       // комбо материалов в форме
-#include "UI_Yoga.h"               // UI-вкладка: дерево Yoga как редактируемый объект
+#include "InputManager.h"
+#include "InputCommands.h"
+#include "ComponentSerializer.h"
+#include "UI_ComponentEditor.h"
+#include "ModelManager.h"
+#include "MaterialManager.h"
+#include "UI_Yoga.h"
 #include <set>
 
 using namespace ui;
 
-// ============ Форма создания энтити (staging) ============
 // «+ create entity» разворачивает форму: чекбоксы компонентов из реестра + поля выбранных.
 // Черновик — НАСТОЯЩАЯ энтити в сцене "_staging" (created в Engine-ините, никогда не активна:
 // дата-модули/батчи её не видят, UI-поток правит её монопольно). Поля рисует тот же
@@ -91,7 +90,6 @@ namespace {
         ImGui::BeginChild("create_entity_form", ImVec2(0, 0),
                           ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_Borders);
 
-        // ---- Набор компонентов ----
         // Свой ID-скоуп: лейблы чекбоксов совпадают с CollapsingHeader секций полей ниже
         // (оба «Model», «Draw»...) — без скоупа ImGui ругается на конфликт ID.
         ImGui::TextDisabled("Components");
@@ -166,7 +164,6 @@ namespace {
             }
         }
 
-        // ---- Create / Cancel ----
         ImGui::Separator();
         ImGui::BeginDisabled(g_ce_entity == kNoEntity);
         if (ImGui::Button("Create")) {

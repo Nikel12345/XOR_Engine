@@ -4,7 +4,6 @@
 #include <string_view>
 #include <vector>
 #include <variant>
-//#include "ShaderManager.h"
 #include "TextureData.h"
 #include "RenderCommandData.h"
 #include "Aliases.h"

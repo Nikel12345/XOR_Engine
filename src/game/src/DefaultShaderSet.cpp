@@ -7,12 +7,12 @@
 
 using namespace ShaderBase;   // POSITION/UV/... в раскладках вершин
 #include "EngineContext.h"
-#include "BufferManager.h"   // DefaultBuffersNames (раньше транзитивно)
-#include "ShaderData.h"      // sp->BindPushConstants — тяжёлая половина (раньше транзитивно)
-#include "ShaderManager.h"   // BindDefaultPushFuncs: GetShaderProgram по имени
-#include "RenderManager.h"    // PassManager + RenderPassStep (ordinal теневого прохода)
-#include "BatchBuilder.h"     // AskLayout/AskNum*(slot) — слепок раскладки слота
-#include "RenderSnapshot.h"   // RenderSnap::BatchLayout
+#include "BufferManager.h"
+#include "ShaderData.h"
+#include "ShaderManager.h"
+#include "RenderManager.h"
+#include "BatchBuilder.h"
+#include "RenderSnapshot.h"
 
 namespace {
     // shadow_pib слота = сумма инстансов SHADOW_PASS в СЛЕПКЕ раскладки слота = граница PIB

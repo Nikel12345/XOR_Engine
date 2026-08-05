@@ -1,11 +1,11 @@
 #include "PCH.h"
 #include "UI_Yoga.h"
-#include "EngineContext.h"    // CreateEntity/DeleteEntity (+ ObjectManager.h транзитивно)
-#include "ObjectManager.h"    // GetActiveSceneName
-#include "BaseComponents.h"   // Draw/Model/Material/UI/UIText компоненты + PositionProxy16 + Entity
-#include "MaterialData.h"     // Material (по указателю в MaterialComponent)
-#include "ModelData.h"        // ModelData
-#include "FontManager.h"      // FontData/FontManager (ShapeString + метрики для intrinsic-размера)
+#include "EngineContext.h"
+#include "ObjectManager.h"
+#include "BaseComponents.h"
+#include "MaterialData.h"
+#include "ModelData.h"
+#include "FontManager.h"
 #include <yoga/Yoga.h>
 
 // Узел нашего дерева: Yoga-узел + пейлоад для создания энтити + свои дети (индексы, параллельны
@@ -87,7 +87,6 @@ UI_Yoga::~UI_Yoga()
 
 bool UI_Yoga::HasTree() const { return impl_->root != kInvalid; }
 
-// ── Обход дерева для редактора ──
 UI_Yoga::Node UI_Yoga::RootNode() const { return impl_->root; }
 
 uint32_t UI_Yoga::ChildCount(Node n) const
@@ -204,6 +203,12 @@ void UI_Yoga::Clear()
     impl_->nodes.clear();
     impl_->root = kInvalid;
     dirty_ = true;  structural_ = true;
+}
+
+void UI_Yoga::Reset()
+{
+    Clear();                  // дерево — под нож (Yoga-узлы + записи), dirty/structural взводит сам
+    impl_->created.clear();   // а вот энтити НЕ удаляем: их уже нет, id принадлежат новой сцене
 }
 
 // Запись матрицы узла в Positions существующей энтити (мутация НА МЕСТЕ, без recreate). row-major:

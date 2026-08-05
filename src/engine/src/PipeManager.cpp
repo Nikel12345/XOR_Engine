@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "PipeManager.h"
 #include "RenderCommandData.h"
-#include "ShaderManager.h"   // резолв vs/fs/cs по имени (sp/csp хранят имена)
+#include "ShaderManager.h"
 
 
 PipeManager::PipeManager(SDL_GPUDevice* dev, SDL_Window* win) {
@@ -200,7 +200,6 @@ SDL_GPUComputePipeline* PipeManager::GetOrCreateComputePipeline(ComputeShaderPro
         SDL_Log("Failed to create compute pipeline: %s", SDL_GetError());
 
     compute_pipelines.emplace(sp, pipeline);
-    //SDL_free(csd->spv_code);
     return pipeline;
 }
 

@@ -2,8 +2,8 @@
 #include <map>
 #include <set>
 #include <string>
-#include <memory>        // std::unique_ptr (scenes_data)
-#include <type_traits>   // std::conditional_t/std::is_same_v/std::decay_t в шаблонах
+#include <memory>
+#include <type_traits>
 #include <unordered_map>
 #include "BaseComponents.h"
 #include "SceneData.h"

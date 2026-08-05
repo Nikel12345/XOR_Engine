@@ -47,7 +47,6 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
     int no_camera = -1;
     om->ForEach<Positions, SpotLightComponent>(scene,
         [&](Entity e, SoAElement<Positions> pos_el, SpotLightComponent& light) {
-        //SDL_Log("Light entity %u: offset=%d, layer=%d", e, offset, spot_layer_index);
             Positions& P = pos_el.container();
             size_t i = pos_el.i();
 
@@ -288,7 +287,6 @@ void LightDataModule::StoreLightCameras(BufferManager* bm, UploadTask* task, Obj
         [&](SoAElement<Positions> pos_el, SpotLightComponent& light, ShadowCasterComponent) {
             Positions& P = pos_el.container();
             size_t i = pos_el.i();
-            //SDL_Log("StoreLightCameras: entity %u", e);
 			StoreSpotLightCamera(bm, task, P, i, light.light_data);
 	});
     om->ForEach<Positions, SphereLightComponent, ShadowCasterComponent>(scene,

@@ -6,11 +6,11 @@
 #include <deque>
 #include <memory>
 #include <unordered_map>
-#include <functional>   // LoadSceneTextures: колбэк создания из файла (декод — верхний слой)
+#include <functional>
 #include "config.h"
 #include "TransferManager.h"
 #include "TextureData.h"
-#include "PreviewPacker.h"   // подсистема превью ассетов UI (поле-по-значению — нужен полный тип)
+#include "PreviewPacker.h"
 
 struct UploadTaskTexture {
 	SDL_GPUTextureRegion dst{};
@@ -68,24 +68,13 @@ public:
 	TextureManager(SDL_GPUDevice* device, TransferManager* transfer_manager);
 
 	TextureAtlas* CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler);
-	// �������� TextureAtlas �� ��� ������������ TextureAtlas
 	// Create TextureAtlas from an already existing TextureAtlas
-	// ������������ ��� �������� ������ � ������ ���������. �� ������ ����� GPU ��������, ���������� ��������� �� �������� � existing_atlas
 	TextureAtlas* CreateTextureAtlas(const std::string& name, TextureAtlas* existing_atlas, SDL_GPUSampler* sampler);
 	// Регистрирует текстуру из уже декодированных пикселей (BGRA32, width*height*4).
 	// Загрузку с диска делает TextureLoader; оркестрация — в EngineContext.
 	TextureHandle* CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels);
 	TextureHandle* CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels);
 
-	//// �������� ������ TextureData � ��������� �����������, ��� �������� ������ � ��������
-	//// Create an empty TextureData with specified parameters, without uploading data to the texture
-	//TextureData* CreateTextureData(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler);
-
-	//// �������� TextureData �� ��� ������������ SDL_GPUTexture
-	//// Create TextureData from an already existing SDL_GPUTexture
-	//TextureData* CreateTextureData(const std::string& name, SDL_GPUTexture* texture, SDL_GPUSampler* sampler);
-
-	// �������� ������ GPU ��������
 	SDL_GPUTexture* CreateGPU_Texture(SDL_GPUTextureCreateInfo tci);
 
 	// Конвертит SDL-поверхность в произвольный пиксельформат и отдаёт ПЛОТНЫЕ пиксели

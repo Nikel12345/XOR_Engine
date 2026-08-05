@@ -1,10 +1,10 @@
 #include "PCH.h"
 #include "FontManager.h"
-#include "Utils.h"           // safe_u32
-#include "TextureManager.h"  // CreateTextureAtlas/CreateTexture/GetSampler + DefaultSamplersNames
-#include "BufferManager.h"   // CreateBufferData/UploadToTransferBuffer + BufferDataType + UploadTask
+#include "Utils.h"
+#include "TextureManager.h"
+#include "BufferManager.h"
 #include <SDL3_ttf/SDL_ttf.h>
-#include <bit>               // std::bit_cast (advance → биты в pad)
+#include <bit>
 
 FontManager::FontManager()
 {

@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "Engine.h"
 #include "MyGame.h"
-#include "ThreadController.h"   // Engine.h теперь forward-only
+#include "ThreadController.h"
 #include "InputManager.h"
 #include "config.h"
 #include "imgui.h"

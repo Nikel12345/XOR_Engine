@@ -7,7 +7,6 @@
 #include "RenderManager.h"
 #include "SlotController.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
 //  A/B-СТЕНД префасса (PrepareFuncPrepassDepended): _Original vs _Optimized.
 //  Вынесен из Engine.cpp, чтобы боевой файл держал ТОЛЬКО победившую версию.
 //
@@ -18,7 +17,6 @@
 //
 //  ВНИМАНИЕ: сам стенд ещё не завязан на текущий API — тела _Original/_Optimized
 //  и прогон в живом PrepareFunc восстанавливает автор (перенос сделан "как есть").
-// ─────────────────────────────────────────────────────────────────────────────
 #if ENGINE_BENCH
 
 struct FenceWaitResult {
@@ -133,11 +131,9 @@ static VariantStats g_stats_opt{ "OPTIMIZED" };
 static int          g_stat_calls = 0;
 static const int    PRINT_EVERY = 600;
 
-// ─────────────────────────────────────────────────────────────────────────────
 //  Тела A/B-вариантов префасса — перенесены из Engine.cpp КАК ЕСТЬ (закомментированы).
 //  Чтобы стенд заработал: восстановить под текущий API и раскомментировать здесь.
 //  Engine.h их уже объявляет (PrepareFuncPrepassDepended_Original/_Optimized).
-// ─────────────────────────────────────────────────────────────────────────────
 //PrepassTimingReport Engine::PrepareFuncPrepassDepended_Original(uint8_t slot)
 //{
 //	using Clock = std::chrono::steady_clock;

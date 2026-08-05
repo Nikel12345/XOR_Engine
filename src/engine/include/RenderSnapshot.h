@@ -4,7 +4,7 @@
 #include <memory>
 #include <functional>
 #include <SDL3/SDL_gpu.h>
-#include "TextureData.h"   // TextureData (UVL) — в слепке лежит значениями
+#include "TextureData.h"
 
 struct BufferData;
 struct PushConstantBinder;

@@ -12,8 +12,8 @@
 #include <vector>
 #include <typeindex>
 #include <unordered_map>
-#include "BaseComponents.h"   // Archetype, ComponentArray, компоненты
-#include "yyjson.h"           // scene.json колоночный: Save/Load пишут/читают колонки полей
+#include "BaseComponents.h"
+#include "yyjson.h"
 
 // Вид поля: json-тип колонки (real/uint/bool/str) и виджет UI (Drag/Checkbox/Input/комбо).
 // Asset* — строка-имя ассета: сериализуется как Str, UI рисует комбо из менеджера.

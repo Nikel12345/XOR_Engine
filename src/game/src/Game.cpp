@@ -7,27 +7,27 @@
 #include "CameraManager.h"
 #include "TextureManager.h"
 #include "ModelManager.h"
-#include "MaterialManager.h"   // GetMaterial — переприменение params к загруженным материалам
+#include "MaterialManager.h"
 #include "InputManager.h"
 #include "ThreadController.h"
 #include "LightDataModule.h"
-#include "imgui.h"              // раньше транзитивно через Engine.h → UI_ImGui.h
+#include "imgui.h"
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
-#include "MaterialParams.h"        // SetMaterialParams + раскладки факторов материалов
-#include "BufferManager.h"         // DefaultBuffersNames (буферы UI-SP)
-#include "DefaultRenderPassSet.h"  // UI_PASS
-#include "PositionStructure.h"     // GeometryStreams (стримы вершин UI-VS)
-#include "FontManager.h"           // ShapeString/FontData (текст тест-энтити)
-#include "UI_DataModule.h"         // MarkDirty после создания UI-энтити
-#include "UI_Yoga.h"               // декларативная сборка UI-дерева (flex → энтити)
-#include "Engine.h"                // engine->GetUIDataModule()
+#include "MaterialParams.h"
+#include "BufferManager.h"
+#include "DefaultRenderPassSet.h"
+#include "PositionStructure.h"
+#include "FontManager.h"
+#include "UI_DataModule.h"
+#include "UI_Yoga.h"
+#include "Engine.h"
 // Свой тип params регистрируется отсюда же одной записью, движок для этого не правится:
 //   MaterialParamsSpecRegistry::Get().Register(MakeMaterialParamsSpec<MyParams>("MyType", {...}));
 // см. MaterialParamsSpec.h
-#include "Colliders.h"             // из либы Physics: компоненты коллайдеров
-#include "ContactSystem.h"         // детекция контактов
-#include "DebugColliderSystem.h"   // отладочные рамки
+#include "Colliders.h"
+#include "ContactSystem.h"
+#include "DebugColliderSystem.h"
 
 Game::Game(Engine* engine)
 {
@@ -185,15 +185,6 @@ SDL_AppResult Game::MainInit()
         }, AnchorShift::Keep, /*dont_save=*/true);   // процедурные кубы игры — в models.json не идут
     }
 
-
-    //ctx->CreateEntity("main_menu",
-    //    SpotLightComponent{ SpotLightComponent::SpotLightData{ 0, 1.0f, 0.0f, 0.0f, 0.18f, 1,\sd   1, 1, 100 } },
-    //    PositionProxy16{ 1,0,0,-2.5f,  0,1,0,0,  0,0, 1,1.25f,  0,0,0,1 },
-    //    ShadowCasterComponent{}
-    //);
-
-
-
     // Пере-привязку push-констант к sp движок зовёт сам В КОНЦЕ каждой загрузки (в т.ч.
     // UI-рантаймовой): sp из манифеста пересозданы голыми, а перенос по имени ломался бы
     // на переименовании. Регистрируем ДО первого LoadScene.
@@ -223,7 +214,7 @@ SDL_AppResult Game::MainInit()
 
         // Две текстовые строки (intrinsic-размер из метрик шрифта).
         UIStyle textS;
-        ui->Text(panel, textS, "Hello UI",    uimat, quad, uifont, fm);
+        ui->Text(panel, textS, "Hello U Hello U Hello U Hello\n U Hello U Hello U Hello UI",    uimat, quad, uifont, fm);
         ui->Text(panel, textS, "Yoga layout", uimat, quad, uifont, fm);
     }
 
@@ -232,32 +223,8 @@ SDL_AppResult Game::MainInit()
 
     {
         MaterialManager* mm = ctx->GetMaterialManager();
-        //ctx->SetMaterialParams(mm->GetMaterial("wood"),  OpaqueMaterialParams{ {0.5f,0.5f,0.5f,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f, /*heightScale*/0.08f, /*pomBias*/2.5f });
-        //ctx->SetMaterialParams(mm->GetMaterial("material_sprite2"), OpaqueMaterialParams{ {1,1,1,1}, {0,0,0}, 1.0f, /*metallic*/1.0f, /*roughness*/1.0f });
-        //ctx->SetMaterialParams(mm->GetMaterial("transparent"),      TransparentMaterialParams{ 0.35f });
-        //ctx->SetMaterialParams(mm->GetMaterial("material_sun"),     OpaqueMaterialParams{ {1,1,1,1}, {0.99f,0.85f,0.45f}, 2.4f, /*metallic*/0.0f, /*roughness*/1.0f });
-        //ctx->SetMaterialParams(mm->GetMaterial("ship"),             OpaqueMaterialParams{ { 0.55f, 0.6f, 0.7f, 1.0f } });
-        //ctx->SetMaterialParams(mm->GetMaterial("m_orange"),         OpaqueMaterialParams{ {1.0f, 0.45f, 0.1f, 1.0f}, {1.0f, 0.854902f, 0.0f}, 0.171f });
-        //ctx->SetMaterialParams(mm->GetMaterial("m_gray"),           OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.552941f, 0.552941f, 0.552941f}, 1.2f });
-        //ctx->SetMaterialParams(mm->GetMaterial("metal1"),           OpaqueMaterialParams{ {1.0f, 0.5f, 0.5f, 1.0f}, {1.0f, 0.0f, 0.0f}, 0.146f, 1.0f, 0.96f });
-        //ctx->SetMaterialParams(mm->GetMaterial("metal2"),           OpaqueMaterialParams{ {0.5f, 0.5f, 0.5f, 1.0f}, {0.0f, 0.0f, 0.0f}, 0.0f, 1.0f, 0.96f });
-        //ctx->SetMaterialParams(mm->GetMaterial("emission"),         OpaqueMaterialParams{ {0.0f, 0.0f, 0.0f, 1.0f}, {0.341176f, 0.341176f, 0.647059f}, 1.7f });
-        //// Opaque-дефолт (белый baseColor = без тинта): иначе MaterialBlock @ b1 несвязан.
-        //ctx->SetMaterialParams(mm->GetMaterial("car"),              OpaqueMaterialParams{});
-        //ctx->SetMaterialParams(mm->GetMaterial("car2"),             OpaqueMaterialParams{});
-        //ctx->SetMaterialParams(mm->GetMaterial("ground"),           OpaqueMaterialParams{});
     }
 
-    //ctx->CreateEntity("main_menu",
-    //    ParentComponent{ sun },
-    //    SphereLightComponent{ SphereLightComponent::SphereLightData{ 0.0125f, 1.0f, 1.0f, 1.0f, 5.0f, 20.0f } },
-    //    LocalMatrixProxy16{},
-    //    PositionProxy16{},
-    //    ShadowCasterComponent{},
-    //    ColliderComponent{}
-    //);
-
-    //ctx->ExecuteGenerators();
     ChangeState(GameState::MAIN_MENU);
     return SDL_APP_CONTINUE;
 }
@@ -299,11 +266,6 @@ SDL_AppResult Game::MainIterate()
     }
 
     // Энтити с ColliderComponent берут явный радиус; остальные с ModelComponent — модельную сферу.
-    //if (SceneData* scene = objectManager->GetActiveScene()) {
-    //    for (const ContactSystem::Contact& c : ContactSystem::DetectContacts(*objectManager, scene)) {
-    //        //SDL_Log("contact %u <-> %u (pen %.3f)", c.a, c.b, c.penetration);
-    //    }
-    //}
 
     return SDL_APP_CONTINUE;
 }
@@ -489,5 +451,4 @@ void Game::MainMenu_Event(SDL_Event* event)
 
 void Game::MainMenu_Quit()
 {
-    // Пока ничего
 }

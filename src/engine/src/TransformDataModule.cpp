@@ -2,9 +2,9 @@
 #include "TransformDataModule.h"
 #include "BufferManager.h"
 #include "ObjectManager.h"
-#include <glm/gtc/type_ptr.hpp>   // glm::make_mat4
+#include <glm/gtc/type_ptr.hpp>
 #include <unordered_set>
-#include <immintrin.h>            // AVX: SoA→AoS транспонирование в StoreTransforms
+#include <immintrin.h>
 
 TransformDataModule::TransformDataModule()
 {

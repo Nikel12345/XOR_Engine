@@ -8,10 +8,10 @@
 #include "MaterialManager.h"
 #include "ModelManager.h"
 #include "ShaderManager.h"
-#include "InputManager.h"   // PushCommand + CommandId
-#include "InputCommands.h"  // CreateMaterialCmd и прочие payload-структуры
-#include "MaterialParamsSpec.h" // схема типа params — цветовое поле для тинта превью материала
-#include <functional>       // резолвер превью плитки (preview_of)
+#include "InputManager.h"
+#include "InputCommands.h"
+#include "MaterialParamsSpec.h"
+#include <functional>
 
 using namespace ui;
 

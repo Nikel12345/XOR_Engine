@@ -1,14 +1,14 @@
 ﻿#include "DefaultRenderPassSet.h"
 #include "TextureManager.h"
 #include "RenderManager.h"
-#include "BufferManager.h"   // DefaultBuffersNames (раньше транзитивно из RenderManager.h)
+#include "BufferManager.h"
 #include "TexturesPresets.h"
 #include "TextureSamplerPresets.h"
 #include "ObjectManager.h"
 #include "BatchBuilder.h"
 #include "EngineContext.h"
 #include "TextureLoader.h"
-#include "LightDataModule.h"   // слепок теневых камер слота (AskShadowCameras)
+#include "LightDataModule.h"
 
 namespace DefaultRenderPassNamespace
 {

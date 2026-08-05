@@ -14,7 +14,7 @@
 #include "ThreadController.h"
 #include "MaterialManager.h"
 #include "InputManager.h"
-#include "FontManager.h"   // new FontManager() в ctor
+#include "FontManager.h"
 #include "TextureLoader.h"
 #include "BatchBuilder.h"
 #include "PIB_DataModule.h"
@@ -24,27 +24,25 @@
 #include "IndirectDataModule.h"
 #include "BoundSphereDataModule.h"
 #include "UI_DataModule.h"
-#include "UI_Yoga.h"   // new UI_Yoga() в ctor + Emit (flex-раскладка UI → энтити)
+#include "UI_Yoga.h"
 #include "EngineContext.h"
 #include "DefaultUpdateSet.h"
 #include "DefaultRenderPassSet.h"
 #include "TexturesPresets.h"
 #include "ComponentSerializer.h"
-#include "MaterialParamsSpec.h"       // RegisterBuiltinMaterialParamsSpecs — схемы типов params
-#include "PositionStructure.h"        // FMT_PosUVNormal — раскладка вершин для fallback-sp
-#include "DefaultCommandSet.h"        // регистрация билтин UI-команд (вынесено из класса)
+#include "MaterialParamsSpec.h"
+#include "PositionStructure.h"
+#include "DefaultCommandSet.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
-#include <filesystem>   // проверка наличия системного шрифта перед догрузкой кириллицы в ImGui
+#include <filesystem>
 
 using namespace ShaderBase;   // POSITION/UV/... в раскладке fallback-vs
 
-// ============================================================
 //  Engine: конструирование/разрушение + инициализация дефолтов.
 //  Кадровый конвейер — Engine_Frame.cpp; save/load сцены — Engine_Scene.cpp;
 //  регистрация UI-команд — DefaultCommandSet.cpp.
-// ============================================================
 
 void Engine::OnWindowResized(Sint32 window_w, Sint32 window_h, Sint32 render_w, Sint32 render_h)
 {
@@ -354,9 +352,6 @@ void Engine::InitPasses()
 		SetUIPass(engine_context);                 // UI-оверлей (NDC-квады) в scene_hdr после bloom, до present
 		SetPresentPass(engine_context);            // финал: HDR-сцену в свопчейн (blit)
 	}
-	//SetDefaultShadowVSMRenderPass(pass_manager, texture_manager, buffer_manager, object_manager, batch_builder);
-	//SetDefaultShadowBlurPass(pass_manager, buffer_manager); // ДЛЯ VSM
-	//SetDefaultMainRenderPass(pass_manager, texture_manager, buffer_manager);
 }
 
 void Engine::InitUICommands()

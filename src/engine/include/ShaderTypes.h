@@ -3,7 +3,7 @@
 #include <string>
 #include <cstdint>
 #include <SDL3/SDL_gpu.h>
-#include <glm/glm.hpp>   // DispatchSizeBinder::element_count
+#include <glm/glm.hpp>
 
 // ЛЁГКАЯ половина бывшего ShaderData.h: enum'ы, вершинные форматы, описание пайплайна (spd),
 // биндеры пуш-констант. Это стабильные типы, которые нужны материалам (TextureSlotRole),

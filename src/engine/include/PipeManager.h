@@ -3,7 +3,7 @@
 #include <deque>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
-#include "config.h"   // BUFFERING_LEVEL
+#include "config.h"
 
 class ShaderManager;
 struct ShaderProgram;
@@ -51,7 +51,6 @@ public:
 	// показывался (sim не успел пере-prepare) → Invalid VkPipeline в валидаторе.
 	void TrashPipelines(uint64_t fences_done, uint64_t graphics_required_epoch, uint64_t compute_rebuild_epoch);
 
-	//void BindComputePipelines(ShaderManager* sm);
 	SDL_GPUDepthStencilTargetInfo depthTargetInfo{};
 	~PipeManager();
 

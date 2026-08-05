@@ -265,8 +265,8 @@ def build_scene():
                    '"Draw":{' + draw_obj + '}}')
 
     blocks = []
-    if EMIT_DIRECT_LIGHT:
-        blocks.append(_light_block())
+    # if EMIT_DIRECT_LIGHT:
+    #     blocks.append(_light_block())
     blocks.append(cubes_block)
 
     text = "{\n" + ",\n".join(blocks) + "\n}\n"

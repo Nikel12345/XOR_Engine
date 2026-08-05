@@ -4,10 +4,9 @@
 #include <cstdint>
 #include "Colliders.h"
 #include "ObjectManager.h"
-#include "BaseComponents.h"   // Positions, ModelComponent
-#include "ModelData.h"        // ModelData::submeshes, SubMeshData::aabb_*
+#include "BaseComponents.h"
+#include "ModelData.h"
 
-// ============================================================
 //  Единый обход «активных коллайдеров» сцены — общий для детекции контактов
 //  (ContactSystem) и отладочной отрисовки (DebugColliderSystem). Два прохода:
 //    1) энтити с ЯВНЫМИ формами (непустой ColliderComponent.shapes);
@@ -20,7 +19,6 @@
 //       const Positions& P, std::size_t i)
 //  Формы — ЛОКАЛЬНЫЕ; P/i дают трансформ энтити (нужен лишь тем, кто переводит
 //  формы в мир — детекции; отрисовка рамок их игнорирует).
-// ============================================================
 namespace ColliderQuery {
 	using Entity = uint32_t;
 

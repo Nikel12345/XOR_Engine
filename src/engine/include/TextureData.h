@@ -74,13 +74,6 @@ struct TextureAtlas{
 	uint8_t mip_levels = 1;
 };
 
-//struct TextureData {
-//	SDL_GPUTextureSamplerBinding texture;
-//	uint32_t w = 0;
-//	uint32_t h = 0;
-//};
-
-
 // enable_shared_from_this: владелец — TextureManager::handles_data (shared_ptr). Материалы держат
 // weak_ptr на хэндл (см. Material::textures) и потому умеют детектировать его удаление. weak_from_this()
 // позволяет выдать такой weak_ptr из сырого TextureHandle* без протаскивания shared_ptr через API.

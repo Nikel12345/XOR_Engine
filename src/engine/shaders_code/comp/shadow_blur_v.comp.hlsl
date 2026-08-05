@@ -1,9 +1,9 @@
 [[vk::combinedImageSampler]]
-Texture2D<float2> u_input   : register(t0, space0);        // было space2
+Texture2D<float2> u_input   : register(t0, space0);
 [[vk::combinedImageSampler]]
-SamplerState      u_sampler : register(s0, space0);        // было space2
+SamplerState      u_sampler : register(s0, space0);
 
-RWTexture2D<float2> u_output : register(u0, space1);       // ок
+RWTexture2D<float2> u_output : register(u0, space1);
 
 static const float weights[5] = { 0.20416, 0.18017, 0.12382, 0.06629, 0.02762 };
 

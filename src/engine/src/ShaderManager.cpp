@@ -1,7 +1,7 @@
 ﻿#include "PCH.h"
 #include "ShaderManager.h"
 #include "BufferManager.h"
-#include "TextureData.h"   // TextureAtlas — полный тип: декларации usage по compute-биндингам
+#include "TextureData.h"
 #include <filesystem>
 
 ShaderManager::ShaderManager(SDL_GPUDevice* device) {
@@ -9,7 +9,6 @@ ShaderManager::ShaderManager(SDL_GPUDevice* device) {
 
     SDL_ShaderCross_Init();
 
-    // === НАДЁЖНЫЙ путь к папке кэша ===
     const char* base = SDL_GetBasePath();                    // папка, где лежит .exe
 
     m_cacheBasePath = std::string(base) + "shaders/shader_cache";

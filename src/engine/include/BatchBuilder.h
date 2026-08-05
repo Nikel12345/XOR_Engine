@@ -6,7 +6,7 @@
 #include <mutex>
 #include <string>
 #include <cstdint>
-#include "config.h"   // BUFFERING_LEVEL — пер-слотовые слепки раскладки
+#include "config.h"
 
 namespace RenderSnap { struct BatchLayout; }
 

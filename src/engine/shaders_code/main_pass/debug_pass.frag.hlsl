@@ -3,11 +3,6 @@
 #include "main_pass/lighting.hlsl"
 #include "main_pass/shadowPCF.hlsl"
 
-// [[vk::combinedImageSampler]]
-// Texture2DArray<float2>  u_shadowMomentsArray : register(t0, space2);
-// [[vk::combinedImageSampler]]
-// SamplerState            u_shadowMomentsSampler : register(s0, space2);
-
 [[vk::combinedImageSampler]]
 Texture2DArray<float>     u_shadowDepthArray  : register(t0, space2);
 [[vk::combinedImageSampler]]
@@ -33,8 +28,6 @@ struct TextureData {
 cbuffer TextureUVLBlock : register(b0, space3) {
     TextureData textures[4];
 };
-
-// ─── Input ───────────────────────────────────────────────────────────────────
 
 struct PSInput
 {

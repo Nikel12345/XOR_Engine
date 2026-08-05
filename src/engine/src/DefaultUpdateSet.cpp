@@ -14,7 +14,7 @@
 #include "BoundSphereDataModule.h"
 #include "UI_DataModule.h"
 #include "FontManager.h"
-#include "ObjectManager.h"   // BuildStaging(om): активная сцена
+#include "ObjectManager.h"
 
 namespace DefaultUpdateSet
 {

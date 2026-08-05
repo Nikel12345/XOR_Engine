@@ -3,8 +3,8 @@
 #include <vector>
 #include <cstring>
 #include <string>
-#include "MaterialData.h"       // Material + TextureSlotRole (через ShaderTypes.h)
-#include "MaterialParamsSpec.h" // ::SetMaterialParams<T> — общая реализация упаковки блоба
+#include "MaterialData.h"
+#include "MaterialParamsSpec.h"
 
 class TextureManager;   // только в сигнатуре CollectSamplerUsage — передаётся на вызове
 

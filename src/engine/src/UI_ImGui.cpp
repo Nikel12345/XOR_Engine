@@ -1,8 +1,8 @@
 #include "PCH.h"
 #include "UI_ImGui.h"
 #include "UI_Internal.h"
-#include "imgui_internal.h"   // DockBuilder* — первичная раскладка доков (см. SetupDockspace)
-#include "ImGuizmo.h"         // ImGuizmo::BeginFrame — кадровый пролог гизмо
+#include "imgui_internal.h"
+#include "ImGuizmo.h"
 
 // Панели живут в отдельных TU (UI_Hierarchy / UI_AssetBrowser / UI_Inspector), но методы —
 // все члены UI_ImGui, а их общее состояние объявлено в UI_Internal.h. Тут — «якорь»: определения

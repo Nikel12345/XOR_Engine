@@ -11,19 +11,17 @@
 #include "ObjectManager.h"
 #include "BatchBuilder.h"
 #include "EngineContext.h"
-#include "UI_Yoga.h"   // ui_yoga->Emit (flex-раскладка UI → энтити перед сборкой батчей)
-#include "CameraManager.h"   // GetActiveCamera — aspect из render-размера каждый кадр
-#include "CameraStruct.h"    // Camera::SetAspect
+#include "UI_Yoga.h"
+#include "CameraManager.h"
+#include "CameraStruct.h"
 #include "DefaultRenderPassSet.h"
 #include "UI_ImGui.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
 
-// ============================================================
 //  Кадровый конвейер Engine: prepare → upload → render → fence.
 //  Колбэки ThreadController (см. Engine::Engine), каждый на своём потоке.
-// ============================================================
 
 void Engine::PrepareFunc(uint8_t slot)
 {
@@ -270,6 +268,11 @@ void Engine::PrepareFuncPrepassDepended(uint8_t slot)
 
 bool Engine::RenderFunc(uint8_t slot)
 {
+	// Кадр целиком под замком свопа сцены (см. scene_swap_mutex): пока LoadScene сносит и
+	// пересоздаёт ECS/дерево UI/словари ресурсов, рендер-поток просто стоит. Берём ДО замера
+	// времени — ожидание загрузки это не кадр, и в render_cpu ему делать нечего.
+	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
+
 	auto t_frame = Prof::Clock::now();
 	SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
 
@@ -381,7 +384,6 @@ void Engine::FenceFunc(uint8_t slot) {
 	// Дренаж трэшей (buffers/textures/pipelines) делает sim в PrepareFunc (очереди одно-поточные).
 	slot_controller->NotifyRenderFenceDone();
 
-	//slot_controller->RemoveSlotFence(slot);
 	slot_controller->SetSlotState(slot, SlotState::RENDERED);
 
 

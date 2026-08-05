@@ -1,12 +1,10 @@
 #ifndef MAIN_MATERIAL_API_HLSL
 #define MAIN_MATERIAL_API_HLSL
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Движковый ПРОЛОГ material-API для main-пасса. Прячет всё движко-определённое, чтобы
 // пользовательский surface содержал только `cbuffer MaterialBlock` + `getSurface`.
 // Регистры материальных текстур — t2..t5 (слоты 0/1 заняты глобалками пасса: тень + env-кубмапа):
 // albedo t2, normal t3, orm t4, emissive t5.
-// ─────────────────────────────────────────────────────────────────────────────
 
 #include "main_pass/math.hlsl"
 #include "main_pass/material.hlsl"

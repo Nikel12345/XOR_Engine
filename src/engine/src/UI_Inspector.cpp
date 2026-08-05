@@ -5,7 +5,7 @@
 #include "imgui_internal.h"
 #include "EngineContext.h"
 #include "InputManager.h"
-#include "InputCommands.h"  // payload-структуры команд редактора
+#include "InputCommands.h"
 // EngineContext.h держит менеджеры forward-декларациями — полные типы тянет этот TU.
 #include "ObjectManager.h"
 #include "CameraManager.h"
@@ -15,21 +15,21 @@
 #include "ModelManager.h"
 #include "ShaderManager.h"
 #include "BatchBuilder.h"
-#include "MaterialParamsSpec.h"      // реестр ТИПОВ params: дропдаун Type + схема полей материала
-#include "ComponentSerializer.h"     // ComponentSpecRegistry — цикл по компонентам энтити
-#include "UI_ComponentEditor.h"      // generic-редактор полей компонента по схеме
-#include "RenderManager.h"           // PassManager + RenderPassStep — дропдаун прохода у sp
-#include "UI_Yoga.h"                 // инспектор/гизмо UI-узла (SelKind::UINode)
+#include "MaterialParamsSpec.h"
+#include "ComponentSerializer.h"
+#include "UI_ComponentEditor.h"
+#include "RenderManager.h"
+#include "UI_Yoga.h"
 #include "ImGuizmo.h"
 #include <glm/gtc/type_ptr.hpp>
-#include <glm/gtc/matrix_transform.hpp>   // glm::translate для гизмо UI-узла
-#include <cstring>            // memcpy матрицы в payload команды
-#include <mutex>              // потокобезопасный приём пути из файл-диалога
+#include <glm/gtc/matrix_transform.hpp>
+#include <cstring>
+#include <mutex>
 #include <atomic>
-#include <filesystem>        // относительные пути ресурсов + копирование файла извне проекта
+#include <filesystem>
 
 using namespace ShaderBase;   // VertexSemantic в редакторе pull вершинника
-#include <SDL3/SDL_dialog.h>  // нативный SDL_ShowOpenFileDialog
+#include <SDL3/SDL_dialog.h>
 
 using namespace ui;
 
@@ -112,8 +112,6 @@ namespace {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "(!)");
         ImGui::SetItemTooltip("%s", tooltip);
     }
-
-    // ================= Inspector-блоки =================
 
     // ShaderInspector дёргает редакторы списков буферов/слот-ролей, определённые ниже (рядом с формами SD).
     void BufferListEditor(const char* label, std::vector<BufferDataName>& list, const std::vector<BufferDataName>& avail);
@@ -253,7 +251,6 @@ namespace {
             }
         }
 
-        // ================= Params (сверху) =================
         // Смена ТИПА params = дефолтный блоб типа из реестра (IN-PLACE, без ребилда дерева:
         // RenderManager читает params->data()/size() живо, а ключ батча — адрес вектора).
         // Список типов — весь реестр: и движковые, и зарегистрированные кодом игры.
@@ -282,7 +279,6 @@ namespace {
         else if (cur->custom_edit)    cur->custom_edit(mat->params.data());   // escape hatch типа
         else                          DrawMaterialParamsFields(*cur, mat->params);
 
-        // ================= Шейдеры + слоты (снизу) =================
         // Материал = набор sp (проходов). Слоты диктует required_slots КАЖДОГО sp, но текстура берётся
         // из ОБЩЕЙ material->textures[role] (роль шарится между sp): правка под одним sp видна под другим.
         ImGui::SeparatorText("Shaders");

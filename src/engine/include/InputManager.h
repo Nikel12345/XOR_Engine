@@ -69,11 +69,9 @@ public:
     InputManager(const InputManager&) = delete;
     InputManager& operator=(const InputManager&) = delete;
 
-    // ---------------- Producer (main-поток) ----------------
     // Единая точка входа: маршрутизирует SDL-событие в снапшоты и очередь.
     void HandleEvent(const SDL_Event& event);
 
-    // ---------------- Consumer (sim-поток) ------------------
     // Выгружает накопленные дискретные события (swap), очищая очередь.
     void DrainKeyEvents(std::vector<KeyEvent>& out);
 
@@ -89,7 +87,6 @@ public:
     // Атомарно забирает и обнуляет накопленный сдвиг колеса.
     float ConsumeWheelDelta() { return wheel_accum_.exchange(0.0f, std::memory_order_relaxed); }
 
-    // ---------------- Интерфейс-команды ---------------------
     // Команда несёт только id и сырой void* на данные — как push_func у шейдера
     // (ShaderData.h / DefaultRenderPassSet.cpp). Под каждую команду пользователь
     // пишет свою структуру (см. InputCommands.h) и сам трактует указатель в функторе:
@@ -126,11 +123,9 @@ private:
     std::atomic<uint32_t> mouse_buttons_{ 0 };   // бит (button-1) выставлен, пока кнопка зажата
     std::atomic<float>    wheel_accum_{ 0.0f };
 
-    // --- очередь дискретных событий клавиатуры ---
     std::mutex            key_mutex_;
     std::vector<KeyEvent> key_events_;
 
-    // --- интерфейс-команды ---
     std::mutex                    cmd_mutex_;
     std::vector<InterfaceCommand> commands_;
     std::vector<InterfaceCommand> commands_scratch_;   // буфер для swap при дренинге

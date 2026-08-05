@@ -36,7 +36,6 @@ public:
 		const std::vector<TextureSlotRole>& texture_slots, BufferManager* bm);
 
 	void CreateComputeShader(const std::string& name, const char* path);
-	// ������� �������� ComputeShaderProgram �� ���������� ������� �� ���������� � �������!
 	// The order in which ComputeShaderPrograms are created does not determine the order in which they are executed in a pass!
 	ComputeShaderProgram* CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
 		std::vector<BufferData*> rw_storage_buffers,

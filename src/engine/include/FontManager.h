@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include "TextureData.h"   // TextureData (UVL, по значению в FontData::uvl); TextureHandle* — по указателю
+#include "TextureData.h"
 
 // SDL_ttf держим ТОЛЬКО в .cpp: заголовок форвардит opaque-тип шрифта.
 struct TTF_Font;

@@ -71,7 +71,6 @@ void ObjectManager::ForEachArchetype(SceneData* scene, Fn&& fn) {
             return (... && (arr != nullptr));
             }, arrs);
         if (!all_present) continue;
-        // ������� ���������!
         std::apply([&](auto*... arr) {
             fn(arr...);
             }, arrs);
@@ -100,12 +99,10 @@ void ObjectManager::ForEach(SceneData* scene, Fn&& fn) {
         return;
     }
 
-    // �����: fn ������������ �����������, ������� �� ������� ��� (�� std::forward � �������)
     auto& f = fn;
 
     constexpr bool all_soa = (is_soa<Ts>::value && ...);
 
-    // ���� ������ ��������� Entity ������ ���������� � ����� ���������� Entity
     constexpr bool wants_entity =
         std::is_invocable_v<std::decay_t<Fn>, Entity, foreach_arg_t<Ts>...>;
 
@@ -118,15 +115,13 @@ void ObjectManager::ForEach(SceneData* scene, Fn&& fn) {
         }, arrs);
         if (!all_present) continue;
 
-        // ������� ���� "���� �� �����������" ��������� ������ ����� Entity �� �����
         if constexpr (all_soa && !wants_entity) {
             std::apply([&](auto*... arr) {
                 f((arr->data)...);
             }, arrs);
         }
         else {
-            // ������ �� �������� � ����� ����� ���� ������ Entity
-            const size_t count = arch.entities.size(); // ������������ ������
+            const size_t count = arch.entities.size();
 
             for (size_t i = 0; i < count; ++i) {
                 Entity e = arch.entities[i];
@@ -150,13 +145,11 @@ void ObjectManager::add_components(Archetype& arch, Components&&... comps) {
         [&] {
             using T = std::decay_t<decltype(comps)>;
             if constexpr (has_related_soa<T>::value) {
-                // ��� ������, ����� SoA-���������:
                 using SoA = typename T::related_soa;
                 if (auto* arr = arch.get_array<SoA>())
                     arr->add(comps);
             }
             else {
-                // ������� AoS
                 if (auto* arr = arch.get_array<T>())
                     arr->add(std::forward<T>(comps));
             }

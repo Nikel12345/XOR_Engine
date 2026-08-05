@@ -1,7 +1,7 @@
 ﻿#include "PCH.h"
 #include "ShaderManager.h"
-#include "BufferManager.h"        // сбор usage-флага VERTEX по перечислению стримов vs
-#include "PositionStructure.h"    // PosUVNormPool — раскладки стримов для слотов vs
+#include "BufferManager.h"
+#include "PositionStructure.h"
 #include <string_view>
 
 using namespace ShaderBase;
@@ -125,7 +125,6 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
 
     std::string cache_path = BuildCachePath(hlsl_path, hash);
 
-    // Пробуем кэш
     Uint8* spv = (Uint8*)SDL_LoadFile(cache_path.c_str(), &out_size);
     if (spv) {
         SDL_Log("[Shader] Cache hit: %s", cache_path.c_str());
@@ -133,7 +132,6 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
         return spv;
     }
 
-    // Компилируем HLSL → SPIR-V
     SDL_ShaderCross_HLSL_Info hlsl_info{};
     hlsl_info.source = src;
     hlsl_info.entrypoint = "main";
@@ -152,7 +150,6 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
         return nullptr;
     }
 
-    // Сохраняем в кэш
     SDL_IOStream* f = SDL_IOFromFile(cache_path.c_str(), "wb");
     if (f) {
         SDL_WriteIO(f, compiled, compiled_size);

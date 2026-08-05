@@ -35,7 +35,7 @@ void AvgRateCounter::end()
     {
         float totalTime = float_seconds(now - firstCallTime).count();
 
-        if (totalTime > 1e-6f)  // защита от делени€ на почти ноль
+        if (totalTime > 1e-6f)
         {
             float avgFPS = static_cast<float>(sampleCount) / totalTime;
 
@@ -51,7 +51,6 @@ void AvgRateCounter::end()
                 << sampleCount << " intervals)" << std::endl;
         }
 
-        // —брос Ч начинаем новый отсчЄт с этого момента
         firstCallTime = now;
         remaining = sampleCount;
     }

@@ -118,7 +118,7 @@ namespace TexturePresets {
             info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
             info.width = 2048;
             info.height = 2048;
-            info.layer_count_or_depth = 1 * 6; // 1 �������� * 6 ������
+            info.layer_count_or_depth = 1 * 6;
             info.num_levels = 1;
 
             break;
@@ -129,7 +129,7 @@ namespace TexturePresets {
             info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
             info.width = 2048;
             info.height = 2048;
-            info.layer_count_or_depth = 4 * 6; // 4 �������� * 6 ������
+            info.layer_count_or_depth = 4 * 6;
             info.num_levels = 1;
 
             break;
@@ -140,7 +140,7 @@ namespace TexturePresets {
             info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
             info.width = 2048;
             info.height = 2048;
-            info.layer_count_or_depth = 8 * 6; // 8 �������� * 6 ������
+            info.layer_count_or_depth = 8 * 6;
             info.num_levels = 1;
 
             break;
@@ -150,7 +150,7 @@ namespace TexturePresets {
             info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
             info.width = 1024;
             info.height = 1024;
-            info.layer_count_or_depth = 1 * 6; // 1 �������� * 6 ������
+            info.layer_count_or_depth = 1 * 6;
             info.num_levels = 1;
             break;
 
@@ -360,14 +360,12 @@ namespace TexturePresets {
             break;
 
         case TexturePreset::Custom:
-            // ��� Custom ����� ��������� �������
             break;
         }
 
         return info;
     }
 
-    // ── Атласы текстур материала (параметризуемые) ───────────────────────────────
     // Квадратный 2D-array атлас под material-текстуры: BGRA8 UNORM (движок не использует
     // sRGB-форматы), задаёшь разрешение, число слоёв и число мип-уровней.
     // Полная мип-цепочка от разрешения: log2(res)+1. Для partial-цепочки передавай число вручную.
@@ -412,7 +410,6 @@ namespace TexturePresets {
         return _MaterialAtlas(resolution, layers, mip_levels, SDL_GPU_TEXTUREUSAGE_SAMPLER);
     }
 
-    // ������ � ����������� ��� ��������
     inline SDL_GPUTextureCreateInfo ShadowCubemapArray(uint32_t num_cubemaps, uint32_t resolution = 2048) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_CUBE_ARRAY;

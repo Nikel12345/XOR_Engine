@@ -22,7 +22,6 @@ namespace DefaultShaderProgramSet
     // фонов ("Fractal"/"Mandelbrot" из shaders.json своих сцен) — под if'ом с именем сцены.
     void BindDefaultPushFuncs(EngineContext* ctx, const std::string& scene_name);
 
-    // Compute shader programs
     // GPU-каллинг (culling_pib.comp): пишет out_pib блоками по камерам (0 — игрок, 1..N — световые).
     // Проход создаёт engine (SetDefaultCullingPass); здесь программа + её push/dispatch.
     void SetCullingPibPrograms(EngineContext* ctx, LightDataModule* ldm);

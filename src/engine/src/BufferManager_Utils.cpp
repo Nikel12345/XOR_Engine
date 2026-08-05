@@ -90,14 +90,4 @@ BufferData* BufferManager::GetBufferData(BufferDataName name)
     SDL_Log("BM operator::Buffer '%s' not found", name);
     return nullptr;
 }
-
-//BufferData* BufferManager::operator[](BufferDataName name)
-//{
-//    auto it = buffers_data.find(name);
-//    if (it != buffers_data.end()) {
-//        return it->second.get();
-//    }
-//
-//    SDL_Log("BM operator::Buffer '%s' not found", name);
-//    return nullptr;
-//}
+

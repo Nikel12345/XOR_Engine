@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 #include <cstdint>
-#include "Colliders.h"   // ShapeKind
+#include "Colliders.h"
 
 class ObjectManager;
 struct SceneData;

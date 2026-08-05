@@ -2,8 +2,8 @@
 #include <string>
 #include <vector>
 #include <cstdint>
-#include "ShaderTypes.h"  // spd/VertexSemantic/TextureSlotRole в payload'ах шейдер-команд
-#include "Aliases.h"      // BufferDataName в RecreateShaderCmd
+#include "ShaderTypes.h"
+#include "Aliases.h"
 
 // Payload-структуры интерфейс-команд (CommandId + транспорт — InputManager.h). Отделены от
 // очереди: InputManager — механизм доставки и полезных нагрузок не знает; их словарь — здесь,

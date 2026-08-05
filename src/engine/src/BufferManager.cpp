@@ -2,7 +2,7 @@
 #include "BufferManager.h"
 #include "CameraStruct.h"
 #include "LightStruct.h"
-#include "PositionStructure.h"   // GeometryStreams::* — имена стрим-буферов пула
+#include "PositionStructure.h"
 
 BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_manager) : dev(device), trm(transfer_manager) {
     using namespace DefaultBuffersNames;
@@ -75,7 +75,7 @@ BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, Bu
 
     BufferData* ptr = data.get();
     buffers_data[name] = std::move(data);
-    pending_bakes.push_back(ptr);   // GPU-буфер создаст ближайший BakePending
+    pending_bakes.push_back(ptr);
 
     return ptr;
 }

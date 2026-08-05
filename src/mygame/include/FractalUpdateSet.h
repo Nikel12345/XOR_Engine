@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <vector>
 #include <glm/glm.hpp>
-#include <glm/gtc/quaternion.hpp>   // ориентация якорённого объекта (FractalAnchorComponent::rot)
+#include <glm/gtc/quaternion.hpp>
 class EngineContext;
 class CameraManager;
 

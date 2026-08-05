@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include "BaseComponents.h"   // Entity
+#include "BaseComponents.h"
 
 // Разделяемое между панелями редактора состояние. Панели живут в разных TU
 // (UI_Hierarchy / UI_AssetBrowser / UI_Inspector), но общаются через один выбор

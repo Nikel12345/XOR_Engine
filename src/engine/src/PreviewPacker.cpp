@@ -1,6 +1,6 @@
 #include "PCH.h"
 #include "PreviewPacker.h"
-#include "TextureData.h"   // полный TextureAtlas: texture_binding для Blit
+#include "TextureData.h"
 #include <algorithm>
 
 void PreviewPacker::Create(SDL_GPUDevice* dev)

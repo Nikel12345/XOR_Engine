@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "UI_ComponentEditor.h"
-#include <cstring>   // strcmp/strlen/strncmp — конвенции группировки полей
-#include <cstdio>    // snprintf — буфер строкового поля
+#include <cstring>
+#include <cstdio>
 
 using namespace ui;
 

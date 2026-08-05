@@ -1,7 +1,7 @@
 #pragma once
 #include <SDL3/SDL.h>
 #include "Engine.h"
-#include "InputManager.h"   // InputManager::KeyEvent в скретч-буферах ниже
+#include "InputManager.h"
 
 struct ModelData;   // члены-указатели: полные типы тянет Game.cpp
 struct Material;
@@ -57,7 +57,6 @@ private:
 	GameState game_state;
 	MainMenuResources main_menu_resources;
 
-	// --- Отладочная визуализация коллайдеров ---
 	void CreateDebugColliders(); 
 	ModelData* debug_box_model = nullptr;    // куб [-1..1]
 	ModelData* debug_sphere_model = nullptr; // сфера r=1

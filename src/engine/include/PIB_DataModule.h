@@ -1,10 +1,12 @@
 #pragma once
 #include <cstdint>
+#include <vector>
 #include "config.h"
 
 class ObjectManager;
 class BufferManager;
 class PassManager;
+struct SceneData;
 struct UploadTask;
 
 
@@ -27,7 +29,19 @@ public:
 private:
     uint32_t ComputeElementCount(PassManager* pm) const;
 
+    // Плоская таблица entity → строка трансформа, ОДИН последовательный проход по архетипам
+    // на заливку. PIB идёт в порядке батч-дерева (произвольный относительно ECS), поэтому
+    // строку надо уметь брать по entity: раньше это были два поиска в unordered_map НА КАЖДУЮ
+    // запись — на 1М объектов это миллионы промахов кэша и заливка PIB на сотни мс (× слоты).
+    // Таблица переводит их в один индексный доступ в плоский массив. Живёт до следующей
+    // заливки (они редкие — только по смене ревизии батчей), между кадрами не валидна.
+    void BuildRowTable(SceneData* scene);
+
+    static constexpr uint32_t kNoRow = 0xFFFFFFFFu;   // строки трансформа нет (= -1 в PIB)
+    std::vector<uint32_t> row_of;
+
     uint32_t total_elements = 0;
+    uint32_t e2c_elements = 0;
     // Per-slot счётчики ревизий: у каждого из BUFFERING_LEVEL буферов своя ревизия.
     uint64_t pib_last_revision[BUFFERING_LEVEL];
     uint64_t e2c_last_revision[BUFFERING_LEVEL];

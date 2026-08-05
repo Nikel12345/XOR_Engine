@@ -9,7 +9,7 @@ layout(location = 1) out vec3 v_worldPos;
 layout(location = 2) out vec3 v_worldNormal;
 layout(location = 3) out vec3 v_worldTangent;
 layout(location = 4) out vec3 v_worldBitangent;
-layout(location = 5) out vec4 v_lightSpacePos[6]; // массив!
+layout(location = 5) out vec4 v_lightSpacePos[6];
 
 layout(set = 0, binding = 0, std430) buffer ModelMatrixBlock {
     mat4 models[];

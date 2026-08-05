@@ -3,7 +3,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
-#include "ShaderTypes.h"   // TextureSlotRole (лёгкая половина; тяжёлый ShaderData.h не нужен)
+#include "ShaderTypes.h"
 #include "Aliases.h"
 
 struct Material {

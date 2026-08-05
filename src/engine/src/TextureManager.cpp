@@ -137,7 +137,7 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
 
 	TextureAtlas* ptr = atlas.get();
 	atlases_data[name] = std::move(atlas);
-	pending_atlas_bakes.push_back(ptr);   // GPU-текстуру создаст ближайший BakePending
+	pending_atlas_bakes.push_back(ptr);
 	return ptr;
 }
 
@@ -299,7 +299,6 @@ void TextureManager::TrashTextures(uint64_t fences_done)
     }
 }
 
-// ── Инструкции ресайза экранных таргетов (словарь по имени) ──
 void TextureManager::CreateResizeInstruction(const std::string& texture_name, TextureResizeFunc fn)
 {
     resize_instructions_[texture_name] = std::move(fn);   // 1 текстура — 1 функция (перезапись)
@@ -649,15 +648,5 @@ TextureManager::~TextureManager()
         if (pending.tex) SDL_ReleaseGPUTexture(dev, pending.tex);
     }
     texture_trash.clear();
-  //  for (auto& pair : textures_data) {
-		//auto& data = pair.second;
-  //      if (data->texture.texture) {
-  //          SDL_ReleaseGPUTexture(dev, data->texture.texture);
-  //      }
-  //      if (data->texture.sampler) {
-  //          SDL_ReleaseGPUSampler(dev, data->texture.sampler);
-		//}
-  //  }
-  //  textures_data.clear();
 }
 

@@ -212,7 +212,6 @@ set(ENGINE_STRUCTS_HDR
     include/ModelData.h
     include/PositionStructure.h
     include/LightStruct.h
-    include/OrderedMap.h
 )
 set(ENGINE_DATAMODULES_SRC
     src/BoundSphereDataModule.cpp
@@ -231,7 +230,6 @@ set(ENGINE_DATAMODULES_HDR
     include/TransformDataModule.h
     include/InstanceDataModule.h
     include/UI_DataModule.h
-    include/ModeleDataModule.h
 )
 set(ENGINE_PRESETS_HDR
     include/TextureSamplerPresets.h

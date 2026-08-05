@@ -33,8 +33,6 @@ layout(set = 3, binding = 0, std140) uniform TextureUVLBlock {
     TextureData textures[4];
 };
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
 vec4 sampleAtlas(sampler2DArray atlas, uint slot, vec2 uv) {
     vec2 offset = unpackUnorm2x16(textures[slot].data.x);
     vec2 scale  = unpackUnorm2x16(textures[slot].data.y);
@@ -52,8 +50,6 @@ vec3 computeNormal() {
     n.x = -n.x;
     return normalize(TBN * n);
 }
-
-// ── lighting ─────────────────────────────────────────────────────────────────
 
 const float AMBIENT   = 0.75;
 const float EDGE_SOFT = 0.30;
@@ -119,8 +115,6 @@ float computeSphereLight(vec3 fragPos, vec3 normal, Light light)
     return dotL * attenuation * power;
 }
 
-// ── shadows ───────────────────────────────────────────────────────────────────
-
 float computeShadowSpot(int cameraIndex)
 {
     vec4  lsp = v_lightSpacePos[cameraIndex];
@@ -161,8 +155,6 @@ float computeShadowSphere(vec3 fragPos, vec3 lightPos, int cameraOffset)
     
     return texture(u_shadowMapFlat, vec4(uv, float(cameraOffset + face), z));
 }
-
-// ── main ──────────────────────────────────────────────────────────────────────
 
 void main()
 {

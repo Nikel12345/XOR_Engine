@@ -203,7 +203,6 @@ private:
 	// РАЗРЕШЕНО: один BufferData* внутри Depended UI
 	//   → prepass_update_instructions → ... → post_readback_instructions
 	//   Гарантировано последовательным выполнением PrepareFuncPrepassDepended
-	// PROHIBITED: One BufferData* in an Undependent UI + any Depended UI
 	
 	// THREAD SAFETY — EnsureBufferCapacity:
 	// PROHIBITED: One BufferData* in an Undependent UI + any Depended UI

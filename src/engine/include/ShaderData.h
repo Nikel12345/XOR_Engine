@@ -5,8 +5,8 @@
 #include <functional>
 #include <memory>
 #include <SDL3/SDL_gpu.h>
-#include "ShaderTypes.h"   // лёгкая половина: enum'ы/вершинные форматы/spd/биндеры
-#include "Aliases.h"       // BufferDataName — имя storage-буфера в ссылках sp
+#include "ShaderTypes.h"
+#include "Aliases.h"
 
 // ТЯЖЁЛАЯ половина: живые структуры шейдер-данных и программ (GPU-хэндлы, std::function,
 // рефлексия). Правится часто (редактор шейдеров) — потребители подключают её ТОЛЬКО если

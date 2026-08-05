@@ -1,14 +1,14 @@
 #include "PCH.h"
 #include "BatchBuilder.h"
 #include "RenderCommandData.h"
-#include "RenderSnapshot.h"   // BatchLayout — слепок раскладки, который строит FinalizeOffsets
+#include "RenderSnapshot.h"
 #include "ObjectManager.h"
 #include "PipeManager.h"
 #include "RenderManager.h"
 #include "ShaderManager.h"
-#include "TextureManager.h"   // резолв имён текстур материала → TextureHandle на сборке батча
-#include "BufferManager.h"    // резолв имён storage-буферов sp → BufferData* на сборке батча
-#include "PositionStructure.h" // IndexBufferForStream — индексный буфер пула по стримам vs
+#include "TextureManager.h"
+#include "BufferManager.h"
+#include "PositionStructure.h"
 #include "ModelData.h"
 #include "TextureData.h"
 #include <unordered_set>
@@ -309,7 +309,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
                 ModelBatchData new_model{};
                 new_model.submesh = &submesh;
                 new_model.instanceCount = 0;
-                new_model.pib_sub_buffer.reserve(16);  // ��������� ������
+                new_model.pib_sub_buffer.reserve(16);
                 model_map[model_key] = std::move(new_model);
             }
 
@@ -317,7 +317,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
 
             uint32_t slot_index = safe_u32(model_batch.pib_sub_buffer.size());
             model_batch.instanceCount++;
-            model_batch.pib_sub_buffer.push_back(entity);  // stable Entity id
+            model_batch.pib_sub_buffer.push_back(entity);
             entity_slots[entity].push_back({ &model_batch, slot_index });
 
         }
@@ -328,7 +328,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
 void BatchBuilder::RemoveEntityFromBatches(Entity entity)
 {
     auto it = entity_slots.find(entity);
-    if (it == entity_slots.end()) return;  // entity was never batched
+    if (it == entity_slots.end()) return;
 
     for (const PibSlot& slot : it->second) {
         ModelBatchData* model_batch = slot.model_batch;

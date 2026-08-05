@@ -6,8 +6,8 @@
 // Правка пишет напрямую в колонки архетипа (та же модель, что у прежних рукописных
 // свет-редакторов) и дёргает spec.after_edit. ui_readonly-поля показываются задизейбленными.
 // Потребители: инспектор сущности (цикл по компонентам архетипа) и форма создания (фаза 3).
-#include "ComponentSerializer.h"   // ComponentSpec/FieldSpec (EngineEcs; ImGui сюда не протекает)
-#include "MaterialParamsSpec.h"    // MaterialParamsSpec/MatFieldSpec — то же самое для params материала
+#include "ComponentSerializer.h"
+#include "MaterialParamsSpec.h"
 
 namespace ui {
     // true — хотя бы одно поле изменено в этом кадре (after_edit уже вызван).

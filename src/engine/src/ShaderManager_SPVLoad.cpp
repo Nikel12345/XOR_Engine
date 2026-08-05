@@ -29,5 +29,5 @@ ComputeShaderData ShaderManager::CreateComputeShaderFromSPV(const char* path)
     size_t n = 0;
     Uint8* spv = (Uint8*)SDL_LoadFile(path, &n);
     if (!spv) { SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load SPV: %s", path); return {}; }
-    return BuildComputeShader(spv, n, path);   // �������� spv ������ � cs
+    return BuildComputeShader(spv, n, path);
 }

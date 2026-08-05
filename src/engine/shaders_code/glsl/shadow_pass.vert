@@ -5,7 +5,6 @@ layout(location = 1) in vec2 a_uv;
 layout(location = 2) in vec3 a_normal;
 layout(location = 3) in vec3 a_tangent;
 
-// ===== instance / transform data =====
 layout(set = 0, binding = 0, std430) buffer ModelMatrixBlock {
     mat4 models[];
 };
@@ -14,14 +13,13 @@ layout(set = 0, binding = 1, std430) buffer PositionIndexBuffer {
     int posIndex[];
 };
 
-// ===== light camera =====
 struct LightCamera {
     mat4 view;
     mat4 proj;
 };
 
 layout(set = 0, binding = 2, std430) buffer LightCameras {
-    LightCamera cameras[];  // ← один массив структур
+    LightCamera cameras[];
 };
 
 layout(set = 1, binding = 0, std140) uniform CurrentCameraUBO {

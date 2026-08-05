@@ -11,13 +11,13 @@
 #include "LightDataModule.h"
 #include "imgui.h"
 #include "DefaultShaderSet.h"
-#include "BufferManager.h"       // CreateBufferData фрактальных буферов (под if сцены)
-#include "FractalUpdateSet.h"    // апдейтеры кадров фракталов + FractalScaleStep (I/K)
-#include "MaterialManager.h"     // GetMaterial: материал якорённого куба из манифеста сцены
-#include "ModelData.h"           // SubMeshData::sphere — радиус тела якорённого объекта
-#include "PositionStructure.h"   // PosUVNormal — генератор процедурного куба
-#include "TexturesPresets.h"     // AlbedoAtlas — атлас под текстуру куба (кодовая инфра)
-#include "UI_ImGui.h"            // Get/SetSelectedEntities — обмен выбором для переноски (G)
+#include "BufferManager.h"
+#include "FractalUpdateSet.h"
+#include "MaterialManager.h"
+#include "ModelData.h"
+#include "PositionStructure.h"
+#include "TexturesPresets.h"
+#include "UI_ImGui.h"
 
 MyGame::MyGame(Engine* engine)
 {

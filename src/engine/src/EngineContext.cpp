@@ -1,9 +1,9 @@
 #include "PCH.h"
 #include "EngineContext.h"
-#include "Engine.h"           // делегирование Save/LoadScene (оркестрация сцены-папки — в Engine)
+#include "Engine.h"
 #include "TextureLoader.h"
-#include "RenderManager.h"    // PassManager (создание проходов, GetRenderPassStep)
-#include "EngineProfiler.h"   // Prof::Clock/MsSince — тайминг фаз загрузки (реальны при любом ENGINE_PROFILE)
+#include "RenderManager.h"
+#include "EngineProfiler.h"
 // Заголовок фасада держит менеджеры forward-декларациями — полные типы тянет этот TU.
 #include "GpuTaskContext.h"
 #include "TextureManager.h"
@@ -11,7 +11,7 @@
 #include "ModelManager.h"
 #include "ShaderManager.h"
 #include "PipeManager.h"
-#include "FontManager.h"      // CreateFont форвардит в FM, передавая TM/BM параметрами
+#include "FontManager.h"
 
 using namespace ShaderBase;   // VertexBufferBinding в сигнатурах Create*Shader
 

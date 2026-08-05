@@ -1,21 +1,19 @@
 #pragma once
 #include <SDL3/SDL.h>
 #include <vector>
-#include <glm/glm.hpp>      // поза захвата переноски (carry_view_offset)
+#include <glm/glm.hpp>
 #include "Engine.h"
-#include "InputManager.h"   // InputManager::KeyEvent в скретч-буферах
+#include "InputManager.h"
 
 struct Material;    // ресурсы спавна якорённых кубов — только указатели
 struct ModelData;
 
-// ============================================================================
 //  MyGame — фрактальная демка. Сцена выбирает фрактал (scene_fractal — 3D-губка
 //  Менгера рэймарчем, scene_mandelbrot — Мандельброт перетурбацией): рендер-
 //  ресурсы фона — в манифестах saved_scene_*, энтити — в их scene.json; в коде
 //  только кадр фрактала (буфер в MainInit + апдейтер FractalUpdateSet, под if'ом
 //  с именем сцены) и ввод: ЛКМ — вращение, стрелки/Space/LShift — полёт,
 //  колесо — скорость, I/K — ручной сдвиг окна масштаба.
-// ============================================================================
 class MyGame {
 public:
 	MyGame(Engine* engine);

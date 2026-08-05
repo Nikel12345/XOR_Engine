@@ -42,12 +42,12 @@
             "path": "../engine/shaders_code/skybox/skybox.frag.hlsl"
         },
         {
-            "name": "transparent_surface_fs",
-            "path": "../engine/shaders_code/transparent_pass/surface.hlsl"
-        },
-        {
             "name": "shadow_fs",
             "path": "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl"
+        },
+        {
+            "name": "transparent_surface_fs",
+            "path": "../engine/shaders_code/transparent_pass/surface.hlsl"
         },
         {
             "name": "untextured_surface_fs",
@@ -60,20 +60,20 @@
     ],
     "compute_shaders": [
         {
-            "name": "bloom_prefilter_cs",
-            "path": "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl"
-        },
-        {
             "name": "bloom_up_cs",
             "path": "../engine/shaders_code/comp/bloom_up.comp.hlsl"
         },
         {
-            "name": "bloom_down_cs",
-            "path": "../engine/shaders_code/comp/bloom_down.comp.hlsl"
+            "name": "bloom_prefilter_cs",
+            "path": "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl"
         },
         {
             "name": "culling_clear_cs",
             "path": "../engine/shaders_code/comp/culling_clear.comp.hlsl"
+        },
+        {
+            "name": "bloom_down_cs",
+            "path": "../engine/shaders_code/comp/bloom_down.comp.hlsl"
         },
         {
             "name": "bloom_composite_cs",
@@ -119,33 +119,6 @@
             }
         },
         {
-            "name": "sp_debug_collider",
-            "vs": "debug_collider_vs",
-            "fs": "debug_collider_fs",
-            "pass": "_DefaultDebugRenderPass",
-            "vs_buffers": [
-                "_DefaultTransformBuffer",
-                "DefaultOutPibBuffer",
-                "_cameraBuffer"
-            ],
-            "fs_buffers": [],
-            "slots": [],
-            "spd": {
-                "cull_mode": 0,
-                "fill_mode": 0,
-                "primitive_type": 2,
-                "depth_test": false,
-                "depth_write": false,
-                "depth_compare": 2,
-                "stencil_test": false,
-                "color_blend": false,
-                "bias_enable": false,
-                "bias_constant": 0.0,
-                "bias_slope": 0.0,
-                "bias_clamp": 0.0
-            }
-        },
-        {
             "name": "sp_shadow",
             "vs": "shadow_vs",
             "fs": "shadow_fs",
@@ -163,6 +136,33 @@
                 "primitive_type": 0,
                 "depth_test": true,
                 "depth_write": true,
+                "depth_compare": 2,
+                "stencil_test": false,
+                "color_blend": false,
+                "bias_enable": false,
+                "bias_constant": 0.0,
+                "bias_slope": 0.0,
+                "bias_clamp": 0.0
+            }
+        },
+        {
+            "name": "sp_debug_collider",
+            "vs": "debug_collider_vs",
+            "fs": "debug_collider_fs",
+            "pass": "_DefaultDebugRenderPass",
+            "vs_buffers": [
+                "_DefaultTransformBuffer",
+                "DefaultOutPibBuffer",
+                "_cameraBuffer"
+            ],
+            "fs_buffers": [],
+            "slots": [],
+            "spd": {
+                "cull_mode": 0,
+                "fill_mode": 0,
+                "primitive_type": 2,
+                "depth_test": false,
+                "depth_write": false,
                 "depth_compare": 2,
                 "stencil_test": false,
                 "color_blend": false,

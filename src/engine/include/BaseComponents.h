@@ -3,17 +3,17 @@
 // индексирует его без форс-инклуда PCH — поэтому всё используемое тянем сами, не
 // полагаясь на PCH/транзитив (иначе uint32_t→Entity не виден и IntelliSense метит
 // каждый компонент как неполный тип).
-#include <cstdint>        // uint32_t (Entity)
-#include <cstddef>        // size_t
+#include <cstdint>
+#include <cstddef>
 #include <vector>
-#include <string>         // имена ассетов в компонентах (для сериализации)
+#include <string>
 #include <unordered_map>
 #include <typeindex>
 #include <memory>
-#include <tuple>          // std::tie, std::apply
-#include <utility>        // std::move
-#include <type_traits>    // is_soa/has_related_soa, std::enable_if_t, std::void_t
-#include <cmath>          // std::sqrt, std::tan (Resolve* в лайтах)
+#include <tuple>
+#include <utility>
+#include <type_traits>
+#include <cmath>
 #include <SDL3/SDL.h>
 
 struct ModelData;
@@ -49,11 +49,10 @@ struct SoAProxyAddable {
                 if (i != last) col[i] = std::move(col[last]);
                 col.pop_back();
                 }()));
-            }, static_cast<Derived&>(*this).columns());       // columns() � �� Derived
+            }, static_cast<Derived&>(*this).columns());
     }
 };
 
-//-----------------------Acicelerations-----------------------//
 struct Accelerations : SoAProxyAddable<Accelerations> {
     using soa_tag = void;
     std::vector<float> x, y, z;
@@ -74,7 +73,6 @@ struct AccelerationProxy {
 struct Velocities3 {
     float x = 0, y = 0, z = 0;
 };
-//-----------------------Velocities-----------------------//
 struct Velocities : SoAProxyAddable<Velocities> {
     using soa_tag = void;
 
@@ -95,9 +93,8 @@ struct VelocityProxy {
     }
 };
 
-//-----------------------Positions-----------------------//
 struct Positions : SoAProxyAddable<Positions> {
-    using soa_tag = void;              // <� ������ SoA
+    using soa_tag = void;
 
     std::vector<float> x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l;
     size_t size() const { return x.size(); }
@@ -408,7 +405,6 @@ struct DrawComponent {
 	uint32_t flags   = 0;      // задел под per-instance биты (tint/dissolve/gpu-visible/...)
 };
 
-// ─────────────────────────── UI (концепт) ───────────────────────────
 // Маркер «эта энтити — элемент игрового интерфейса». По нему UI-проход и UI_DataModule
 // отбирают энтити ОТДЕЛЬНО от мировой геометрии (аналог DrawComponent, но для UI). Пока
 // чистый маркер без полей — якоря/слой/интерактивность добавятся позже. Полноценно в
@@ -433,7 +429,6 @@ struct IComponentArray {
     virtual void swap_remove(size_t i) = 0;
 };
 
-// AoS (�� ���������)
 template<typename T, typename = void>
 struct ComponentArray : IComponentArray {
     std::vector<T> data;
@@ -444,13 +439,11 @@ struct ComponentArray : IComponentArray {
 
     void swap_remove(size_t i) override {
         const size_t last = data.size() - 1;
-        if (i != last) data[i] = std::move(data[last]);  // ���� �� self-move
+        if (i != last) data[i] = std::move(data[last]);
         data.pop_back();
     };
 };
 
-
-// SoA (���� � T ���� soa_tag)
 template<typename T>
 struct ComponentArray<T, std::enable_if_t<is_soa<T>::value>> : IComponentArray {
     T data;
@@ -471,7 +464,6 @@ struct Archetype {
     ComponentArray<T>* get_array() {
         auto it = components.find(std::type_index(typeid(T)));
         if (it == components.end()) {
-            //SDL_Log("Archetype::get_array: ComponentArray for type %s not found", typeid(T).name());
             return nullptr;
         };
         return static_cast<ComponentArray<T>*>(it->second.get());

@@ -1,10 +1,8 @@
 #include "PCH.h"
 #include "MaterialParamsSpec.h"
-#include "MaterialParams.h"   // Opaque/TransparentMaterialParams — встроенные раскладки
+#include "MaterialParams.h"
 
-// ============================================================
 //  Реестр (зеркало ComponentSpecRegistry)
-// ============================================================
 MaterialParamsSpecRegistry& MaterialParamsSpecRegistry::Get()
 {
     static MaterialParamsSpecRegistry instance;
@@ -73,10 +71,8 @@ void ClearMaterialParams(Material* m)
     m->params_type.clear();
 }
 
-// ============================================================
 //  Встроенные типы: вся правда о типе — одна запись (как у компонентов).
 //  Порядок fields = порядок ключей в materials.json и полей в инспекторе.
-// ============================================================
 void RegisterBuiltinMaterialParamsSpecs()
 {
     using K = MatFieldKind;

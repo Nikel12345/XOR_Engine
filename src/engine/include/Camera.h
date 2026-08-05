@@ -19,7 +19,6 @@ public:
     void StoreViewMatrix(BufferManager* bm, BufferData* buffer_data);
     void SetView(const glm::vec3& position, const glm::vec3& target, const glm::vec3& up);
     void MoveView(const glm::vec3& offset);
-    //void RotateView(float angle, const glm::vec3& axis);
     void RotateView(float mouse_x, float mouse_y, bool lmb_down);
     void UpdateWindowSize(float width, float height);
     glm::vec3 GetPosition() const { return position; };
