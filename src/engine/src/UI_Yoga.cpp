@@ -3,8 +3,6 @@
 #include "EngineContext.h"
 #include "ObjectManager.h"
 #include "BaseComponents.h"
-#include "MaterialData.h"
-#include "ModelData.h"
 #include "FontManager.h"
 #include <yoga/Yoga.h>
 
@@ -13,8 +11,8 @@
 struct NodeRec {
     YGNodeRef             yg       = nullptr;
     bool                  draws    = false;      // создавать ли энтити (контейнер без материала — нет)
-    Material*             material = nullptr;
-    ModelData*            quad     = nullptr;
+    std::string           material;               // имена ассетов (см. UI_Yoga::Box) — как в компонентах
+    std::string           quad;
     std::vector<uint32_t> glyphs;                // непусто → текстовый бокс (UITextComponent)
     uint32_t              font     = 0;
     std::string           text;                  // исходная строка (для подписи в редакторе)
@@ -106,7 +104,7 @@ std::string UI_Yoga::NodeLabel(Node n) const
     const NodeRec& r = impl_->nodes[n];
     if (n == impl_->root)   return "UI Root";
     if (!r.text.empty())    return "Text: " + r.text;
-    if (r.material)         return "Panel";
+    if (!r.material.empty()) return "Panel";
     return "Group";
 }
 
@@ -152,13 +150,13 @@ UI_Yoga::Node UI_Yoga::Root(const UIStyle& s)
     return id;
 }
 
-UI_Yoga::Node UI_Yoga::Box(Node parent, const UIStyle& s, Material* material, ModelData* quad)
+UI_Yoga::Node UI_Yoga::Box(Node parent, const UIStyle& s, const std::string& material, const std::string& quad)
 {
     const Node id = MakeNode(impl_, s);   // единственный push_back — ссылки берём после него
     NodeRec& r = impl_->nodes[id];
     r.material = material;
     r.quad     = quad;
-    r.draws    = (material != nullptr);    // без материала — чистый контейнер (не рисуется)
+    r.draws    = !material.empty();    // без материала — чистый контейнер (не рисуется)
     NodeRec& p = impl_->nodes[parent];
     YGNodeInsertChild(p.yg, r.yg, YGNodeGetChildCount(p.yg));
     p.children.push_back(id);
@@ -167,7 +165,7 @@ UI_Yoga::Node UI_Yoga::Box(Node parent, const UIStyle& s, Material* material, Mo
 }
 
 UI_Yoga::Node UI_Yoga::Text(Node parent, const UIStyle& s, const std::string& utf8,
-                            Material* material, ModelData* quad, FontData* font, FontManager* fm)
+                            const std::string& material, const std::string& quad, FontData* font, FontManager* fm)
 {
     const Node id = MakeNode(impl_, s);
     NodeRec& r = impl_->nodes[id];
@@ -256,7 +254,7 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
     r.ndc_z  = z;
     r.emitted = true;
 
-    if (r.draws && r.quad) {
+    if (r.draws && !r.quad.empty()) {
         // Юнит-квад [0,1] раскладывается матрицей Positions: диагональ = масштаб, 4-й столбец
         // (w,d,h) = сдвиг (row-major, как scene.json).
         PositionProxy16 m{ sx,0,0,L,   0,sy,0,(T - sy),   0,0,1,z,   0,0,0,1 };

@@ -657,47 +657,23 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 	// Замок на ECS-swap не нужен: рендер-проходы/каллинг читают пер-слотовые слепки, а не
 	// ECS. Единственный живой читатель ECS на рендер-потоке — UI (осознанный компромисс,
 	// см. Engine::RenderFunc; правильное закрытие — UI-слепок или построение UI в sim).
-	double clear_ms = 0.0, ecs_ms = 0.0, ptr_ms = 0.0;
+	double clear_ms = 0.0, ecs_ms = 0.0;
 	std::vector<Entity> loaded;
 	{
 		const auto t_clear = Prof::Clock::now();
 		if (SceneData* prev = object_manager->GetScene(scene_name)) prev->clear();
 		clear_ms = Prof::MsSince(t_clear);
 
-		// ECS-часть: текст → сущности (указатели на ассеты пока пустые, только имена).
-		// Возвращает ИМЕННО созданные этой загрузкой сущности.
+		// ECS-часть: текст → сущности. Ссылки на ассеты (модель/материалы) — имена, ровно те же,
+		// что в рантайме, поэтому прохода-фиксапа указателей после загрузки БОЛЬШЕ НЕТ: резолв
+		// живёт в BatchBuilder, на сборке батчей. Возвращает ИМЕННО созданные этой загрузкой
+		// сущности (нужны вызывающему, не нам).
 		const auto t_ecs = Prof::Clock::now();
 		loaded = object_manager->LoadScene(scene_name, text);
 		ecs_ms = Prof::MsSince(t_ecs);
 
 		SceneData* scene = object_manager->GetScene(scene_name);
 		if (scene) {
-			// Чиним указатели на ассеты по сохранённым именам — это знает только верхний слой.
-			// Обходим ТОЛЬКО загруженные сущности (не всю сцену): уже существовавшие в ней
-			// производные сущности (напр. дебаг-коллайдеры) держат живые указатели без имён —
-			// их трогать нельзя. Незаполнённое/неизвестное имя оставляет nullptr; сборщик батчей
-			// такие сущности пропускает (см. BatchBuilder::AddEntityToBatches), но логируем.
-			const auto t_ptr = Prof::Clock::now();
-			for (Entity e : loaded) {
-				if (object_manager->Has<ModelComponent>(scene, e)) {
-					ModelComponent& m = object_manager->GetComponent<ModelComponent>(scene, e);
-					m.model = m.name.empty() ? nullptr : (*model_manager)[m.name];
-					if (!m.model)
-						SDL_Log("LoadScene: model '%s' not resolved (entity will not render)", m.name.c_str());
-				}
-				if (object_manager->Has<MaterialComponent>(scene, e)) {
-					MaterialComponent& mc = object_manager->GetComponent<MaterialComponent>(scene, e);
-					mc.materials.clear();
-					mc.materials.reserve(mc.names.size());
-					for (const auto& n : mc.names) {
-						Material* mat = material_manager->GetMaterial(n);
-						if (!mat) SDL_Log("LoadScene: material '%s' not resolved", n.c_str());
-						mc.materials.push_back(mat);
-					}
-				}
-			}
-			ptr_ms = Prof::MsSince(t_ptr);
-
 			object_manager->SetSceneState(scene_name, true);
 
 			// UI — часть сцены и уходит вместе с ней: clear выше снёс его энтити, здесь сносим
@@ -721,8 +697,8 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 	// ближайший prepare — игровой апдейт и prepare идут последовательно на одном sim-потоке.
 	batch_builder->SetDirtyBatches(true);
 	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), dir.c_str());
-	SDL_Log("LoadScene TIMING [%zu ent, %.1f MB]: read=%.1f  tex=%.1f  mdl=%.1f  shd=%.1f  mat=%.1f  clear=%.1f  ecs=%.1f  ptr_restore=%.1f  | total=%.1f ms",
+	SDL_Log("LoadScene TIMING [%zu ent, %.1f MB]: read=%.1f  tex=%.1f  mdl=%.1f  shd=%.1f  mat=%.1f  clear=%.1f  ecs=%.1f  | total=%.1f ms",
 		loaded.size(), text.size() / (1024.0 * 1024.0),
-		read_ms, tex_ms, mdl_ms, shd_ms, mat_ms, clear_ms, ecs_ms, ptr_ms,
-		read_ms + tex_ms + mdl_ms + shd_ms + mat_ms + clear_ms + ecs_ms + ptr_ms);
+		read_ms, tex_ms, mdl_ms, shd_ms, mat_ms, clear_ms, ecs_ms,
+		read_ms + tex_ms + mdl_ms + shd_ms + mat_ms + clear_ms + ecs_ms);
 }

@@ -14,10 +14,11 @@ struct EntityColliders {
 	std::vector<WorldShape> shapes;
 };
 
-std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene) {
+std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene,
+	const ColliderQuery::ModelLookup& model_of) {
 	// Собираем мировые формы всех активных коллайдеров сцены (явные + авто по сабмешам).
 	std::vector<EntityColliders> ents;
-	ColliderQuery::ForEachActiveCollider(om, scene,
+	ColliderQuery::ForEachActiveCollider(om, scene, model_of,
 		[&](Entity e, const std::vector<Collider>& shapes, const Positions& P, std::size_t i) {
 			EntityColliders ec; ec.e = e;
 			Collision::BuildWorldShapes(P, i, shapes, ec.shapes);

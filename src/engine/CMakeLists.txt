@@ -333,9 +333,10 @@ target_precompile_headers(Engine PRIVATE
 target_link_libraries(Engine PUBLIC
     EngineGpu
     EngineEcs
-    ImGui                                                            # Game.cpp/UI зовут ImGui::
 )
 target_link_libraries(Engine PRIVATE
+    ImGui                                                            # только UI_*.cpp/Engine.cpp; игра ходит через фасад UI_ImGui
+
     "${CMAKE_SOURCE_DIR}/external/SDL3_image/lib/x64/SDL3_image.lib"  # только TextureLoader
     "${CMAKE_SOURCE_DIR}/external/SDL3_ttf/lib/x64/SDL3_ttf.lib"      # только FontManager (SDL_ttf)
     yyjson                                                            # файлы сцены/ресурсов (Save/LoadScene)

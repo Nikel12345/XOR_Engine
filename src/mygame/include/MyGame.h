@@ -5,9 +5,6 @@
 #include "Engine.h"
 #include "InputManager.h"
 
-struct Material;    // ресурсы спавна якорённых кубов — только указатели
-struct ModelData;
-
 //  MyGame — фрактальная демка. Сцена выбирает фрактал (scene_fractal — 3D-губка
 //  Менгера рэймарчем, scene_mandelbrot — Мандельброт перетурбацией): рендер-
 //  ресурсы фона — в манифестах saved_scene_*, энтити — в их scene.json; в коде
@@ -41,10 +38,10 @@ private:
 
 	// Сцена губки активна (MainIterate гоняет MengerTick + матрицы якорённых объектов).
 	bool fractal_scene = false;
-	// Ресурсы спавна якорённых кубов (этап 4): захвачены в MainInit — клавиша N создаёт
-	// энтити с FractalAnchorComponent из них (материал/модель общие для всех кубов).
-	Material*  anchor_material = nullptr;
-	ModelData* cube_model      = nullptr;
+	// Ресурсы спавна якорённых кубов (этап 4) — ПО ИМЕНИ, как их держат сами компоненты
+	// (материал/модель общие для всех кубов; клавиша N создаёт из них энтити).
+	static constexpr const char* kAnchorMaterial = "iron_block";
+	static constexpr const char* kAnchorModel    = "cube";
 
 	// Переноска (этап 8b, HUD-вариант): G забирает выбор у UI (гизмо гаснет само), и куб
 	// ВЫКЛЮЧАЕТСЯ из мира — рисуется в фиксированной части экрана всегда одинаково (HUD-поза

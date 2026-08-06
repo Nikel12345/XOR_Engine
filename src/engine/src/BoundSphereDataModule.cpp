@@ -2,6 +2,7 @@
 #include "BoundSphereDataModule.h"
 #include "BufferManager.h"
 #include "ObjectManager.h"
+#include "ModelManager.h"
 #include "ModelData.h"
 
 BoundSphereDataModule::BoundSphereDataModule()
@@ -49,10 +50,32 @@ uint32_t BoundSphereDataModule::CalculateSphereSize(ObjectManager* om, uint64_t 
 	return total_size;
 }
 
-void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, ObjectManager* om)
+void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, ObjectManager* om, ModelManager* mm)
 {
 	SceneData* scene = om->GetActiveScene();
 	if (!scene) return;
+
+	// Имя модели → сфера, с памятью на ОДНО последнее имя. Модель у энтити — ссылка по имени, то
+	// есть наивно это хэш строки + поиск в словаре НА КАЖДУЮ строку буфера; на 1М объектов такой
+	// поиск стоит дороже всего остального заполнения вместе взятого. Соседние строки почти всегда
+	// одна и та же модель (порядок — по архетипам), а сравнение коротких строк на порядок дешевле
+	// промаха кэша в хэш-таблице — кэш снимает почти все поиски, промах стоит ровно один find.
+	// Помним УКАЗАТЕЛЬ на строку компонента: ECS в этом проходе не мутируется, колонки не
+	// переезжают, поэтому он жив до конца вызова.
+	const std::string* memo_name = nullptr;
+	glm::vec4 memo_sphere(0.0f, 0.0f, 0.0f, -1.0f);
+	auto sphere_of = [&](const std::string& name) -> glm::vec4 {
+		if (memo_name && *memo_name == name) return memo_sphere;
+		const ModelData* model = nullptr;
+		if (mm && !name.empty()) {
+			const auto& models = mm->GetModels();   // не operator[]: тот логирует промах (см. BatchBuilder)
+			auto it = models.find(name);
+			if (it != models.end()) model = it->second.get();
+		}
+		memo_sphere = ModelSphere(model);
+		memo_name   = &name;
+		return memo_sphere;
+	};
 
 	// Прямой обход scene->archetypes с тем же отбором, что RecalculateInstanceOffsets /
 	// TransformDataModule — порядок строк обязан совпадать с буфером трансформов.
@@ -74,6 +97,6 @@ void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, Ob
 
 		for (size_t i = 0; i < n; ++i)
 			dst[i] = (is_ui || !model_arr) ? glm::vec4(0.0f, 0.0f, 0.0f, -1.0f)
-			                               : ModelSphere((*model_arr)[i].model);
+			                               : sphere_of((*model_arr)[i].name);
 	}
 }

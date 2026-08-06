@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <vector>
+#include <SDL3/SDL_events.h>
 
 // Заголовку хватает forward-декларации: только статические методы с EngineContext*.
 // imgui/ObjectManager/CameraManager тянут сами UI_*.cpp — по факту использования.
@@ -20,6 +21,16 @@ public:
     // случае сдвигает выбор на кадр — для редактора приемлемо. uint32_t = Entity.
     static std::vector<uint32_t> GetSelectedEntities();
     static void SetSelectedEntities(const std::vector<uint32_t>& entities);
+
+    // ── Фасад ImGui для игры: движок — библиотека, а редактор в ней опционален, поэтому
+    // игровой код не должен знать ни про imgui.h, ни про ImGuiIO. Когда редактор уедет под
+    // рантайм-флаг, WantCapture* просто вернут false, а ProcessEvent станет no-op — игра
+    // не изменится ни строкой. Гонка та же, что была при прямом чтении ImGuiIO: кадр ImGui
+    // идёт на рендер-потоке, спрашивает игра с sim — ответ отстаёт максимум на кадр.
+    static bool WantCaptureMouse();
+    static bool WantCaptureKeyboard();
+    // SDL-событие в бэкенд ImGui. Зовётся из цикла событий приложения (main-поток).
+    static void ProcessEvent(const SDL_Event& event);
 
 private:
     // Хост-докспейс поверх вьюпорта + первичная раскладка панелей (Hierarchy слева,

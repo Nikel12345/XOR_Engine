@@ -11,7 +11,7 @@
 #include "InputManager.h"
 #include "ThreadController.h"
 #include "LightDataModule.h"
-#include "imgui.h"
+#include "UI_ImGui.h"
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
 #include "MaterialParams.h"
@@ -200,8 +200,9 @@ SDL_AppResult Game::MainInit()
     if (FontData* uifont = ctx->GetFontManager()->GetFont("default")) {
         UI_Yoga*      ui    = ctx->GetUIYoga();
         FontManager*  fm    = ctx->GetFontManager();
-        Material*     uimat = ctx->GetMaterialManager()->GetMaterial("ui_mat");
-        ModelData*    quad  = (*ctx->GetModelManager())["quad"];
+        // Ассеты узла — по имени (как в ModelComponent/MaterialComponent); резолвит их сборка батчей.
+        const std::string uimat = "ui_mat";
+        const std::string quad  = "quad";
 
         // Экран: колонка, дети прижаты к низу и по центру по горизонтали.
         UIStyle screen; screen.dir = UIDir::Column; screen.justify = UIJustify::End; screen.align = UIAlign::Center;
@@ -224,7 +225,7 @@ SDL_AppResult Game::MainInit()
     {
         MaterialManager* mm = ctx->GetMaterialManager();
     }
-
+	ctx->ExecuteGenerators();   // CreateDebugColliders
     ChangeState(GameState::MAIN_MENU);
     return SDL_APP_CONTINUE;
 }
@@ -244,15 +245,17 @@ SDL_AppResult Game::MainIterate()
     }
 
     Camera* camera = cameraManager->GetActiveCamera();
-    ImGuiIO& io = ImGui::GetIO();
+    // Снимаем один раз на тик: внутри тика ответ редактора не меняется (его кадр идёт на
+    // рендер-потоке), а игра так не зависит от того, есть ли редактор в сборке вообще.
+    const bool ui_mouse = UI_ImGui::WantCaptureMouse();
 
     float wheel = input->ConsumeWheelDelta();
-    if (wheel != 0.0f && !io.WantCaptureMouse) {
+    if (wheel != 0.0f && !ui_mouse) {
         camera->SpeedChange(wheel);   // щелчки колеса; шаг мультипликативный (см. Camera::SPEED_STEP)
     }
     mouse_x = input->MouseX();
     mouse_y = input->MouseY();
-    bool rotate = input->IsMouseButtonDown(SDL_BUTTON_LEFT) && !io.WantCaptureMouse;
+    bool rotate = input->IsMouseButtonDown(SDL_BUTTON_LEFT) && !ui_mouse;
     camera->RotateView(mouse_x, mouse_y, rotate);
 
     input->ExecuteCommands(ctx);
@@ -276,16 +279,24 @@ void Game::CreateDebugColliders()
     if (!scene) return;
     if (!debug_collider_material || !debug_box_model || !debug_sphere_model) return;
 
-    std::vector<DebugColliderSystem::DebugShape> shapes = DebugColliderSystem::CollectDebugShapes(*objectManager, scene);
+    // Резолвер имени модели для fallback-прохода физики: словарь моделей живёт в Engine, которую
+    // Physics не линкует, поэтому поиск отдаём вызовом (см. ColliderQuery::ModelLookup).
+    ModelManager* mm = ctx->GetModelManager();
+    std::vector<DebugColliderSystem::DebugShape> shapes = DebugColliderSystem::CollectDebugShapes(
+        *objectManager, scene,
+        [mm](const std::string& n) -> const ModelData* {
+            auto it = mm->GetModels().find(n);
+            return it != mm->GetModels().end() ? it->second.get() : nullptr;
+        });
     if (shapes.empty()) return;
 
     for (const DebugColliderSystem::DebugShape& s : shapes) {
-        ModelData* model = (s.kind == ShapeKind::Box) ? debug_box_model : debug_sphere_model;
+        const char* model_name = (s.kind == ShapeKind::Box) ? "debug_box" : "debug_sphere";
         LocalMatrixProxy16 lm{};   // SoA-локаль: в CreateEntity едет как прокси (как PositionProxy16)
         for (int i = 0; i < 16; ++i) lm.m[i] = s.local[i];
         ctx->CreateEntity("main_menu",
-            MaterialComponent{ { debug_collider_material } },
-            ModelComponent{ model },
+            MaterialComponent{ { "debug_collider" } },
+            ModelComponent{ model_name },
             PositionProxy16{},          // перезапишется композицией parent × local
             ParentComponent{ s.owner },
             lm,
@@ -342,8 +353,7 @@ void Game::MainMenu_Update()
 {
     SimulateGravity();   // симуляция идёт всегда, до раннего выхода по WantCaptureMouse
 
-    ImGuiIO& io = ImGui::GetIO();
-    if (io.WantCaptureMouse) return;
+    if (UI_ImGui::WantCaptureMouse()) return;
 
     const float camSpeed = 0.05f;
     const float lightSpeed = 0.1f;

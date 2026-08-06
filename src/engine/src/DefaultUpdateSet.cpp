@@ -301,13 +301,14 @@ void DefaultUpdateSet::SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSph
     auto* bm = ctx.GetBufferManager();
     auto* om = ctx.GetObjectManager();
     auto* bb = ctx.GetBatchBuilder();
+    auto* mm = ctx.GetModelManager();   // резолвер имени модели у энтити (см. StoreSpheres)
 
     // Сферы по строкам трансформов для GPU-каллинга. Тот же gate-паттерн, что у PIB:
     // ревизия батчей per-slot (создание/удаление энтити двигает строки).
     bm->CreateUpdateInstruction(DEFAULT_BOUND_SPHERE_BUFFER,
-        [om, bdm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+        [om, bdm, mm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
-        bdm->StoreSpheres(bm, &task, om);
+        bdm->StoreSpheres(bm, &task, om, mm);
     },
         [om, bdm, bb, bm]() -> uint32_t
     {

@@ -82,7 +82,8 @@ void Engine::PrepareFunc(uint8_t slot)
 
 	{
 		PROF_SCOPE(Sim, " update_render_batches");
-		batch_builder->UpdateRenderBatches(pipe_manager, pass_manager, object_manager, texture_manager, shader_manager, buffer_manager, object_manager->GetActiveScene());
+		batch_builder->UpdateRenderBatches(pipe_manager, pass_manager, object_manager, texture_manager, shader_manager, buffer_manager,
+			model_manager, material_manager, object_manager->GetActiveScene());
 	}
 
 	// Клеймим слоту текущую эпоху ребилда (до заливки его буферов ниже). Если этот prepare

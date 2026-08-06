@@ -2,6 +2,8 @@
 #include <vector>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <string>
 #include "Colliders.h"
 #include "ObjectManager.h"
 #include "BaseComponents.h"
@@ -22,8 +24,14 @@
 namespace ColliderQuery {
 	using Entity = uint32_t;
 
+	// Резолвер «имя модели → геометрия». ModelComponent хранит ИМЯ, а словарь моделей живёт в
+	// ModelManager — он в либе Engine, которую Physics НЕ линкует (и не должна). Поэтому поиск
+	// приходит снаружи, вызовом: физика остаётся листовой, а зависимость от каталога ассетов
+	// становится явной в сигнатуре. Пустой резолвер = авто-коллайдеров по сабмешам не будет.
+	using ModelLookup = std::function<const ModelData*(const std::string&)>;
+
 	template <typename Fn>
-	void ForEachActiveCollider(ObjectManager& om, SceneData* scene, Fn&& fn) {
+	void ForEachActiveCollider(ObjectManager& om, SceneData* scene, const ModelLookup& model_of, Fn&& fn) {
 		// 1) Явные коллайдеры (непустой список форм).
 		om.ForEach<Positions, ColliderComponent>(scene,
 			[&](Entity e, SoAElement<Positions> p, ColliderComponent& col) {
@@ -39,11 +47,12 @@ namespace ColliderQuery {
 				if (om.Has<ColliderComponent>(scene, e) &&
 					!om.GetComponent<ColliderComponent>(scene, e).shapes.empty())
 					return;   // уже учтён явными формами
-				if (!mc.model || mc.model->submeshes.empty()) return;
+				const ModelData* model = (model_of && !mc.name.empty()) ? model_of(mc.name) : nullptr;
+				if (!model || model->submeshes.empty()) return;
 
 				std::vector<Collider> autoShapes;
-				autoShapes.reserve(mc.model->submeshes.size());
-				for (const auto& sm : mc.model->submeshes)
+				autoShapes.reserve(model->submeshes.size());
+				for (const auto& sm : model->submeshes)
 					autoShapes.push_back(Collider::Box(sm.aabb_half, sm.aabb_center));
 
 				fn(e, autoShapes, p.container(), p.i());

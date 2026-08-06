@@ -8,6 +8,8 @@
 #include "ShaderManager.h"
 #include "TextureManager.h"
 #include "BufferManager.h"
+#include "ModelManager.h"
+#include "MaterialManager.h"
 #include "PositionStructure.h"
 #include "ModelData.h"
 #include "TextureData.h"
@@ -150,29 +152,49 @@ void BatchBuilder::QueueDelete(Entity entity)
 }
 
 void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+    ModelManager* mdm, MaterialManager* mtm,
     const MaterialComponent& material_component, const ModelComponent& model_component) {
 
-    // Защита от незаполненных ссылок: сущность из загрузки сцены, чьё имя ассета не
-    // разрешилось в указатель (пустое/неизвестное имя), приходит с model == nullptr.
-    // Без этого гарда разыменование model->submeshes падает в сборке батчей.
-    if (!model_component.model) {
-        SDL_Log("BatchBuilder: entity %u has null model - skipped (unresolved asset?)", entity);
+    // Модель и материалы у энтити — ССЫЛКИ ПО ИМЕНИ (см. ModelComponent/MaterialComponent);
+    // резолвим здесь, на сборке, ровно как имена текстур/sp внутри материала ниже. Ищем прямо
+    // в словаре, а НЕ через ModelManager::operator[] / MaterialManager::GetMaterial: те логируют
+    // промах, а здесь вызов на КАЖДУЮ сущность — одно битое имя в сцене на 1М объектов дало бы
+    // миллион строк лога. О пропуске сообщают гарды ниже (по одной строке на сущность).
+    ModelData* model = nullptr;
+    if (mdm && !model_component.name.empty()) {
+        const auto& models = mdm->GetModels();
+        auto it = models.find(model_component.name);
+        if (it != models.end()) model = it->second.get();
+    }
+
+    // Защита от неразрешённых ссылок: пустое/неизвестное имя (ассет удалён, переименован или
+    // ещё не создан) даёт nullptr. Без гарда разыменование model->submeshes падает на сборке.
+    if (!model) {
+        SDL_Log("BatchBuilder: entity %u has null model - skipped (unresolved asset '%s'?)",
+            entity, model_component.name.c_str());
         return;
     }
 
-    for (SubMeshData& submesh : model_component.model->submeshes)
+    for (SubMeshData& submesh : model->submeshes)
     {
-        if (material_component.materials.size() != model_component.model->submeshes.size()) {
+        if (material_component.names.size() != model->submeshes.size()) {
             SDL_Log("BulidBatches:: Submash and material sizes mismatch");
         }
-        // Границы + null материала (тоже может быть не разрешён по имени при загрузке).
-        if (submesh.material_index >= material_component.materials.size()) {
+        // Границы + промах имени материала (та же природа, что у модели выше).
+        if (submesh.material_index >= material_component.names.size()) {
             SDL_Log("BatchBuilder: entity %u material_index out of range - skipped", entity);
             continue;
         }
-        Material* material = material_component.materials[submesh.material_index];
+        const std::string& material_name = material_component.names[submesh.material_index];
+        Material* material = nullptr;
+        if (mtm && !material_name.empty()) {
+            const auto& materials = mtm->GetMaterials();
+            auto mit = materials.find(material_name);
+            if (mit != materials.end()) material = mit->second.get();
+        }
         if (!material) {
-            SDL_Log("BatchBuilder: entity %u has null material - skipped (unresolved asset?)", entity);
+            SDL_Log("BatchBuilder: entity %u has null material - skipped (unresolved asset '%s'?)",
+                entity, material_name.c_str());
             continue;
         }
 
@@ -353,7 +375,8 @@ void BatchBuilder::RemoveEntityFromBatches(Entity entity)
 }
 
 void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-    TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene)
+    TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+    ModelManager* mdm, MaterialManager* mtm, SceneData* scene)
 {
     if (!scene) {
         SDL_Log("UpdateRenderBatches called with null scene!");
@@ -366,14 +389,14 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
     // раскладки слота — см. FinalizeOffsets/AskLayout), дерево приватно для sim.
     bool changed = false;
     if (dirty_batches.exchange(false)) {
-        BuildRenderBatches(pm, pass_manager, om, tm, sm, bm, scene);
+        BuildRenderBatches(pm, pass_manager, om, tm, sm, bm, mdm, mtm, scene);
         FinalizeOffsets(pass_manager, bm);
         // Полная пересборка переклеила ВСЮ раскладку (indirect_command_index, firstInstance).
         // Бампим эпоху — слоты, залитые под старой раскладкой, рендер больше не покажет.
         ++rebuild_epoch;
         changed = true;
     }
-    else if (ApplyIncremental(pm, pass_manager, om, tm, sm, bm, scene)) {
+    else if (ApplyIncremental(pm, pass_manager, om, tm, sm, bm, mdm, mtm, scene)) {
         FinalizeOffsets(pass_manager, bm);
         changed = true;
     }
@@ -400,7 +423,8 @@ inline void RecalculateInstanceOffsets(SceneData* scene)
 }
 
 void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-    TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene)
+    TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+    ModelManager* mdm, MaterialManager* mtm, SceneData* scene)
 {
     for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses()) {
         rp->shader_batches.clear();
@@ -430,7 +454,7 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
             return;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
         const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
-        AddEntityToBatches(entity, pm, tm, sm, bm, material_component, model_component);
+        AddEntityToBatches(entity, pm, tm, sm, bm, mdm, mtm, material_component, model_component);
     }
     );
 
@@ -438,7 +462,8 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
 }
 
 bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-    TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene)
+    TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+    ModelManager* mdm, MaterialManager* mtm, SceneData* scene)
 {
     // Atomically take + clear the queues, then work on the local copies outside
     // the lock so we never hold delta_mutex while mutating the batch tree.
@@ -470,7 +495,7 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
             continue;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
         const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
-        AddEntityToBatches(entity, pm, tm, sm, bm, material_component, model_component);
+        AddEntityToBatches(entity, pm, tm, sm, bm, mdm, mtm, material_component, model_component);
     }
     for (Entity entity : deletes) {
         RemoveEntityFromBatches(entity);

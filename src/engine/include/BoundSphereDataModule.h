@@ -4,6 +4,7 @@
 
 class ObjectManager;
 class BufferManager;
+class ModelManager;
 struct UploadTask;
 
 // Сферы для GPU-каллинга ПО СТРОКАМ ТРАНСФОРМОВ (тот же порядок и отбор архетипов, что
@@ -15,7 +16,9 @@ class BoundSphereDataModule {
 public:
 	BoundSphereDataModule();
 	uint32_t CalculateSphereSize(ObjectManager* om, uint64_t revision, uint8_t slot);
-	void StoreSpheres(BufferManager* bm, UploadTask* task, ObjectManager* om);
+	// mm — резолвер имени модели у энтити (ModelComponent хранит имя, не указатель); приходит
+	// на вызове, полем не хранится.
+	void StoreSpheres(BufferManager* bm, UploadTask* task, ObjectManager* om, ModelManager* mm);
 private:
 	uint32_t total_size = 0;
 	uint64_t last_revision[BUFFERING_LEVEL];

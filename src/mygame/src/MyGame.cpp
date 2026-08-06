@@ -9,7 +9,6 @@
 #include "InputManager.h"
 #include "ThreadController.h"
 #include "LightDataModule.h"
-#include "imgui.h"
 #include "DefaultShaderSet.h"
 #include "BufferManager.h"
 #include "FractalUpdateSet.h"
@@ -107,17 +106,13 @@ SDL_AppResult MyGame::MainInit()
 
         // Куб — движковый примитив (Engine.cpp, рядом с quad/sphere), берём по имени. Раньше здесь
         // жила его копия-генератор; вынесена в движок, чтобы канон развёртки (v-down) был один.
-        cube_model = (*ctx->GetModelManager())["cube"];
-
-        anchor_material = ctx->GetMaterialManager()->GetMaterial("iron_block");
-
         // Тест-куб этапа 3 — теперь просто первый якорённый объект: корневой размер (σ=1,
         // глубина 0), вплотную справа от губки. Дальше им занимается общий контур этапа 4.
         FractalUpdateSet::FractalPos root_pos;
         root_pos.local = glm::dvec3(3.0, 0.0, 0.0);
         ctx->CreateEntity(scene_name,
-            MaterialComponent{ { anchor_material } },
-            ModelComponent{ cube_model },
+            MaterialComponent{ { kAnchorMaterial } },
+            ModelComponent{ kAnchorModel },
             PositionProxy16{ 0,0,0,0,  0,0,0,0,  0,0,0,0,  0,0,0,1 },
             DrawComponent{},
             GeneratedComponent{},
@@ -136,15 +131,18 @@ SDL_AppResult MyGame::MainIterate()
     input->DrainKeyEvents(key_events_scratch);
 
     Camera* camera = cameraManager->GetActiveCamera();
-    ImGuiIO& io = ImGui::GetIO();
+    // Снимаем один раз на тик: внутри тика ответ редактора не меняется (его кадр идёт на
+    // рендер-потоке), а игра так не зависит от того, есть ли редактор в сборке вообще.
+    const bool ui_mouse    = UI_ImGui::WantCaptureMouse();
+    const bool ui_keyboard = UI_ImGui::WantCaptureKeyboard();
 
     float wheel = input->ConsumeWheelDelta();
-    if (wheel != 0.0f && !io.WantCaptureMouse) {
+    if (wheel != 0.0f && !ui_mouse) {
         camera->SpeedChange(wheel);   // щелчки колеса; шаг мультипликативный (см. Camera::SPEED_STEP)
     }
     mouse_x = input->MouseX();
     mouse_y = input->MouseY();
-    bool rotate = input->IsMouseButtonDown(SDL_BUTTON_LEFT) && !io.WantCaptureMouse;
+    bool rotate = input->IsMouseButtonDown(SDL_BUTTON_LEFT) && !ui_mouse;
     camera->RotateView(mouse_x, mouse_y, rotate);
 
     input->ExecuteCommands(ctx);
@@ -155,7 +153,7 @@ SDL_AppResult MyGame::MainIterate()
     // подлёт сам замедляется и раскрывает детализацию, врезаться нельзя.
     // Колесо (SpeedChange камеры) — множитель скорости поверх; удержание I/K — ручной сдвиг
     // окна масштаба относительно авто (~1 уровень в секунду, I — мельче, K — крупнее).
-    if (!io.WantCaptureMouse) {
+    if (!ui_mouse) {
         const float camSpeed = 1.0f;           // игровые юниты за тик (полное отклонение)
         const float zoomRate = 1.0f / 60.0f;   // уровней за тик удержания (при 60 UPS = 1 ур/с)
         glm::vec3 camMove(0.0f);   // x: лево/право, y: верх/низ, z: вперёд/назад
@@ -192,7 +190,7 @@ SDL_AppResult MyGame::MainIterate()
         // ВЫКЛЮЧЕН из мира и рисуется в фиксированной части экрана всегда одинаково (HUD-поза
         // в ForEach-контуре ниже); выбор ЗАБИРАЕТСЯ у UI — гизмо гаснет само. Отпуск кладёт
         // куб в мир заново спавн-позой — личная логика масштаба доводит размер под окружение.
-        if (!io.WantCaptureKeyboard) {
+        if (!ui_keyboard) {
             for (const InputManager::KeyEvent& e : key_events_scratch) {
                 if (!e.down) continue;
                 if (e.scancode == SDL_SCANCODE_N) {
@@ -201,8 +199,8 @@ SDL_AppResult MyGame::MainIterate()
                     p.local += glm::dvec3(camera->GetForward()) * (1.5 * cam.sigma);
                     p.sigma  = 0.5 * cam.sigma;
                     ctx->CreateEntity("scene_fractal",
-                        MaterialComponent{ { anchor_material } },
-                        ModelComponent{ cube_model },
+                        MaterialComponent{ { kAnchorMaterial } },
+                        ModelComponent{ kAnchorModel },
                         PositionProxy16{ 0,0,0,0,  0,0,0,0,  0,0,0,0,  0,0,0,1 },
                         DrawComponent{},
                         GeneratedComponent{},
@@ -322,9 +320,15 @@ SDL_AppResult MyGame::MainIterate()
             // модели): контур универсален для ЛЮБОЙ якорёной модели, не только куба (у куба
             // получается прежний √3). Пер-осевое растяжение гизмо в отсев входит максимумом
             // (консервативно), а в правило размера — НЕ входит (см. MengerObjectScaleTick).
+            // Модель у энтити — имя, поэтому ищем её в словаре: якорей десятки, поиск на тик копеечный.
+            const ModelData* model = nullptr;
+            if (!mc.name.empty()) {
+                auto it = modelManager->GetModels().find(mc.name);
+                if (it != modelManager->GetModels().end()) model = it->second.get();
+            }
             double r_model = 0.0;
-            if (mc.model)
-                for (const SubMeshData& sm : mc.model->submeshes)
+            if (model)
+                for (const SubMeshData& sm : model->submeshes)
                     r_model = std::max(r_model,
                         (double)glm::length(glm::vec3(sm.sphere)) + (double)sm.sphere.w);
             if (r_model <= 0.0) r_model = 1.0;   // пустая/вырожденная модель — нейтральный радиус
@@ -369,7 +373,7 @@ SDL_AppResult MyGame::MainIterate()
     }
 
     // B — дебаг-закладка позиции (после MengerTick: состояние тика уже свежее).
-    if (!io.WantCaptureKeyboard) {
+    if (!ui_keyboard) {
         for (const InputManager::KeyEvent& e : key_events_scratch) {
             if (e.down && e.scancode == SDL_SCANCODE_B)
                 FractalUpdateSet::MengerBookmarkHere();

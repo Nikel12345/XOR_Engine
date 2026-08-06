@@ -122,7 +122,7 @@ namespace {
 
                     if (is_model) {
                         // В форме имя модели ВЫБИРАЕТСЯ (в отличие от ReadOnly у живой энтити):
-                        // указатель зарезолвит хендлер CreateEntityCmd тем же путём, что загрузка.
+                        // черновик ещё не в дереве батчей, менять состав нечему.
                         ModelComponent& mdl = (*arch.get_array<ModelComponent>())[row];
                         if (ImGui::BeginCombo("model", mdl.name.empty() ? "(none)" : mdl.name.c_str())) {
                             if (ImGui::Selectable("(none)", mdl.name.empty())) mdl.name.clear();
@@ -134,28 +134,30 @@ namespace {
                         }
                     }
                     else if (is_material) {
-                        // Список имён материалов; порядок = сабмеши модели (индекс сабмеша → материал).
+                        // Слоты ФИКСИРОВАНЫ моделью (как слот-роли текстур у материала фиксирует
+                        // required_slots его sp): слот = сабмеш, его material_index адресует этот
+                        // список — значит длина всегда равна числу сабмешей, добавить/убрать нечего.
+                        // Модель не выбрана или не найдена (процедурная, битое имя) → список пуст.
                         MaterialComponent& mats = (*arch.get_array<MaterialComponent>())[row];
-                        ImGui::TextDisabled("order = model submeshes");
+                        size_t sub_count = 0;
+                        if (auto* mdl_arr = arch.get_array<ModelComponent>()) {
+                            const auto& models = ctx->GetModelManager()->GetModels();
+                            auto mit = models.find((*mdl_arr)[row].name);
+                            if (mit != models.end()) sub_count = mit->second->submeshes.size();
+                        }
+                        if (mats.names.size() != sub_count) mats.names.resize(sub_count);   // смена модели
                         for (size_t k = 0; k < mats.names.size(); ++k) {
-                            ImGui::PushID(static_cast<int>(k));
                             std::string& cur = mats.names[k];
-                            if (ImGui::BeginCombo("##mat", cur.empty() ? "(none)" : cur.c_str())) {
+                            char label[32];
+                            snprintf(label, sizeof(label), "submesh %zu", k);
+                            if (ImGui::BeginCombo(label, cur.empty() ? "(none)" : cur.c_str())) {
                                 for (auto& [nm, m] : ctx->GetMaterialManager()->GetMaterials()) {
                                     if (!g_show_internal && IsInternalName(nm)) continue;
                                     if (ImGui::Selectable(nm.c_str(), nm == cur)) cur = nm;
                                 }
                                 ImGui::EndCombo();
                             }
-                            ImGui::SameLine();
-                            if (ImGui::SmallButton("-")) {
-                                mats.names.erase(mats.names.begin() + k);
-                                ImGui::PopID();
-                                break;
-                            }
-                            ImGui::PopID();
                         }
-                        if (ImGui::SmallButton("+ material")) mats.names.emplace_back();
                     }
                     else {
                         DrawComponentFields(*s, arch, row);

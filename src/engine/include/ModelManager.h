@@ -36,10 +36,10 @@ public:
 	// Процедурная модель: геометрию выдаёт generator (вызывается жадно, как и чтение с диска).
 	ModelData* CreateModel(const std::string& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep);
 
-	// Upsert из файла (для редактора): существующий перезагружает В ТОТ ЖЕ объект ModelData —
-	// указатель у энтити (ModelComponent.model) остаётся жив, сабмеши пересчитываются на
-	// заново-аппендженную геометрию. Старая геометрия остаётся в GPU-буфере (reclaim'а нет —
-	// приемлемо для редактора). Новое имя — создаёт. Пересборку батчей взводит вызывающий.
+	// Upsert из файла (для редактора): существующий перезагружает В ТОТ ЖЕ объект ModelData,
+	// сабмеши пересчитываются на заново-аппендженную геометрию. Старая геометрия остаётся в
+	// GPU-буфере (reclaim'а нет — приемлемо для редактора). Новое имя — создаёт. Пересборку
+	// батчей взводит вызывающий (она же перерезолвит имена моделей у энтити).
 	ModelData* LoadModelFromFile(const std::string& name, const std::string& path, const std::string& path_ind, AnchorShift anchor = AnchorShift::Keep);
 
 	// Merge-upsert моделей из манифеста сцены (см. SceneModelEntry): каждая запись через

@@ -2,6 +2,7 @@
 #include "UI_ImGui.h"
 #include "UI_Internal.h"
 #include "imgui_internal.h"
+#include "imgui_impl_sdl3.h"
 #include "ImGuizmo.h"
 
 // Панели живут в отдельных TU (UI_Hierarchy / UI_AssetBrowser / UI_Inspector), но методы —
@@ -32,6 +33,16 @@ void UI_ImGui::SetSelectedEntities(const std::vector<uint32_t>& entities)
     g_sel.entity = entities.front();   // порядок важен: entity ДО kind («ворота» открываются последними)
     g_sel.index  = -1;
     g_sel.kind   = SelKind::Entity;
+}
+
+// Фасад ImGui для игры (контракт — в заголовке): единственное место, где игровой ввод
+// спрашивает редактор, не зная про ImGuiIO.
+bool UI_ImGui::WantCaptureMouse()    { return ImGui::GetIO().WantCaptureMouse; }
+bool UI_ImGui::WantCaptureKeyboard() { return ImGui::GetIO().WantCaptureKeyboard; }
+
+void UI_ImGui::ProcessEvent(const SDL_Event& event)
+{
+    ImGui_ImplSDL3_ProcessEvent(&event);
 }
 
 void UI_ImGui::Iterate(EngineContext* ctx)

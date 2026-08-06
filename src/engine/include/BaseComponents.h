@@ -16,9 +16,7 @@
 #include <cmath>
 #include <SDL3/SDL.h>
 
-struct ModelData;
 struct TextureData;
-struct Material;
 
 using f_restrict_pointer = float const* __restrict;
 using Entity = uint32_t;
@@ -217,19 +215,18 @@ struct TextureComponent {
 };
 
 
+// Ссылка на ассет — ТОЛЬКО имя (то же правило, что внутри Material: текстуры/sp по имени).
+// Резолв в ModelData*/Material* происходит у потребителя, на месте использования, и резолвер
+// приходит туда параметром — ECS про ModelManager/MaterialManager по-прежнему не знает.
+// Имя ПЕРЕЖИВАЕТ delete+recreate ассета под тем же именем и не требует фиксапа после загрузки
+// сцены: сохранение и рантайм держат одно и то же представление, чинить нечего.
 struct ModelComponent {
-    ModelData* model = nullptr;
-    // Имя ассета: задаётся при создании, пишется при сохранении сцены. Указатель при
-    // загрузке восстанавливается из имени в верхнем слое (ECS не знает про ModelManager) —
-    // так не нужен обратный поиск указатель→имя.
     std::string name;
 };
 
 // Порядок расположения материалов должен соответствовать порядку сабмешей в модели, поскольку индекс материала в сабмеше используется для доступа к материалу
 // Order of materials must correspond to the order of submeshes in the model, as the material index in the submesh is used to access the material
 struct MaterialComponent {
-    std::vector<Material*> materials;
-    // Имена материалов (по одному на элемент materials, тот же порядок). См. ModelComponent::name.
     std::vector<std::string> names;
 };
 

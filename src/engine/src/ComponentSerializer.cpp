@@ -159,7 +159,7 @@ void LoadMaterial(Archetype& arch, yyjson_val* comp, size_t count)
         }
     }
     auto* a = arch.get_array<MaterialComponent>();
-    for (size_t i = 0; i < count; ++i) a->add(rows[i]);   // указатели восстановит верхний слой
+    for (size_t i = 0; i < count; ++i) a->add(rows[i]);
 }
 
 } // namespace
@@ -185,11 +185,12 @@ void RegisterBuiltinComponentSpecs()
             FieldSpec::Num("k", F32, SOA_NUM(Positions, k)), FieldSpec::Num("l", F32, SOA_NUM(Positions, l)),
         } });
 
-    // ---- Model: имя ассета; model-указатель восстанавливает верхний слой (Engine::LoadScene) ----
+    // ---- Model: имя ассета (оно же рантайм-ссылка — фиксапа после загрузки нет) ----
     reg.Register({ .name = "Model", .sig_type = typeid(ModelComponent),
         .add_default = AddDefaultAoS<ModelComponent>,
         .fields = { FieldSpec::Str("name", AOS_STR(ModelComponent, name), AssetModel).ReadOnly() } });
-        // ReadOnly: смена модели у энтити — не запись строки (указатель/батчи), а будущая команда
+        // ReadOnly: смена модели меняет состав батчей (и число сабмешей → длину списка
+        // материалов), поэтому это будущая команда, а не запись строки из UI-потока
 
     // ---- Material: зубчатый массив имён — рукописная пара (см. выше) ----
     reg.Register({ .name = "Material", .sig_type = typeid(MaterialComponent),

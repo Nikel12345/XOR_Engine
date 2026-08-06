@@ -4,7 +4,8 @@
 
 namespace DebugColliderSystem {
 
-std::vector<DebugShape> CollectDebugShapes(ObjectManager& om, SceneData* scene) {
+std::vector<DebugShape> CollectDebugShapes(ObjectManager& om, SceneData* scene,
+	const ColliderQuery::ModelLookup& model_of) {
 	std::vector<DebugShape> out;
 
 	// Лёгкое раздутие рамки (на 3%), чтобы рёбра выходили чуть наружу поверхности и не
@@ -29,7 +30,7 @@ std::vector<DebugShape> CollectDebugShapes(ObjectManager& om, SceneData* scene) 
 
 	// Те же активные коллайдеры, что видит детекция (явные + авто по сабмешам), но
 	// рисуем их ЛОКАЛЬНЫЕ формы — трансформ владельца (P/i) не нужен, его добавит движок.
-	ColliderQuery::ForEachActiveCollider(om, scene,
+	ColliderQuery::ForEachActiveCollider(om, scene, model_of,
 		[&](Entity e, const std::vector<Collider>& shapes, const Positions&, std::size_t) {
 			for (const Collider& c : shapes) {
 				glm::vec3 half = (c.kind == ShapeKind::Sphere) ? glm::vec3(c.radius) : c.half;

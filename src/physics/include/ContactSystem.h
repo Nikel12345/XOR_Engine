@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <cstdint>
+#include "ColliderQuery.h"   // ColliderQuery::ModelLookup в сигнатуре
 
 class ObjectManager;
 struct SceneData;
@@ -18,5 +19,8 @@ namespace ContactSystem {
 		float penetration;   // глубина для sphere-sphere; для пар с боксом = 0 (только факт)
 	};
 
-	std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene);
+	// model_of — резолвер имени модели энтити (см. ColliderQuery::ModelLookup): нужен fallback-
+	// проходу, который строит авто-боксы по сабмешам.
+	std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene,
+		const ColliderQuery::ModelLookup& model_of);
 }

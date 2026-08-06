@@ -85,9 +85,8 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 		});
 
 	// Создание сущности из staging-формы: json одной сущности идёт ТЕМ ЖЕ путём, что файл
-	// сцены (ObjectManager::LoadScene), затем фиксап указателей ассетов по именам — зеркало
-	// Engine::LoadScene (ECS-ядро менеджеров не знает). Незарезолвленное имя → nullptr,
-	// сборщик батчей такие пропускает.
+	// сцены (ObjectManager::LoadScene). Фиксапа указателей ассетов после него нет — модель и
+	// материалы это ИМЕНА и в файле, и в рантайме, резолвит их BatchBuilder на сборке батчей.
 	//
 	// Добавление — ИНКРЕМЕНТАЛЬНОЕ (QueueCreate), как у EngineContext::CreateEntity: путь через
 	// ObjectManager идёт мимо него, поэтому дельту ставим здесь руками. Новый батч (свой материал/
@@ -105,28 +104,10 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 				// что в CreateEntity/DeleteEntity: id чужой сцены совпал бы с чужим объектом).
 				const bool feeds_batches = (scene == om->GetActiveScene());
 				const std::vector<Entity> created = om->LoadScene(c->scene, c->json);
-				for (Entity e : created) {
-					if (om->Has<ModelComponent>(scene, e)) {
-						ModelComponent& m = om->GetComponent<ModelComponent>(scene, e);
-						m.model = m.name.empty() ? nullptr : (*ctx->GetModelManager())[m.name];
-						if (!m.model && !m.name.empty())
-							SDL_Log("CreateEntity: model '%s' not resolved (entity will not render)", m.name.c_str());
-					}
-					if (om->Has<MaterialComponent>(scene, e)) {
-						MaterialComponent& mc = om->GetComponent<MaterialComponent>(scene, e);
-						mc.materials.clear();
-						mc.materials.reserve(mc.names.size());
-						for (const auto& n : mc.names) {
-							Material* mat = ctx->GetMaterialManager()->GetMaterial(n);
-							if (!mat) SDL_Log("CreateEntity: material '%s' not resolved", n.c_str());
-							mc.materials.push_back(mat);
-						}
-					}
-					// ПОСЛЕ фиксапа указателей: инкремент читает model/materials на ближайшем
-					// prepare. Отбор (Draw+visible, Model, Material) перепроверяет ApplyIncremental
-					// сам — здесь очередь дешевле фильтра.
+				// Отбор (Draw+visible, Model, Material) перепроверяет ApplyIncremental сам —
+				// здесь очередь дешевле фильтра.
+				for (Entity e : created)
 					if (feeds_batches) ctx->GetBatchBuilder()->QueueCreate(e);
-				}
 			}
 			delete c;
 		});

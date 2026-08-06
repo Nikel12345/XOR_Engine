@@ -16,6 +16,8 @@ class PassManager;
 class TextureManager;
 class ShaderManager;
 class BufferManager;
+class ModelManager;
+class MaterialManager;
 struct SceneData;
 struct ModelBatchData;
 struct MaterialComponent;
@@ -30,10 +32,12 @@ public:
 	BatchBuilder();
 	// Brings the batch tree up to date: full rebuild when dirty, otherwise applies
 	// the queued create/delete delta. Bumps the revision when the tree changed.
-	// Резолверы name-based ссылок материала (имя текстуры/sp → указатель на сборке) передаются
-	// параметром, а не хранятся полем: системы движка не держат указатели друг на друга.
+	// Резолверы name-based ссылок (имя модели/материала у энтити, имя текстуры/sp внутри материала
+	// → указатель на сборке) передаются параметром, а не хранятся полем: системы движка не держат
+	// указатели друг на друга.
 	void UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-		TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene);
+		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
 	void BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm);
 	void BuildComputePrepassBatches(PipeManager* pm, ShaderManager* sm);
 
@@ -86,16 +90,19 @@ private:
 	};
 
 	void BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-		TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene);
+		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
 	// Drains the queues and applies them to the batch tree. Returns true if any
 	// delta was applied.
 	bool ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
-		TextureManager* tm, ShaderManager* sm, BufferManager* bm, SceneData* scene);
+		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
 	void FinalizeOffsets(PassManager* pass_manager, BufferManager* bm);
 
 	// Find-or-create the batch nodes for a single entity and record its slots.
 	// Shared by full rebuild and incremental add.
 	void AddEntityToBatches(Entity entity, PipeManager* pm, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+		ModelManager* mdm, MaterialManager* mtm,
 		const MaterialComponent& material_component, const ModelComponent& model_component);
 	void RemoveEntityFromBatches(Entity entity);
 

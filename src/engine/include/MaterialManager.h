@@ -27,9 +27,8 @@ public:
 	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, TextureName>> textures, std::vector<ShaderName> shaders);
 
 	// Merge-upsert материалов из манифеста (см. SceneMaterialEntry). Существующий обновляется
-	// В МЕСТЕ (указатель у энтити жив — MaterialComponent.materials перепривяжется на пересборке,
-	// но и так тот же адрес), новый создаётся. params/params_type проставляются напрямую. Материалы
-	// вне манифеста не трогаются. Возвращает число обработанных.
+	// В МЕСТЕ, новый создаётся. params/params_type проставляются напрямую. Материалы вне
+	// манифеста не трогаются. Возвращает число обработанных.
 	size_t LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries);
 
 	// Сбор usage-флагов. Слот материала — это ФРАГМЕНТНЫЙ СЭМПЛЕР по определению (TextureSlotRole →

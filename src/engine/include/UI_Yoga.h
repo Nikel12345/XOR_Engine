@@ -5,8 +5,6 @@
 
 class EngineContext;
 class FontManager;
-struct Material;
-struct ModelData;
 struct FontData;
 
 // Мост между flex-раскладкой (Yoga) и ECS-энтити UI. Игра описывает ДЕРЕВО боксов (стили +
@@ -14,7 +12,7 @@ struct FontData;
 // Сам Yoga наружу НЕ течёт (pimpl) — как SDL_ttf в FontManager. Ручное создание UI-энтити
 // (ctx->CreateEntity с UIComponent) по-прежнему работает: это просто второй, императивный путь.
 //
-// Модель — «всё есть бокс» (как div/span/text в HTML): контейнер (material==nullptr) не рисуется,
+// Модель — «всё есть бокс» (как div/span/text в HTML): контейнер (без материала) не рисуется,
 // только раскладывает детей; Box с материалом = панель (фон); Text = бокс с intrinsic-размером
 // из метрик шрифта (тайтовый прямоугольник по строке). Т.к. Yoga считает в ПИКСЕЛЯХ кадра и rect
 // переводится в NDC по реальному размеру экрана, форма получается aspect-корректной сама —
@@ -46,10 +44,12 @@ public:
     static constexpr Node kInvalid = 0xFFFFFFFFu;
 
     // Построение дерева (обычно в init игры). Root начинает новое дерево (сносит прежнее).
+    // Материал/модель узла — ПО ИМЕНИ: узел кладёт их в ModelComponent/MaterialComponent как есть,
+    // а те держат имена (резолв — на сборке батчей). Пустое имя материала → чистый контейнер.
     Node Root(const UIStyle& s);                                        // корень = холст экрана
-    Node Box (Node parent, const UIStyle& s, Material* material, ModelData* quad);   // material==nullptr → контейнер
+    Node Box (Node parent, const UIStyle& s, const std::string& material, const std::string& quad);
     Node Text(Node parent, const UIStyle& s, const std::string& utf8,
-              Material* material, ModelData* quad, FontData* font, FontManager* fm);
+              const std::string& material, const std::string& quad, FontData* font, FontManager* fm);
 
     void Clear();                        // снести дерево (энтити снимутся на следующем Emit)
     void MarkDirty() { dirty_ = true; }  // ресайз окна / смена контента → пересчёт на следующем Emit

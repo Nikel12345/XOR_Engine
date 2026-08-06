@@ -4,8 +4,7 @@
 #include "ThreadController.h"
 #include "InputManager.h"
 #include "config.h"
-#include "imgui.h"
-#include "imgui_impl_sdl3.h"
+#include "UI_ImGui.h"
 extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 static SDL_Window* win = NULL;
 static SDL_GPUDevice* dev = NULL;
@@ -67,7 +66,7 @@ int main() {
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
-            ImGui_ImplSDL3_ProcessEvent(&event);
+            UI_ImGui::ProcessEvent(event);
 
             // События окна/жизненного цикла — здесь, где есть engine и running.
             if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) { running = false; break; }

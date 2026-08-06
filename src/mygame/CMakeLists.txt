@@ -14,9 +14,9 @@ target_include_directories(MyGame PRIVATE
 
 target_link_libraries(MyGame PRIVATE Engine Physics)
 
-# PCH: как у Game — std/SDL/glm/imgui + Engine.h (см. src/game/CMakeLists.txt).
+# PCH: как у Game — std/SDL/glm БЕЗ imgui + Engine.h (см. src/game/CMakeLists.txt).
 target_precompile_headers(MyGame PRIVATE
-    "${CMAKE_SOURCE_DIR}/src/engine/include/PCH_Engine.h"
+    "${CMAKE_SOURCE_DIR}/src/engine/include/PCH.h"
     "${CMAKE_SOURCE_DIR}/src/engine/include/Engine.h"
 )
 
