@@ -13,15 +13,44 @@ static constexpr float WIDTH = 800.0f;
 static constexpr float HEIGHT = 600.0f;
 
 int main() {
-    win = SDL_CreateWindow("MyGame",
-        static_cast<int>(WIDTH),
-        static_cast<int>(HEIGHT),
-        SDL_WINDOW_RESIZABLE);
-    dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV |
-        SDL_GPU_SHADERFORMAT_DXIL |
-        SDL_GPU_SHADERFORMAT_MSL,
-        true, nullptr);
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        SDL_Log("SDL_Init failed: %s", SDL_GetError());
+        return 1;
+    }
+    auto make_window = [] {
+        return SDL_CreateWindow("MyGame",
+            static_cast<int>(WIDTH), static_cast<int>(HEIGHT), SDL_WINDOW_RESIZABLE);
+    };
+    win = make_window();
+    if (!win) {
+        SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
+        return 1;
+    }
+    // ТОЛЬКО SPIRV: движок компилирует шейдеры единственным путём и отдаёт compute-пайплайны
+    // сырым SPIR-V (PipeManager::GetOrCreateComputePipeline). Перечислить тут DXIL/MSL — значит
+    // разрешить SDL выбрать бэкенд, для которого у нас нет байткода: на SDL 3.4 авто-выбор на
+    // Windows уходит в D3D12, и compute-пайплайны падают на «not valid DXIL».
+    dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, nullptr);
+    if (!dev) {
+        SDL_Log("SDL_CreateGPUDevice failed: %s", SDL_GetError());
+        return 1;
+    }
+    SDL_Log("GPU backend: %s", SDL_GetGPUDeviceDriver(dev));
     SDL_ClaimWindowForGPUDevice(dev, win);
+
+    // БАГ SDL 3.4.14: первое окно процесса Vulkan-девайс не заклеймливает (claim возвращает true,
+    // но окно не регистрируется). Подробности и разбор — в game/src/main.cpp и в зонде
+    // sandbox/src/ClaimWindowProbe.cpp. Проверяем факт, а не возврат; ветка сама отомрёт с фиксом.
+    if (SDL_GetGPUSwapchainTextureFormat(dev, win) == SDL_GPU_TEXTUREFORMAT_INVALID) {
+        SDL_Log("Claim didn't take (SDL 3.4 first-window bug) - recreating window");
+        SDL_ReleaseWindowFromGPUDevice(dev, win);
+        SDL_DestroyWindow(win);
+        win = make_window();
+        if (!win || !SDL_ClaimWindowForGPUDevice(dev, win)) {
+            SDL_Log("Window re-claim failed: %s", SDL_GetError());
+            return 1;
+        }
+    }
     SDL_SetGPUAllowedFramesInFlight(dev, BUFFERING_LEVEL);
 
     SDL_GPUPresentMode desired_mode = SDL_GPU_PRESENTMODE_IMMEDIATE;

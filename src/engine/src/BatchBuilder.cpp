@@ -151,6 +151,12 @@ void BatchBuilder::QueueDelete(Entity entity)
     entities_to_delete.push_back(entity);
 }
 
+void BatchBuilder::QueueUpdate(Entity entity)
+{
+    std::lock_guard<std::mutex> lock(delta_mutex);
+    entities_to_update.push_back(entity);
+}
+
 void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
     ModelManager* mdm, MaterialManager* mtm,
     const MaterialComponent& material_component, const ModelComponent& model_component) {
@@ -438,6 +444,7 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
         std::lock_guard<std::mutex> lock(delta_mutex);
         entities_to_create.clear();
         entities_to_delete.clear();
+        entities_to_update.clear();
     }
 
     // Отбор по маркеру DrawComponent — Positions НЕ требуется (тот же критерий, что в
@@ -467,13 +474,35 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
 {
     // Atomically take + clear the queues, then work on the local copies outside
     // the lock so we never hold delta_mutex while mutating the batch tree.
-    std::vector<Entity> creates, deletes;
+    std::vector<Entity> creates, deletes, updates;
     {
         std::lock_guard<std::mutex> lock(delta_mutex);
         creates.swap(entities_to_create);
         deletes.swap(entities_to_delete);
+        updates.swap(entities_to_update);
     }
-    if (creates.empty() && deletes.empty()) return false;
+    if (creates.empty() && deletes.empty() && updates.empty()) return false;
+
+    // Add-сторона общая для create и update: отбор рисуемого — тот же, что в BuildRenderBatches
+    // (есть модель и материал; есть DrawComponent и он visible — флаг источник истины).
+    auto add_if_drawable = [&](Entity entity) {
+        if (!om->Has<ModelComponent>(scene, entity) || !om->Has<MaterialComponent>(scene, entity))
+            return;
+        if (!om->Has<DrawComponent>(scene, entity) || !om->GetComponent<DrawComponent>(scene, entity).visible)
+            return;
+        const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
+        const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
+        AddEntityToBatches(entity, pm, tm, sm, bm, mdm, mtm, material_component, model_component);
+    };
+
+    // Перевесить — ПЕРВЫМИ и в обход обоих гардов create-стороны: энтити жива, просто её место
+    // в дереве изменилось. Снять со старых слотов и добавить по текущим компонентам. Порядок
+    // важен: после этого она уже в дереве, поэтому парный QueueCreate (если он был) погасится
+    // гардом идемпотентности, а парный QueueDelete отработает ниже и уберёт её целиком.
+    for (Entity entity : updates) {
+        RemoveEntityFromBatches(entity);
+        add_if_drawable(entity);
+    }
 
     // An entity created AND deleted in the same frame is dropped from the add
     // side (its components are already gone from ECS). RemoveEntityFromBatches is
@@ -486,16 +515,7 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
         // создания энтити). Если энтити уже в дереве — повторный AddEntityToBatches
         // наплодил бы дубликаты слотов в PIB. «Show» уже видимого — просто no-op.
         if (entity_slots.count(entity)) continue;
-        // Батчим только если есть и модель, и материал (см. BuildRenderBatches).
-        if (!om->Has<ModelComponent>(scene, entity) || !om->Has<MaterialComponent>(scene, entity))
-            continue;
-        // Скрытый энтити в дерево не добавляем — флаг visible источник истины (тот же
-        // отбор, что в BuildRenderBatches). Нет DrawComponent — тоже не рисуемый.
-        if (!om->Has<DrawComponent>(scene, entity) || !om->GetComponent<DrawComponent>(scene, entity).visible)
-            continue;
-        const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
-        const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
-        AddEntityToBatches(entity, pm, tm, sm, bm, mdm, mtm, material_component, model_component);
+        add_if_drawable(entity);
     }
     for (Entity entity : deletes) {
         RemoveEntityFromBatches(entity);

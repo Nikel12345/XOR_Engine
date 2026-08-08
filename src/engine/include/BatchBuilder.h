@@ -44,6 +44,12 @@ public:
 	// Incremental delta (queued from UI thread, drained on prepare thread).
 	void QueueCreate(Entity entity);
 	void QueueDelete(Entity entity);
+	// «Перевесить»: энтити ОСТАЁТСЯ, но её место в дереве изменилось (сменили модель/материал →
+	// другие sp/atlas/model-батчи). Снимает со старых слотов и добавляет заново по ТЕКУЩИМ
+	// компонентам — то же, что recreate, но без пересоздания самой энтити.
+	// Отдельный путь, а не пара Delete+Create: у пары add-сторона гасится дважды — как «создана
+	// и удалена в одном кадре» и гардом идемпотентности (энтити уже в дереве).
+	void QueueUpdate(Entity entity);
 
 	// Monotonic version of the batch tree. Any consumer (PIB, indirect, ...) caches
 	// the last revision it processed and re-uploads only when this differs — so the
@@ -112,9 +118,10 @@ private:
 	// rebuild, mutated incrementally by AddEntityToBatches/RemoveEntityFromBatches.
 	std::unordered_map<Entity, std::vector<PibSlot>> entity_slots;
 
-	std::mutex          delta_mutex;        // guards both delta queues
+	std::mutex          delta_mutex;        // guards all delta queues
 	std::vector<Entity> entities_to_create; // protected by delta_mutex
 	std::vector<Entity> entities_to_delete; // protected by delta_mutex
+	std::vector<Entity> entities_to_update; // protected by delta_mutex
 
 	// Текущая раскладка (двойник дерева после FinalizeOffsets) и её пер-слотовые стампы.
 	// current_layout пишет только sim (prepare); слоты берут shared_ptr — старый слот

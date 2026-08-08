@@ -107,7 +107,7 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
         return nullptr;
     }
 
-    // === Хэш: верхний файл + рекурсивно все его #include + целевая платформа/GPU ===
+    // === Хэш: верхний файл + рекурсивно все его #include + платформа/GPU/тулчейн ===
     const SDL_GPUShaderFormat supported = SDL_GetGPUShaderFormats(dev);
     const char* include_dir = "../engine/shaders_code";   // один источник истины (см. ниже hlsl_info)
 
@@ -122,6 +122,41 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     // GPU-формат (DXIL / MSL / SPIRV) — чтобы при смене видеокарты/ОС кэш пересобрался.
     hash ^= (uint64_t)supported;
     hash *= 1099511628211ULL;   // чтобы изменение формата сильно меняло хэш
+
+    // Версия ТУЛЧЕЙНА. Именно она решает: в кэше лежит SPIR-V, выданный DXC внутри shadercross,
+    // поэтому при неизменном исходнике байткод меняет ровно обновление shadercross — без этого
+    // ключа грузился бы .spv от прежнего компилятора. Версия компилтайм (заголовки, с которыми
+    // собрались), рантайм-геттера у shadercross нет.
+    const uint32_t toolchain_ver = SDL_SHADERCROSS_MAJOR_VERSION * 1000000u
+                                 + SDL_SHADERCROSS_MINOR_VERSION * 1000u
+                                 + SDL_SHADERCROSS_MICRO_VERSION;
+    FnvMix(hash, (const uint8_t*)&toolchain_ver, sizeof(toolchain_ver));
+
+    // Устройство и версия драйвера (SDL 3.4, SDL_GetGPUDeviceProperties). На сам SPIR-V драйвер
+    // НЕ влияет — он его лишь потребляет на сборке пайплайна; ключ расширен консервативно, чтобы
+    // смена GPU или обновление драйвера гарантированно давали свежую компиляцию. Цена промаха —
+    // одна перекомпиляция на старте. Строки домешиваем целиком: их формат не специфицирован
+    // (см. докстринг SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING), разбирать на части нельзя.
+    if (const SDL_PropertiesID gpu_props = SDL_GetGPUDeviceProperties(dev)) {
+        // Печатаем ОДИН раз на процесс (а не на каждый шейдер): это состав ключа, он неизменен.
+        // Смысл лога — видеть, что свойства реально непусты: пустые строки домешали бы ноль байт,
+        // и расширение ключа молча стало бы пустышкой.
+        static bool logged = false;
+        const uint64_t before = hash;
+        for (const char* key : { SDL_PROP_GPU_DEVICE_NAME_STRING,
+                                 SDL_PROP_GPU_DEVICE_DRIVER_NAME_STRING,
+                                 SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING }) {
+            const char* val = SDL_GetStringProperty(gpu_props, key, "");
+            if (!logged) SDL_Log("[Shader] cache key: %s = '%s'", key, val);
+            FnvMix(hash, (const uint8_t*)val, SDL_strlen(val));
+        }
+        if (!logged) {
+            SDL_Log("[Shader] cache key: GPU-part %s (hash %016llx -> %016llx)",
+                hash == before ? "NO EFFECT (empty props!)" : "applied",
+                (unsigned long long)before, (unsigned long long)hash);
+            logged = true;
+        }
+    }
 
     std::string cache_path = BuildCachePath(hlsl_path, hash);
 
