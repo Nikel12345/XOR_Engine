@@ -462,10 +462,36 @@ void TextureManager::_BuildUploadTasks() {
     for (auto& task : upload_tasks)
         _PlaceTask(task);
 
+    // Оффсет задачи обязан быть кратен размеру текселя формата НАЗНАЧЕНИЯ
+    // (VUID-vkCmdCopyBufferToImage-dstImage-07975), а задачи РАЗНЫХ форматов лежат в ОДНОМ
+    // трансфер-буфере: глифы шрифта грузятся в R8-атлас (__TextAtlas) задачами размером w*h —
+    // сплошь и рядом нечётным, — и первая же такая задача сбивает выравнивание ВСЕМ следующим
+    // за ней 4-байтовым атласам (albedo/normal/env_skybox). Копия с невыровненного оффсета —
+    // UB: один драйвер её вытягивает, другой читает со сдвигом на байт, и каналы уезжают
+    // (альфа 255 попадает в синий → вся текстурированная картинка в «синем фильтре»).
+    // Шаг берём у САМОГО формата (SDL знает: 1 у R8, 4 у BGRA8, 8/16 у 16F/32F и BC), а не
+    // константой сверху — тогда R8-глифы пакуются впритык, а платят выравниванием только те,
+    // кому оно правда нужно.
     uint32_t off = 0;
     for (auto& t : upload_tasks) {
+        // Атлас у задачи есть всегда — _PlaceTask выше разыменовывает его без проверки; здесь
+        // это лишь страховка, чтобы оффсеты остались монотонными, а не «залипли» на нуле.
+        const TextureAtlas* a = t.target_handle ? t.target_handle->atlas : nullptr;
+        const uint32_t align = a ? SDL_GPUTextureFormatTexelBlockSize(a->format) : 16;
+        if (align > 1) off = (off + align - 1) / align * align;
         t.offset = off;
         off += t.size;
+        if (!a) continue;
+
+        // Размер задачи ДОЛЖЕН совпадать с тем, сколько байт ждёт формат назначения: сюда
+        // приходят два разных пути (CreateTexture с BGRA от TextureLoader и FontManager с
+        // R8, собранным руками из альфы), и расхождение форматов даст не ошибку валидации,
+        // а тихую порчу — сдвиг строк или чтение за границей TB. Ловим здесь, а не по цвету
+        // на экране. Размеры уже с gutter'ом: _PlaceTask обновляет width/height/size вместе.
+        const uint32_t expect = SDL_CalculateGPUTextureFormatSize(a->format, t.width, t.height, 1);
+        if (t.size != expect)
+            SDL_Log("Upload '%s': %u байт, а формат атласа '%s' ждёт %u (%ux%u)",
+                t.name.c_str(), t.size, a->debug_name.c_str(), expect, t.width, t.height);
     }
 }
 
