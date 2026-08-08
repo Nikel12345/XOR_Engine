@@ -39,9 +39,10 @@ install(TARGETS MyGame
     RUNTIME DESTINATION .       # MyGame.exe ляжет в корень dist/
 )
 
-# DLL-ки
+# DLL-ки. SDL3.dll теперь собирается нами (external/SDL3), поэтому берём её у цели,
+# а не по фиксированному пути; остальные — готовые бинарники.
 install(FILES
-    "${CMAKE_SOURCE_DIR}/external/SDL3/bin/SDL3.dll"
+    $<TARGET_FILE:SDL3::SDL3>
     "${CMAKE_SOURCE_DIR}/external/SDL3_image/lib/x64/SDL3_image.dll"
     DESTINATION .
 )

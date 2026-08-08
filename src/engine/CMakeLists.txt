@@ -16,10 +16,9 @@ add_library(ImGui STATIC
 target_include_directories(ImGui PUBLIC
     "${CMAKE_SOURCE_DIR}/external/ImGui/include"
     "${CMAKE_SOURCE_DIR}/external/ImGuizmo"
-    "${CMAKE_SOURCE_DIR}/external/SDL3/include"
 )
 target_link_libraries(ImGui PUBLIC
-    "${CMAKE_SOURCE_DIR}/external/SDL3/lib/libSDL3.dll.a"
+    SDL3::SDL3          # include-пути SDL приходят вместе с целью (см. корневой CMakeLists)
 )
 
 # SPIRV (spirv_reflect) удалён из сборки: рефлексия идёт через shadercross
@@ -72,14 +71,13 @@ source_group("Headers" FILES ${ENGINEECS_HDR})
 
 target_include_directories(EngineEcs PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "${CMAKE_SOURCE_DIR}/external/SDL3/include"             # BaseComponents.h включает SDL
 )
 target_include_directories(EngineEcs PRIVATE
     "${CMAKE_SOURCE_DIR}/external/glm"                      # нужно для PCH.h
     "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/include" # тоже только ради общего PCH (косметика)
 )
 target_link_libraries(EngineEcs PUBLIC
-    "${CMAKE_SOURCE_DIR}/external/SDL3/lib/libSDL3.dll.a"
+    SDL3::SDL3                                              # BaseComponents.h включает SDL; цель даёт и include-пути
     yyjson                                                  # scene.json: колоночная сериализация ECS (ComponentSerializer.h раскрывает yyjson-типы)
 )
 target_precompile_headers(EngineEcs PRIVATE
@@ -147,7 +145,6 @@ target_include_directories(EngineGpu PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     "${CMAKE_SOURCE_DIR}/external/glm"
-    "${CMAKE_SOURCE_DIR}/external/SDL3/include"
     "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/include"   # ShaderManager.h раскрывает SDL_ShaderCross_*
 )
 target_include_directories(EngineGpu PRIVATE
@@ -155,7 +152,7 @@ target_include_directories(EngineGpu PRIVATE
 )
 
 target_link_libraries(EngineGpu PUBLIC
-    "${CMAKE_SOURCE_DIR}/external/SDL3/lib/libSDL3.dll.a"
+    SDL3::SDL3          # SDL3-инклуды публичных заголовков GPU-кора приходят вместе с целью
 )
 target_link_libraries(EngineGpu PRIVATE
     "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/lib/SDL3_shadercross.lib"  # компиляция шейдеров — только внутри
