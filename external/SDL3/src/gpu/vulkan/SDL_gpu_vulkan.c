@@ -643,6 +643,22 @@ typedef Uint32 VulkanBufferUsageModeFlags;
 #define VULKAN_BUFFER_USAGE_MODE_COMPUTE_STORAGE_READ           (1u << 6)
 #define VULKAN_BUFFER_USAGE_MODE_COMPUTE_STORAGE_READ_WRITE     (1u << 7)
 
+/* ENGINE-FORK: какие usage-биты ВЫРАЗИМЫ в барьере на очереди данной семьи.
+ *
+ * SetMemoryBarrierFlags переводит эти биты в стадии конвейера (VERTEX_READ →
+ * VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, COMPUTE_STORAGE_READ → COMPUTE_SHADER, ...).
+ * На очереди без VK_QUEUE_GRAPHICS_BIT/COMPUTE_BIT таких стадий не существует, и барьер,
+ * который их называет, невалиден. Поэтому перед выводом барьера usage-биты режутся маской
+ * очереди, на которой пишется командный буфер.
+ *
+ * Маска — свойство ПАРЫ (ресурс, очередь), а не ресурса: сам буфер своих usage-флагов не
+ * теряет никогда. В создание ресурса (VULKAN_INTERNAL_CreateBuffer) маска не попадает —
+ * иначе буфер создался бы без VERTEX и стал непригоден для отрисовки навсегда.
+ */
+#define VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS  0xFFFFFFFFu
+#define VULKAN_BUFFER_USAGE_MODE_MASK_TRANSFER  (VULKAN_BUFFER_USAGE_MODE_COPY_SOURCE | \
+                                                 VULKAN_BUFFER_USAGE_MODE_COPY_DESTINATION)
+
 typedef enum VulkanTextureUsageMode
 {
     VULKAN_TEXTURE_USAGE_MODE_UNINITIALIZED,
@@ -1088,6 +1104,12 @@ struct VulkanCommandPool
 {
     SDL_ThreadID threadID;
     VkCommandPool commandPool;
+
+    /* ENGINE-FORK: маска выразимых usage-битов очереди этой семьи (см. VULKAN_BUFFER_USAGE_MODE_MASK_*).
+     * Живёт на пуле, а не на командном буфере, потому что это свойство СЕМЬИ очередей: пул уже
+     * создаётся с queueFamilyIndex, и когда ключ пула станет (threadID, family), маска поедет
+     * вместе с ним без единой правки в местах вывода барьеров. */
+    VulkanBufferUsageModeFlags queueUsageModeMask;
 
     VulkanCommandBuffer **inactiveCommandBuffers;
     Uint32 inactiveCommandBufferCapacity;
@@ -2658,6 +2680,11 @@ static void VULKAN_INTERNAL_BufferMemoryBarrier(
     memoryBarrier.offset = 0;
     memoryBarrier.size = buffer->size;
 
+    /* ENGINE-FORK: срезать биты, невыразимые на очереди этого командного буфера.
+     * На графической/унифицированной очереди маска пропускает всё — поведение не меняется. */
+    sourceUsageMode &= commandBuffer->commandPool->queueUsageModeMask;
+    destinationUsageMode &= commandBuffer->commandPool->queueUsageModeMask;
+
     VULKAN_INTERNAL_SetMemoryBarrierFlags(
         sourceUsageMode,
         &srcStages,
@@ -2667,6 +2694,20 @@ static void VULKAN_INTERNAL_BufferMemoryBarrier(
         destinationUsageMode,
         &dstStages,
         &memoryBarrier.dstAccessMask);
+
+    /* ENGINE-FORK: пустая маска — это НЕ нулевые стадии: барьер, не называющий ни одной стадии,
+     * невалиден. Пустая сторона выражается явной формой «здесь потребителя/производителя нет»:
+     *   dst пуст  → BOTTOM_OF_PIPE: запись сделать доступной, ждать на этой очереди некому (release);
+     *   src пуст  → TOP_OF_PIPE:    ждать на этой очереди нечего (acquire).
+     * Соответствующая маска доступа при этом обязана остаться нулевой — она уже нулевая, потому
+     * что SetMemoryBarrierFlags ставит биты доступа только вместе со стадиями.
+     * Видимость между лентами закрывает не этот барьер, а сабмит-fence кадра. */
+    if (srcStages == 0) {
+        srcStages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    }
+    if (dstStages == 0) {
+        dstStages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    }
 
     renderer->vkCmdPipelineBarrier(
         commandBuffer->commandBuffer,
@@ -2697,6 +2738,24 @@ static void VULKAN_INTERNAL_TextureMemoryBarrier(
     VkPipelineStageFlags srcStages = 0;
     VkPipelineStageFlags dstStages = 0;
     VkImageMemoryBarrier memoryBarrier;
+
+    /* ENGINE-FORK: текстурный барьер маской НЕ режется — он запрещён вне графической очереди.
+     *
+     * Разница с буфером принципиальная. Буферные usage-биты складываются (DefaultBufferUsageMode
+     * копит их через |=), поэтому маска у буфера убирает слагаемые, оставляя остальные верными.
+     * Текстурный режим выбирается первым подошедшим по приоритету (DefaultTextureUsageMode,
+     * цепочка else if, SAMPLER первым), и это не «набор бит», а РАСКЛАДКА байт в памяти. Срезать
+     * там нечего: маска сменила бы ответ целиком — копировальная очередь, «не знающая» про
+     * SAMPLER, оставила бы картинку в форме приёмника копии, а SDL дальше считал бы её готовой
+     * к чтению. Инвариант «между операциями ресурс в своём состоянии по умолчанию» сломался бы
+     * молча: валидация не скажет ничего, вылезет мусором на экране.
+     *
+     * Поэтому граница проходит не по «текстуры vs буферы», а по «есть layout vs нет layout», и
+     * вся текстурная работа живёт на render-ленте. Ассерт — вторая линия обороны: первая, типы
+     * командных буферов на стороне движка, не даёт записать текстурную операцию на upload-ленту. */
+    SDL_assert_release(
+        commandBuffer->commandPool->queueUsageModeMask == VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS &&
+        "Texture barrier on a non-graphics queue!");
 
     memoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     memoryBarrier.pNext = NULL;
@@ -9621,6 +9680,10 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
     }
 
     vulkanCommandPool->threadID = threadID;
+    /* ENGINE-FORK: пока очередь одна и она графическая — маска пропускает всё, вывод барьеров
+     * не меняется ни на бит. Появится вторая (копировальная) семья — её пулы получат
+     * VULKAN_BUFFER_USAGE_MODE_MASK_TRANSFER здесь же. */
+    vulkanCommandPool->queueUsageModeMask = VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS;
 
     vulkanCommandPool->inactiveCommandBufferCapacity = 0;
     vulkanCommandPool->inactiveCommandBufferCount = 0;
