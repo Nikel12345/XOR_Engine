@@ -1110,6 +1110,13 @@ struct VulkanCommandPool
     SDL_ThreadID threadID;
     VkCommandPool commandPool;
 
+    /* ENGINE-FORK: семья пула и ЕЁ очередь — сюда уходит сабмит любого буфера этого пула.
+     * Разрешается один раз при создании пула, потому что дальше это неизменно: командный буфер
+     * годен только для той семьи, из пула которой взят. Так сабмит перестаёт зависеть от
+     * глобальной renderer->unifiedQueue и не требует нигде спрашивать роль. */
+    Uint32 queueFamilyIndex;
+    VkQueue queue;
+
     /* ENGINE-FORK: маска выразимых usage-битов очереди этой семьи (см. VULKAN_BUFFER_USAGE_MODE_MASK_*).
      * Живёт на пуле, а не на командном буфере, потому что это свойство СЕМЬИ очередей: пул уже
      * создаётся с queueFamilyIndex, и когда ключ пула станет (threadID, family), маска поедет
@@ -9710,6 +9717,22 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
     }
 
     vulkanCommandPool->threadID = threadID;
+
+    /* ENGINE-FORK: семья → очередь. Таблица renderer->queues[] индексируется РОЛЬЮ, а здесь у
+     * нас семья, поэтому ищем первую роль с этой семьёй. Ответ однозначен: роли, делящие семью,
+     * получили одну и ту же ручку (vkGetDeviceQueue с одинаковыми аргументами).
+     * Промах невозможен — семья пришла из этой же таблицы. */
+    vulkanCommandPool->queueFamilyIndex = queueFamilyIndex;
+    vulkanCommandPool->queue = VK_NULL_HANDLE;
+    for (Uint32 role = 0; role < SDL_GPU_QUEUETYPE_COUNT; role += 1) {
+        if (renderer->queueFamilyIndices[role] == queueFamilyIndex) {
+            vulkanCommandPool->queue = renderer->queues[role];
+            break;
+        }
+    }
+    SDL_assert_release(vulkanCommandPool->queue != VK_NULL_HANDLE &&
+                       "Command pool family has no queue!");
+
     /* ENGINE-FORK: пока очередь одна и она графическая — маска пропускает всё, вывод барьеров
      * не меняется ни на бит. Появится вторая (копировальная) семья — её пулы получат
      * VULKAN_BUFFER_USAGE_MODE_MASK_TRANSFER здесь же. */
@@ -10985,8 +11008,15 @@ static bool VULKAN_Submit(
     submitInfo.pSignalSemaphores = vulkanCommandBuffer->signalSemaphores;
     submitInfo.signalSemaphoreCount = vulkanCommandBuffer->signalSemaphoreCount;
 
+    /* ENGINE-FORK: в СВОЮ очередь, а не в глобальную. Буфер годен только для семьи своего пула,
+     * поэтому очередь берётся оттуда же — спрашивать роль на этом уровне не нужно и негде.
+     *
+     * submitLock остаётся ОДИН на все очереди, и это не пережиток: vkQueueSubmit требует внешней
+     * синхронизации на очередь, но под этим же замком идут ОБЩИЕ вещи — пул fence'ов, списки
+     * отложенного разрушения, дефраг. Их per-queue не разложить. Цена мала: vkQueueSubmit только
+     * ставит работу в очередь и возвращается, параллельность живёт на GPU, а не здесь. */
     vulkanResult = renderer->vkQueueSubmit(
-        renderer->unifiedQueue,
+        vulkanCommandBuffer->commandPool->queue,
         1,
         &submitInfo,
         vulkanCommandBuffer->inFlightFence->fence);
@@ -11010,8 +11040,16 @@ static bool VULKAN_Submit(
         presentInfo.pImageIndices = &presentData->swapchainImageIndex;
         presentInfo.pResults = NULL;
 
+        /* ENGINE-FORK: презент ВСЕГДА на графической, а не на очереди этого буфера. Семья под
+         * презент выбиралась с явной проверкой SDL_Vulkan_GetPresentationSupport — у
+         * копировальной и вычислительной семей его нет, и презент с них невалиден.
+         *
+         * Сегодня это совпадает с очередью буфера (presentData появляется только у того, кто
+         * запрашивал свопчейн, а свопчейн — операция графической роли), но полагаться на
+         * совпадение нельзя: оно неявное, а нарушение дало бы не ошибку компиляции, а падение
+         * на чужой машине. */
         presentResult = renderer->vkQueuePresentKHR(
-            renderer->unifiedQueue,
+            renderer->queues[SDL_GPU_QUEUETYPE_GRAPHICS],
             &presentInfo);
 
         if (presentResult == VK_SUCCESS || presentResult == VK_SUBOPTIMAL_KHR || presentResult == VK_ERROR_OUT_OF_DATE_KHR) {
