@@ -140,8 +140,13 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp, Sha
         pci.target_info.color_target_descriptions = nullptr;
     }
 
-    pci.target_info.has_depth_stencil_target = true;
-    pci.target_info.depth_stencil_format = sp->associated_render_pass->renderPassTexsData.depth_format;
+    // Наличие depth-таргета ВЫВОДИТСЯ из формата, а не считается данностью. Проход без глубины
+    // законен (полноэкранный эффект в один цвет, отладочная отрисовка), а раньше жёсткий true
+    // отправлял в SDL depth_stencil_format = INVALID — то есть ассерт «Invalid texture format
+    // enum!» внутри SDL_CreateGPUGraphicsPipeline. У проходов С глубиной поведение прежнее.
+    const SDL_GPUTextureFormat ds_fmt = sp->associated_render_pass->renderPassTexsData.depth_format;
+    pci.target_info.has_depth_stencil_target = (ds_fmt != SDL_GPU_TEXTUREFORMAT_INVALID);
+    pci.target_info.depth_stencil_format = ds_fmt;
 
 	SDL_GPUGraphicsPipeline* pipe = nullptr;
     pipe = SDL_CreateGPUGraphicsPipeline(dev, &pci);
