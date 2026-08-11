@@ -1178,12 +1178,19 @@ struct VulkanRenderer
     Uint32 queueFamilyIndex;
     VkQueue unifiedQueue;
 
-    /* ENGINE-FORK: семья для SDL_GPU_QUEUETYPE_TRANSFER. Пока отдельная не заводится, РАВНА
-     * queueFamilyIndex — именно через это равенство и работает fallback: перевод роли в семью
-     * (VULKAN_AcquireCommandBuffer) просто выдаёт ту же семью, и ни ключ пула, ни что-либо
-     * ниже не узнаёт, что второй очереди нет. Появится отдельная — меняется одно присваивание
-     * при создании устройства, остальной код уже готов. */
-    Uint32 transferQueueFamilyIndex;
+    /* ENGINE-FORK: семья и очередь на КАЖДУЮ роль, индексируются SDL_GPUQueueType.
+     *
+     * Таблицей, а не отдельными полями на роль: перевод роли в семью становится одним
+     * обращением по индексу без единой ветки, и добавление роли не трогает код вообще.
+     *
+     * Fallback выражен ЗАПОЛНЕНИЕМ, а не проверками: роль, для которой отдельной семьи не
+     * нашлось, получает графическую. Поэтому нигде ниже — ни в переводе роли, ни в ключе пула,
+     * ни в сабмите — не нужно спрашивать «а есть ли такая очередь».
+     *
+     * queueFamilyIndex/unifiedQueue выше оставлены как есть: на них завязан апстримный код
+     * (свопчейн, создание ресурсов), и они всегда равны графическому элементу этих таблиц. */
+    Uint32  queueFamilyIndices[SDL_GPU_QUEUETYPE_COUNT];
+    VkQueue queues[SDL_GPU_QUEUETYPE_COUNT];
 
     VulkanCommandBuffer **submittedCommandBuffers;
     Uint32 submittedCommandBufferCount;
@@ -9769,14 +9776,9 @@ static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
     SDL_ThreadID threadID = SDL_GetCurrentThreadID();
 
     /* ENGINE-FORK: РОЛЬ → СЕМЬЯ. Единственное место перевода: выше по стеку живёт намерение
-     * вызывающего, ниже — только индекс семьи (см. CommandPoolHashTableKey).
-     * transferQueueFamilyIndex равен графической, пока вторая семья не заведена, поэтому
-     * TRANSFER здесь штатно вырождается в графическую очередь — ветки на «а есть ли она»
-     * ни тут, ни у вызывающего не нужно. */
-    Uint32 queueFamilyIndex =
-        (queueType == SDL_GPU_QUEUETYPE_TRANSFER)
-            ? renderer->transferQueueFamilyIndex
-            : renderer->queueFamilyIndex;
+     * вызывающего, ниже — только индекс семьи (см. CommandPoolHashTableKey). Веток нет: роль
+     * без своей семьи получила графическую ещё при выборе устройства. */
+    Uint32 queueFamilyIndex = renderer->queueFamilyIndices[queueType];
 
     SDL_LockMutex(renderer->acquireCommandBufferLock);
 
@@ -12346,7 +12348,11 @@ static Uint8 VULKAN_INTERNAL_IsDeviceSuitable(
     VulkanFeatures *features,
     VkPhysicalDevice physicalDevice,
     VulkanExtensions *physicalDeviceExtensions,
-    Uint32 *queueFamilyIndex)
+    Uint32 *queueFamilyIndex,
+    /* ENGINE-FORK: выделенные семьи под COMPUTE и TRANSFER. SDL_MAX_UINT32 — не нашлось,
+     * тогда роль отдаётся графической (заполняется вызывающим). */
+    Uint32 *computeQueueFamilyIndex,
+    Uint32 *transferQueueFamilyIndex)
 {
     Uint32 queueFamilyCount, queueFamilyRank, queueFamilyBest;
     VkQueueFamilyProperties *queueProps;
@@ -12451,6 +12457,41 @@ static Uint8 VULKAN_INTERNAL_IsDeviceSuitable(
         }
     }
 
+    /* ENGINE-FORK: ВЫДЕЛЕННЫЕ семьи под compute и transfer.
+     *
+     * Ищем строго специализированные, а не «любую подходящую»: смысл второй очереди в том,
+     * чтобы работа шла на ДРУГОМ аппаратном движке. Семья с GRAPHICS_BIT — это тот же движок,
+     * что и рендер, и вынос на неё дал бы только иллюзию.
+     *
+     *   compute   = COMPUTE, но НЕ GRAPHICS  (на AMD это ACE)
+     *   transfer  = TRANSFER, но НЕ GRAPHICS и НЕ COMPUTE  (выделенный DMA, на AMD SDMA)
+     *
+     * Про TRANSFER_BIT: спека разрешает семье с graphics/compute не выставлять его, хотя
+     * копирования она умеет. Нам это безразлично — мы ищем именно ту, где он выставлен ЯВНО и
+     * больше ничего нет, а такая семья бит проставляет всегда.
+     *
+     * Не нашлось — остаётся SDL_MAX_UINT32, и вызывающий подставит графическую. */
+    *computeQueueFamilyIndex = SDL_MAX_UINT32;
+    *transferQueueFamilyIndex = SDL_MAX_UINT32;
+    for (i = 0; i < queueFamilyCount; i += 1) {
+        VkQueueFlags flags = queueProps[i].queueFlags;
+
+        if (queueProps[i].queueCount == 0) {
+            continue;
+        }
+        if (flags & VK_QUEUE_GRAPHICS_BIT) {
+            continue;   // тот же движок, что и рендер — не интересует
+        }
+
+        if ((flags & VK_QUEUE_COMPUTE_BIT) && *computeQueueFamilyIndex == SDL_MAX_UINT32) {
+            *computeQueueFamilyIndex = i;
+        } else if ((flags & VK_QUEUE_TRANSFER_BIT) &&
+                   !(flags & VK_QUEUE_COMPUTE_BIT) &&
+                   *transferQueueFamilyIndex == SDL_MAX_UINT32) {
+            *transferQueueFamilyIndex = i;
+        }
+    }
+
     SDL_stack_free(queueProps);
 
     if (*queueFamilyIndex == SDL_MAX_UINT32) {
@@ -12470,6 +12511,7 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
     Uint32 i, physicalDeviceCount;
     Sint32 suitableIndex;
     Uint32 suitableQueueFamilyIndex;
+    Uint32 suitableComputeQueueFamilyIndex, suitableTransferQueueFamilyIndex;   /* ENGINE-FORK */
     Uint64 highestRank;
 
     vulkanResult = renderer->vkEnumeratePhysicalDevices(
@@ -12515,8 +12557,12 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
     suitableIndex = -1;
     suitableQueueFamilyIndex = 0;
     highestRank = 0;
+    /* ENGINE-FORK: специализированные семьи выбранного устройства (SDL_MAX_UINT32 — нет такой) */
+    suitableComputeQueueFamilyIndex = SDL_MAX_UINT32;
+    suitableTransferQueueFamilyIndex = SDL_MAX_UINT32;
     for (i = 0; i < physicalDeviceCount; i += 1) {
         Uint32 queueFamilyIndex;
+        Uint32 computeQueueFamilyIndex, transferQueueFamilyIndex;   /* ENGINE-FORK */
         Uint64 deviceRank;
 
         if (!VULKAN_INTERNAL_IsDeviceSuitable(
@@ -12524,7 +12570,9 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
                 features,
                 physicalDevices[i],
                 &physicalDeviceExtensions[i],
-                &queueFamilyIndex)) {
+                &queueFamilyIndex,
+                &computeQueueFamilyIndex,
+                &transferQueueFamilyIndex)) {
             // Device does not meet the minimum requirements, skip it entirely
             continue;
         }
@@ -12541,6 +12589,10 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
              */
             suitableIndex = i;
             suitableQueueFamilyIndex = queueFamilyIndex;
+            /* ENGINE-FORK: семьи принадлежат УСТРОЙСТВУ — берём вместе с ним, иначе при смене
+             * победителя остались бы индексы от чужой карты. */
+            suitableComputeQueueFamilyIndex = computeQueueFamilyIndex;
+            suitableTransferQueueFamilyIndex = transferQueueFamilyIndex;
             highestRank = deviceRank;
         }
     }
@@ -12549,9 +12601,31 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
         renderer->supports = physicalDeviceExtensions[suitableIndex];
         renderer->physicalDevice = physicalDevices[suitableIndex];
         renderer->queueFamilyIndex = suitableQueueFamilyIndex;
-        /* ENGINE-FORK: отдельная копировальная семья ещё не ищется — fallback на графическую.
-         * Это ЕДИНСТВЕННОЕ присваивание, которое поменяет следующий шаг. */
-        renderer->transferQueueFamilyIndex = suitableQueueFamilyIndex;
+
+        /* ENGINE-FORK: ЗДЕСЬ И ТОЛЬКО ЗДЕСЬ решается, что во что вырождается. Всё, что ниже
+         * (перевод роли, ключ пула, сабмит), работает дальше без единой проверки «а есть ли
+         * такая очередь».
+         *
+         * Роль без своей семьи падает на БЛИЖАЙШУЮ БОЛЕЕ ШИРОКУЮ, потому что способности
+         * вложены: TRANSFER ⊂ COMPUTE ⊂ GRAPHICS. Падать можно только ВВЕРХ по вложению —
+         * compute-семья копирования исполнит (транспорт подразумевается спекой для любой
+         * graphics/compute-семьи), а transfer-семья диспатч не исполнит никогда.
+         *
+         * Отсюда важное для заливки: нет выделенной DMA-семьи, но есть compute — заливка
+         * уходит на неё, а НЕ на графику. Это всё ещё ДРУГОЙ аппаратный движок, то есть
+         * перекрытие с рендером сохраняется. Конфигурация «compute есть, transfer нет»
+         * распространённая, и потеря была бы обидной. */
+        renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_GRAPHICS] = suitableQueueFamilyIndex;
+        renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_COMPUTE] =
+            (suitableComputeQueueFamilyIndex != SDL_MAX_UINT32)
+                ? suitableComputeQueueFamilyIndex
+                : suitableQueueFamilyIndex;
+        /* Уже разрешённый COMPUTE — сам либо выделенная семья, либо графическая, поэтому одно
+         * выражение покрывает обе ступени спуска. */
+        renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_TRANSFER] =
+            (suitableTransferQueueFamilyIndex != SDL_MAX_UINT32)
+                ? suitableTransferQueueFamilyIndex
+                : renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_COMPUTE];
     } else {
         SDL_stack_free(physicalDevices);
         SDL_stack_free(physicalDeviceExtensions);
@@ -12598,16 +12672,34 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
     VkPhysicalDevicePortabilitySubsetFeaturesKHR portabilityFeatures;
     const char **deviceExtensions;
 
-    VkDeviceQueueCreateInfo queueCreateInfo;
+    /* ENGINE-FORK: по заявке на КАЖДУЮ РАЗЛИЧНУЮ семью. Одну семью перечислить дважды нельзя
+     * (VUID-VkDeviceCreateInfo-queueFamilyIndex-02802), а при fallback роли делят одну и ту же —
+     * поэтому список собирается с отсевом повторов, а не по одной заявке на роль. */
+    VkDeviceQueueCreateInfo queueCreateInfos[SDL_GPU_QUEUETYPE_COUNT];
+    Uint32 queueCreateInfoCount = 0;
+    Uint32 qi, qj;
     float queuePriority = 1.0f;
 
-    queueCreateInfo.sType =
-        VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queueCreateInfo.pNext = NULL;
-    queueCreateInfo.flags = 0;
-    queueCreateInfo.queueFamilyIndex = renderer->queueFamilyIndex;
-    queueCreateInfo.queueCount = 1;
-    queueCreateInfo.pQueuePriorities = &queuePriority;
+    for (qi = 0; qi < SDL_GPU_QUEUETYPE_COUNT; qi += 1) {
+        bool alreadyRequested = false;
+        for (qj = 0; qj < queueCreateInfoCount; qj += 1) {
+            if (queueCreateInfos[qj].queueFamilyIndex == renderer->queueFamilyIndices[qi]) {
+                alreadyRequested = true;
+                break;
+            }
+        }
+        if (alreadyRequested) {
+            continue;
+        }
+
+        queueCreateInfos[queueCreateInfoCount].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueCreateInfos[queueCreateInfoCount].pNext = NULL;
+        queueCreateInfos[queueCreateInfoCount].flags = 0;
+        queueCreateInfos[queueCreateInfoCount].queueFamilyIndex = renderer->queueFamilyIndices[qi];
+        queueCreateInfos[queueCreateInfoCount].queueCount = 1;
+        queueCreateInfos[queueCreateInfoCount].pQueuePriorities = &queuePriority;
+        queueCreateInfoCount += 1;
+    }
 
     // check feature support
 
@@ -12653,8 +12745,8 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
         deviceCreateInfo.pNext = NULL;
     }
     deviceCreateInfo.flags = 0;
-    deviceCreateInfo.queueCreateInfoCount = 1;
-    deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
+    deviceCreateInfo.queueCreateInfoCount = queueCreateInfoCount;   /* ENGINE-FORK */
+    deviceCreateInfo.pQueueCreateInfos = queueCreateInfos;
     deviceCreateInfo.enabledLayerCount = 0;
     deviceCreateInfo.ppEnabledLayerNames = NULL;
     deviceCreateInfo.enabledExtensionCount = GetDeviceExtensionCount(
@@ -12743,11 +12835,31 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
                              #func);
 #include "SDL_gpu_vulkan_vkfuncs.h"
 
-    renderer->vkGetDeviceQueue(
-        renderer->logicalDevice,
-        renderer->queueFamilyIndex,
-        0,
-        &renderer->unifiedQueue);
+    /* ENGINE-FORK: ручка на очередь каждой роли. vkGetDeviceQueue ничего не создаёт — очередь
+     * принадлежит устройству и умирает с ним, поэтому парного разрушения нет. Роли, делящие
+     * семью (fallback), получают одну и ту же ручку — это и есть вырождение в одну очередь. */
+    for (qi = 0; qi < SDL_GPU_QUEUETYPE_COUNT; qi += 1) {
+        renderer->vkGetDeviceQueue(
+            renderer->logicalDevice,
+            renderer->queueFamilyIndices[qi],
+            0,
+            &renderer->queues[qi]);
+    }
+    renderer->unifiedQueue = renderer->queues[SDL_GPU_QUEUETYPE_GRAPHICS];
+
+    if (renderer->debugMode) {
+        Uint32 gfx = renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_GRAPHICS];
+        Uint32 cmp = renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_COMPUTE];
+        Uint32 xfr = renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_TRANSFER];
+        SDL_LogInfo(SDL_LOG_CATEGORY_GPU,
+                    "GPU queue families: graphics=%u compute=%u%s transfer=%u%s (%u distinct)",
+                    gfx,
+                    cmp, (cmp == gfx) ? " (shared with graphics)" : " (dedicated)",
+                    xfr, (xfr == gfx) ? " (shared with graphics)"
+                       : (xfr == cmp) ? " (shared with compute)"
+                                      : " (dedicated)",
+                    queueCreateInfoCount);
+    }
 
     return 1;
 }
