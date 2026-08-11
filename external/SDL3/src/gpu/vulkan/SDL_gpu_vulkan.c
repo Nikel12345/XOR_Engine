@@ -1217,6 +1217,12 @@ struct VulkanRenderer
      * рассинхронизацию вместо ошибки. Маска описывает железо, не намерение. */
     VulkanBufferUsageModeFlags queueUsageModeMasks[SDL_GPU_QUEUETYPE_COUNT];
 
+    /* ENGINE-FORK: битовая маска семей, о сабмите в которые уже сообщено (debugMode).
+     * Логируем ПЕРВЫЙ сабмит в каждую семью: иначе маршрутизацию не увидеть снаружи вообще —
+     * очередь у SDL прячется за командным буфером, — а печатать каждый сабмит значит залить
+     * лог 60 строками в секунду. Под submitLock, поэтому без атомиков. */
+    Uint32 submitLoggedFamilies;
+
     VulkanCommandBuffer **submittedCommandBuffers;
     Uint32 submittedCommandBufferCount;
     Uint32 submittedCommandBufferCapacity;
@@ -11103,6 +11109,16 @@ static bool VULKAN_Submit(
      * синхронизации на очередь, но под этим же замком идут ОБЩИЕ вещи — пул fence'ов, списки
      * отложенного разрушения, дефраг. Их per-queue не разложить. Цена мала: vkQueueSubmit только
      * ставит работу в очередь и возвращается, параллельность живёт на GPU, а не здесь. */
+    if (renderer->debugMode) {
+        Uint32 fam = vulkanCommandBuffer->commandPool->queueFamilyIndex;
+        if (fam < 32 && !(renderer->submitLoggedFamilies & (1u << fam))) {
+            renderer->submitLoggedFamilies |= (1u << fam);
+            SDL_LogInfo(SDL_LOG_CATEGORY_GPU,
+                        "GPU first submit to queue family %u (thread %" SDL_PRIu64 ")",
+                        fam, (Uint64)vulkanCommandBuffer->commandPool->threadID);
+        }
+    }
+
     vulkanResult = renderer->vkQueueSubmit(
         vulkanCommandBuffer->commandPool->queue,
         1,
