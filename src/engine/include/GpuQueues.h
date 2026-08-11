@@ -17,11 +17,18 @@
 //     ├── GetUploadQueue()                  → UploadQueue
 //     │     └── AcquireCommandBuffer()      → UploadCommandBuffer
 //     │           └── BeginBufferCopyPass() → UploadCopyPass       // ТОЛЬКО буферные операции
+//     ├── GetComputeQueue()                 → ComputeQueue
+//     │     └── AcquireCommandBuffer()      → ComputeCommandBuffer
+//     │           ├── BeginBufferCopyPass() → UploadCopyPass
+//     │           └── BeginComputePass(...) → SDL_GPUComputePass*
 //     └── GetRenderQueue()                  → RenderQueue
 //           └── AcquireCommandBuffer()      → RenderCommandBuffer
 //                 ├── BeginTextureCopyPass()  → TextureCopyPass    // + текстурные операции
 //                 ├── BeginRenderPass(...)    → SDL_GPURenderPass*
 //                 └── BeginComputePass(...)   → SDL_GPUComputePass*
+//
+// Способности ВЛОЖЕНЫ: upload ⊂ compute ⊂ render. Ни одного метода, который есть на узком
+// лейне и отсутствует на широком.
 //
 // ИМЕНОВАНИЕ разное на каждом уровне, и разница несёт смысл о времени жизни:
 //   • Get…    — объект уже существует, живёт со всем устройством, вызов идемпотентен и
@@ -130,6 +137,42 @@ private:
     SDL_GPUCommandBuffer* cb_ = nullptr;
 };
 
+// Командный буфер вычислительного лейна. Способности вложены (TRANSFER ⊂ COMPUTE ⊂ GRAPHICS),
+// поэтому здесь есть всё, что у заливочного, плюс вычислительный пасс. Чего нет: рендер-пассов,
+// мипов, блитов, свопчейна — они отрисовка, на очереди без графического бита их не исполнить.
+//
+// Текстурного копи-пасса тут НАМЕРЕННО нет, хотя копирования изображений вычислительная очередь
+// исполняет. Дело в барьерах: возврат текстуры в состояние по умолчанию выражается стадиями, а
+// SAMPLER-состояние (самое частое) называет стадии вершинника и фрагментника, которых на этой
+// очереди не существует. Появится вычислительная работа с текстурами — открывать надо не этот
+// метод, а сперва вопрос, какие состояния на ней выразимы (см. SDL_FORK.md).
+class ComputeCommandBuffer {
+public:
+    explicit ComputeCommandBuffer(SDL_GPUCommandBuffer* cb) : cb_(cb) {}
+
+    UploadCopyPass BeginBufferCopyPass() const { return UploadCopyPass(SDL_BeginGPUCopyPass(cb_)); }
+
+    SDL_GPUComputePass* BeginComputePass(const SDL_GPUStorageTextureReadWriteBinding* storage_texture_bindings,
+                                         Uint32 num_storage_texture_bindings,
+                                         const SDL_GPUStorageBufferReadWriteBinding* storage_buffer_bindings,
+                                         Uint32 num_storage_buffer_bindings) const
+    { return SDL_BeginGPUComputePass(cb_, storage_texture_bindings, num_storage_texture_bindings,
+                                     storage_buffer_bindings, num_storage_buffer_bindings); }
+
+    void PushComputeUniformData(Uint32 slot, const void* data, Uint32 length) const
+    { SDL_PushGPUComputeUniformData(cb_, slot, data, length); }
+
+    bool          Submit() const                { return SDL_SubmitGPUCommandBuffer(cb_); }
+    SDL_GPUFence* SubmitAndAcquireFence() const { return SDL_SubmitGPUCommandBufferAndAcquireFence(cb_); }
+    bool          Cancel() const                { return SDL_CancelGPUCommandBuffer(cb_); }
+
+    explicit operator bool() const { return cb_ != nullptr; }
+    SDL_GPUCommandBuffer* Raw() const { return cb_; }
+
+private:
+    SDL_GPUCommandBuffer* cb_ = nullptr;
+};
+
 // Командный буфер рендер-лейна: всё остальное. Мипы и блит стоят на командном буфере, а не в
 // пассе (так их объявляет SDL), поэтому типизировать пассы было бы недостаточно — обе операции
 // это отрисовка, и запретить их на заливке можно только здесь.
@@ -180,11 +223,24 @@ private:
 // Значения размером с указатель: копируются свободно, ничем не владеют, живут сколько угодно —
 // сама очередь принадлежит устройству. Хранить их в полях не нужно, берутся у QueueManager.
 
+// Роль передаётся ЗДЕСЬ и только здесь — дальше она едет на самом командном буфере. Поэтому у
+// Submit/Cancel аргумента очереди нет и быть не должно: буфер взят из пула конкретной семьи и
+// в чужую очередь не отправляется в принципе (SDL сабмитит в commandPool->queue).
 class UploadQueue {
 public:
     explicit UploadQueue(SDL_GPUDevice* device) : device_(device) {}
     UploadCommandBuffer AcquireCommandBuffer() const
-    { return UploadCommandBuffer(SDL_AcquireGPUCommandBuffer(device_)); }
+    { return UploadCommandBuffer(SDL_AcquireGPUCommandBufferOnQueue(device_, SDL_GPU_QUEUETYPE_TRANSFER)); }
+
+private:
+    SDL_GPUDevice* device_ = nullptr;
+};
+
+class ComputeQueue {
+public:
+    explicit ComputeQueue(SDL_GPUDevice* device) : device_(device) {}
+    ComputeCommandBuffer AcquireCommandBuffer() const
+    { return ComputeCommandBuffer(SDL_AcquireGPUCommandBufferOnQueue(device_, SDL_GPU_QUEUETYPE_COMPUTE)); }
 
 private:
     SDL_GPUDevice* device_ = nullptr;
@@ -194,7 +250,7 @@ class RenderQueue {
 public:
     explicit RenderQueue(SDL_GPUDevice* device) : device_(device) {}
     RenderCommandBuffer AcquireCommandBuffer() const
-    { return RenderCommandBuffer(SDL_AcquireGPUCommandBuffer(device_)); }
+    { return RenderCommandBuffer(SDL_AcquireGPUCommandBufferOnQueue(device_, SDL_GPU_QUEUETYPE_GRAPHICS)); }
 
 private:
     SDL_GPUDevice* device_ = nullptr;
