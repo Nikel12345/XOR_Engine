@@ -1025,8 +1025,12 @@ struct SDL_GPUDevice
         SDL_GPURenderer *driverData,
         SDL_Window *window);
 
+    /* ENGINE-FORK: queueType добавлен здесь, а не отдельной записью в таблице, чтобы у
+     * бэкенда не появилось двух путей получения буфера. Бэкенды без второй очереди
+     * (D3D12, Metal — и Vulkan, пока вторая семья не заведена) параметр игнорируют. */
     SDL_GPUCommandBuffer *(*AcquireCommandBuffer)(
-        SDL_GPURenderer *driverData);
+        SDL_GPURenderer *driverData,
+        SDL_GPUQueueType queueType);
 
     bool (*AcquireSwapchainTexture)(
         SDL_GPUCommandBuffer *commandBuffer,

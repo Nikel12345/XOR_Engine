@@ -7505,8 +7505,12 @@ static D3D12CommandBuffer *D3D12_INTERNAL_AcquireCommandBufferFromPool(
 }
 
 static SDL_GPUCommandBuffer *D3D12_AcquireCommandBuffer(
-    SDL_GPURenderer *driverData)
+    SDL_GPURenderer *driverData,
+    SDL_GPUQueueType queueType)
 {
+    /* ENGINE-FORK: у бэкенда одна очередь (D3D12_COMMAND_LIST_TYPE_DIRECT), выбирать нечего —
+     * TRANSFER штатно вырождается в неё же. */
+    (void)queueType;
     D3D12Renderer *renderer = (D3D12Renderer *)driverData;
     D3D12CommandBuffer *commandBuffer;
     ID3D12DescriptorHeap *heaps[2];

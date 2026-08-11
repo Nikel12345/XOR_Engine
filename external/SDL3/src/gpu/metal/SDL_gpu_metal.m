@@ -2137,8 +2137,12 @@ static bool METAL_INTERNAL_AcquireFence(
 }
 
 static SDL_GPUCommandBuffer *METAL_AcquireCommandBuffer(
-    SDL_GPURenderer *driverData)
+    SDL_GPURenderer *driverData,
+    SDL_GPUQueueType queueType)
 {
+    /* ENGINE-FORK: у Metal один MTLCommandQueue by design — TRANSFER вырождается в него.
+     * Это и есть тот бэкенд, ради которого fallback обязан быть штатным, а не временным. */
+    (void)queueType;
     @autoreleasepool {
         MetalRenderer *renderer = (MetalRenderer *)driverData;
         MetalCommandBuffer *commandBuffer;

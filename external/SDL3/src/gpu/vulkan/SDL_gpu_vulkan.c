@@ -914,6 +914,11 @@ typedef struct RenderPassDepthStencilTargetDescription
 typedef struct CommandPoolHashTableKey
 {
     SDL_ThreadID threadID;
+    /* ENGINE-FORK: командный пул Vulkan создаётся ПОД СЕМЬЮ очередей и годен только для неё —
+     * значит при двух семьях одного threadID для ключа мало. Семья тут индексом, а не «ролью»:
+     * роль (заливка/рендер) живёт выше, на границе публичного API, и в семью её переводит тот,
+     * кто буфер запрашивает. Пул про роли ничего не знает и знать не должен. */
+    Uint32 queueFamilyIndex;
 } CommandPoolHashTableKey;
 
 typedef struct RenderPassHashTableKey
@@ -1173,6 +1178,13 @@ struct VulkanRenderer
     Uint32 queueFamilyIndex;
     VkQueue unifiedQueue;
 
+    /* ENGINE-FORK: семья для SDL_GPU_QUEUETYPE_TRANSFER. Пока отдельная не заводится, РАВНА
+     * queueFamilyIndex — именно через это равенство и работает fallback: перевод роли в семью
+     * (VULKAN_AcquireCommandBuffer) просто выдаёт ту же семью, и ни ключ пула, ни что-либо
+     * ниже не узнаёт, что второй очереди нет. Появится отдельная — меняется одно присваивание
+     * при создании устройства, остальной код уже готов. */
+    Uint32 transferQueueFamilyIndex;
+
     VulkanCommandBuffer **submittedCommandBuffers;
     Uint32 submittedCommandBufferCount;
     Uint32 submittedCommandBufferCapacity;
@@ -1266,7 +1278,7 @@ static void VULKAN_ReleaseWindow(SDL_GPURenderer *driverData, SDL_Window *window
 static bool VULKAN_Wait(SDL_GPURenderer *driverData);
 static bool VULKAN_WaitForFences(SDL_GPURenderer *driverData, bool waitAll, SDL_GPUFence *const *fences, Uint32 numFences);
 static bool VULKAN_Submit(SDL_GPUCommandBuffer *commandBuffer);
-static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(SDL_GPURenderer *driverData);
+static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(SDL_GPURenderer *driverData, SDL_GPUQueueType queueType);
 
 // Error Handling
 
@@ -3573,14 +3585,17 @@ static void SDLCALL VULKAN_INTERNAL_DescriptorSetLayoutHashDestroy(void *userdat
 
 static Uint32 SDLCALL VULKAN_INTERNAL_CommandPoolHashFunction(void *userdata, const void *key)
 {
-    return (Uint32)((CommandPoolHashTableKey *)key)->threadID;
+    /* ENGINE-FORK: семья входит в хэш вместе с потоком. Семей единицы, и без подмешивания
+     * пулы разных семей одного потока сели бы в одну корзину. */
+    CommandPoolHashTableKey *k = (CommandPoolHashTableKey *)key;
+    return (Uint32)k->threadID ^ (k->queueFamilyIndex * 2654435761u);
 }
 
 static bool SDLCALL VULKAN_INTERNAL_CommandPoolHashKeyMatch(void *userdata, const void *aKey, const void *bKey)
 {
     CommandPoolHashTableKey *a = (CommandPoolHashTableKey *)aKey;
     CommandPoolHashTableKey *b = (CommandPoolHashTableKey *)bKey;
-    return a->threadID == b->threadID;
+    return a->threadID == b->threadID && a->queueFamilyIndex == b->queueFamilyIndex;
 }
 
 static void SDLCALL VULKAN_INTERNAL_CommandPoolHashDestroy(void *userdata, const void *key, const void *value)
@@ -7030,7 +7045,11 @@ static SDL_GPUTexture *VULKAN_CreateTexture(
     // Only do this after "container" is set, so the texture
     // is fully initialized before any Submit that could trigger defrag.
     {
-        VulkanCommandBuffer *barrierCommandBuffer = (VulkanCommandBuffer *)VULKAN_AcquireCommandBuffer((SDL_GPURenderer *)renderer);
+        /* ENGINE-FORK: GRAPHICS обязательна и не подлежит выбору — это ТЕКСТУРНЫЙ барьер
+         * (смена раскладки), а он вне графической очереди запрещён (см. комментарий у
+         * VULKAN_INTERNAL_TextureMemoryBarrier). SDL берёт буфер сам, мимо публичного API,
+         * поэтому типы на стороне движка это место не прикрывают — только явная роль здесь. */
+        VulkanCommandBuffer *barrierCommandBuffer = (VulkanCommandBuffer *)VULKAN_AcquireCommandBuffer((SDL_GPURenderer *)renderer, SDL_GPU_QUEUETYPE_GRAPHICS);
         VULKAN_INTERNAL_TextureTransitionToDefaultUsage(
             renderer,
             barrierCommandBuffer,
@@ -9643,13 +9662,15 @@ static bool VULKAN_INTERNAL_AllocateCommandBuffer(
 
 static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
     VulkanRenderer *renderer,
-    SDL_ThreadID threadID)
+    SDL_ThreadID threadID,
+    Uint32 queueFamilyIndex)   /* ENGINE-FORK: пул теперь пер-(поток, семья), а не пер-поток */
 {
     VulkanCommandPool *vulkanCommandPool = NULL;
     VkCommandPoolCreateInfo commandPoolCreateInfo;
     VkResult vulkanResult;
     CommandPoolHashTableKey key;
     key.threadID = threadID;
+    key.queueFamilyIndex = queueFamilyIndex;
 
     bool result = SDL_FindInHashTable(
         renderer->commandPoolHashTable,
@@ -9665,7 +9686,9 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
     commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     commandPoolCreateInfo.pNext = NULL;
     commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    commandPoolCreateInfo.queueFamilyIndex = renderer->queueFamilyIndex;
+    /* ENGINE-FORK: семья берётся из ключа, а не из глобальной renderer->queueFamilyIndex —
+     * иначе пул, заведённый под вторую семью, создался бы под первой. */
+    commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
 
     vulkanResult = renderer->vkCreateCommandPool(
         renderer->logicalDevice,
@@ -9698,6 +9721,7 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
 
     CommandPoolHashTableKey *allocedKey = SDL_malloc(sizeof(CommandPoolHashTableKey));
     allocedKey->threadID = threadID;
+    allocedKey->queueFamilyIndex = queueFamilyIndex;   /* ENGINE-FORK */
 
     SDL_InsertIntoHashTable(
         renderer->commandPoolHashTable,
@@ -9709,10 +9733,11 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
 
 static VulkanCommandBuffer *VULKAN_INTERNAL_GetInactiveCommandBufferFromPool(
     VulkanRenderer *renderer,
-    SDL_ThreadID threadID)
+    SDL_ThreadID threadID,
+    Uint32 queueFamilyIndex)   /* ENGINE-FORK: транзит семьи до пула */
 {
     VulkanCommandPool *commandPool =
-        VULKAN_INTERNAL_FetchCommandPool(renderer, threadID);
+        VULKAN_INTERNAL_FetchCommandPool(renderer, threadID, queueFamilyIndex);
     VulkanCommandBuffer *commandBuffer;
 
     if (commandPool == NULL) {
@@ -9734,7 +9759,8 @@ static VulkanCommandBuffer *VULKAN_INTERNAL_GetInactiveCommandBufferFromPool(
 }
 
 static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
-    SDL_GPURenderer *driverData)
+    SDL_GPURenderer *driverData,
+    SDL_GPUQueueType queueType)
 {
     VulkanRenderer *renderer = (VulkanRenderer *)driverData;
     VkResult result;
@@ -9742,10 +9768,20 @@ static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
 
     SDL_ThreadID threadID = SDL_GetCurrentThreadID();
 
+    /* ENGINE-FORK: РОЛЬ → СЕМЬЯ. Единственное место перевода: выше по стеку живёт намерение
+     * вызывающего, ниже — только индекс семьи (см. CommandPoolHashTableKey).
+     * transferQueueFamilyIndex равен графической, пока вторая семья не заведена, поэтому
+     * TRANSFER здесь штатно вырождается в графическую очередь — ветки на «а есть ли она»
+     * ни тут, ни у вызывающего не нужно. */
+    Uint32 queueFamilyIndex =
+        (queueType == SDL_GPU_QUEUETYPE_TRANSFER)
+            ? renderer->transferQueueFamilyIndex
+            : renderer->queueFamilyIndex;
+
     SDL_LockMutex(renderer->acquireCommandBufferLock);
 
     VulkanCommandBuffer *commandBuffer =
-        VULKAN_INTERNAL_GetInactiveCommandBufferFromPool(renderer, threadID);
+        VULKAN_INTERNAL_GetInactiveCommandBufferFromPool(renderer, threadID, queueFamilyIndex);
 
     if (commandBuffer == NULL) {
         SDL_UnlockMutex(renderer->acquireCommandBufferLock);
@@ -12513,6 +12549,9 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
         renderer->supports = physicalDeviceExtensions[suitableIndex];
         renderer->physicalDevice = physicalDevices[suitableIndex];
         renderer->queueFamilyIndex = suitableQueueFamilyIndex;
+        /* ENGINE-FORK: отдельная копировальная семья ещё не ищется — fallback на графическую.
+         * Это ЕДИНСТВЕННОЕ присваивание, которое поменяет следующий шаг. */
+        renderer->transferQueueFamilyIndex = suitableQueueFamilyIndex;
     } else {
         SDL_stack_free(physicalDevices);
         SDL_stack_free(physicalDeviceExtensions);
