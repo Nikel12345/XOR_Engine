@@ -655,9 +655,12 @@ typedef Uint32 VulkanBufferUsageModeFlags;
  * теряет никогда. В создание ресурса (VULKAN_INTERNAL_CreateBuffer) маска не попадает —
  * иначе буфер создался бы без VERTEX и стал непригоден для отрисовки навсегда.
  */
-#define VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS  0xFFFFFFFFu
 #define VULKAN_BUFFER_USAGE_MODE_MASK_TRANSFER  (VULKAN_BUFFER_USAGE_MODE_COPY_SOURCE | \
                                                  VULKAN_BUFFER_USAGE_MODE_COPY_DESTINATION)
+#define VULKAN_BUFFER_USAGE_MODE_MASK_COMPUTE   (VULKAN_BUFFER_USAGE_MODE_MASK_TRANSFER | \
+                                                 VULKAN_BUFFER_USAGE_MODE_COMPUTE_STORAGE_READ | \
+                                                 VULKAN_BUFFER_USAGE_MODE_COMPUTE_STORAGE_READ_WRITE)
+#define VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS  0xFFFFFFFFu
 
 typedef enum VulkanTextureUsageMode
 {
@@ -1204,6 +1207,15 @@ struct VulkanRenderer
      * семью, и тогда ресурсы обязаны остаться EXCLUSIVE (CONCURRENT требует минимум двух). */
     Uint32 distinctQueueFamilyIndices[SDL_GPU_QUEUETYPE_COUNT];
     Uint32 distinctQueueFamilyCount;
+
+    /* ENGINE-FORK: маска выразимых usage-битов для семьи КАЖДОЙ роли.
+     *
+     * Выводится из НАСТОЯЩИХ queueFlags семьи, а не из имени роли, и это принципиально. При
+     * fallback роль TRANSFER может сидеть на compute-семье, которая COMPUTE_STORAGE-биты
+     * прекрасно выражает. Срезав их «потому что роль называется TRANSFER», мы получили бы не
+     * пессимизацию, а ПОТЕРЮ половины «пусть увидит» в барьере — то есть тихую
+     * рассинхронизацию вместо ошибки. Маска описывает железо, не намерение. */
+    VulkanBufferUsageModeFlags queueUsageModeMasks[SDL_GPU_QUEUETYPE_COUNT];
 
     VulkanCommandBuffer **submittedCommandBuffers;
     Uint32 submittedCommandBufferCount;
@@ -2756,6 +2768,32 @@ static void VULKAN_INTERNAL_BufferMemoryBarrier(
     buffer->transitioned = true;
 }
 
+/* ENGINE-FORK: выразимо ли текстурное состояние на очереди с такой маской.
+ *
+ * Правило то же, что у буферов: состояние переводится в стадии конвейера, и назвать стадию,
+ * которой на очереди нет, нельзя. Но реакция разная — буферу лишние биты СРЕЗАЮТСЯ, а текстуре
+ * срезать нечего (состояние одно, а не набор), поэтому здесь только проверка. */
+static bool VULKAN_INTERNAL_TextureUsageModeExpressible(
+    VulkanTextureUsageMode mode,
+    VulkanBufferUsageModeFlags queueUsageModeMask)
+{
+    switch (mode) {
+    case VULKAN_TEXTURE_USAGE_MODE_UNINITIALIZED:
+    case VULKAN_TEXTURE_USAGE_MODE_COPY_SOURCE:
+    case VULKAN_TEXTURE_USAGE_MODE_COPY_DESTINATION:
+        return true;   // транспорт есть на любой очереди
+
+    case VULKAN_TEXTURE_USAGE_MODE_COMPUTE_STORAGE_READ:
+    case VULKAN_TEXTURE_USAGE_MODE_COMPUTE_STORAGE_READ_WRITE:
+        return (queueUsageModeMask & VULKAN_BUFFER_USAGE_MODE_COMPUTE_STORAGE_READ) != 0;
+
+    default:
+        /* SAMPLER, GRAPHICS_STORAGE_READ, COLOR/DEPTH_STENCIL_ATTACHMENT, PRESENT —
+         * все называют графические стадии. */
+        return queueUsageModeMask == VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS;
+    }
+}
+
 static void VULKAN_INTERNAL_TextureMemoryBarrier(
     VulkanRenderer *renderer,
     VulkanCommandBuffer *commandBuffer,
@@ -2771,7 +2809,7 @@ static void VULKAN_INTERNAL_TextureMemoryBarrier(
     VkPipelineStageFlags dstStages = 0;
     VkImageMemoryBarrier memoryBarrier;
 
-    /* ENGINE-FORK: текстурный барьер маской НЕ режется — он запрещён вне графической очереди.
+    /* ENGINE-FORK: текстурный барьер маской НЕ режется — состояние проверяется целиком.
      *
      * Разница с буфером принципиальная. Буферные usage-биты складываются (DefaultBufferUsageMode
      * копит их через |=), поэтому маска у буфера убирает слагаемые, оставляя остальные верными.
@@ -2782,12 +2820,21 @@ static void VULKAN_INTERNAL_TextureMemoryBarrier(
      * к чтению. Инвариант «между операциями ресурс в своём состоянии по умолчанию» сломался бы
      * молча: валидация не скажет ничего, вылезет мусором на экране.
      *
-     * Поэтому граница проходит не по «текстуры vs буферы», а по «есть layout vs нет layout», и
-     * вся текстурная работа живёт на render-ленте. Ассерт — вторая линия обороны: первая, типы
-     * командных буферов на стороне движка, не даёт записать текстурную операцию на upload-ленту. */
+     * Поэтому граница проходит не по «текстуры vs буферы», а по «есть layout vs нет layout».
+     * Ассерт — вторая линия обороны: первая, типы командных буферов на стороне движка, не даёт
+     * записать текстурную операцию на лейн, который её не потянет.
+     *
+     * Проверяется именно ВЫРАЗИМОСТЬ, а не «графическая ли очередь»: вычислительная очередь
+     * COMPUTE_STORAGE-состояния выражает законно, и запрещать ей их значило бы закрыть
+     * compute-лейн для его собственных storage-текстур. Недоступны ей SAMPLER и таргеты. */
     SDL_assert_release(
-        commandBuffer->commandPool->queueUsageModeMask == VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS &&
-        "Texture barrier on a non-graphics queue!");
+        VULKAN_INTERNAL_TextureUsageModeExpressible(
+            sourceUsageMode, commandBuffer->commandPool->queueUsageModeMask) &&
+        "Texture barrier source state is not expressible on this queue!");
+    SDL_assert_release(
+        VULKAN_INTERNAL_TextureUsageModeExpressible(
+            destinationUsageMode, commandBuffer->commandPool->queueUsageModeMask) &&
+        "Texture barrier destination state is not expressible on this queue!");
 
     memoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     memoryBarrier.pNext = NULL;
@@ -9766,19 +9813,18 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
      * Промах невозможен — семья пришла из этой же таблицы. */
     vulkanCommandPool->queueFamilyIndex = queueFamilyIndex;
     vulkanCommandPool->queue = VK_NULL_HANDLE;
+    vulkanCommandPool->queueUsageModeMask = 0;
     for (Uint32 role = 0; role < SDL_GPU_QUEUETYPE_COUNT; role += 1) {
         if (renderer->queueFamilyIndices[role] == queueFamilyIndex) {
             vulkanCommandPool->queue = renderer->queues[role];
+            /* Маска — свойство СЕМЬИ, поэтому берётся тем же поиском, что и очередь: у ролей,
+             * делящих семью, она одинакова по построению (выводилась из флагов этой семьи). */
+            vulkanCommandPool->queueUsageModeMask = renderer->queueUsageModeMasks[role];
             break;
         }
     }
     SDL_assert_release(vulkanCommandPool->queue != VK_NULL_HANDLE &&
                        "Command pool family has no queue!");
-
-    /* ENGINE-FORK: пока очередь одна и она графическая — маска пропускает всё, вывод барьеров
-     * не меняется ни на бит. Появится вторая (копировальная) семья — её пулы получат
-     * VULKAN_BUFFER_USAGE_MODE_MASK_TRANSFER здесь же. */
-    vulkanCommandPool->queueUsageModeMask = VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS;
 
     vulkanCommandPool->inactiveCommandBufferCapacity = 0;
     vulkanCommandPool->inactiveCommandBufferCount = 0;
@@ -12725,6 +12771,28 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
                 renderer->distinctQueueFamilyCount += 1;
             }
         }
+
+        /* ENGINE-FORK: маски по НАСТОЯЩИМ флагам семей выбранного устройства. Перезапрашиваем
+         * свойства семей: в цикле выше они были у устройств-кандидатов, а нужны у победителя. */
+        {
+            Uint32 famCount = 0;
+            VkQueueFamilyProperties *famProps;
+            renderer->vkGetPhysicalDeviceQueueFamilyProperties(
+                renderer->physicalDevice, &famCount, NULL);
+            famProps = SDL_stack_alloc(VkQueueFamilyProperties, famCount);
+            renderer->vkGetPhysicalDeviceQueueFamilyProperties(
+                renderer->physicalDevice, &famCount, famProps);
+
+            for (Uint32 role = 0; role < SDL_GPU_QUEUETYPE_COUNT; role += 1) {
+                VkQueueFlags flags = famProps[renderer->queueFamilyIndices[role]].queueFlags;
+                renderer->queueUsageModeMasks[role] =
+                    (flags & VK_QUEUE_GRAPHICS_BIT) ? VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS
+                  : (flags & VK_QUEUE_COMPUTE_BIT)  ? VULKAN_BUFFER_USAGE_MODE_MASK_COMPUTE
+                                                    : VULKAN_BUFFER_USAGE_MODE_MASK_TRANSFER;
+            }
+
+            SDL_stack_free(famProps);
+        }
     } else {
         SDL_stack_free(physicalDevices);
         SDL_stack_free(physicalDeviceExtensions);
@@ -12935,17 +13003,27 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
     renderer->unifiedQueue = renderer->queues[SDL_GPU_QUEUETYPE_GRAPHICS];
 
     if (renderer->debugMode) {
+        /* Класс маски печатается рядом с индексом, чтобы строка проверяла сама себя: маска
+         * выводится из ФЛАГОВ семьи, поэтому «transfer=2 [xfer]» подтверждает, что семья 2
+         * действительно копировальная, а «transfer=2 [gfx]» означал бы ошибку вывода. */
+        #define ENGINE_FORK_MASK_TAG(role)                                                        \
+            (renderer->queueUsageModeMasks[role] == VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS ? "gfx"   \
+           : renderer->queueUsageModeMasks[role] == VULKAN_BUFFER_USAGE_MODE_MASK_COMPUTE  ? "comp"  \
+                                                                                           : "xfer")
         Uint32 gfx = renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_GRAPHICS];
         Uint32 cmp = renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_COMPUTE];
         Uint32 xfr = renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_TRANSFER];
         SDL_LogInfo(SDL_LOG_CATEGORY_GPU,
-                    "GPU queue families: graphics=%u compute=%u%s transfer=%u%s (%u distinct)",
-                    gfx,
-                    cmp, (cmp == gfx) ? " (shared with graphics)" : " (dedicated)",
-                    xfr, (xfr == gfx) ? " (shared with graphics)"
-                       : (xfr == cmp) ? " (shared with compute)"
-                                      : " (dedicated)",
+                    "GPU queue families: graphics=%u [%s] compute=%u [%s]%s transfer=%u [%s]%s (%u distinct)",
+                    gfx, ENGINE_FORK_MASK_TAG(SDL_GPU_QUEUETYPE_GRAPHICS),
+                    cmp, ENGINE_FORK_MASK_TAG(SDL_GPU_QUEUETYPE_COMPUTE),
+                    (cmp == gfx) ? " (shared with graphics)" : " (dedicated)",
+                    xfr, ENGINE_FORK_MASK_TAG(SDL_GPU_QUEUETYPE_TRANSFER),
+                    (xfr == gfx) ? " (shared with graphics)"
+                  : (xfr == cmp) ? " (shared with compute)"
+                                 : " (dedicated)",
                     queueCreateInfoCount);
+        #undef ENGINE_FORK_MASK_TAG
     }
 
     return 1;
