@@ -6,7 +6,9 @@
 #include <deque>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <functional>
+#include <mutex>
 #include "config.h"
 #include "TransferManager.h"
 #include "TextureData.h"
@@ -16,7 +18,16 @@ struct UploadTaskTexture {
 	SDL_GPUTextureRegion dst{};
 	std::vector<std::byte> pixels;          // транзитные пиксели этой задачи (с gutter'ом, если pad>0)
 	std::string name;                       // для диагностики при упаковке
-	TextureHandle* target_handle = nullptr; // куда писать UVL + через него атлас для GenerateMipmaps
+	// ТОЛЬКО для sim-фазы (_PlaceTask пишет сюда UVL, DeleteTextureHandle сравнивает по нему).
+	// Разыменовывать его на стадии заливки НЕЛЬЗЯ: хэндлы умирают немедленно в
+	// DeleteTextureHandle (handles_data.erase), и задача, уже отданная на исполнение, получила
+	// бы висячий указатель.
+	TextureHandle* target_handle = nullptr;
+	// Атлас назначения — заполняет _PlaceTask. Всё, что нужно знать о приёмнике на стадии
+	// заливки (формат для выравнивания, mip_levels и usage для заявки на мипы), берётся отсюда,
+	// а не через target_handle. Указатель стабилен: atlases_data только пополняется (оба
+	// CreateTextureAtlas* при коллизии имени возвращают существующий), удаления атласов нет.
+	TextureAtlas* atlas = nullptr;
 	Uint32 offset = 0;
 	Uint32 size = 0;
 	Uint32 width = 0, height = 0, pitch = 0;
@@ -91,6 +102,9 @@ public:
 	// апдейт (вместе с объявлением sp/материалов) идёт раньше prepare на том же sim-потоке.
 	void BakePending();
 
+	// Дренирует mip_tasks — заявки, поставленные ExecuteUploadTasks для атласов, в которые
+	// реально поехали пиксели. Никакого состояния кроме mip_tasks не трогает, upload_tasks
+	// больше не читает и не чистит (ими владеет ExecuteUploadTasks).
 	void GenerateMipmaps(SDL_GPUCommandBuffer* cb);
 
 	// Арендует transfer-буфер у TransferManager и возвращает его; владелец fence фазы
@@ -102,7 +116,9 @@ public:
 	// поэтому к моменту BuildRenderBatches UVL уже обязан быть посчитан. Детерминирована и
 	// идемпотентна (тот же набор задач → те же UVL). GPU-загрузка пикселей — отдельно, в
 	// ExecuteUploadTasks (ей нужен copy-pass), упаковке же GPU не нужен.
-	void PackAtlases() { _BuildUploadTasks(); }
+	// Заканчивается ПЕРЕДАЧЕЙ пачки render-потоку (см. _PublishUploadTasks): после неё задачи
+	// уходят из-под sim и заливка их больше не касается этого потока.
+	void PackAtlases() { _BuildUploadTasks(); _PublishUploadTasks(); preview.Publish(); }
 	SDL_GPUSampler* CreateSampler(const std::string& name, SDL_GPUSamplerCreateInfo sci);
 	SDL_GPUSampler* GetSampler(const std::string& name);
 	
@@ -140,9 +156,10 @@ public:
 	void RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci);
 
 	// ── Превью ассетов UI — самостоятельная подсистема PreviewPacker (ключ = ИМЯ текстуры, не хэндл).
-	//    TM только проксирует: дренаж дёрти-блитов на upload-cb (после GenerateMipmaps — тот же поток
-	//    sim/prepare и fence-цикл, очередь одно-поточная), выдачу UV/текстуры для ImGui и явное
-	//    освобождение при реальном удалении. Заявку на превью TM ставит в _PlaceTask (UVL готов). ──
+	//    TM только проксирует: запись блитов на render-cb (после GenerateMipmaps — источник обязан
+	//    уже содержать пиксели), выдачу UV/текстуры для ImGui и явное освобождение при реальном
+	//    удалении. Заявку на превью TM ставит в _PlaceTask (UVL готов), а PackAtlases передаёт
+	//    вызревшие заявки render'у (preview.Publish) — как и задачи заливки. ──
 	void BlitPendingPreviews(SDL_GPUCommandBuffer* cb) { preview.Blit(cb); }
 	SDL_GPUTexture* GetPreviewAtlasTexture() const { return preview.Texture(); }
 	// UV ячейки превью ПО ИМЕНИ (для ImGui::Image/AddImage). valid=false — превью для имени нет.
@@ -180,6 +197,9 @@ public:
 private:
 	void CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name);
 	void _BuildUploadTasks();
+	// Передача накопленной пачки render-потоку. Идиома InputManager: мьютекс держится только на
+	// саму передачу, дальше каждая сторона работает со своим вектором без замков.
+	void _PublishUploadTasks();
 	// Разместить одну upload-задачу в персистентном упаковщике её атласа (слой за слоем от 0-го,
 	// с переиспользованием освобождённых регионов). При успехе пишет UVL/placement в handle,
 	// gutter'ит пиксели и заполняет task.dst. См. TextureManager.cpp.
@@ -191,7 +211,27 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<TextureHandle>> handles_data;
 	std::unordered_map<std::string, SDL_GPUSampler*> samplers_data;
 	std::unordered_map<TextureAtlas*, std::unique_ptr<AtlasPacker>> atlas_packers;  // персистентное состояние упаковки
+	// ── Задачи заливки текстур: производит sim, исполняет render ──
+	// upload_tasks — приёмник sim-потока: сюда пишет CreateUploadTask, здесь их размещает в атласе
+	// _PlaceTask и отсюда вычищает DeleteTextureHandle. Наружу не видны.
 	std::vector<UploadTaskTexture> upload_tasks;
+	// Переданные, но ещё не забранные. Единственное, что видят оба потока — и только под мьютексом
+	// (по идиоме InputManager::commands_). Пачка НЕ привязана к слоту специально: при frame skip
+	// слот перезаписывается, а места в атласе задачам уже розданы безвозвратно, так что потеря
+	// пачки означала бы мусор в этих регионах навсегда. Здесь они просто дождутся ближайшего рендера.
+	std::mutex upload_handoff_mtx;
+	std::vector<UploadTaskTexture> published_upload_tasks;
+	// Собственность render-потока: забранное из published_*. Живёт между кадрами — если аренда
+	// transfer-буфера не удалась, задачи остаются здесь до следующей попытки.
+	std::vector<UploadTaskTexture> render_upload_tasks;
+	// Атласы, в которые в этой пачке РЕАЛЬНО поехали пиксели — заявка на мипы. Ставит
+	// ExecuteUploadTasks (единственный владелец upload_tasks), дренирует GenerateMipmaps.
+	// Раньше GenerateMipmaps сам ходил по upload_tasks и сам же их чистил — то есть мутировал
+	// чужое состояние; из-за этого две операции нельзя было развести ни во времени, ни по
+	// потокам. Множество, а не вектор: атлас мипуется один раз, сколько бы задач в него ни легло.
+	// Хранится ХЭНДЛ ТЕКСТУРЫ, а не атлас: мипуем ровно ту текстуру, в которую писали
+	// (task.dst.texture), и на стороне генерации не нужен доступ к живому состоянию менеджера.
+	std::unordered_set<SDL_GPUTexture*> mip_tasks;
 
 	// Превью ассетов UI: самодостаточная подсистема (владеет GPU-текстурой + сеткой по имени).
 	// Заявку ставит _PlaceTask (UVL готов), дренаж/UV/release — через прокси публичного блока.

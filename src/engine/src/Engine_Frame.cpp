@@ -157,18 +157,12 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 		PROF_SCOPE(Sim, "  exec_upload_tasks (буферы)");
 		buffer_manager->ExecuteUploadTasks(cp, slot);
 	}
-	TransferBufferData* texture_tbd;
-	{
-		PROF_SCOPE(Sim, "  tex_upload_tasks");
-		texture_tbd = texture_manager->ExecuteUploadTasks(cp);
-	}
 	SDL_EndGPUCopyPass(cp);
-	{
-		PROF_SCOPE(Sim, "  generate_mipmaps");
-		texture_manager->GenerateMipmaps(cb);
-	}
-	// Превью-блиты UI — тем же cb ПОСЛЕ заливки пикселей и мипов (порядок внутри cb).
-	texture_manager->BlitPendingPreviews(cb);
+	// Текстур здесь больше НЕТ: заливка пикселей, мипы и блиты превью уехали в RenderFunc.
+	// Причина не в производительности — мипы (SDL_GenerateMipmapsForGPUTexture) и превью
+	// (SDL_BlitGPUTexture) это ОТРИСОВКА, и на копировальной очереди их не исполнить. Пока они
+	// сидели в этом cb, весь upload был непереносим на отдельную очередь. Sim теперь только
+	// упаковывает атласы и передаёт пачку (TextureManager::PackAtlases → _PublishUploadTasks).
 	SDL_GPUFence* fence;
 	{
 		PROF_SCOPE(Sim, "  submit_acquire_fence");
@@ -176,7 +170,7 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 	}
 
 
-	pending_upload_tbs[slot] = { undepended_tbd, texture_tbd };
+	pending_upload_tbs[slot] = undepended_tbd;
 	slot_controller->GetSlotsData()[slot].submit_time = Prof::Clock::now();
 	slot_controller->SetSlotFence(slot, fence);         // fence ДО флага UPLOADING
 	slot_controller->SetSlotState(slot, SlotState::UPLOADING);
@@ -201,9 +195,8 @@ void Engine::UploadFunc(uint8_t slot)
 	sd.fence = nullptr;
 
 	auto t_rel = Prof::Clock::now();
-	transfer_manager->ReleaseTB(pending_upload_tbs[slot].buffers_tbd);
-	transfer_manager->ReleaseTB(pending_upload_tbs[slot].textures_tbd);
-	pending_upload_tbs[slot] = {};
+	transfer_manager->ReleaseTB(pending_upload_tbs[slot]);
+	pending_upload_tbs[slot] = nullptr;
 	double release_ms = Prof::MsSince(t_rel);
 
 	slot_controller->SetSlotState(slot, SlotState::PREPARED);
@@ -302,6 +295,23 @@ bool Engine::RenderFunc(uint8_t slot)
 	// выше при ресайзе под свопчейн); буферы/пайплайны так же монопольно дренирует sim в PrepareFunc.
 	texture_manager->TrashTextures(slot_controller->RenderFencesDone());
 
+	// ── ТЕКСТУРНАЯ РАБОТА ──
+	// Живёт здесь, а не в prepare, потому что мипы и превью — ОТРИСОВКА (SDL_GenerateMipmaps* /
+	// SDL_BlitGPUTexture), и очередь, умеющая только копировать, их не исполнит. Держать их в
+	// upload-cb значило запереть заливку на графической очереди навсегда.
+	// Место в кадре: ПОСЛЕ проверок свопчейна (раньше — cb мог быть отменён, и забранная пачка
+	// пропала бы вместе с ним) и ПОСЛЕ ресайза таргетов, но ДО любых проходов, которые атласы
+	// читают. Порядок внутри cb гарантирует, что к отрисовке пиксели и мипы уже на месте.
+	TransferBufferData* texture_tbd;
+	{
+		PROF_SCOPE(Render, " tex_upload (заливка+мипы+превью)");
+		SDL_GPUCopyPass* tex_cp = SDL_BeginGPUCopyPass(cb);
+		texture_tbd = texture_manager->ExecuteUploadTasks(tex_cp);
+		SDL_EndGPUCopyPass(tex_cp);
+		texture_manager->GenerateMipmaps(cb);
+		texture_manager->BlitPendingPreviews(cb);   // ПОСЛЕ пикселей и мипов — источник готов
+	}
+
 	// Свопчейн — в свой атлас (PassManager владеет им как полем, вне реестра TextureManager).
 	// Отсюда его берёт PRESENT_PASS (блит-проход). Пишем только мы — RenderFunc единственный
 	// писатель, он же и читатель (тело блита в ExecutePassesSteps ниже) → без замков.
@@ -359,6 +369,9 @@ bool Engine::RenderFunc(uint8_t slot)
 		SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
 		Prof::Render().Add(" submit_acquire_fence", Prof::MsSince(t));
 		slot_controller->GetSlotsData()[slot].submit_time = Prof::Clock::now();
+		// Текстурный TB читается GPU в этом же cb → отпускать только по ЭТОМУ fence (FenceFunc).
+		// Стеш пишем ДО публикации fence — та же схема видимости, что у pending_upload_tbs.
+		pending_render_tbs[slot] = texture_tbd;
 		slot_controller->SetSlotFence(slot, fence);
 	}
 
@@ -381,6 +394,9 @@ void Engine::FenceFunc(uint8_t slot) {
 
 	SDL_ReleaseGPUFence(dev, fence);
 	sd.fence = nullptr;
+	// Текстурный TB: GPU дочитал его вместе с кадром — вернуть в пул (см. pending_render_tbs).
+	transfer_manager->ReleaseTB(pending_render_tbs[slot]);
+	pending_render_tbs[slot] = nullptr;
 	// Жизнь GPU-ресурсов FenceThread не трогает — только тикает счётчик завершённых render-fence.
 	// Дренаж трэшей (buffers/textures/pipelines) делает sim в PrepareFunc (очереди одно-поточные).
 	slot_controller->NotifyRenderFenceDone();

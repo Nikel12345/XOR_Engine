@@ -348,6 +348,7 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     if (task.placed) return true;             // идемпотентность: повторный PackAtlases не сдвинет тайл
 
     TextureAtlas* atlas = task.target_handle->atlas;
+    task.atlas = atlas;   // с этого момента задача самодостаточна — см. UploadTaskTexture::atlas
     auto& packer_uptr = atlas_packers[atlas];
     if (!packer_uptr) packer_uptr = std::make_unique<AtlasPacker>();
     AtlasPacker& packer = *packer_uptr;
@@ -462,32 +463,17 @@ void TextureManager::_BuildUploadTasks() {
     for (auto& task : upload_tasks)
         _PlaceTask(task);
 
-    // Оффсет задачи обязан быть кратен размеру текселя формата НАЗНАЧЕНИЯ
-    // (VUID-vkCmdCopyBufferToImage-dstImage-07975), а задачи РАЗНЫХ форматов лежат в ОДНОМ
-    // трансфер-буфере: глифы шрифта грузятся в R8-атлас (__TextAtlas) задачами размером w*h —
-    // сплошь и рядом нечётным, — и первая же такая задача сбивает выравнивание ВСЕМ следующим
-    // за ней 4-байтовым атласам (albedo/normal/env_skybox). Копия с невыровненного оффсета —
-    // UB: один драйвер её вытягивает, другой читает со сдвигом на байт, и каналы уезжают
-    // (альфа 255 попадает в синий → вся текстурированная картинка в «синем фильтре»).
-    // Шаг берём у САМОГО формата (SDL знает: 1 у R8, 4 у BGRA8, 8/16 у 16F/32F и BC), а не
-    // константой сверху — тогда R8-глифы пакуются впритык, а платят выравниванием только те,
-    // кому оно правда нужно.
-    uint32_t off = 0;
+    // Размер задачи ДОЛЖЕН совпадать с тем, сколько байт ждёт формат назначения: сюда приходят
+    // два разных пути (CreateTexture с BGRA от TextureLoader и FontManager с R8, собранным руками
+    // из альфы), и расхождение форматов даст не ошибку валидации, а тихую порчу — сдвиг строк или
+    // чтение за границей TB. Ловим здесь, а не по цвету на экране. Размеры уже с gutter'ом:
+    // _PlaceTask обновляет width/height/size вместе.
+    // Оффсеты в transfer-буфере здесь НЕ считаются: их назначает ExecuteUploadTasks, потому что
+    // она может забрать несколько пачек разом (кадры со skip'ом) — нумеровать их по-пачечно
+    // значило бы наложить задачи разных пачек друг на друга в одном TB.
     for (auto& t : upload_tasks) {
-        // Атлас у задачи есть всегда — _PlaceTask выше разыменовывает его без проверки; здесь
-        // это лишь страховка, чтобы оффсеты остались монотонными, а не «залипли» на нуле.
-        const TextureAtlas* a = t.target_handle ? t.target_handle->atlas : nullptr;
-        const uint32_t align = a ? SDL_GPUTextureFormatTexelBlockSize(a->format) : 16;
-        if (align > 1) off = (off + align - 1) / align * align;
-        t.offset = off;
-        off += t.size;
+        const TextureAtlas* a = t.atlas;
         if (!a) continue;
-
-        // Размер задачи ДОЛЖЕН совпадать с тем, сколько байт ждёт формат назначения: сюда
-        // приходят два разных пути (CreateTexture с BGRA от TextureLoader и FontManager с
-        // R8, собранным руками из альфы), и расхождение форматов даст не ошибку валидации,
-        // а тихую порчу — сдвиг строк или чтение за границей TB. Ловим здесь, а не по цвету
-        // на экране. Размеры уже с gutter'ом: _PlaceTask обновляет width/height/size вместе.
         const uint32_t expect = SDL_CalculateGPUTextureFormatSize(a->format, t.width, t.height, 1);
         if (t.size != expect)
             SDL_Log("Upload '%s': %u байт, а формат атласа '%s' ждёт %u (%ux%u)",
@@ -495,18 +481,78 @@ void TextureManager::_BuildUploadTasks() {
     }
 }
 
+void TextureManager::_PublishUploadTasks() {
+    if (upload_tasks.empty()) return;
+    std::lock_guard lk(upload_handoff_mtx);
+    published_upload_tasks.insert(published_upload_tasks.end(),
+        std::make_move_iterator(upload_tasks.begin()),
+        std::make_move_iterator(upload_tasks.end()));
+    upload_tasks.clear();
+}
+
 TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
-    if (upload_tasks.empty())
+    // Забор переданного sim'ом (см. _PublishUploadTasks). Лок держится только на перенос;
+    // дальше render работает со своим вектором без замков. Не swap, а append: с прошлого раза
+    // здесь могли остаться задачи (аренда TB не удалась), и терять их нельзя.
+    {
+        std::lock_guard lk(upload_handoff_mtx);
+        if (!published_upload_tasks.empty()) {
+            render_upload_tasks.insert(render_upload_tasks.end(),
+                std::make_move_iterator(published_upload_tasks.begin()),
+                std::make_move_iterator(published_upload_tasks.end()));
+            published_upload_tasks.clear();
+        }
+    }
+    if (render_upload_tasks.empty())
         return nullptr;
 
-    // Упаковка (UVL + task.dst) сделана заранее в PackAtlases() — до сборки батчей,
-    // там же назначены offset'ы, поэтому суммарный размер = конец последней задачи.
-    const UploadTaskTexture& last = upload_tasks.back();
-    TransferBufferData* tbd = trm->AcquireUploadTB(last.offset + last.size);
-    if (!tbd)
-        return nullptr;
+    // SDL_GenerateMipmapsForGPUTexture — это ОТРИСОВКА в уровни, поэтому требует у текстуры ОБА
+    // флага: SAMPLER и COLOR_TARGET (SDL_gpu.c:2498; одного COLOR_TARGET мало — проверено зондом).
+    // При их отсутствии SDL бьёт SDL_assert_release, а он по умолчанию АБОРТИТ процесс. Пресеты
+    // ставят эти флаги при num_levels > 1 (см. _MaterialAtlas), но атлас может прийти и снаружи
+    // (Custom-tci из игры), поэтому здесь — явная проверка: промах даёт лог и пропуск, а не краш.
+    // Проверка живёт ЗДЕСЬ, а не в GenerateMipmaps: атлас берётся из task.atlas, и это последнее
+    // место, где он нужен — дальше в mip_tasks едет только хэндл текстуры.
+    constexpr SDL_GPUTextureUsageFlags kMipUsage =
+        SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 
-    for (auto& task : upload_tasks) {
+    // Раскладка задач в transfer-буфере. Оффсет обязан быть кратен размеру текселя формата
+    // НАЗНАЧЕНИЯ (VUID-vkCmdCopyBufferToImage-dstImage-07975), а задачи РАЗНЫХ форматов лежат в
+    // ОДНОМ буфере: глифы шрифта грузятся в R8-атлас (__TextAtlas) задачами размером w*h — сплошь
+    // и рядом нечётным, — и первая же такая задача сбивает выравнивание ВСЕМ следующим за ней
+    // 4-байтовым атласам (albedo/normal/env_skybox). Копия с невыровненного оффсета — UB: один
+    // драйвер её вытягивает, другой читает со сдвигом на байт, и каналы уезжают (альфа 255
+    // попадает в синий → вся текстурированная картинка в «синем фильтре»). Шаг берём у САМОГО
+    // формата (SDL знает: 1 у R8, 4 у BGRA8, 8/16 у 16F/32F и BC), а не константой сверху — тогда
+    // R8-глифы пакуются впритык, а платят выравниванием только те, кому оно правда нужно.
+    // Считаем ЗДЕСЬ, а не на упаковке: сюда могло приехать несколько пачек сразу, и у каждой
+    // нумерация с нуля — общий TB они бы перекрыли.
+    uint32_t off = 0;
+    for (auto& t : render_upload_tasks) {
+        // Атлас у размещённой задачи есть всегда; проверка — чтобы оффсеты остались монотонными,
+        // а не «залипли» на нуле, если задача не разместилась.
+        const uint32_t align = t.atlas ? SDL_GPUTextureFormatTexelBlockSize(t.atlas->format) : 16;
+        if (align > 1) off = (off + align - 1) / align * align;
+        t.offset = off;
+        off += t.size;
+    }
+    const uint32_t total = off;
+
+    TransferBufferData* tbd = total ? trm->AcquireUploadTB(total) : nullptr;
+    if (!tbd) {
+        // total == 0 — все задачи пустые, грузить нечего: чистим, иначе они копились бы вечно.
+        // Иначе аренда TB реально провалилась (драйверная аллокация или маппинг) — задачи
+        // ОСТАВЛЯЕМ на следующий кадр: места в атласе им уже розданы и не вернутся (_PlaceTask
+        // идемпотентен по placed), так что потеря пикселей = мусор в этих регионах навсегда.
+        if (total == 0) render_upload_tasks.clear();
+        return nullptr;
+    }
+
+    // Решение про мипы принимаем ОДИН раз на атлас за пачку: у шрифтового атласа задача на
+    // каждый глиф, и без этого промах по usage залил бы лог сотнями одинаковых строк.
+    std::unordered_set<SDL_GPUTexture*> mip_decided;
+
+    for (auto& task : render_upload_tasks) {
         if (!task.dst.texture) continue;   // задача не разместилась (атлас переполнен) — не грузим
         // Пиксели уже декодированы TextureLoader'ом (BGRA32, плотно) — просто копируем.
         SDL_GPUTextureTransferInfo src{};
@@ -519,38 +565,34 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
         SDL_memcpy(base + task.offset, task.pixels.data(), task.size);
 
         SDL_UploadToGPUTexture(cp, &src, &task.dst, false);
+
+        // Заявка на мипы — здесь, где известно, что пиксели этого атласа реально поехали.
+        const TextureAtlas* a = task.atlas;
+        if (!a || a->mip_levels <= 1) continue;                    // мипов нет — генерировать нечего
+        if (!mip_decided.insert(task.dst.texture).second) continue; // по этому атласу уже решили
+
+        if ((a->tci.usage & kMipUsage) != kMipUsage) {
+            SDL_Log("TextureManager::ExecuteUploadTasks: atlas has num_levels=%u but usage lacks "
+                    "SAMPLER|COLOR_TARGET - mip generation skipped (would abort on SDL assert).",
+                    a->mip_levels);
+            continue;
+        }
+        mip_tasks.insert(task.dst.texture);
     };
+
+    render_upload_tasks.clear();
     return tbd;
 }
 
 void TextureManager::GenerateMipmaps(SDL_GPUCommandBuffer* cb)
 {
-    // SDL_GenerateMipmapsForGPUTexture — это ОТРИСОВКА в уровни, поэтому требует у текстуры ОБА
-    // флага: SAMPLER и COLOR_TARGET (SDL_gpu.c:2498; одного COLOR_TARGET мало — проверено зондом).
-    // При их отсутствии SDL бьёт SDL_assert_release, а он по умолчанию АБОРТИТ процесс. Пресеты
-    // ставят эти флаги при num_levels > 1 (см. _MaterialAtlas), но атлас может прийти и снаружи
-    // (Custom-tci из игры), поэтому здесь — явная проверка: промах даёт лог и пропуск, а не краш.
-    constexpr SDL_GPUTextureUsageFlags kMipUsage =
-        SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
-
-    std::unordered_set<SDL_GPUTexture*> seen;
-    for (auto& task : upload_tasks) {
-        if (!task.target_handle || !task.target_handle->atlas) continue;
-        TextureAtlas* atlas = task.target_handle->atlas;
-        SDL_GPUTexture* tex = atlas->texture_binding.texture;
-        if (!tex) continue;                       // атлас ещё не забейкан
-        if (atlas->mip_levels <= 1) continue;     // мипов нет — генерировать нечего
-        if (!seen.insert(tex).second) continue;   // атлас уже отмиплен в этом кадре
-
-        if ((atlas->tci.usage & kMipUsage) != kMipUsage) {
-            SDL_Log("TextureManager::GenerateMipmaps: atlas has num_levels=%u but usage lacks "
-                    "SAMPLER|COLOR_TARGET - mip generation skipped (would abort on SDL assert).",
-                    atlas->mip_levels);
-            continue;
-        }
+    // Заявки ставит ExecuteUploadTasks (там же и вся валидация usage-флагов) — здесь только
+    // дренаж. Живое состояние менеджера (атласы, хэндлы) не читается вообще: в mip_tasks лежат
+    // готовые хэндлы текстур, поэтому метод можно звать с другого потока, чем тот, что
+    // ставил заявки, и переносить между командбуферами независимо от заливки.
+    for (SDL_GPUTexture* tex : mip_tasks)
         SDL_GenerateMipmapsForGPUTexture(cb, tex);
-    }
-    upload_tasks.clear();
+    mip_tasks.clear();
 }
 
 SDL_GPUSampler* TextureManager::CreateSampler(const std::string& name, SDL_GPUSamplerCreateInfo sci)
@@ -623,6 +665,11 @@ void TextureManager::DeleteTextureHandle(const std::string& name)
         }
     }
 
+    // Чистим ТОЛЬКО sim-вектор; уже переданные render'у пачки не трогаем и не можем. Это
+    // оптимизация, а не корректность: место удалённой текстуры возвращается упаковщику, и если
+    // его в этом же кадре займёт новая — её задача попадёт в БОЛЕЕ ПОЗДНЮЮ пачку, а пачки
+    // исполняются по порядку. Значит последними в регион лягут актуальные пиксели; худшее, что
+    // даёт непойманная задача, — лишняя заливка байт, которые тут же перезапишутся.
     upload_tasks.erase(
         std::remove_if(upload_tasks.begin(), upload_tasks.end(),
                        [handle](const UploadTaskTexture& t) { return t.target_handle == handle; }),

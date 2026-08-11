@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "PreviewPacker.h"
 #include "TextureData.h"
+#include "Utils.h"
 #include <algorithm>
 
 void PreviewPacker::Create(SDL_GPUDevice* dev)
@@ -26,12 +27,14 @@ void PreviewPacker::Destroy(SDL_GPUDevice* dev)
     dirty_.clear();
     free_cells_.clear();
     next_cell_ = 0;
+    published_.clear();
+    render_blits_.clear();
 }
 
 int32_t PreviewPacker::Alloc()
 {
     if (!free_cells_.empty()) { int32_t c = free_cells_.back(); free_cells_.pop_back(); return c; }
-    if (next_cell_ < (int32_t)CAPACITY) return next_cell_++;
+    if (next_cell_ < safe_u32t_i(CAPACITY)) return next_cell_++;
     return -1;   // сетка исчерпана
 }
 
@@ -51,28 +54,55 @@ void PreviewPacker::Request(const std::string& name, TextureAtlas* src,
         dirty_.push_back(name);
 }
 
-void PreviewPacker::Blit(SDL_GPUCommandBuffer* cb)
+void PreviewPacker::Publish()
 {
-    // Дренаж на upload-cb ПОСЛЕ заливки пикселей и мипов того же cb: порядок внутри cb гарантирует,
-    // что источник уже содержит пиксели. ImGui читает превью-атлас на рендере — те же гарантии,
-    // что у самих атласов (upload раньше рендера по таймлайну).
-    if (!atlas_ || dirty_.empty()) return;
+    if (dirty_.empty()) return;
 
+    std::vector<BlitTask>    ready;
     std::vector<std::string> retry;   // источники без готовой GPU-текстуры — оставить на потом
     for (const std::string& name : dirty_) {
         auto it = slots_.find(name);
-        if (it == slots_.end() || it->second.cell < 0) continue;   // Release-нут между Request и Blit
+        if (it == slots_.end() || it->second.cell < 0) continue;   // Release-нут между Request и Publish
         const Slot& s = it->second;
-        if (!s.src || !s.src->texture_binding.texture) { retry.push_back(name); continue; }
+        SDL_GPUTexture* src = s.src ? s.src->texture_binding.texture : nullptr;
+        if (!src) { retry.push_back(name); continue; }              // атлас ещё не забейкан
 
+        BlitTask t{};
+        t.src = src;
+        t.sx = s.x; t.sy = s.y; t.sw = s.w; t.sh = s.h; t.layer = s.layer;
+        // Индекс ячейки (row-major) → её пиксельный угол. Считаем здесь, чтобы render получил
+        // готовые координаты и не знал ни про сетку, ни про то, что ячейка бывает -1.
+        t.dx = safe_i_u32(s.cell % safe_u32t_i(PER_ROW)) * CELL;
+        t.dy = safe_i_u32(s.cell / safe_u32t_i(PER_ROW)) * CELL;
+        ready.push_back(t);
+    }
+    dirty_.swap(retry);
+
+    if (ready.empty()) return;
+    std::lock_guard lk(mtx_);
+    published_.insert(published_.end(), ready.begin(), ready.end());
+}
+
+void PreviewPacker::Blit(SDL_GPUCommandBuffer* cb)
+{
+    // Запись на render-cb ПОСЛЕ заливки пикселей и мипов того же cb: порядок внутри cb гарантирует,
+    // что источник уже содержит пиксели. ImGui рисует превью-атлас этим же cb ниже по кадру.
+    {
+        std::lock_guard lk(mtx_);
+        if (published_.empty()) return;
+        published_.swap(render_blits_);   // render_blits_ пуст: его чистит хвост прошлого вызова
+    }
+    if (!atlas_) { render_blits_.clear(); return; }
+
+    for (const BlitTask& t : render_blits_) {
         SDL_GPUBlitInfo bi{};
-        bi.source.texture = s.src->texture_binding.texture;
+        bi.source.texture = t.src;
         bi.source.mip_level = 0;
-        bi.source.layer_or_depth_plane = s.layer;
-        bi.source.x = s.x; bi.source.y = s.y; bi.source.w = s.w; bi.source.h = s.h;
+        bi.source.layer_or_depth_plane = t.layer;
+        bi.source.x = t.sx; bi.source.y = t.sy; bi.source.w = t.sw; bi.source.h = t.sh;
         bi.destination.texture = atlas_;
-        bi.destination.x = (Uint32)(s.cell % (int32_t)PER_ROW) * CELL;
-        bi.destination.y = (Uint32)(s.cell / (int32_t)PER_ROW) * CELL;
+        bi.destination.x = t.dx;
+        bi.destination.y = t.dy;
         bi.destination.w = CELL;
         bi.destination.h = CELL;
         bi.load_op = SDL_GPU_LOADOP_LOAD;   // соседние ячейки не трогаем
@@ -80,10 +110,10 @@ void PreviewPacker::Blit(SDL_GPUCommandBuffer* cb)
         // растягивается в мыльный градиент и подмешивает соседей по кромке региона → NEAREST даёт
         // чёткие тексели без утечки. Крупный (уменьшение до CELL) оставляем LINEAR: NEAREST на
         // даунскейле 2048→64 алиасит. Порог — ровно CELL: увеличение → NEAREST, уменьшение → LINEAR.
-        bi.filter = (s.w < CELL && s.h < CELL) ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+        bi.filter = (t.sw < CELL && t.sh < CELL) ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
         SDL_BlitGPUTexture(cb, &bi);
     }
-    dirty_.swap(retry);
+    render_blits_.clear();
 }
 
 PreviewPacker::UV PreviewPacker::GetUV(const std::string& name) const
@@ -93,8 +123,8 @@ PreviewPacker::UV PreviewPacker::GetUV(const std::string& name) const
     if (!atlas_ || it == slots_.end() || it->second.cell < 0) return r;
     const float cell = 1.0f / (float)PER_ROW;
     r.valid = true;
-    r.u0 = (float)(it->second.cell % (int32_t)PER_ROW) * cell;
-    r.v0 = (float)(it->second.cell / (int32_t)PER_ROW) * cell;
+    r.u0 = safe_sint32_f(it->second.cell % safe_u32t_i(PER_ROW)) * cell;
+    r.v0 = safe_sint32_f(it->second.cell / safe_u32t_i(PER_ROW)) * cell;
     r.u1 = r.u0 + cell;
     r.v1 = r.v0 + cell;
     return r;

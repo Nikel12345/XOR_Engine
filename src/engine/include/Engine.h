@@ -217,15 +217,15 @@ private:
     std::atomic<bool> running = true;
     ImDrawData* imgui_draw_data = nullptr;
 
-    // Transfer-буферы upload'а, ушедшего в полёт для слота. Вернутся в пул на
-    // UploadThread (Engine::UploadFunc) после сигнала upload-fence. Видимость
-    // между потоками обеспечивает mutex SlotController'а: стеш пишется ДО
-    // SetSlotState(UPLOADING), читается после проверки IsUploadingSlot.
-    struct PendingUploadTBs {
-        TransferBufferData* buffers_tbd = nullptr;
-        TransferBufferData* textures_tbd = nullptr;
-    };
-    PendingUploadTBs pending_upload_tbs[BUFFERING_LEVEL];
+    // Transfer-буферы, ушедшие в полёт для слота: держим до fence той фазы, что их читает
+    // (контракт TransferManager::ReleaseTB). Стеш пишется ДО публикации fence, читается после
+    // его сигнала — видимость между потоками даёт mutex SlotController'а.
+    //   buffers  — заливка буферов, submit в PrepareFunc → отпускает UploadFunc по upload-fence;
+    //   textures — заливка пикселей, submit в RenderFunc → отпускает FenceFunc по render-fence.
+    // Разъехались они потому, что текстурная работа (мипы и блиты превью — отрисовка, на
+    // копировальной очереди её не исполнить) уехала в RenderFunc.
+    TransferBufferData* pending_upload_tbs[BUFFERING_LEVEL] = {};
+    TransferBufferData* pending_render_tbs[BUFFERING_LEVEL] = {};
 
     // [PROFILE] Момент завершения предыдущего кадра (сигнал render-fence в FenceFunc).
     // Разница между соседними завершениями = реальный период кадра (1/период = FPS).
