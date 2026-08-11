@@ -100,6 +100,7 @@ option(ENGINE_PROFILE "Кадровый профайлер (Prof::/PROF_SCOPE)" 
 target_compile_definitions(EngineGpu PUBLIC ENGINE_PROFILE=$<BOOL:${ENGINE_PROFILE}>)
 
 set(ENGINEGPU_SRC
+    src/QueueManager.cpp
     src/TransferManager.cpp
     src/BufferManager.cpp
     src/BufferManager_Binds.cpp
@@ -116,6 +117,8 @@ set(ENGINEGPU_SRC
     src/EngineProfiler.cpp
 )
 set(ENGINEGPU_HDR
+    include/GpuQueues.h
+    include/QueueManager.h
     include/TransferManager.h
     include/BufferManager.h
     include/BufferData.h
