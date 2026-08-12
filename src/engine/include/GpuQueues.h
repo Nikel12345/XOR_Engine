@@ -53,19 +53,13 @@ private:
     SDL_GPUCopyPass* cp_ = nullptr;
 };
 
-// ─────────────────────────────────────── командные буферы ─────────────────────────────────
 
-// Командный буфер заливочного лейна. Ни свопчейна, ни мипов, ни блитов, ни пушей — на
-// копировальной очереди всего этого не исполнить.
 class UploadCommandBuffer {
 public:
     explicit UploadCommandBuffer(SDL_GPUCommandBuffer* cb) : cb_(cb) {}
 
     UploadCopyPass BeginBufferCopyPass() const { return UploadCopyPass(SDL_BeginGPUCopyPass(cb_)); }
 
-    // Два варианта закрытия: без fence — «отправил и забыл», с fence — когда нужен сигнал
-    // завершения работы над слотом (SlotController). Отменённый буфер возвращается в пул,
-    // ничего не исполнив.
     bool          Submit() const                { return SDL_SubmitGPUCommandBuffer(cb_); }
     SDL_GPUFence* SubmitAndAcquireFence() const { return SDL_SubmitGPUCommandBufferAndAcquireFence(cb_); }
     bool          Cancel() const                { return SDL_CancelGPUCommandBuffer(cb_); }
