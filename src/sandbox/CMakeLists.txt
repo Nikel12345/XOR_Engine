@@ -3,7 +3,8 @@ add_executable(Sandbox)
 # Площадки для запуска подсистем движка по отдельности.
 # Каждый сценарий — свой .cpp; main решает, что именно запустить.
 set(SANDBOX_SRC
-    src/TransferQueueProbe.cpp        # зонд: доезжает ли заливка буфера до выделенной КОПИРОВАЛЬНОЙ очереди (см. шапку файла)
+    src/QueueThreadingProbe.cpp       # зонд: очереди под конвейером потоков движка (ThreadController+SlotController) — потокобезопасность
+    # src/TransferQueueProbe.cpp      # зонд: три очереди последовательно, без потоков (см. шапку файла)
     # src/CopyComputeBarrierProbe.cpp # зонд: порядок нескольких операций над одним буфером в одном cb, без fence (см. шапку файла)
     # src/ClaimWindowProbe.cpp        # зонд: claim окна GPU-девайсом — им найден баг «первого окна» в SDL 3.4 (см. шапку файла)
     # src/main.cpp              # зонд: TDM store под контеншеном памяти

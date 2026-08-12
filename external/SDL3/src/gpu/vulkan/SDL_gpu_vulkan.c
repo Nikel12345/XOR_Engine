@@ -1217,11 +1217,14 @@ struct VulkanRenderer
      * рассинхронизацию вместо ошибки. Маска описывает железо, не намерение. */
     VulkanBufferUsageModeFlags queueUsageModeMasks[SDL_GPU_QUEUETYPE_COUNT];
 
-    /* ENGINE-FORK: битовая маска семей, о сабмите в которые уже сообщено (debugMode).
-     * Логируем ПЕРВЫЙ сабмит в каждую семью: иначе маршрутизацию не увидеть снаружи вообще —
-     * очередь у SDL прячется за командным буфером, — а печатать каждый сабмит значит залить
-     * лог 60 строками в секунду. Под submitLock, поэтому без атомиков. */
-    Uint32 submitLoggedFamilies;
+    /* ENGINE-FORK: пары (поток, семья), о сабмите которых уже сообщено (debugMode).
+     * Логируем первый сабмит каждой ПАРЫ, а не каждой семьи: под конвейером потоков в одну
+     * семью сабмитят разные потоки, и по-семейный лог показал бы только первого из них — то
+     * есть не отличил бы «sim реально пишет в копировальную» от «в неё один раз написал main».
+     * Пар в реальности единицы (потоков конвейера 4, семей 3), поэтому хватает крошечного
+     * массива; переполнение просто перестаёт логировать. Под submitLock, поэтому без атомиков. */
+    struct { SDL_ThreadID threadID; Uint32 family; } submitLogged[16];
+    Uint32 submitLoggedCount;
 
     VulkanCommandBuffer **submittedCommandBuffers;
     Uint32 submittedCommandBufferCount;
@@ -11111,11 +11114,19 @@ static bool VULKAN_Submit(
      * ставит работу в очередь и возвращается, параллельность живёт на GPU, а не здесь. */
     if (renderer->debugMode) {
         Uint32 fam = vulkanCommandBuffer->commandPool->queueFamilyIndex;
-        if (fam < 32 && !(renderer->submitLoggedFamilies & (1u << fam))) {
-            renderer->submitLoggedFamilies |= (1u << fam);
+        SDL_ThreadID tid = vulkanCommandBuffer->commandPool->threadID;
+        bool seen = false;
+        for (Uint32 i = 0; i < renderer->submitLoggedCount; i += 1) {
+            if (renderer->submitLogged[i].threadID == tid &&
+                renderer->submitLogged[i].family == fam) { seen = true; break; }
+        }
+        if (!seen && renderer->submitLoggedCount < SDL_arraysize(renderer->submitLogged)) {
+            renderer->submitLogged[renderer->submitLoggedCount].threadID = tid;
+            renderer->submitLogged[renderer->submitLoggedCount].family = fam;
+            renderer->submitLoggedCount += 1;
             SDL_LogInfo(SDL_LOG_CATEGORY_GPU,
-                        "GPU first submit to queue family %u (thread %" SDL_PRIu64 ")",
-                        fam, (Uint64)vulkanCommandBuffer->commandPool->threadID);
+                        "GPU first submit: thread %" SDL_PRIu64 " -> queue family %u",
+                        (Uint64)tid, fam);
         }
     }
 
