@@ -20,10 +20,14 @@
 //  UpdateInstruction + ReadBackInstruction, TransferManager, ShaderManager
 //  (vs/fs/cs + ShaderProgram + ComputeShaderProgram), PassManager (RenderPassStep
 //  со свопчейном-атласом и ComputePrepass), PipeManager, BatchBuilder.
-//  Вычислительная работа повешена на ПРЕПАСС намеренно: в движке это штатный шов
-//  для работы в отдельном командном буфере до основных проходов (там каллинг), и
-//  ExecutePrepassesSteps / ExecutePassesSteps разводятся по разным очередям без
-//  единой правки в PassManager.
+//  ОСТОРОЖНО С ПРЕПАССОМ. Вычислительная работа повешена на него потому, что
+//  ExecutePrepassesSteps и ExecutePassesSteps — два независимых входа, и их легко
+//  развести по разным очередям, не трогая PassManager. Но препасс НЕ задумывался
+//  как шов под compute: это механизм PrepassDepended, сделанный под другую задачу
+//  (сама она больше не используется), а каллинг переиспользовал его уже вторично.
+//  То, что зонд через него прошёл, — не рекомендация; на нём могут висеть
+//  допущения исходного назначения, и для боевой compute-фазы шов стоит выбирать
+//  осознанно, а не по этому примеру.
 //
 //  Вершинный буфер — стрим пула (_VertexPosBuffer). usage ему объявляют сами
 //  шейдеры: VERTEX от вершинника, COMPUTE_STORAGE_WRITE от вычислительной
@@ -105,6 +109,10 @@ struct RotateParams {
     uint32_t vertex_count = VERTEX_COUNT;
 };
 struct DummyDispatchData {};
+
+// Юниформа вершинника: поправка на форму окна (см. шапку triangle.vert.hlsl).
+// Дополнена до 16 байт — cbuffer в HLSL кладёт скаляр в регистр такого размера.
+struct ViewParams { float aspect = 1.0f; float pad[3]{}; };
 
 // Дельта текущего кадра. Пуш-лямбда обязана брать данные ТОЛЬКО через биндер, но у зонда нет
 // ни слотов, ни слепков, поэтому тик просто лежит здесь и обновляется в цикле кадров.
@@ -190,7 +198,7 @@ int main(int, char**)
 
         RenderPassStep* tri_pass = pm.CreateRenderPass(
             "TRIANGLE_PASS",
-            [&bm, pipeline_slot](SDL_GPUCommandBuffer* cb, PassManager*, RenderPassStep& rp)
+            [&bm, pipeline_slot](SDL_GPUCommandBuffer* cb, PassManager* p, RenderPassStep& rp)
         {
             // Резолв таргетов — на исполнении: текстура свопчейна меняется каждый кадр.
             // В движке это делает RenderPassStandardBody; здесь тело своё, потому что
@@ -206,6 +214,12 @@ int main(int, char**)
             BufferData* vb = bm.GetBufferData(GeometryStreams::VERTEX_POS_BUFFER);
             if (*pipeline_slot && vb && vb->Static.buffer) {
                 SDL_BindGPUGraphicsPipeline(sdl_rp, *pipeline_slot);
+                // Поправка на форму окна — см. шапку triangle.vert.hlsl. Берётся у свопчейн-
+                // атласа, а не запоминается при старте: он переживает смену размера окна.
+                const TextureAtlas* sw = p->GetSwapchainAtlas();
+                ViewParams vp{};
+                vp.aspect = (sw && sw->height) ? (float)sw->width / (float)sw->height : 1.0f;
+                SDL_PushGPUVertexUniformData(cb, 0, &vp, sizeof(vp));
                 SDL_GPUBufferBinding vbind{};
                 vbind.buffer = vb->Static.buffer;
                 vbind.offset = 0;
