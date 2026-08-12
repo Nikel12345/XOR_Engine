@@ -7508,8 +7508,8 @@ static SDL_GPUCommandBuffer *D3D12_AcquireCommandBuffer(
     SDL_GPURenderer *driverData,
     SDL_GPUQueueType queueType)
 {
-    /* ENGINE-FORK: у бэкенда одна очередь (D3D12_COMMAND_LIST_TYPE_DIRECT), выбирать нечего —
-     * TRANSFER штатно вырождается в неё же. */
+    /* ENGINE-FORK: this backend has exactly one queue (D3D12_COMMAND_LIST_TYPE_DIRECT),
+     * so there is nothing to select -- TRANSFER degrades onto it as designed. */
     (void)queueType;
     D3D12Renderer *renderer = (D3D12Renderer *)driverData;
     D3D12CommandBuffer *commandBuffer;
