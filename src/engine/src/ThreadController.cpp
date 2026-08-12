@@ -172,8 +172,8 @@ void ThreadController::UploadThread()
             if (!slot_controller->IsUploadingSlot(slot)) {
                 continue;
             }
-            // Fence ставится ДО перевода в UPLOADING, но проверка защитная.
-            if (!slot_controller->GetSlotsData()[slot].fence) {
+            // Fences ставятся ДО перевода в UPLOADING, но проверка защитная.
+            if (slot_controller->GetSlotsData()[slot].upload.Empty()) {
                 continue;
             }
 
@@ -267,7 +267,7 @@ void ThreadController::FenceThread()
             }
             // IS_RENDERING ставится при ВЫБОРЕ слота (WaitRenderableSlot), fence
             // появляется позже — после сабмита. Пока его нет, ждать нечего.
-            if (!slot_controller->GetSlotsData()[slot].fence) {
+            if (slot_controller->GetSlotsData()[slot].render.Empty()) {
                 continue;
             }
 

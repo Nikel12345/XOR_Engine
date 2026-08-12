@@ -8,7 +8,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
-#include <mutex>
 #include "config.h"
 #include "TransferManager.h"
 #include "TextureData.h"
@@ -103,7 +102,7 @@ public:
 	void BakePending();
 
 	// Дренирует mip_tasks — заявки, поставленные ExecuteUploadTasks для атласов, в которые
-	// реально поехали пиксели. Никакого состояния кроме mip_tasks не трогает, upload_tasks
+	// реально поехали пиксели. Никакого состояния кроме mip_tasks не трогает, texture_upload_tasks
 	// больше не читает и не чистит (ими владеет ExecuteUploadTasks).
 	void GenerateMipmaps(SDL_GPUCommandBuffer* cb);
 
@@ -116,9 +115,7 @@ public:
 	// поэтому к моменту BuildRenderBatches UVL уже обязан быть посчитан. Детерминирована и
 	// идемпотентна (тот же набор задач → те же UVL). GPU-загрузка пикселей — отдельно, в
 	// ExecuteUploadTasks (ей нужен copy-pass), упаковке же GPU не нужен.
-	// Заканчивается ПЕРЕДАЧЕЙ пачки render-потоку (см. _PublishUploadTasks): после неё задачи
-	// уходят из-под sim и заливка их больше не касается этого потока.
-	void PackAtlases() { _BuildUploadTasks(); _PublishUploadTasks(); preview.Publish(); }
+	void PackAtlases() { _BuildUploadTasks(); preview.Publish(); }
 	SDL_GPUSampler* CreateSampler(const std::string& name, SDL_GPUSamplerCreateInfo sci);
 	SDL_GPUSampler* GetSampler(const std::string& name);
 	
@@ -156,10 +153,10 @@ public:
 	void RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci);
 
 	// ── Превью ассетов UI — самостоятельная подсистема PreviewPacker (ключ = ИМЯ текстуры, не хэндл).
-	//    TM только проксирует: запись блитов на render-cb (после GenerateMipmaps — источник обязан
-	//    уже содержать пиксели), выдачу UV/текстуры для ImGui и явное освобождение при реальном
-	//    удалении. Заявку на превью TM ставит в _PlaceTask (UVL готов), а PackAtlases передаёт
-	//    вызревшие заявки render'у (preview.Publish) — как и задачи заливки. ──
+	//    TM только проксирует: запись блитов на текстурный cb стадии заливки (после GenerateMipmaps —
+	//    источник обязан уже содержать пиксели), выдачу UV/текстуры для ImGui и явное освобождение
+	//    при реальном удалении. Заявку на превью TM ставит в _PlaceTask (UVL готов), а PackAtlases
+	//    объявляет вызревшие готовыми (preview.Publish) — как и задачи заливки. ──
 	void BlitPendingPreviews(SDL_GPUCommandBuffer* cb) { preview.Blit(cb); }
 	SDL_GPUTexture* GetPreviewAtlasTexture() const { return preview.Texture(); }
 	// UV ячейки превью ПО ИМЕНИ (для ImGui::Image/AddImage). valid=false — превью для имени нет.
@@ -197,9 +194,6 @@ public:
 private:
 	void CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name);
 	void _BuildUploadTasks();
-	// Передача накопленной пачки render-потоку. Идиома InputManager: мьютекс держится только на
-	// саму передачу, дальше каждая сторона работает со своим вектором без замков.
-	void _PublishUploadTasks();
 	// Разместить одну upload-задачу в персистентном упаковщике её атласа (слой за слоем от 0-го,
 	// с переиспользованием освобождённых регионов). При успехе пишет UVL/placement в handle,
 	// gutter'ит пиксели и заполняет task.dst. См. TextureManager.cpp.
@@ -211,19 +205,16 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<TextureHandle>> handles_data;
 	std::unordered_map<std::string, SDL_GPUSampler*> samplers_data;
 	std::unordered_map<TextureAtlas*, std::unique_ptr<AtlasPacker>> atlas_packers;  // персистентное состояние упаковки
-	// ── Задачи заливки текстур: производит sim, исполняет render ──
-	// upload_tasks — приёмник sim-потока: сюда пишет CreateUploadTask, здесь их размещает в атласе
-	// _PlaceTask и отсюда вычищает DeleteTextureHandle. Наружу не видны.
-	std::vector<UploadTaskTexture> upload_tasks;
-	// Переданные, но ещё не забранные. Единственное, что видят оба потока — и только под мьютексом
-	// (по идиоме InputManager::commands_). Пачка НЕ привязана к слоту специально: при frame skip
-	// слот перезаписывается, а места в атласе задачам уже розданы безвозвратно, так что потеря
-	// пачки означала бы мусор в этих регионах навсегда. Здесь они просто дождутся ближайшего рендера.
-	std::mutex upload_handoff_mtx;
-	std::vector<UploadTaskTexture> published_upload_tasks;
-	// Собственность render-потока: забранное из published_*. Живёт между кадрами — если аренда
-	// transfer-буфера не удалась, задачи остаются здесь до следующей попытки.
-	std::vector<UploadTaskTexture> render_upload_tasks;
+	// ── Задачи заливки текстур: ОДИН вектор, ОДИН поток ──
+	// Сюда пишет CreateUploadTask, здесь их размещает в атласе _PlaceTask (PackAtlases), отсюда
+	// заливает и чистит ExecuteUploadTasks, отсюда же вычищает DeleteTextureHandle. Всё это —
+	// sim: и упаковка, и заливка идут в PrepareFunc. Render вектора не касается, замков нет.
+	// Пары published_/render_ и мьютекса передачи больше НЕТ: они были нужны, пока заливка жила
+	// на render-потоке. Задачи НЕ привязаны к слоту специально: при frame skip слот
+	// перезаписывается, а места в атласе задачам уже розданы безвозвратно, так что потеря
+	// задачи означала бы мусор в этих регионах навсегда — они просто ждут здесь.
+	// Живут между кадрами: если аренда transfer-буфера не удалась, остаются до следующей попытки.
+	std::vector<UploadTaskTexture> texture_upload_tasks;
 	// Атласы, в которые в этой пачке РЕАЛЬНО поехали пиксели — заявка на мипы. Ставит
 	// ExecuteUploadTasks (единственный владелец upload_tasks), дренирует GenerateMipmaps.
 	// Раньше GenerateMipmaps сам ходил по upload_tasks и сам же их чистил — то есть мутировал

@@ -7,7 +7,8 @@ SlotController::SlotController()
     for (uint8_t i = 0; i < BUFFERING_LEVEL; ++i) {
         slots_data[i].frame_id = 0;
         slots_data[i].flags = 0;
-        slots_data[i].fence = nullptr;
+        slots_data[i].upload.Clear();
+        slots_data[i].render.Clear();
     }
 }
 
@@ -317,7 +318,10 @@ void SlotController::HandleComputed(uint8_t slot)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    slots_data[slot].fence = nullptr;
+    // Своего поля fence у compute нет и зануления чужих здесь не место: upload-fences уже
+    // отпустил и вычистил UploadFunc, render-fence ещё не существует. Раньше строка
+    // slots_data[slot].fence = nullptr здесь была, и это ровно тот симптом, из-за которого
+    // поле стоило разделить: по общему полю не читалось, что именно она чистит.
     slots_data[slot].flags = static_cast<uint8_t>(
         (slots_data[slot].flags & ~SLOT_FLAG_IS_COMPUTING) | SLOT_FLAG_HAS_COMPUTED);
 
@@ -329,7 +333,7 @@ void SlotController::HandleRendered(uint8_t slot)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    slots_data[slot].fence = nullptr;
+    slots_data[slot].render.Clear();
     slots_data[slot].flags = static_cast<uint8_t>(
         slots_data[slot].flags & ~SLOT_FLAG_IS_RENDERING);
 
@@ -351,13 +355,23 @@ void SlotController::SetSlotState(uint8_t slot, SlotState new_state)
     }
 }
 
-void SlotController::SetSlotFence(uint8_t slot, SDL_GPUFence* fence)
+void SlotController::PushUploadFence(uint8_t slot, SDL_GPUFence* fence)
 {
     if (slot == INVALID_SLOT || slot >= BUFFERING_LEVEL)
         return;
 
     std::lock_guard<std::mutex> lock(mutex_);
-    slots_data[slot].fence = fence;
+    slots_data[slot].upload.Push(fence);
+}
+
+void SlotController::SetRenderFence(uint8_t slot, SDL_GPUFence* fence)
+{
+    if (slot == INVALID_SLOT || slot >= BUFFERING_LEVEL)
+        return;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    slots_data[slot].render.Clear();
+    slots_data[slot].render.Push(fence);
 }
 
 void SlotController::StampSlotEpoch(uint8_t slot, uint64_t epoch)
@@ -382,11 +396,12 @@ void SlotController::DebugDump(const char* tag)
     SDL_Log("==== SlotController::DebugDump %s ====", tag ? tag : "");
     SDL_Log(" last_rendering_slot = %u", last_rendering_slot);
 
+    static_assert(StageFences::CAP == 2, "формат строки ниже печатает ровно два upload-fence");
     for (uint8_t i = 0; i < BUFFERING_LEVEL; ++i) {
         const SlotData& sd = slots_data[i];
         uint8_t f = sd.flags;
         SDL_Log(
-            " slot %u: flags=0x%02X [Rsv=%u U=%u P=%u R=%u], frame_id=%u, fence=%p",
+            " slot %u: flags=0x%02X [Rsv=%u U=%u P=%u R=%u], frame_id=%u, upload=%u{%p,%p}, render=%p",
             i,
             f,
             (f & SLOT_FLAG_RESERVED) != 0,
@@ -394,7 +409,10 @@ void SlotController::DebugDump(const char* tag)
             (f & SLOT_FLAG_HAS_PREPARED) != 0,
             (f & SLOT_FLAG_IS_RENDERING) != 0,
             sd.frame_id,
-            (void*)sd.fence
+            sd.upload.count,
+            (void*)sd.upload.items[0],
+            (void*)sd.upload.items[1],
+            (void*)sd.render.items[0]
         );
     }
     SDL_Log("======================================");

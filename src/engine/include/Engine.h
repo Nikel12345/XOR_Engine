@@ -226,12 +226,12 @@ private:
     // Transfer-буферы, ушедшие в полёт для слота: держим до fence той фазы, что их читает
     // (контракт TransferManager::ReleaseTB). Стеш пишется ДО публикации fence, читается после
     // его сигнала — видимость между потоками даёт mutex SlotController'а.
-    //   buffers  — заливка буферов, submit в PrepareFunc → отпускает UploadFunc по upload-fence;
-    //   textures — заливка пикселей, submit в RenderFunc → отпускает FenceFunc по render-fence.
-    // Разъехались они потому, что текстурная работа (мипы и блиты превью — отрисовка, на
-    // копировальной очереди её не исполнить) уехала в RenderFunc.
+    // Оба сабмитятся в PrepareFunc и оба отпускаются в UploadFunc, но буферами РАЗНЫМИ: заливка
+    // буферов идёт на копировальную очередь, а текстурная (мипы и блиты превью — отрисовка,
+    // копировальной их не исполнить) на графическую. Fences обоих лежат в SlotData::upload и
+    // ждутся одним wait_all — отсюда и общая точка освобождения.
     TransferBufferData* pending_upload_tbs[BUFFERING_LEVEL] = {};
-    TransferBufferData* pending_render_tbs[BUFFERING_LEVEL] = {};
+    TransferBufferData* pending_texture_tbs[BUFFERING_LEVEL] = {};
 
     // [PROFILE] Момент завершения предыдущего кадра (сигнал render-fence в FenceFunc).
     // Разница между соседними завершениями = реальный период кадра (1/период = FPS).
