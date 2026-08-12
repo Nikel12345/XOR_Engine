@@ -225,7 +225,7 @@ SDL_AppResult Game::MainInit()
     {
         MaterialManager* mm = ctx->GetMaterialManager();
     }
-	ctx->ExecuteGenerators();   // CreateDebugColliders
+	//ctx->ExecuteGenerators();   // CreateDebugColliders
     ChangeState(GameState::MAIN_MENU);
     return SDL_APP_CONTINUE;
 }
