@@ -320,6 +320,8 @@ int main(int, char**)
         // пишет команды и сам ждёт свой фенс — блокируется при этом ТОЛЬКО он: render в это
         // время рисует другой слот, sim готовит третий. В этом и весь смысл стадии.
         auto compute_cb = [&](uint8_t slot) {
+            slots.SetSlotState(slot, SlotState::COMPUTING);
+
             ComputeCommandBuffer ccb = qm.GetComputeQueue().AcquireCommandBuffer();
             if (!ccb) { g_error = true; return; }
 

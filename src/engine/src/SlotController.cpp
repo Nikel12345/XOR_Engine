@@ -305,9 +305,12 @@ void SlotController::HandlePrepared(uint8_t slot)
 void SlotController::HandleComputing(uint8_t slot)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    // Флаги уже выставил MarkComputingUnsafe при захвате — здесь только фиксация факта
-    // сабмита. Отдельный переход нужен, чтобы стадия зеркалила остальные и читалась так же.
-    (void)slot;
+
+    // ИДЕМПОТЕНТЕН: те же флаги уже выставил MarkComputingUnsafe при захвате слота — там это
+    // обязательно, иначе в окне между выбором и сабмитом слот выглядел бы свободным. Переход
+    // оставлен, чтобы стадия читалась как остальные: функция стадии явно объявляет состояние.
+    slots_data[slot].flags = static_cast<uint8_t>(
+        (slots_data[slot].flags | SLOT_FLAG_IS_COMPUTING) & ~SLOT_FLAG_HAS_PREPARED);
 }
 
 void SlotController::HandleComputed(uint8_t slot)

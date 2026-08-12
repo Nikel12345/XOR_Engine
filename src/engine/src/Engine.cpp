@@ -129,6 +129,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});
 	thread_controller->SetUploadCallback([this](uint8_t slot) {this->UploadFunc(slot); });
+	thread_controller->SetComputeCallback([this](uint8_t slot) {this->ComputeFunc(slot); });
 	thread_controller->SetRenderCallback(
 		[this](uint8_t slot) {
 			return this->RenderFunc(slot);   // !!! return

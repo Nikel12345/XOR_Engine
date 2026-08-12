@@ -46,7 +46,7 @@ void ThreadController::SetFenceCallback(FenceCallback cb)
 
 void ThreadController::StartThreads()
 {
-    if (!game_iter_callback || !prepare_callback || !upload_callback || !render_callback || !fence_callback) {
+    if (!game_iter_callback || !prepare_callback || !upload_callback || !compute_callback || !render_callback || !fence_callback) {
         if (!game_iter_callback) {
             SDL_Log("No game_iter");
         }
@@ -55,6 +55,9 @@ void ThreadController::StartThreads()
         }
         if (!upload_callback) {
             SDL_Log("No upload");
+        }
+        if (!compute_callback) {
+            SDL_Log("No compute");
         }
         if (!render_callback) {
             SDL_Log("No render");
@@ -72,9 +75,6 @@ void ThreadController::StartThreads()
     // переиспользует слоты (upload сам прокручивает слот в PrepareFuncPrepassUndepended).
     if (!DISABLE_UPLOAD)
         upload_thread = std::thread(&ThreadController::UploadThread, this);
-    // Вычислительный поток поднимается ВСЕГДА, даже без compute_callback: слот теперь идёт
-    // PREPARED → COMPUTED, и без этой стадии рендер не увидел бы ни одного кадра. Без
-    // колбэка стадия вырождается в проброс — цена ей condvar-ожидание и переворот флага.
     compute_thread = std::thread(&ThreadController::ComputeThread, this);
     if (!DISABLE_RENDER) {
         render_thread = std::thread(&ThreadController::RenderThread, this);
@@ -198,7 +198,8 @@ void ThreadController::UploadThread()
 // слот бессмысленно, его результат уже лежит в его же буферах.
 //
 // Завершение работы GPU ловится fence'ом внутри колбэка, как и на других стадиях; сюда он
-// возвращается уже с готовым слотом и сам переводит его в COMPUTED.
+// возвращается уже с готовым слотом и сам переводит его в COMPUTED. Колбэк ОБЯЗАТЕЛЕН, как и
+// у остальных стадий: пустая стадия — это пустая функция, а не отсутствие стадии.
 void ThreadController::ComputeThread()
 {
     while (running.load())
@@ -207,12 +208,7 @@ void ThreadController::ComputeThread()
         if (slot == INVALID_SLOT)   // останов
             break;
 
-        if (compute_callback) {
-            compute_callback(slot);
-        } else {
-            // Стадии нет — слот просто проезжает дальше, чтобы рендер его увидел.
-            slot_controller->SetSlotState(slot, SlotState::COMPUTED);
-        }
+        compute_callback(slot);
     }
 }
 

@@ -123,6 +123,9 @@ public:
 
     void UploadFunc(uint8_t slot);
 
+    // Вычислительная стадия конвейера. Пока ПУСТАЯ: слот просто проезжает сквозь неё.
+    void ComputeFunc(uint8_t slot);
+
     bool RenderFunc(uint8_t idx);
 
     void FenceFunc(uint8_t slot);
