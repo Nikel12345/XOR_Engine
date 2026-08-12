@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "QueueManager.h"
 #include "Engine.h"
 #include "EngineProfiler.h"
 // Engine.h теперь только forward-декларации — полные типы тянет этот TU.
@@ -130,34 +131,37 @@ void Engine::PrepareFunc(uint8_t slot)
 void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 {
 	if (DISABLE_UPLOAD) {
-		SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
-		SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
+		UploadCommandBuffer cb = queue_manager->GetUploadQueue().AcquireCommandBuffer();
+		UploadCopyPass cp = cb.BeginBufferCopyPass();
 		TransferBufferData* tbd;
 		{
 			PROF_SCOPE(Sim, "  exec_update_instructions (всего)");
-			tbd = buffer_manager->ExecuteUpdateInstructions(cp);
+			tbd = buffer_manager->ExecuteUpdateInstructions(cp.Raw());
 		}
-		SDL_EndGPUCopyPass(cp);
-		SDL_CancelGPUCommandBuffer(cb);
+		cp.End();
+		cb.Cancel();
 		transfer_manager->ReleaseTB(tbd);
 		slot_controller->SetSlotState(slot, SlotState::UPLOADING);
 		slot_controller->SetSlotState(slot, SlotState::PREPARED);
 		return;
 	}
 
-	SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
-	SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cb);
+	// КОПИРОВАЛЬНАЯ очередь: тут только буферные копии, отрисовки нет (мипы и превью уехали
+	// в RenderFunc отдельным шагом — см. ниже). Роль передаёт обёртка, ветки на «а есть ли
+	// такая очередь» нет: не нашлось выделенной семьи — SDL сам отдал ближайшую более широкую.
+	UploadCommandBuffer cb = queue_manager->GetUploadQueue().AcquireCommandBuffer();
+	UploadCopyPass cp = cb.BeginBufferCopyPass();
 
 	TransferBufferData* undepended_tbd;
 	{
 		PROF_SCOPE(Sim, "  exec_update_instructions (всего)");
-		undepended_tbd = buffer_manager->ExecuteUpdateInstructions(cp);
+		undepended_tbd = buffer_manager->ExecuteUpdateInstructions(cp.Raw());
 	}
 	{
 		PROF_SCOPE(Sim, "  exec_upload_tasks (буферы)");
-		buffer_manager->ExecuteUploadTasks(cp, slot);
+		buffer_manager->ExecuteUploadTasks(cp.Raw(), slot);
 	}
-	SDL_EndGPUCopyPass(cp);
+	cp.End();
 	// Текстур здесь больше НЕТ: заливка пикселей, мипы и блиты превью уехали в RenderFunc.
 	// Причина не в производительности — мипы (SDL_GenerateMipmapsForGPUTexture) и превью
 	// (SDL_BlitGPUTexture) это ОТРИСОВКА, и на копировальной очереди их не исполнить. Пока они
@@ -166,7 +170,7 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 	SDL_GPUFence* fence;
 	{
 		PROF_SCOPE(Sim, "  submit_acquire_fence");
-		fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+		fence = cb.SubmitAndAcquireFence();
 	}
 
 
@@ -224,7 +228,22 @@ void Engine::ComputeFunc(uint8_t slot)
 {
 	slot_controller->SetSlotState(slot, SlotState::COMPUTING);
 
-	// ← здесь появится ExecutePrepassesSteps на вычислительной очереди + свой fence
+	// GPU-каллинг (scatter). Раньше жил отдельным cb + fence ВНУТРИ RenderFunc и потому не мог
+	// начаться, пока render-поток не дорисует текущий кадр, — хотя следующий слот давно готов.
+	// Теперь стадия берёт СВОЙ слот и считает его на вычислительной очереди, пока графическая
+	// занята предыдущим кадром. Перекрытие появляется МЕЖДУ кадрами, внутри одного его и не было.
+	//
+	// Fence остаётся и по-прежнему обязателен: SDL_GPU не барьерит compute-write -> indirect-read
+	// между очередями (да и внутри одного cb на тяжёлом scatter draw читал недозаполненный
+	// индирект → мерцание). Но теперь он блокирует ЭТОТ поток, а не рендерный: слот выходит в
+	// COMPUTED только с дописанными out_pib/indirect, и рендер физически не возьмёт его раньше.
+	{
+		ComputeCommandBuffer ccb = queue_manager->GetComputeQueue().AcquireCommandBuffer();
+		pass_manager->ExecutePrepassesSteps(ccb.Raw(), slot);
+		SDL_GPUFence* cull_fence = ccb.SubmitAndAcquireFence();
+		SDL_WaitForGPUFences(dev, true, &cull_fence, 1);
+		SDL_ReleaseGPUFence(dev, cull_fence);
+	}
 
 	slot_controller->SetSlotState(slot, SlotState::COMPUTED);
 }
@@ -290,18 +309,18 @@ bool Engine::RenderFunc(uint8_t slot)
 	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
 
 	auto t_frame = Prof::Clock::now();
-	SDL_GPUCommandBuffer* cb = SDL_AcquireGPUCommandBuffer(dev);
+	RenderCommandBuffer cb = queue_manager->GetRenderQueue().AcquireCommandBuffer();
 
 	Uint32 w = 0, h = 0;
 	SDL_GPUTexture* tex = nullptr;
 
 	// Ранний выход (нет свопчейн-текстуры) кадром не считаем — Frame() не зовём.
-	if (!SDL_AcquireGPUSwapchainTexture(cb, win, &tex, &w, &h)) {
-		SDL_CancelGPUCommandBuffer(cb);
+	if (!cb.AcquireSwapchainTexture(win, &tex, &w, &h)) {
+		cb.Cancel();
 		return false;
 	}
 	if (!tex) {
-		SDL_CancelGPUCommandBuffer(cb);
+		cb.Cancel();
 		return false;
 	}
 
@@ -327,11 +346,11 @@ bool Engine::RenderFunc(uint8_t slot)
 	TransferBufferData* texture_tbd;
 	{
 		PROF_SCOPE(Render, " tex_upload (заливка+мипы+превью)");
-		SDL_GPUCopyPass* tex_cp = SDL_BeginGPUCopyPass(cb);
-		texture_tbd = texture_manager->ExecuteUploadTasks(tex_cp);
-		SDL_EndGPUCopyPass(tex_cp);
-		texture_manager->GenerateMipmaps(cb);
-		texture_manager->BlitPendingPreviews(cb);   // ПОСЛЕ пикселей и мипов — источник готов
+		TextureCopyPass tex_cp = cb.BeginTextureCopyPass();
+		texture_tbd = texture_manager->ExecuteUploadTasks(tex_cp.Raw());
+		tex_cp.End();
+		texture_manager->GenerateMipmaps(cb.Raw());
+		texture_manager->BlitPendingPreviews(cb.Raw());   // ПОСЛЕ пикселей и мипов — источник готов
 	}
 
 	// Свопчейн — в свой атлас (PassManager владеет им как полем, вне реестра TextureManager).
@@ -344,22 +363,10 @@ bool Engine::RenderFunc(uint8_t slot)
 	pass_manager->SetRenderFrame(slot, batch_builder->AskLayout(slot));
 	{
 		PROF_SCOPE(Render, " execute_passes (запись команд)");
-
-		// GPU-каллинг (scatter) в ОТДЕЛЬНОМ cb + fence ПЕРЕД рендером. SDL_GPU не барьерит
-		// compute-write -> indirect-read внутри одного cb (на 1М scatter из-за atomic-контеншена
-		// медленный, и draw читал недозаполненный индирект → мерцание). Отдельный cb + fence
-		// гарантирует, что out_pib/indirect дописаны. Fence вдобавок ТРОТТЛИТ рендер-поток под
-		// темп GPU: без него (просто сабмит) рендер убегает вперёд, копит бэклог GPU и пейсинг
-		// ХУЖЕ (50мс-спайки). Консистентность scatter↔draw даёт общий слепок слота.
-		{
-			SDL_GPUCommandBuffer* cull_cb = SDL_AcquireGPUCommandBuffer(dev);
-			pass_manager->ExecutePrepassesSteps(cull_cb, slot);
-			SDL_GPUFence* cull_fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cull_cb);
-			SDL_WaitForGPUFences(dev, true, &cull_fence, 1);
-			SDL_ReleaseGPUFence(dev, cull_fence);
-		}
-
-		pass_manager->ExecutePassesSteps(cb, slot);
+		// Каллинга здесь БОЛЬШЕ НЕТ: он уехал в ComputeFunc, на свою стадию и свою очередь.
+		// Слот доезжает сюда уже в состоянии COMPUTED, то есть его out_pib/indirect дописаны —
+		// гарантию даёт fence вычислительной стадии, а не ожидание внутри этого кадра.
+		pass_manager->ExecutePassesSteps(cb.Raw(), slot);
 	}
 
 	{
@@ -372,7 +379,9 @@ bool Engine::RenderFunc(uint8_t slot)
 		EndImGuiFrame();
 		if (imgui_draw_data && imgui_draw_data->CmdListsCount > 0)
 		{
-			ImGui_ImplSDLGPU3_PrepareDrawData(imgui_draw_data, cb);
+			// Raw(): ImGui — чужое API, оно про наши типы очередей не знает. Это штатный люк
+			// (см. GpuQueues.h), а не обход: буфер всё равно взят у RenderQueue.
+			ImGui_ImplSDLGPU3_PrepareDrawData(imgui_draw_data, cb.Raw());
 
 			SDL_GPUColorTargetInfo imgui_color_target = {};
 			imgui_color_target.texture = tex;
@@ -380,15 +389,15 @@ bool Engine::RenderFunc(uint8_t slot)
 			imgui_color_target.store_op = SDL_GPU_STOREOP_STORE;
 			imgui_color_target.cycle = false;
 
-			SDL_GPURenderPass* imgui_rp = SDL_BeginGPURenderPass(cb, &imgui_color_target, 1, nullptr);
-			ImGui_ImplSDLGPU3_RenderDrawData(imgui_draw_data, cb, imgui_rp);
+			SDL_GPURenderPass* imgui_rp = cb.BeginRenderPass(&imgui_color_target, 1, nullptr);
+			ImGui_ImplSDLGPU3_RenderDrawData(imgui_draw_data, cb.Raw(), imgui_rp);
 			SDL_EndGPURenderPass(imgui_rp);
 		}
 	}
 
 	{
 		auto t = Prof::Clock::now();
-		SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+		SDL_GPUFence* fence = cb.SubmitAndAcquireFence();
 		Prof::Render().Add(" submit_acquire_fence", Prof::MsSince(t));
 		slot_controller->GetSlotsData()[slot].submit_time = Prof::Clock::now();
 		// Текстурный TB читается GPU в этом же cb → отпускать только по ЭТОМУ fence (FenceFunc).

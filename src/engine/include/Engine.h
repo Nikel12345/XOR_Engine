@@ -14,6 +14,7 @@
 // определения заголовку не нужны. Каждый cpp (движка и игры) сам инклюдит те менеджеры,
 // которые реально зовёт — правка одного менеджер-заголовка больше НЕ пересобирает всех
 // потребителей Engine.h (раньше это был хаб на весь мир: ~28 TU на любое изменение).
+class QueueManager;
 class TransferManager;
 class BufferManager;
 class TextureManager;
@@ -82,6 +83,7 @@ class Engine
 {
 public:
     Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height);
+    QueueManager* GetQueueManager() const { return queue_manager; }
     TransferManager* GetTransferManager() const { return transfer_manager; }
     BufferManager* GetBufferManager() const { return buffer_manager; }
     TextureManager* GetTextureManager() const { return texture_manager; }
@@ -188,6 +190,7 @@ private:
 
     SDL_Window* win = nullptr;
     SDL_GPUDevice* dev = nullptr;
+    QueueManager* queue_manager = nullptr;
     TransferManager* transfer_manager = nullptr;
     BufferManager* buffer_manager = nullptr;
     TextureManager* texture_manager = nullptr;

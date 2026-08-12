@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "Engine.h"
 // Engine.h теперь только forward-декларации — полные типы менеджеров тянет этот TU.
+#include "QueueManager.h"
 #include "TransferManager.h"
 #include "BufferManager.h"
 #include "TextureManager.h"
@@ -85,6 +86,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	size_state_.window_size.store(start_size, std::memory_order_relaxed);
 	size_state_.applied_render = start_size;   // гейт стартует «уже применённым» (таргеты созданы под этот размер)
 	transfer_manager = new TransferManager(dev);
+	queue_manager = new QueueManager(dev);
 	buffer_manager = new BufferManager(dev, transfer_manager);
 	texture_manager = new TextureManager(dev, transfer_manager);
 	shader_manager = new ShaderManager(dev);
@@ -372,6 +374,7 @@ Engine::~Engine()
 	delete buffer_manager;
 	delete texture_manager;
 	delete transfer_manager;   // после менеджеров: они возвращают арендованные TB в пул
+	delete queue_manager;      // ничем не владеет (очереди принадлежат устройству) — порядок свободный
 	delete shader_manager;
 	delete pipe_manager;
 	delete model_manager;
