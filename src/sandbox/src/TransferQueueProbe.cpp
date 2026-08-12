@@ -1,42 +1,50 @@
 // ============================================================================
-//  Sandbox: полная череда двух очередей — заливка на КОПИРОВАЛЬНОЙ, отрисовка на
-//  ГРАФИЧЕСКОЙ, между ними блокирующий fence.
+//  Sandbox: полная череда ТРЁХ очередей на одном буфере.
 //
-//  Проверяет то, что до этого зонда не исполнялось ни разу: движок берёт все
-//  командные буферы с ролью GRAPHICS, поэтому не-графические пути форка (три
-//  семьи, сабмит в свою очередь, маски барьеров, CONCURRENT у буферов) жили
-//  непроверенными.
+//    фаза 1  КОПИРОВАЛЬНАЯ   заливает вершины треугольника
+//    фаза 2  КОПИРОВАЛЬНАЯ   читает их обратно (сверка с исходником)
+//    фаза 3a ВЫЧИСЛИТЕЛЬНАЯ  доворачивает вершины В САМОМ БУФЕРЕ, каждый кадр
+//    фаза 3b ГРАФИЧЕСКАЯ     рисует ими треугольник
+//    фаза 4  КОПИРОВАЛЬНАЯ   читает результат и судит, что это был поворот
 //
-//  ЧТО ЗДЕСЬ ДВИЖКОВОЕ. Всё, кроме конвейера исполнения: BufferData +
-//  UpdateInstruction + ReadBackInstruction, TransferManager под transfer-буферы,
-//  ShaderManager (vs/fs + ShaderProgram), PassManager (RenderPassStep со
-//  свопчейном-атласом), PipeManager (графический пайплайн). Свой только порядок
-//  вызовов: ни потоков, ни слотов — последовательно, через fence.
+//  Между фазами — блокирующий fence. Ни потоков, ни слотов: конвейер строго
+//  последовательный, потому что проверяется маршрутизация, а не пейсинг.
 //
-//  ПОЧЕМУ ТРЕУГОЛЬНИК РИСУЕТСЯ ЗАЛИТЫМИ ВЕРШИНАМИ. Это и есть проверка
-//  межсемейного обмена: буфер ЗАПОЛНЕН на копировальной семье, а ЧИТАЕТСЯ на
-//  графической. Ровно тот случай, ради которого буферы переведены в
-//  VK_SHARING_MODE_CONCURRENT: при EXCLUSIVE содержимое на второй семье было бы
-//  формально undefined — и это не гонка, fence её и так закрывает.
+//  ГЛАВНОЕ: после первой заливки CPU вершины НЕ ТРОГАЕТ. Вращение накапливается
+//  в самой памяти буфера, то есть каждая семья видит записи предыдущей. Это и
+//  есть то, ради чего буферы переведены в VK_SHARING_MODE_CONCURRENT: при
+//  EXCLUSIVE содержимое на чужой семье было бы формально undefined, и fence бы
+//  не помог — он даёт порядок и видимость, но не владение.
 //
-//  Вершинный буфер — стрим пула (_VertexPosBuffer, FMT_PosStream). Его usage
-//  (VERTEX) объявляет CreateVertexShader, руками ничего не помечается. Заодно
-//  это самый острый случай для масок барьеров: состояние по умолчанию такого
-//  буфера переводится в VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, которой на
-//  копировальной очереди НЕ СУЩЕСТВУЕТ — без маски барьер уронил бы устройство.
+//  ЧТО ЗДЕСЬ ДВИЖКОВОЕ. Всё, кроме порядка вызовов: BufferData +
+//  UpdateInstruction + ReadBackInstruction, TransferManager, ShaderManager
+//  (vs/fs/cs + ShaderProgram + ComputeShaderProgram), PassManager (RenderPassStep
+//  со свопчейном-атласом и ComputePrepass), PipeManager, BatchBuilder.
+//  Вычислительная работа повешена на ПРЕПАСС намеренно: в движке это штатный шов
+//  для работы в отдельном командном буфере до основных проходов (там каллинг), и
+//  ExecutePrepassesSteps / ExecutePassesSteps разводятся по разным очередям без
+//  единой правки в PassManager.
+//
+//  Вершинный буфер — стрим пула (_VertexPosBuffer). usage ему объявляют сами
+//  шейдеры: VERTEX от вершинника, COMPUTE_STORAGE_WRITE от вычислительной
+//  программы; флаги сливаются объединением. Руками ничего не помечено. Заодно это
+//  самый острый случай для масок барьеров: состояние по умолчанию такого буфера
+//  переводится в VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, которой нет ни на
+//  копировальной, ни на вычислительной очереди — без маски барьер уронил бы
+//  устройство.
 //
 //  КРИТЕРИИ (все независимы):
-//    1. в логе два разных 'first submit to queue family': копировальная и графическая;
-//    2. ридбэк привозит записанные вершины (заливка реально доехала);
-//    3. валидация Vulkan молчит — ПОЛНОСТЬЮ, включая выход;
-//    4. на экране градиентный треугольник — цвет выводится ИЗ ПОЗИЦИИ, поэтому
-//       занулённый буфер дал бы вырожденную геометрию, а не картинку.
+//    1. в логе ТРИ разных 'first submit to queue family' — по одному на семью;
+//    2. фаза 2: прочитанное совпадает с залитым;
+//    3. фаза 4: вершины СДВИНУЛИСЬ и при этом СОХРАНИЛИ длину. Второе и отличает
+//       поворот от мусора: неверный бинд или страйд длину не сохранит. Счётчик
+//       кадров доказывал бы только то, что проход исполнился;
+//    4. валидация Vulkan молчит — полностью, включая выход;
+//    5. на экране вращается градиентный треугольник.
 //
-//  ВЫХОД — ПО ЗАКРЫТИЮ ОКНА (или Esc), а не по счётчику кадров. Раньше зонд жил
-//  фиксированные 90 кадров, то есть полторы секунды, и самопроизвольно
-//  исчезающее окно вместе с руганью валидации на выходе выглядело неотличимо от
-//  падения. Ни того, ни другого больше нет; жёсткая крышка по кадрам осталась
-//  только предохранителем для запуска без присмотра.
+//  ВЫХОД — ПО ЗАКРЫТИЮ ОКНА (или Esc), а не по счётчику кадров: окно, исчезающее
+//  само через полторы секунды, неотличимо от падения. Крышка по кадрам осталась
+//  предохранителем для запуска без присмотра.
 //
 //  Запуск (рабочая директория — src/sandbox или корень репо, путь к шейдерам
 //  подстрахован кандидатами):
@@ -60,6 +68,7 @@
 #include "RenderManager.h"
 #include "RenderCommandData.h"
 #include "PipeManager.h"
+#include "BatchBuilder.h"
 #include "PositionStructure.h"
 #include "TextureData.h"
 
@@ -80,8 +89,26 @@ constexpr PosOnly TRIANGLE[VERTEX_COUNT] = {
     { -0.6f,  0.6f, 0.0f },
 };
 
+// Последнее прочитанное содержимое буфера. Читатель только копирует сюда, а СУДИТ вызывающий:
+// фаза 2 сверяет с исходником, фаза 4 — проверяет, что это именно поворот.
+PosOnly  g_read[VERTEX_COUNT]{};
+bool     g_read_ok = false;
 bool     g_readback_ok = false;
 uint32_t g_frames_drawn = 0;
+uint32_t g_frames_rotated = 0;
+bool     g_exit_ok = false;
+
+// Пуш вычислительной фазы: дельта поворота за кадр. Тик живёт на CPU, сам поворот
+// накапливается В БУФЕРЕ (см. шапку rotate_verts.comp.hlsl).
+struct RotateParams {
+    float    delta_angle = 0.0f;
+    uint32_t vertex_count = VERTEX_COUNT;
+};
+struct DummyDispatchData {};
+
+// Дельта текущего кадра. Пуш-лямбда обязана брать данные ТОЛЬКО через биндер, но у зонда нет
+// ни слотов, ни слепков, поэтому тик просто лежит здесь и обновляется в цикле кадров.
+float g_delta_angle = 0.0f;
 
 // Шейдеры ищем от нескольких корней: рабочая директория у зондов исторически разная.
 // Возврат ПО ЗНАЧЕНИЮ намеренно: со статическим буфером второй вызов затирал результат первого.
@@ -105,7 +132,7 @@ int main(int, char**)
     if (!SDL_Init(SDL_INIT_VIDEO)) { SDL_Log("SDL_Init: %s", SDL_GetError()); return 1; }
 
     auto make_window = [] {
-        return SDL_CreateWindow("queue probe: transfer upload -> graphics draw", 640, 480, 0);
+        return SDL_CreateWindow("queue probe: transfer -> compute -> graphics", 640, 480, 0);
     };
     SDL_Window* win = make_window();
     if (!win) { SDL_Log("SDL_CreateWindow: %s", SDL_GetError()); return 1; }
@@ -134,7 +161,8 @@ int main(int, char**)
 
     const std::string vs_path = FindShader("triangle.vert.hlsl");
     const std::string fs_path = FindShader("triangle.frag.hlsl");
-    if (vs_path.empty() || fs_path.empty()) {
+    const std::string cs_path = FindShader("rotate_verts.comp.hlsl");
+    if (vs_path.empty() || fs_path.empty() || cs_path.empty()) {
         SDL_Log("Не найдены шейдеры треугольника (жду CWD = src/sandbox или корень репо).");
         return 1;
     }
@@ -147,6 +175,7 @@ int main(int, char**)
         ShaderManager   sm(dev);
         PassManager     pm;
         PipeManager     pipes(dev, win);
+        BatchBuilder    bb;
 
         // Вершинный буфер заводить НЕ НУЖНО: стримы пула (_VertexPosBuffer и соседей) создаёт
         // сам конструктор BufferManager — Static, ~2.2 МБ, RESIZE_AND_COPY. usage ему объявит
@@ -189,6 +218,22 @@ int main(int, char**)
         },
             std::move(rptd), 0);
 
+        // ── Вычислительный ПРЕПАСС: штатный шов движка под работу, которая идёт в ОТДЕЛЬНОМ
+        //    командном буфере до основных проходов (в игре там каллинг). Нам это и нужно:
+        //    препассы исполняет ExecutePrepassesSteps, обычные проходы — ExecutePassesSteps,
+        //    значит их легко развести по разным очередям, не трогая PassManager. ──
+        ComputePassStep* rot_pass = pm.CreateComputePrepass(
+            "ROTATE_PREPASS",
+            [&bm](SDL_GPUCommandBuffer* cb, PassManager* p, ComputePassStep& cp, uint8_t frame)
+        {
+            RotateParams     push{};
+            DummyDispatchData dd{};
+            push.delta_angle = g_delta_angle;   // тик кадра
+            p->ComputePassStandardBody(cb, &cp, &bm, &push, &dd, frame);
+            ++g_frames_rotated;
+        },
+            0);
+
         // ── Шейдеры и программа. Вершинник перечисляет ПОТРЕБЛЯЕМЫЕ стримы: это и есть
         //    декларация usage=VERTEX для _VertexPosBuffer (см. BufferData.h) ──
         sm.CreateVertexShader("triangle_vs", vs_path.c_str(),
@@ -207,6 +252,29 @@ int main(int, char**)
             &bm);
         if (!sp) { SDL_Log("CreateShaderProgram не вернул программу."); return 1; }
 
+        // Вычислительная программа. Объявление буфера как rw даёт ему COMPUTE_STORAGE_WRITE —
+        // ЛОЖИТСЯ ПОВЕРХ VERTEX от вершинника, потому что usage-флаги сливаются объединением
+        // (см. BufferData.h). Один и тот же буфер законно и вершинный, и storage.
+        sm.CreateComputeShader("rotate_verts_cs", cs_path.c_str());
+        ComputeShaderProgram* csp = sm.CreateComputeShaderProgram(
+            "csp_rotate_verts", "rotate_verts_cs",
+            { bm.GetBufferData(GeometryStreams::VERTEX_POS_BUFFER) },   // rw (u0, space1)
+            {}, {}, {}, {},
+            rot_pass);
+        if (!csp) { SDL_Log("CreateComputeShaderProgram не вернул программу."); return 1; }
+
+        // push_func: лямбда получает заготовку из тела прохода и досылает её шейдеру.
+        // Здесь она только проставляет счётчик и пушит — дельту уже положило тело прохода.
+        csp->BindPushConstants<RotateParams>(
+            [](const PushConstantBinder& binder, RotateParams data) {
+            data.vertex_count = VERTEX_COUNT;
+            binder.Push(0, data);   // слот 0 = b0, space2 (см. шейдер)
+        });
+        csp->BindDispatch<DummyDispatchData>(
+            [](DispatchSizeBinder& binder, DummyDispatchData) {
+            binder.Dispatch(VERTEX_COUNT, 1, 1);   // счёт ЭЛЕМЕНТОВ, деление на numthreads — внутри
+        });
+
         // Бейк создаёт GPU-буфер по объявленному usage; затем пайплайн и порядок проходов.
         bm.BakePending();
         BufferData* vb = bm.GetBufferData(GeometryStreams::VERTEX_POS_BUFFER);
@@ -215,7 +283,11 @@ int main(int, char**)
         pipes.CreateGraphicsPiplenes(sm.GetShaderPrograms(), &sm);
         *pipeline_slot = pipes.GetGraphicPipeline(sp);
         if (!*pipeline_slot) { SDL_Log("Пайплайн не собрался — рисовать нечем."); return 1; }
+        pipes.CreateComputePipelines(sm.GetComputeShaderPrograms(), &sm);
+        // Порядок обязателен: FillRenderPasses сливает ordered-списки, по которым идёт
+        // BuildComputeBatches. Наоборот — батчи собрались бы по пустому списку.
         pm.FillRenderPasses();
+        bb.BuildComputeBatches(&pm, &pipes, &sm);
 
         // ── Инструкции жизненного цикла буфера (как DefaultUpdateSet) ──
         bm.CreateUpdateInstruction(GeometryStreams::VERTEX_POS_BUFFER,
@@ -233,7 +305,8 @@ int main(int, char**)
             auto span = bmm->ReadFromTransferBuffer(&task, VERTEX_BYTES);
             if (span.size() != VERTEX_BYTES) { SDL_Log("Readback: %u байт вместо %u.",
                                                       (uint32_t)span.size(), VERTEX_BYTES); return; }
-            g_readback_ok = SDL_memcmp(span.data(), TRIANGLE, VERTEX_BYTES) == 0;
+            SDL_memcpy(g_read, span.data(), VERTEX_BYTES);
+            g_read_ok = true;
         },
             []() -> uint32_t { return VERTEX_BYTES; });
 
@@ -259,8 +332,10 @@ int main(int, char**)
         }
 
         // ══ ФАЗА 2 — ЧТЕНИЕ ОБРАТНО, ТОЖЕ НА КОПИРОВАЛЬНОЙ ══
-        SDL_Log("--- фаза 2: чтение вершин обратно (upload queue) ---");
-        {
+        // Скачивание буфера копировальной очередью. Зовётся дважды: до вращения (сверка с
+        // исходником) и после (проверка, что вычислительная фаза записала ИМЕННО поворот).
+        auto read_back_vertices = [&] {
+            g_read_ok = false;
             UploadCommandBuffer cb = qm.GetUploadQueue().AcquireCommandBuffer();
             UploadCopyPass cp = cb.BeginBufferCopyPass();
             TransferBufferData* tbd = bm.ExecuteReadBackInstructionsSize();
@@ -272,7 +347,11 @@ int main(int, char**)
             SDL_ReleaseGPUFence(dev, fence);
             bm.ExecuteReadBackInstructionsReader();   // читатель — ПОСЛЕ fence
             trm.ReleaseTB(tbd);
-        }
+        };
+
+        SDL_Log("--- фаза 2: чтение вершин обратно (upload queue) ---");
+        read_back_vertices();
+        g_readback_ok = g_read_ok && SDL_memcmp(g_read, TRIANGLE, VERTEX_BYTES) == 0;
 
         // ══ ФАЗА 3 — ОТРИСОВКА НА ГРАФИЧЕСКОЙ ОЧЕРЕДИ ══
         // Вершины уже на месте (fence фазы 1 отработал), поэтому графическая очередь читает
@@ -280,7 +359,7 @@ int main(int, char**)
         // Крутимся, ПОКА ОКНО НЕ ЗАКРОЮТ, а не фиксированное число кадров: зонд визуальный, и
         // самопроизвольно исчезающее через полторы секунды окно неотличимо от падения.
         // Предохранитель на случай запуска без присмотра — жёсткая крышка по кадрам.
-        SDL_Log("--- фаза 3: отрисовка (render queue). Закрой окно, чтобы выйти. ---");
+        SDL_Log("--- фаза 3: вращение (compute queue) + отрисовка (render queue). Закрой окно, чтобы выйти. ---");
         const int FRAME_CAP = 60 * 60 * 5;   // ~5 минут при vsync
         bool quit = false;
         for (int i = 0; i < FRAME_CAP && !quit; ++i) {
@@ -292,6 +371,27 @@ int main(int, char**)
             }
             if (quit) break;
 
+            // ── ФАЗА 3a: ВРАЩЕНИЕ НА ВЫЧИСЛИТЕЛЬНОЙ ОЧЕРЕДИ ──
+            // Отдельный командный буфер и блокирующий fence — та же схема, что у заливки.
+            // CPU вершины больше не трогает: он даёт только дельту, а сам поворот копится
+            // в самом буфере. Значит буфер к этому моменту прошёл через ВСЕ ТРИ семьи.
+            g_delta_angle = 0.015f;   // радиан за кадр; тик кадра, дальше уедет в push_func
+            {
+                ComputeCommandBuffer ccb = qm.GetComputeQueue().AcquireCommandBuffer();
+                if (!ccb) { SDL_Log("Acquire (compute): %s", SDL_GetError()); break; }
+
+                pm.ExecutePrepassesSteps(ccb.Raw(), 0);
+
+                SDL_GPUFence* cf = ccb.SubmitAndAcquireFence();
+                if (!cf) { SDL_Log("Submit (compute): %s", SDL_GetError()); break; }
+                // Блокирующее ожидание: половину «пусть увидит» на вычислительной очереди
+                // назвать нечем (стадии вершинной выборки там нет — её срезает маска), и
+                // закрывает её именно fence.
+                SDL_WaitForGPUFences(dev, true, &cf, 1);
+                SDL_ReleaseGPUFence(dev, cf);
+            }
+
+            // ── ФАЗА 3b: ОТРИСОВКА НА ГРАФИЧЕСКОЙ ──
             RenderCommandBuffer cb = qm.GetRenderQueue().AcquireCommandBuffer();
             if (!cb) { SDL_Log("Acquire (render): %s", SDL_GetError()); break; }
 
@@ -311,6 +411,27 @@ int main(int, char**)
             SDL_ReleaseGPUFence(dev, fence);
         }
 
+        // ══ ФАЗА 4 — ЧТО ИМЕННО НАПИСАЛА ВЫЧИСЛИТЕЛЬНАЯ ФАЗА ══
+        // Счётчик кадров доказывает лишь то, что проход ИСПОЛНИЛСЯ. Судим по содержимому:
+        // поворот обязан (а) сдвинуть вершины и (б) СОХРАНИТЬ длину каждой в плоскости XY.
+        // Мусор от неверного бинда или страйда завалит второе условие.
+        SDL_Log("--- фаза 4: проверка результата вращения (upload queue) ---");
+        read_back_vertices();
+        bool rotated_moved = false, length_kept = g_read_ok;
+        if (g_read_ok) {
+            for (uint32_t i = 0; i < VERTEX_COUNT; ++i) {
+                const float r0 = SDL_sqrtf(TRIANGLE[i].x * TRIANGLE[i].x + TRIANGLE[i].y * TRIANGLE[i].y);
+                const float r1 = SDL_sqrtf(g_read[i].x * g_read[i].x + g_read[i].y * g_read[i].y);
+                if (SDL_fabsf(r1 - r0) > 1e-3f) length_kept = false;
+                if (SDL_fabsf(g_read[i].x - TRIANGLE[i].x) > 1e-4f ||
+                    SDL_fabsf(g_read[i].y - TRIANGLE[i].y) > 1e-4f) rotated_moved = true;
+            }
+            SDL_Log("Вершина 0: было (%.3f, %.3f), стало (%.3f, %.3f)",
+                    TRIANGLE[0].x, TRIANGLE[0].y, g_read[0].x, g_read[0].y);
+        }
+        SDL_Log("Вершины сдвинулись: %s;  длина сохранена: %s",
+                rotated_moved ? "ДА" : "НЕТ", length_kept ? "ДА" : "НЕТ");
+
         // Именованные шейдеры держат GPU-модули в реестрах ShaderManager, а те разрушаются ПОСЛЕ
         // гашения его токена — делитер тогда сознательно становится no-op (чтобы не звать релиз
         // по мёртвому устройству), и модули доживают до vkDestroyDevice. Сносим их явно, пока
@@ -322,16 +443,20 @@ int main(int, char**)
 
         // ── Вердикт ──
         SDL_Log("Вершины после ридбэка: %s", g_readback_ok ? "СОВПАЛИ" : "НЕ СОВПАЛИ");
-        SDL_Log("Кадров с отрисованным треугольником: %u", g_frames_drawn);
-        if (g_readback_ok && g_frames_drawn > 0)
-            SDL_Log("ВЕРДИКТ: заливка прошла копировальной очередью, отрисовка — графической, "
-                    "и графика прочитала буфер, заполненный чужой семьёй.");
+        SDL_Log("Кадров: вращений %u, отрисовок %u", g_frames_rotated, g_frames_drawn);
+        const bool all_ok = g_readback_ok && g_frames_drawn > 0 && g_frames_rotated > 0
+                            && rotated_moved && length_kept;
+        if (all_ok)
+            SDL_Log("ВЕРДИКТ: буфер прошёл через ВСЕ ТРИ семьи — залит копировальной, "
+                    "повёрнут вычислительной, прочитан графической. Вращение на экране и есть "
+                    "доказательство: CPU вершины после первой заливки не трогал.");
         else
             SDL_Log("ВЕРДИКТ: ПРОВАЛ. Смотри строки 'GPU queue families' / "
                     "'GPU first submit to queue family N' и вывод валидации.");
-        SDL_Log("В логе должно быть ДВА разных 'first submit to queue family' — "
-                "копировальная (фаза 1) и графическая (фаза 3).");
+        SDL_Log("В логе должно быть ТРИ разных 'first submit to queue family' — "
+                "копировальная (фаза 1), вычислительная (3a) и графическая (3b).");
 
+        g_exit_ok = all_ok;
         delete pipeline_slot;
     }   // ← менеджеры разрушены здесь, устройство ещё живо
 
@@ -339,5 +464,5 @@ int main(int, char**)
     SDL_DestroyGPUDevice(dev);
     SDL_DestroyWindow(win);
     SDL_Quit();
-    return (g_readback_ok && g_frames_drawn > 0) ? 0 : 1;
+    return g_exit_ok ? 0 : 1;
 }
