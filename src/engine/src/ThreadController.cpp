@@ -14,6 +14,11 @@ ThreadController::ThreadController(SlotController* slot_controller)
     ups_counter = new AvgRateCounter("UPS", 20);
 }
 
+void ThreadController::SetComputeCallback(ComputeCallback cb)
+{
+    compute_callback = std::move(cb);
+}
+
 void ThreadController::SetGameIterationCallback(GameIterCallback cb)
 {
     game_iter_callback = std::move(cb);
@@ -67,6 +72,10 @@ void ThreadController::StartThreads()
     // переиспользует слоты (upload сам прокручивает слот в PrepareFuncPrepassUndepended).
     if (!DISABLE_UPLOAD)
         upload_thread = std::thread(&ThreadController::UploadThread, this);
+    // Вычислительный поток поднимается ВСЕГДА, даже без compute_callback: слот теперь идёт
+    // PREPARED → COMPUTED, и без этой стадии рендер не увидел бы ни одного кадра. Без
+    // колбэка стадия вырождается в проброс — цена ей condvar-ожидание и переворот флага.
+    compute_thread = std::thread(&ThreadController::ComputeThread, this);
     if (!DISABLE_RENDER) {
         render_thread = std::thread(&ThreadController::RenderThread, this);
         fence_thread  = std::thread(&ThreadController::FenceThread, this);
@@ -79,10 +88,15 @@ void ThreadController::StartThreads()
 ThreadController::~ThreadController()
 {
     running.store(false);
+    // ДО join'ов: поток, стоящий на condvar слота, сам по себе выключения running не увидит.
+    if (slot_controller)
+        slot_controller->NotifyShutdown();
     if (game_n_prep_iter_thread.joinable())
         game_n_prep_iter_thread.join();
     if (upload_thread.joinable())
         upload_thread.join();
+    if (compute_thread.joinable())
+        compute_thread.join();
     if (render_thread.joinable())
         render_thread.join();
     if (fence_thread.joinable())
@@ -174,6 +188,30 @@ void ThreadController::UploadThread()
             // Загрузок в полёте нет — опрашивать чаще нет смысла. Пока пайплайн
             // полон, цикл сюда не попадает (стоит в kernel-wait, не спит).
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
+        }
+    }
+}
+
+// Вычислительная стадия между загрузкой и рендером. Устройство ближе к рендеру, чем к
+// upload: сама берёт слот (WaitComputableSlot) и сама пишет команды, тогда как UploadThread
+// лишь сторожит чужие сабмиты. Отличие от рендера — нет fallback'а: пере-вычислять прошлый
+// слот бессмысленно, его результат уже лежит в его же буферах.
+//
+// Завершение работы GPU ловится fence'ом внутри колбэка, как и на других стадиях; сюда он
+// возвращается уже с готовым слотом и сам переводит его в COMPUTED.
+void ThreadController::ComputeThread()
+{
+    while (running.load())
+    {
+        uint8_t slot = slot_controller->WaitComputableSlot(UPS_priority);
+        if (slot == INVALID_SLOT)   // останов
+            break;
+
+        if (compute_callback) {
+            compute_callback(slot);
+        } else {
+            // Стадии нет — слот просто проезжает дальше, чтобы рендер его увидел.
+            slot_controller->SetSlotState(slot, SlotState::COMPUTED);
         }
     }
 }

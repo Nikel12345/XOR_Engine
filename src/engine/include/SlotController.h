@@ -12,10 +12,12 @@
 //   UPLOADING — copy-команды отправлены на GPU, upload-fence ещё не отстрелил;
 //               кадр НЕЛЬЗЯ отдавать рендеру (данные могут не дойти — барьеры
 //               copy-пасса на практике этого не гарантируют, нужен fence)
-//   PREPARED  — загрузка завершена, кадр готов и ждёт рендера
+//   PREPARED  — загрузка завершена, кадр ждёт ВЫЧИСЛИТЕЛЬНОЙ стадии
+//   COMPUTING — compute-команды отправлены, compute-fence ещё не отстрелил
+//   COMPUTED  — вычисления завершены, кадр готов и ждёт рендера
 //   RENDERING — кадр отправлен на GPU, render-fence ещё не отстрелил
 //
-// «Записываемый» для sim = нет RESERVED/UPLOADING/RENDERING и слот не
+// «Записываемый» для sim = нет RESERVED/UPLOADING/COMPUTING/RENDERING и слот не
 // last_rendering_slot (его буферы может читать fallback-пере-рендер). Мешает ли
 // записи PREPARED — зависит от режима (allow_frame_skip в Get/WaitFreeSlotIndex):
 //   skip разрешён (UPS_priority=true)  — PREPARED перезаписывается, причём всегда
@@ -23,19 +25,27 @@
 //   skip запрещён (UPS_priority=false) — каждый подготовленный кадр обязан
 //     отрисоваться, sim блокируется и UPS проседает до темпа рендера.
 //
-// PREPARED-кадры образуют логическую очередь по свежести: позиция = frame_id
+// УСТАРИВАНИЕ ЖИВЁТ В ОДНОМ МЕСТЕ. Снимать флаг готовности с ЧУЖИХ слотов (skip
+// «показать не успели») имеет право только вычислительная стадия: она берёт
+// свежайший PREPARED и гасит более старые. Рендер выбирает среди COMPUTED по
+// frame_id и чужих слотов НЕ трогает — до него доезжает уже отфильтрованное.
+// Раньше это делал рендер, и разрушительная часть жила в двух местах сразу.
+//
+// PREPARED/COMPUTED-кадры образуют логическую очередь по свежести: позиция = frame_id
 // (номер prepare, ставится при отправке загрузки), членство = флаг PREPARED.
 // Sim перезаписывает старый конец, рендер при skip'е берёт свежий конец (более
 // старые кадры при этом умирают — показывать их после нового значит откат),
 // при lockstep — старый (по порядку, без потерь). Физическая очередь не нужна:
 // концы = argmin/argmax по BUFFERING_LEVEL слотам под уже взятым мьютексом,
 // а слоты умеют покидать середину (drop, перезапись) — ring это не выразит.
-enum class SlotState : uint8_t { UPLOADING, PREPARED, RENDERED };   // scoped: имена слишком общие для глобала
+enum class SlotState : uint8_t { UPLOADING, PREPARED, COMPUTING, COMPUTED, RENDERED };   // scoped: имена слишком общие для глобала
 
 constexpr uint8_t SLOT_FLAG_RESERVED     = 1u << 0;
 constexpr uint8_t SLOT_FLAG_IS_UPLOADING = 1u << 1;
 constexpr uint8_t SLOT_FLAG_HAS_PREPARED = 1u << 2;
-constexpr uint8_t SLOT_FLAG_IS_RENDERING = 1u << 3;
+constexpr uint8_t SLOT_FLAG_IS_COMPUTING = 1u << 3;
+constexpr uint8_t SLOT_FLAG_HAS_COMPUTED = 1u << 4;
+constexpr uint8_t SLOT_FLAG_IS_RENDERING = 1u << 5;
 
 struct SlotData {
     uint64_t frame_id = 0;              // порядковый номер prepare — порядок sim-тиков, не порядок прихода fences
@@ -64,6 +74,11 @@ public:
     uint8_t GetFreeSlotIndex(bool allow_frame_skip); 
     uint8_t WaitFreeSlotIndex(bool allow_frame_skip);
 
+    // Вычислительная стадия. Fallback'а у неё НЕТ (в отличие от рендера): нечего считать —
+    // просто ждём, как upload. Пере-«вычислять» прошлый слот бессмысленно, его результат уже
+    // лежит в его же буферах.
+    uint8_t WaitComputableSlot(bool latest_wins);
+
     uint8_t WaitRenderableSlot(bool latest_wins);
 
     bool IsUploadingSlot(uint8_t slot);   // гейт UploadThread
@@ -91,6 +106,12 @@ public:
     void NotifyRenderFenceDone() { render_fences_done_.fetch_add(1, std::memory_order_release); }
     uint64_t RenderFencesDone() const { return render_fences_done_.load(std::memory_order_acquire); }
 
+    // Разбудить всех ждущих и перевести контроллер в режим останова: ожидания перестают
+    // блокировать и возвращают INVALID_SLOT. Без этого поток, стоящий на condvar, не проснётся
+    // при выключении running — и join повиснет. Зовёт ~ThreadController ДО join'ов.
+    void NotifyShutdown();
+    bool IsShuttingDown() const { return shutting_down_.load(std::memory_order_acquire); }
+
     void DebugDump(const char* tag = nullptr);
 
 private:
@@ -108,18 +129,24 @@ private:
     uint64_t required_epoch_ = 0;
 
     std::atomic<uint64_t> render_fences_done_{ 0 };   // см. NotifyRenderFenceDone
+    std::atomic<bool>     shutting_down_{ false };    // см. NotifyShutdown
 
     std::mutex mutex_;
     std::condition_variable cv_free_;        // sim ждёт записываемый слот
+    std::condition_variable cv_computable_;  // compute ждёт залитый кадр
     std::condition_variable cv_renderable_;  // render ждёт готовый кадр / fallback
 
     // Все *Unsafe — только под уже захваченным mutex_.
     uint8_t AcquireFreeSlotUnsafe(bool allow_frame_skip);
+    uint8_t GetComputableSlotUnsafe(bool latest_wins);
     uint8_t GetReadySlotUnsafe(bool latest_wins);
     uint8_t GetRenderableFallbackUnsafe();
+    void    MarkComputingUnsafe(uint8_t slot);
     void    MarkRenderingUnsafe(uint8_t slot);
 
     void HandleUploading(uint8_t slot);
     void HandlePrepared(uint8_t slot);
+    void HandleComputing(uint8_t slot);
+    void HandleComputed(uint8_t slot);
     void HandleRendered(uint8_t slot);
 };
