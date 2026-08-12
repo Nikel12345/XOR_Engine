@@ -13,14 +13,15 @@
 //  моя отсебятина, а не движок.
 //
 //  РАСКЛАДКА ПО ОЧЕРЕДЯМ:
-//    sim-поток      → КОПИРОВАЛЬНАЯ  заливает пер-слотовый тик (угол за кадр)
-//    render-поток   → ГРАФИЧЕСКАЯ    вращение + отрисовка
+//    sim-поток      → КОПИРОВАЛЬНАЯ    заливает пер-слотовый тик (угол за кадр)
+//    compute-поток  → ВЫЧИСЛИТЕЛЬНАЯ   вращает вершины
+//    render-поток   → ГРАФИЧЕСКАЯ      рисует
 //
-//  Вращение ВРЕМЕННО едет на графической очереди, хотя оно вычислительное: у
-//  ThreadController нет compute-стадии, а заводить её ради зонда значит менять
-//  движок до того, как проверка пройдена. Само по себе это не ослабляет тест:
-//  проверяется одновременная работа двух потоков с двумя семьями, а какая работа
-//  внутри графического командного буфера — здесь неважно.
+//  Пять стадий на трёх слотах, каждая на своей очереди и со своим фенсом. Каждый
+//  поток блокируется ТОЛЬКО на своём фенсе: пока compute ждёт свой, render рисует
+//  другой слот, а sim готовит третий. Ради этого стадия и заводилась — раньше
+//  каллинг сидел в render-потоке и не мог взять следующий слот, пока текущий
+//  кадр не дорисован.
 //
 //  ТИК ИДЁТ ЧЕРЕЗ БУФЕР, А НЕ ЧЕРЕЗ ПУШ. В одно­поточном зонде дельта лежала в
 //  глобальной переменной, и пуш записывал её тем же потоком. Здесь она проходит
@@ -87,7 +88,7 @@ struct DummyDispatchData {};
 struct ViewParams { float aspect = 1.0f; float pad[3]{}; };
 
 // Счётчики — атомарные: их трогают разные потоки конвейера.
-std::atomic<uint32_t> g_prepares{ 0 }, g_uploads{ 0 }, g_renders{ 0 }, g_fences{ 0 };
+std::atomic<uint32_t> g_prepares{ 0 }, g_uploads{ 0 }, g_computes{ 0 }, g_renders{ 0 }, g_fences{ 0 };
 std::atomic<bool>     g_error{ false };
 bool g_moved = false, g_len_ok = false;   // читаются после останова потоков
 
@@ -315,6 +316,24 @@ int main(int, char**)
         };
 
         // render-поток → ГРАФИЧЕСКАЯ очередь
+        // compute-поток → ВЫЧИСЛИТЕЛЬНАЯ очередь. Слот берёт сам (WaitComputableSlot), сам
+        // пишет команды и сам ждёт свой фенс — блокируется при этом ТОЛЬКО он: render в это
+        // время рисует другой слот, sim готовит третий. В этом и весь смысл стадии.
+        auto compute_cb = [&](uint8_t slot) {
+            ComputeCommandBuffer ccb = qm.GetComputeQueue().AcquireCommandBuffer();
+            if (!ccb) { g_error = true; return; }
+
+            pm.ExecutePrepassesSteps(ccb.Raw(), slot);
+
+            SDL_GPUFence* fence = ccb.SubmitAndAcquireFence();
+            if (!fence) { g_error = true; return; }
+            SDL_WaitForGPUFences(dev, true, &fence, 1);
+            SDL_ReleaseGPUFence(dev, fence);
+
+            slots.SetSlotState(slot, SlotState::COMPUTED);
+            ++g_computes;
+        };
+
         auto render_cb = [&](uint8_t slot) -> bool {
             RenderCommandBuffer cb = qm.GetRenderQueue().AcquireCommandBuffer();
             if (!cb) { g_error = true; return false; }
@@ -326,8 +345,8 @@ int main(int, char**)
             }
 
             pm.SetSwapchain(tex, w, h);
-            pm.ExecutePrepassesSteps(cb.Raw(), slot);   // вращение (временно здесь же)
-            pm.ExecutePassesSteps(cb.Raw(), slot);      // отрисовка
+            pm.ExecutePassesSteps(cb.Raw(), slot);   // только отрисовка: вращение уехало
+                                                     // на свою стадию и свою очередь
 
             SDL_GPUFence* fence = cb.SubmitAndAcquireFence();
             if (!fence) { g_error = true; return false; }
@@ -358,6 +377,7 @@ int main(int, char**)
         threads.SetGameIterationCallback(game_iter_cb);
         threads.SetPrepareCallback(prepare_cb);
         threads.SetUploadCallback(upload_cb);
+        threads.SetComputeCallback(compute_cb);
         threads.SetRenderCallback(render_cb);
         threads.SetFenceCallback(fence_cb);
         threads.StartThreads();
@@ -373,14 +393,26 @@ int main(int, char**)
             }
             SDL_Delay(16);
             if (++ticks % 125 == 0) {   // ~каждые 2 секунды
-                SDL_Log("prepare=%u upload=%u render=%u fence=%u%s",
-                        g_prepares.load(), g_uploads.load(), g_renders.load(), g_fences.load(),
+                SDL_Log("prepare=%u upload=%u compute=%u render=%u fence=%u%s",
+                        g_prepares.load(), g_uploads.load(), g_computes.load(),
+                        g_renders.load(), g_fences.load(),
                         g_error.load() ? "  [БЫЛА ОШИБКА]" : "");
             }
         }
 
         }   // ← потоки остановлены и приджойнены деструктором
         SDL_Log("--- останов: потоки приджойнены ---");
+
+        // Останов застаёт конвейер В ПОЛЁТЕ: слот мог быть засабмичен, но его стадия не успела
+        // дождаться фенса — тот остаётся живым и утекает (валидация ловит его как
+        // VUID-vkDestroyDevice-device-05137 на VkFence). Дочищаем сами, потоки уже стоят.
+        for (uint8_t i = 0; i < BUFFERING_LEVEL; ++i) {
+            SDL_GPUFence*& f = slots.GetSlotsData()[i].fence;
+            if (!f) continue;
+            SDL_WaitForGPUFences(dev, true, &f, 1);
+            SDL_ReleaseGPUFence(dev, f);
+            f = nullptr;
+        }
         SDL_WaitForGPUIdle(dev);
 
         // Счётчики стадий доказывают, что конвейер КРУТИЛСЯ, но не что вращение доехало:
@@ -436,9 +468,10 @@ int main(int, char**)
     SDL_Quit();
 
     const bool ok = !g_error.load() && g_renders.load() > 0 && g_fences.load() > 0
-                    && g_moved && g_len_ok;
-    SDL_Log("ВЕРДИКТ: %s (prepare=%u upload=%u render=%u fence=%u)",
-            ok ? "конвейер отработал, очереди выдержали многопоточность" : "ПРОВАЛ",
-            g_prepares.load(), g_uploads.load(), g_renders.load(), g_fences.load());
+                    && g_computes.load() > 0 && g_moved && g_len_ok;
+    SDL_Log("ВЕРДИКТ: %s (prepare=%u upload=%u compute=%u render=%u fence=%u)",
+            ok ? "пятистадийный конвейер отработал, три очереди выдержали многопоточность" : "ПРОВАЛ",
+            g_prepares.load(), g_uploads.load(), g_computes.load(),
+            g_renders.load(), g_fences.load());
     return ok ? 0 : 1;
 }
