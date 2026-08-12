@@ -118,7 +118,9 @@ public:
 	// ExecuteUploadTasks (ей нужен copy-pass), упаковке же GPU не нужен.
 	// Заканчивается ПЕРЕДАЧЕЙ пачки render-потоку (см. _PublishUploadTasks): после неё задачи
 	// уходят из-под sim и заливка их больше не касается этого потока.
-	void PackAtlases() { _BuildUploadTasks(); _PublishUploadTasks(); preview.Publish(); }
+	// Две фазы по симметрии: сначала МАССОВОЕ освобождение регионов, накопленных удалениями, затем
+	// МАССОВОЕ размещение новых задач — иначе новые текстуры не увидели бы освободившееся место.
+	void PackAtlases() { _ReleasePendingRegions(); _BuildUploadTasks(); _PublishUploadTasks(); preview.Publish(); }
 	SDL_GPUSampler* CreateSampler(const std::string& name, SDL_GPUSamplerCreateInfo sci);
 	SDL_GPUSampler* GetSampler(const std::string& name);
 	
@@ -126,9 +128,9 @@ public:
 	void DeleteTexture(SDL_GPUTexture* texture);
 
 	// Удаление ОДНОЙ текстуры из атласа: снимает хэндл и освобождает его регион (GPU-текстуру
-	// атласа НЕ трогает — атлас общий). Слой удалённой текстуры пересобирается «начисто» (весь слой
-	// снова один прямоугольник минус выжившие), поэтому освободившееся место сливается в крупный
-	// остаток. Выжившие не двигаются.
+	// атласа НЕ трогает — атлас общий). Хэндл уходит из словаря СРАЗУ, а место возвращается
+	// упаковщику ОТЛОЖЕННО — в ближайшем PackAtlases (см. pending_region_release_): слой
+	// пересобирается один раз на всю пачку удалений, а не на каждое.
 	void DeleteTextureHandle(const std::string& name);
 
 	// Merge-upsert текстур из манифеста сцены (см. SceneTextureEntry): занятое имя снимается
@@ -196,6 +198,9 @@ public:
 	};
 private:
 	void CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name);
+	// Массовое освобождение: пересобирает свободное место в слоях, помеченных удалениями
+	// (pending_region_release_). Первая фаза PackAtlases — до размещения новых задач.
+	void _ReleasePendingRegions();
 	void _BuildUploadTasks();
 	// Передача накопленной пачки render-потоку. Идиома InputManager: мьютекс держится только на
 	// саму передачу, дальше каждая сторона работает со своим вектором без замков.
@@ -211,6 +216,13 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<TextureHandle>> handles_data;
 	std::unordered_map<std::string, SDL_GPUSampler*> samplers_data;
 	std::unordered_map<TextureAtlas*, std::unique_ptr<AtlasPacker>> atlas_packers;  // персистентное состояние упаковки
+	// Слои, ждущие пересборки свободного места после удалений (атлас + номер слоя, без дублей).
+	// Хэндл и его запись в atlas->textures снимаются немедленно (иначе висячий TextureData*), а
+	// возврат места копится здесь: пачка удалений (загрузка сцены — 18 снятых хэндлов) стоит одну
+	// пересборку слоя вместо одной на каждую текстуру, и пересборка идёт по УЖЕ финальному составу
+	// выживших, а не N раз по промежуточным. Владелец — sim: и удаления (команды/LoadScene), и
+	// дренаж (_ReleasePendingRegions в PackAtlases) идут на нём, поэтому без замков.
+	std::vector<std::pair<TextureAtlas*, uint32_t>> pending_region_release_;
 	// ── Задачи заливки текстур: производит sim, исполняет render ──
 	// upload_tasks — приёмник sim-потока: сюда пишет CreateUploadTask, здесь их размещает в атласе
 	// _PlaceTask и отсюда вычищает DeleteTextureHandle. Наружу не видны.

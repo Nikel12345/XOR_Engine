@@ -456,6 +456,53 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     return true;
 }
 
+// Распаковать ВНЕШНИЙ (с gutter'ом) прямоугольник размещения из UVL. unorm16 при размере атласа
+// ≤ ~4096 даёт пиксель-в-пиксель (шаг unorm ≫ 1 текселя), поэтому отдельно позицию не храним.
+// padX/padY восстанавливаем ТОЙ ЖЕ по-осевой формулой, что и при укладке (_PlaceTask) — чистая
+// функция от (w,h,atlas), поэтому декод даёт РОВНО уложенный внешний прямоугольник (без over-/under-
+// оценки): carve при удалении освобождает точно занятое место.
+static rectpack2D::rect_xywh _DecodeOuterRect(const TextureData& td, const TextureAtlas* atlas) {
+    auto unpack_lo = [](uint32_t p) { return (float)(p & 0xFFFFu) / 65535.0f; };
+    auto unpack_hi = [](uint32_t p) { return (float)(p >> 16)      / 65535.0f; };
+    const int w  = (int)(unpack_lo(td.uv_packed_scale)  * atlas->width  + 0.5f);
+    const int h  = (int)(unpack_hi(td.uv_packed_scale)  * atlas->height + 0.5f);
+    const int ix = (int)(unpack_lo(td.uv_packed_offset) * atlas->width  + 0.5f);
+    const int iy = (int)(unpack_hi(td.uv_packed_offset) * atlas->height + 0.5f);
+    const int padX = ((uint32_t)w >= atlas->width)  ? 0 : atlas->padding;
+    const int padY = ((uint32_t)h >= atlas->height) ? 0 : atlas->padding;
+
+    const int ox = std::max(0, ix - padX);
+    const int oy = std::max(0, iy - padY);
+    const int orr = std::min((int)atlas->width,  ix + w + padX);
+    const int ob = std::min((int)atlas->height, iy + h + padY);
+    return rectpack2D::rect_xywh(ox, oy, orr - ox, ob - oy);
+}
+
+void TextureManager::_ReleasePendingRegions() {
+    // Массовое освобождение — зеркало массового размещения ниже, и обязано идти ПЕРЕД ним: только
+    // так новые текстуры этого же кадра садятся в место, освободившееся от снятых (перезагрузка
+    // сцены — это delete+create одних и тех же имён). Пара (атлас, слой) в списке одна, сколько бы
+    // текстур из слоя ни сняли, — в этом весь смысл переноса: пересборка слоя одна на пачку.
+    for (const auto& [atlas, layer] : pending_region_release_) {
+        auto pit = atlas_packers.find(atlas);
+        if (pit == atlas_packers.end() || !pit->second) continue;   // в атласе ничего не размещали
+        auto& layers = pit->second->layers;
+        if (layer >= layers.size()) continue;
+
+        // Пересборка «начисто»: слой снова один целый прямоугольник минус выжившие. Так место
+        // снятых сливается в крупный остаток, а не остаётся набором дыр по их форме. Выжившие
+        // не двигаются — их регионы точно восстанавливаются из UVL (см. _DecodeOuterRect).
+        auto& lp = layers[layer];
+        lp.reset((int)atlas->width, (int)atlas->height);
+        for (TextureData* s : atlas->textures)
+            if (s->layer == layer) {
+                rectpack2D::rect_xywh o = _DecodeOuterRect(*s, atlas);
+                if (o.w > 0 && o.h > 0) lp.carve(o);   // ещё не размещённые дают нулевой прямоугольник
+            }
+    }
+    pending_region_release_.clear();
+}
+
 void TextureManager::_BuildUploadTasks() {
     // Каждую новую задачу вставляем в ПЕРСИСТЕНТНЫЙ упаковщик её атласа. Уже размещённые задачи
     // (placed) пропускаются, поэтому существующие тайлы не двигаются, а новые садятся в остаток —
@@ -614,28 +661,6 @@ SDL_GPUSampler* TextureManager::GetSampler(const std::string& name)
     }
 }
 
-// Распаковать ВНЕШНИЙ (с gutter'ом) прямоугольник размещения из UVL. unorm16 при размере атласа
-// ≤ ~4096 даёт пиксель-в-пиксель (шаг unorm ≫ 1 текселя), поэтому отдельно позицию не храним.
-// padX/padY восстанавливаем ТОЙ ЖЕ по-осевой формулой, что и при укладке (_PlaceTask) — чистая
-// функция от (w,h,atlas), поэтому декод даёт РОВНО уложенный внешний прямоугольник (без over-/under-
-// оценки): carve при удалении освобождает точно занятое место.
-static rectpack2D::rect_xywh _DecodeOuterRect(const TextureData& td, const TextureAtlas* atlas) {
-    auto unpack_lo = [](uint32_t p) { return (float)(p & 0xFFFFu) / 65535.0f; };
-    auto unpack_hi = [](uint32_t p) { return (float)(p >> 16)      / 65535.0f; };
-    const int w  = (int)(unpack_lo(td.uv_packed_scale)  * atlas->width  + 0.5f);
-    const int h  = (int)(unpack_hi(td.uv_packed_scale)  * atlas->height + 0.5f);
-    const int ix = (int)(unpack_lo(td.uv_packed_offset) * atlas->width  + 0.5f);
-    const int iy = (int)(unpack_hi(td.uv_packed_offset) * atlas->height + 0.5f);
-    const int padX = ((uint32_t)w >= atlas->width)  ? 0 : atlas->padding;
-    const int padY = ((uint32_t)h >= atlas->height) ? 0 : atlas->padding;
-
-    const int ox = std::max(0, ix - padX);
-    const int oy = std::max(0, iy - padY);
-    const int orr = std::min((int)atlas->width,  ix + w + padX);
-    const int ob = std::min((int)atlas->height, iy + h + padY);
-    return rectpack2D::rect_xywh(ox, oy, orr - ox, ob - oy);
-}
-
 void TextureManager::DeleteTextureHandle(const std::string& name)
 {
     auto it = handles_data.find(name);
@@ -647,21 +672,20 @@ void TextureManager::DeleteTextureHandle(const std::string& name)
     TextureData* td = &handle->texture_data;
 
     if (TextureAtlas* atlas = handle->atlas) {
+        // Снятие из списка атласа — НЕМЕДЛЕННО и именно здесь: atlas->textures держит TextureData*
+        // внутрь хэндла, который умрёт ниже, а отложить это значило бы оставить висячий указатель.
         auto& v = atlas->textures;
         v.erase(std::remove(v.begin(), v.end(), td), v.end());
 
-        auto pit = atlas_packers.find(atlas);
-        if (pit != atlas_packers.end() && pit->second) {
-            const uint32_t L = td->layer;
-            if (L < pit->second->layers.size()) {
-                auto& layer = pit->second->layers[L];
-                layer.reset((int)atlas->width, (int)atlas->height);
-                for (TextureData* s : atlas->textures)
-                    if (s->layer == L) {
-                        rectpack2D::rect_xywh o = _DecodeOuterRect(*s, atlas);
-                        if (o.w > 0 && o.h > 0) layer.carve(o);
-                    }
-            }
+        // Возврат места упаковщику — отложенно: помечаем слой, пересоберёт его один раз на всю
+        // пачку удалений _ReleasePendingRegions (см. pending_region_release_).
+        // uv_packed_scale == 0 — текстура ещё не размещалась (создана после прошлого PackAtlases),
+        // места в слое не занимает, освобождать нечего.
+        if (td->uv_packed_scale != 0) {
+            const std::pair<TextureAtlas*, uint32_t> key{ atlas, td->layer };
+            if (std::find(pending_region_release_.begin(), pending_region_release_.end(), key)
+                == pending_region_release_.end())
+                pending_region_release_.push_back(key);
         }
     }
 
