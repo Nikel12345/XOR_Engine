@@ -643,17 +643,19 @@ typedef Uint32 VulkanBufferUsageModeFlags;
 #define VULKAN_BUFFER_USAGE_MODE_COMPUTE_STORAGE_READ           (1u << 6)
 #define VULKAN_BUFFER_USAGE_MODE_COMPUTE_STORAGE_READ_WRITE     (1u << 7)
 
-/* ENGINE-FORK: какие usage-биты ВЫРАЗИМЫ в барьере на очереди данной семьи.
+/* ENGINE-FORK: which usage bits are EXPRESSIBLE in a barrier on a queue of a given
+ * family.
  *
- * SetMemoryBarrierFlags переводит эти биты в стадии конвейера (VERTEX_READ →
- * VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, COMPUTE_STORAGE_READ → COMPUTE_SHADER, ...).
- * На очереди без VK_QUEUE_GRAPHICS_BIT/COMPUTE_BIT таких стадий не существует, и барьер,
- * который их называет, невалиден. Поэтому перед выводом барьера usage-биты режутся маской
- * очереди, на которой пишется командный буфер.
+ * SetMemoryBarrierFlags turns these bits into pipeline stages (VERTEX_READ ->
+ * VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, COMPUTE_STORAGE_READ -> COMPUTE_SHADER, and so
+ * on). On a queue without VK_QUEUE_GRAPHICS_BIT/COMPUTE_BIT those stages do not
+ * exist, and a barrier naming them is invalid. So the usage bits are masked by the
+ * queue the command buffer is being recorded for, just before the barrier is emitted.
  *
- * Маска — свойство ПАРЫ (ресурс, очередь), а не ресурса: сам буфер своих usage-флагов не
- * теряет никогда. В создание ресурса (VULKAN_INTERNAL_CreateBuffer) маска не попадает —
- * иначе буфер создался бы без VERTEX и стал непригоден для отрисовки навсегда.
+ * The mask is a property of the PAIR (resource, queue), not of the resource: the
+ * buffer never loses its own usage flags. It must not reach resource creation
+ * (VULKAN_INTERNAL_CreateBuffer) -- a buffer created without VERTEX would be unusable
+ * for drawing forever after.
  */
 #define VULKAN_BUFFER_USAGE_MODE_MASK_TRANSFER  (VULKAN_BUFFER_USAGE_MODE_COPY_SOURCE | \
                                                  VULKAN_BUFFER_USAGE_MODE_COPY_DESTINATION)
@@ -917,10 +919,12 @@ typedef struct RenderPassDepthStencilTargetDescription
 typedef struct CommandPoolHashTableKey
 {
     SDL_ThreadID threadID;
-    /* ENGINE-FORK: командный пул Vulkan создаётся ПОД СЕМЬЮ очередей и годен только для неё —
-     * значит при двух семьях одного threadID для ключа мало. Семья тут индексом, а не «ролью»:
-     * роль (заливка/рендер) живёт выше, на границе публичного API, и в семью её переводит тот,
-     * кто буфер запрашивает. Пул про роли ничего не знает и знать не должен. */
+    /* ENGINE-FORK: a Vulkan command pool is created FOR A QUEUE FAMILY and is only valid
+     * for that family, so with more than one family a threadID alone is no longer a
+     * sufficient key. The family appears here as an index, not as a "role": the role
+     * (upload/render) lives higher up, at the public API boundary, and whoever asks for
+     * the command buffer is the one who maps it to a family. The pool knows nothing
+     * about roles, and should not. */
     Uint32 queueFamilyIndex;
 } CommandPoolHashTableKey;
 
@@ -1113,17 +1117,19 @@ struct VulkanCommandPool
     SDL_ThreadID threadID;
     VkCommandPool commandPool;
 
-    /* ENGINE-FORK: семья пула и ЕЁ очередь — сюда уходит сабмит любого буфера этого пула.
-     * Разрешается один раз при создании пула, потому что дальше это неизменно: командный буфер
-     * годен только для той семьи, из пула которой взят. Так сабмит перестаёт зависеть от
-     * глобальной renderer->unifiedQueue и не требует нигде спрашивать роль. */
+    /* ENGINE-FORK: the pool's family and ITS queue -- every buffer from this pool is
+     * submitted there. Resolved once at pool creation because it cannot change
+     * afterwards: a command buffer is only valid for the family of the pool it came
+     * from. Submission therefore stops depending on the global renderer->unifiedQueue,
+     * and no longer has to ask anyone about roles. */
     Uint32 queueFamilyIndex;
     VkQueue queue;
 
-    /* ENGINE-FORK: маска выразимых usage-битов очереди этой семьи (см. VULKAN_BUFFER_USAGE_MODE_MASK_*).
-     * Живёт на пуле, а не на командном буфере, потому что это свойство СЕМЬИ очередей: пул уже
-     * создаётся с queueFamilyIndex, и когда ключ пула станет (threadID, family), маска поедет
-     * вместе с ним без единой правки в местах вывода барьеров. */
+    /* ENGINE-FORK: mask of usage bits expressible on this family's queue (see
+     * VULKAN_BUFFER_USAGE_MODE_MASK_*). It lives on the pool rather than on the command
+     * buffer because it is a property of the FAMILY: the pool is already created with a
+     * queueFamilyIndex, so once the pool key becomes (threadID, family) the mask
+     * travels with it without touching a single barrier emission site. */
     VulkanBufferUsageModeFlags queueUsageModeMask;
 
     VulkanCommandBuffer **inactiveCommandBuffers;
@@ -1188,41 +1194,45 @@ struct VulkanRenderer
     Uint32 queueFamilyIndex;
     VkQueue unifiedQueue;
 
-    /* ENGINE-FORK: семья и очередь на КАЖДУЮ роль, индексируются SDL_GPUQueueType.
+    /* ENGINE-FORK: the family and queue for EACH role, indexed by SDL_GPUQueueType.
      *
-     * Таблицей, а не отдельными полями на роль: перевод роли в семью становится одним
-     * обращением по индексу без единой ветки, и добавление роли не трогает код вообще.
+     * A table rather than one field per role: mapping a role to a family becomes a
+     * single indexed load with no branching, and adding a role touches no code at all.
      *
-     * Fallback выражен ЗАПОЛНЕНИЕМ, а не проверками: роль, для которой отдельной семьи не
-     * нашлось, получает графическую. Поэтому нигде ниже — ни в переводе роли, ни в ключе пула,
-     * ни в сабмите — не нужно спрашивать «а есть ли такая очередь».
+     * The fallback is expressed by HOW THE TABLE IS FILLED, not by checks: a role with
+     * no family of its own is given the graphics one. Nothing downstream -- role
+     * mapping, pool key, submission -- ever has to ask "does that queue exist?".
      *
-     * queueFamilyIndex/unifiedQueue выше оставлены как есть: на них завязан апстримный код
-     * (свопчейн, создание ресурсов), и они всегда равны графическому элементу этих таблиц. */
+     * queueFamilyIndex/unifiedQueue above are left alone: upstream code depends on them
+     * (swapchain, resource creation), and they are always equal to the graphics entry
+     * of these tables. */
     Uint32  queueFamilyIndices[SDL_GPU_QUEUETYPE_COUNT];
     VkQueue queues[SDL_GPU_QUEUETYPE_COUNT];
 
-    /* ENGINE-FORK: те же семьи без повторов. Нужны там, где важно именно множество, а не роль:
-     * заявки очередей и sharingMode ресурсов. count == 1 означает, что всё вырождено в одну
-     * семью, и тогда ресурсы обязаны остаться EXCLUSIVE (CONCURRENT требует минимум двух). */
+    /* ENGINE-FORK: the same families, deduplicated. Needed where what matters is the SET
+     * rather than the role: queue creation requests and resource sharingMode. count == 1
+     * means everything collapsed onto one family, and then resources must stay EXCLUSIVE
+     * (CONCURRENT requires at least two). */
     Uint32 distinctQueueFamilyIndices[SDL_GPU_QUEUETYPE_COUNT];
     Uint32 distinctQueueFamilyCount;
 
-    /* ENGINE-FORK: маска выразимых usage-битов для семьи КАЖДОЙ роли.
+    /* ENGINE-FORK: expressible-usage mask for the family behind EACH role.
      *
-     * Выводится из НАСТОЯЩИХ queueFlags семьи, а не из имени роли, и это принципиально. При
-     * fallback роль TRANSFER может сидеть на compute-семье, которая COMPUTE_STORAGE-биты
-     * прекрасно выражает. Срезав их «потому что роль называется TRANSFER», мы получили бы не
-     * пессимизацию, а ПОТЕРЮ половины «пусть увидит» в барьере — то есть тихую
-     * рассинхронизацию вместо ошибки. Маска описывает железо, не намерение. */
+     * Derived from the family's REAL queueFlags, not from the role's name, and that is
+     * essential. Under fallback the TRANSFER role may sit on a compute family, which
+     * expresses COMPUTE_STORAGE bits perfectly well. Stripping them "because the role is
+     * called TRANSFER" would not be conservative -- it would DROP half of the
+     * make-visible side of the barrier, i.e. produce silent desynchronisation instead of
+     * an error. The mask describes the hardware, not the intent. */
     VulkanBufferUsageModeFlags queueUsageModeMasks[SDL_GPU_QUEUETYPE_COUNT];
 
-    /* ENGINE-FORK: пары (поток, семья), о сабмите которых уже сообщено (debugMode).
-     * Логируем первый сабмит каждой ПАРЫ, а не каждой семьи: под конвейером потоков в одну
-     * семью сабмитят разные потоки, и по-семейный лог показал бы только первого из них — то
-     * есть не отличил бы «sim реально пишет в копировальную» от «в неё один раз написал main».
-     * Пар в реальности единицы (потоков конвейера 4, семей 3), поэтому хватает крошечного
-     * массива; переполнение просто перестаёт логировать. Под submitLock, поэтому без атомиков. */
+    /* ENGINE-FORK: (thread, family) pairs already reported as submitted to (debugMode).
+     * The first submit of each PAIR is logged, not of each family: under a thread
+     * pipeline several threads submit into the same family, and a per-family log would
+     * only ever show the first of them -- it could not tell "sim really does write to
+     * the copy queue" from "main wrote to it once". In practice there are only a handful
+     * of pairs (4 pipeline threads, 3 families), so a tiny array is enough; on overflow
+     * it simply stops logging. Held under submitLock, hence no atomics. */
     struct { SDL_ThreadID threadID; Uint32 family; } submitLogged[16];
     Uint32 submitLoggedCount;
 
@@ -2733,8 +2743,9 @@ static void VULKAN_INTERNAL_BufferMemoryBarrier(
     memoryBarrier.offset = 0;
     memoryBarrier.size = buffer->size;
 
-    /* ENGINE-FORK: срезать биты, невыразимые на очереди этого командного буфера.
-     * На графической/унифицированной очереди маска пропускает всё — поведение не меняется. */
+    /* ENGINE-FORK: drop the bits that are not expressible on this command buffer's queue.
+     * On a graphics/unified queue the mask passes everything through, so behaviour is
+     * unchanged. */
     sourceUsageMode &= commandBuffer->commandPool->queueUsageModeMask;
     destinationUsageMode &= commandBuffer->commandPool->queueUsageModeMask;
 
@@ -2748,13 +2759,15 @@ static void VULKAN_INTERNAL_BufferMemoryBarrier(
         &dstStages,
         &memoryBarrier.dstAccessMask);
 
-    /* ENGINE-FORK: пустая маска — это НЕ нулевые стадии: барьер, не называющий ни одной стадии,
-     * невалиден. Пустая сторона выражается явной формой «здесь потребителя/производителя нет»:
-     *   dst пуст  → BOTTOM_OF_PIPE: запись сделать доступной, ждать на этой очереди некому (release);
-     *   src пуст  → TOP_OF_PIPE:    ждать на этой очереди нечего (acquire).
-     * Соответствующая маска доступа при этом обязана остаться нулевой — она уже нулевая, потому
-     * что SetMemoryBarrierFlags ставит биты доступа только вместе со стадиями.
-     * Видимость между лентами закрывает не этот барьер, а сабмит-fence кадра. */
+    /* ENGINE-FORK: an empty mask is NOT the same as zero stages -- a barrier naming no
+     * stage at all is invalid. An empty side is expressed by the explicit form of "there
+     * is no producer/consumer here":
+     *   dst empty -> BOTTOM_OF_PIPE: make the write available, nobody on this queue waits (release);
+     *   src empty -> TOP_OF_PIPE:    there is nothing on this queue to wait for (acquire).
+     * The corresponding access mask must stay zero -- and it already is, because
+     * SetMemoryBarrierFlags only ever sets access bits together with stages.
+     * Visibility across queues is closed not by this barrier but by the frame's submit
+     * fence. */
     if (srcStages == 0) {
         srcStages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
     }
@@ -2777,11 +2790,12 @@ static void VULKAN_INTERNAL_BufferMemoryBarrier(
     buffer->transitioned = true;
 }
 
-/* ENGINE-FORK: выразимо ли текстурное состояние на очереди с такой маской.
+/* ENGINE-FORK: is a texture state expressible on a queue with this mask?
  *
- * Правило то же, что у буферов: состояние переводится в стадии конвейера, и назвать стадию,
- * которой на очереди нет, нельзя. Но реакция разная — буферу лишние биты СРЕЗАЮТСЯ, а текстуре
- * срезать нечего (состояние одно, а не набор), поэтому здесь только проверка. */
+ * The rule is the same as for buffers: a state is translated into pipeline stages, and
+ * a stage the queue does not have cannot be named. The response differs, though -- for
+ * a buffer the surplus bits are MASKED OFF, while a texture has nothing to mask (it
+ * carries one state, not a set), so all that is left here is a check. */
 static bool VULKAN_INTERNAL_TextureUsageModeExpressible(
     VulkanTextureUsageMode mode,
     VulkanBufferUsageModeFlags queueUsageModeMask)
@@ -2790,15 +2804,15 @@ static bool VULKAN_INTERNAL_TextureUsageModeExpressible(
     case VULKAN_TEXTURE_USAGE_MODE_UNINITIALIZED:
     case VULKAN_TEXTURE_USAGE_MODE_COPY_SOURCE:
     case VULKAN_TEXTURE_USAGE_MODE_COPY_DESTINATION:
-        return true;   // транспорт есть на любой очереди
+        return true;   // transfer is available on every queue
 
     case VULKAN_TEXTURE_USAGE_MODE_COMPUTE_STORAGE_READ:
     case VULKAN_TEXTURE_USAGE_MODE_COMPUTE_STORAGE_READ_WRITE:
         return (queueUsageModeMask & VULKAN_BUFFER_USAGE_MODE_COMPUTE_STORAGE_READ) != 0;
 
     default:
-        /* SAMPLER, GRAPHICS_STORAGE_READ, COLOR/DEPTH_STENCIL_ATTACHMENT, PRESENT —
-         * все называют графические стадии. */
+        /* SAMPLER, GRAPHICS_STORAGE_READ, COLOR/DEPTH_STENCIL_ATTACHMENT, PRESENT --
+         * all of these name graphics stages. */
         return queueUsageModeMask == VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS;
     }
 }
@@ -2818,24 +2832,26 @@ static void VULKAN_INTERNAL_TextureMemoryBarrier(
     VkPipelineStageFlags dstStages = 0;
     VkImageMemoryBarrier memoryBarrier;
 
-    /* ENGINE-FORK: текстурный барьер маской НЕ режется — состояние проверяется целиком.
+    /* ENGINE-FORK: a texture barrier is NOT masked -- the state is checked as a whole.
      *
-     * Разница с буфером принципиальная. Буферные usage-биты складываются (DefaultBufferUsageMode
-     * копит их через |=), поэтому маска у буфера убирает слагаемые, оставляя остальные верными.
-     * Текстурный режим выбирается первым подошедшим по приоритету (DefaultTextureUsageMode,
-     * цепочка else if, SAMPLER первым), и это не «набор бит», а РАСКЛАДКА байт в памяти. Срезать
-     * там нечего: маска сменила бы ответ целиком — копировальная очередь, «не знающая» про
-     * SAMPLER, оставила бы картинку в форме приёмника копии, а SDL дальше считал бы её готовой
-     * к чтению. Инвариант «между операциями ресурс в своём состоянии по умолчанию» сломался бы
-     * молча: валидация не скажет ничего, вылезет мусором на экране.
+     * The difference from buffers is fundamental. Buffer usage bits accumulate
+     * (DefaultBufferUsageMode ORs them together), so masking a buffer removes addends and
+     * leaves the rest correct. A texture mode is picked as the first match by priority
+     * (DefaultTextureUsageMode, a chain of else-ifs with SAMPLER first), and that is not a
+     * "set of bits" but a MEMORY LAYOUT. There is nothing to strip: a mask would change
+     * the answer wholesale -- a copy queue that "knows nothing about" SAMPLER would leave
+     * the image in copy-destination form while SDL went on believing it ready to be read.
+     * The invariant "between operations a resource sits in its default state" would break
+     * silently: validation says nothing, and it surfaces as garbage on screen.
      *
-     * Поэтому граница проходит не по «текстуры vs буферы», а по «есть layout vs нет layout».
-     * Ассерт — вторая линия обороны: первая, типы командных буферов на стороне движка, не даёт
-     * записать текстурную операцию на лейн, который её не потянет.
+     * So the line is not drawn between "textures vs buffers" but between "has a layout vs
+     * has none". The assert is a second line of defence: the first one, command buffer
+     * types on the engine side, keeps a texture operation off a lane that cannot carry it.
      *
-     * Проверяется именно ВЫРАЗИМОСТЬ, а не «графическая ли очередь»: вычислительная очередь
-     * COMPUTE_STORAGE-состояния выражает законно, и запрещать ей их значило бы закрыть
-     * compute-лейн для его собственных storage-текстур. Недоступны ей SAMPLER и таргеты. */
+     * What is checked is EXPRESSIBILITY, not "is this the graphics queue": a compute queue
+     * expresses COMPUTE_STORAGE states legitimately, and forbidding them would shut the
+     * compute lane out of its own storage textures. What it cannot have is SAMPLER and
+     * render targets. */
     SDL_assert_release(
         VULKAN_INTERNAL_TextureUsageModeExpressible(
             sourceUsageMode, commandBuffer->commandPool->queueUsageModeMask) &&
@@ -3661,8 +3677,9 @@ static void SDLCALL VULKAN_INTERNAL_DescriptorSetLayoutHashDestroy(void *userdat
 
 static Uint32 SDLCALL VULKAN_INTERNAL_CommandPoolHashFunction(void *userdata, const void *key)
 {
-    /* ENGINE-FORK: семья входит в хэш вместе с потоком. Семей единицы, и без подмешивания
-     * пулы разных семей одного потока сели бы в одну корзину. */
+    /* ENGINE-FORK: the family is mixed into the hash along with the thread. Families are
+     * few, and without mixing, pools of different families on the same thread would all
+     * land in one bucket. */
     CommandPoolHashTableKey *k = (CommandPoolHashTableKey *)key;
     return (Uint32)k->threadID ^ (k->queueFamilyIndex * 2654435761u);
 }
@@ -4417,21 +4434,24 @@ static VulkanBuffer *VULKAN_INTERNAL_CreateBuffer(
     createinfo.flags = 0;
     createinfo.size = size;
     createinfo.usage = vulkanUsageFlags;
-    /* ENGINE-FORK: буферы делятся между семьями БЕЗ передачи владения.
+    /* ENGINE-FORK: buffers are shared between families WITHOUT ownership transfer.
      *
-     * EXCLUSIVE значит «в каждый момент ресурс принадлежит одной семье», и доступ с другой без
-     * парного release/acquire-барьера даёт UNDEFINED содержимое — даже при идеальном разделении
-     * по времени, потому что fence даёт порядок и видимость, но владения НЕ передаёт.
+     * EXCLUSIVE means "at any moment the resource belongs to exactly one family", and
+     * touching it from another without a paired release/acquire barrier yields UNDEFINED
+     * contents -- even under perfect separation in time, because a fence gives ordering
+     * and visibility but does NOT transfer ownership.
      *
-     * Выбран CONCURRENT, а не ownership-барьеры, по трём причинам:
-     *   • у буфера нет ни раскладки, ни сжатия — расшаривать нечего, цена практически нулевая
-     *     (у ТЕКСТУР было бы иначе, там CONCURRENT может стоить аппаратного сжатия);
-     *   • для CONCURRENT-ресурса VK_QUEUE_FAMILY_IGNORED в барьерах — ПРАВИЛЬНОЕ значение,
-     *     то есть весь существующий барьерный код остаётся верным как есть;
-     *   • ownership-барьеры потребовали бы ПОМНИТЬ, какая семья владеет ресурсом сейчас, а SDL
-     *     про состояние ресурсов не помнит ничего — на этом стоит вся его схема барьеров.
+     * CONCURRENT was chosen over ownership barriers for three reasons:
+     *   - a buffer has neither layout nor compression, so there is nothing to give up:
+     *     the cost is essentially nil (for TEXTURES it would be different, where
+     *     CONCURRENT can cost hardware compression);
+     *   - for a CONCURRENT resource VK_QUEUE_FAMILY_IGNORED is the CORRECT value in
+     *     barriers, so all the existing barrier code stays valid as written;
+     *   - ownership barriers would require REMEMBERING which family currently owns a
+     *     resource, and SDL remembers nothing about resource state -- its whole barrier
+     *     scheme rests on that.
      *
-     * Одна семья (fallback) → обязателен EXCLUSIVE: CONCURRENT требует минимум двух. */
+     * One family (fallback) -> EXCLUSIVE is mandatory: CONCURRENT requires at least two. */
     if (renderer->distinctQueueFamilyCount > 1) {
         createinfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
         createinfo.queueFamilyIndexCount = renderer->distinctQueueFamilyCount;
@@ -5974,21 +5994,24 @@ static VulkanTexture *VULKAN_INTERNAL_CreateTexture(
     imageCreateInfo.samples = SDLToVK_SampleCount[createinfo->sample_count];
     imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageCreateInfo.usage = vkUsageFlags;
-    /* ENGINE-FORK: текстуры НАМЕРЕННО остаются EXCLUSIVE, в отличие от буферов.
+    /* ENGINE-FORK: textures DELIBERATELY stay EXCLUSIVE, unlike buffers.
      *
-     * Здесь CONCURRENT стоит дорого: у изображения есть раскладка и метаданные сжатия, и форма,
-     * годная для всех перечисленных семей, обычно означает отключённое аппаратное сжатие — цену
-     * платят КАЖДЫЙ кадр, даже если со второй семьи к текстуре так и не обратились.
+     * Here CONCURRENT is expensive: an image has a layout and compression metadata, and a
+     * form valid for every listed family usually means hardware compression is off -- a
+     * cost paid EVERY frame, even if the second family never touches the texture at all.
      *
-     * Пока это безопасно: вся текстурная работа движка живёт на графическом лейне (мипы и блиты
-     * там вынужденно — это отрисовка), поэтому семьи текстуры не пересекают.
+     * For now this is safe: all of the engine's texture work lives on the graphics lane
+     * (mipmaps and blits necessarily so -- they are draws), so textures never cross
+     * families.
      *
-     * КОГДА ПОМЕНЯТЬ: как только вычислительная работа с текстурами уедет на compute-очередь.
-     * Тогда правило выводится прямо из флагов создания, ничего запоминать не нужно:
-     *     usage содержит COMPUTE_STORAGE_*  →  CONCURRENT { graphics, compute }
-     *     иначе                             →  EXCLUSIVE
-     * И цена там окажется невелика: текстура, в которую пишет compute, обязана быть storage, а
-     * такие SDL и так держит в VK_IMAGE_LAYOUT_GENERAL, где оптимальных сжатых форм уже нет. */
+     * WHEN TO CHANGE THIS: as soon as compute work on textures moves to the compute
+     * queue. The rule then follows straight from the creation flags, with nothing to
+     * remember:
+     *     usage contains COMPUTE_STORAGE_*  ->  CONCURRENT { graphics, compute }
+     *     otherwise                         ->  EXCLUSIVE
+     * And the cost there turns out to be small: a texture written by compute has to be
+     * storage, and SDL already keeps those in VK_IMAGE_LAYOUT_GENERAL, where the optimal
+     * compressed forms are gone anyway. */
     imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imageCreateInfo.queueFamilyIndexCount = 0;
     imageCreateInfo.pQueueFamilyIndices = NULL;
@@ -7157,11 +7180,36 @@ static SDL_GPUTexture *VULKAN_CreateTexture(
     // Only do this after "container" is set, so the texture
     // is fully initialized before any Submit that could trigger defrag.
     {
-        /* ENGINE-FORK: GRAPHICS обязательна и не подлежит выбору — это ТЕКСТУРНЫЙ барьер
-         * (смена раскладки), а он вне графической очереди запрещён (см. комментарий у
-         * VULKAN_INTERNAL_TextureMemoryBarrier). SDL берёт буфер сам, мимо публичного API,
-         * поэтому типы на стороне движка это место не прикрывают — только явная роль здесь. */
-        VulkanCommandBuffer *barrierCommandBuffer = (VulkanCommandBuffer *)VULKAN_AcquireCommandBuffer((SDL_GPURenderer *)renderer, SDL_GPU_QUEUETYPE_GRAPHICS);
+        /* ENGINE-FORK: the barrier goes on the family that owns the texture's DEFAULT state,
+         * rather than unconditionally on graphics. Which family that is follows from the very
+         * rule the barrier itself asserts on: a texture whose usage is only COMPUTE_STORAGE_*
+         * is expressible on the compute queue, while everything else (SAMPLER, graphics
+         * storage, render targets) is graphics-only.
+         *
+         * Why: textures are EXCLUSIVE and the fork performs no ownership transfer at all (every
+         * barrier uses VK_QUEUE_FAMILY_IGNORED). A texture created on graphics and then used
+         * from compute crosses a family boundary, after which its contents are undefined.
+         * Creating it on the family it will actually live on removes that crossing. It also
+         * removes a cross-queue ordering assumption: the creation barrier and the first use end
+         * up on the same queue, so the ordering comes from the queue rather than from luck.
+         *
+         * A texture carrying SAMPLER on top of COMPUTE_STORAGE_* is pinned to graphics by this
+         * same rule: its default state is SAMPLER (first in DefaultTextureUsageMode), so it is
+         * created here and cannot be touched from compute at all -- the barrier asserts on the
+         * SOURCE state too, so the attempt aborts before anything is recorded. Sharing such a
+         * texture between families would need sharingMode, which stays EXCLUSIVE for every
+         * texture -- see the comment in VULKAN_INTERNAL_CreateTexture.
+         *
+         * SDL acquires this command buffer itself, bypassing the public API, so the engine-side
+         * command buffer types do not cover this site -- naming the role here is what does. */
+        VulkanTextureUsageMode defaultMode = VULKAN_INTERNAL_DefaultTextureUsageMode(texture);
+        SDL_GPUQueueType barrierQueueType =
+            (defaultMode == VULKAN_TEXTURE_USAGE_MODE_COMPUTE_STORAGE_READ ||
+             defaultMode == VULKAN_TEXTURE_USAGE_MODE_COMPUTE_STORAGE_READ_WRITE)
+                ? SDL_GPU_QUEUETYPE_COMPUTE
+                : SDL_GPU_QUEUETYPE_GRAPHICS;
+
+        VulkanCommandBuffer *barrierCommandBuffer = (VulkanCommandBuffer *)VULKAN_AcquireCommandBuffer((SDL_GPURenderer *)renderer, barrierQueueType);
         VULKAN_INTERNAL_TextureTransitionToDefaultUsage(
             renderer,
             barrierCommandBuffer,
@@ -9775,7 +9823,7 @@ static bool VULKAN_INTERNAL_AllocateCommandBuffer(
 static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
     VulkanRenderer *renderer,
     SDL_ThreadID threadID,
-    Uint32 queueFamilyIndex)   /* ENGINE-FORK: пул теперь пер-(поток, семья), а не пер-поток */
+    Uint32 queueFamilyIndex)   /* ENGINE-FORK: pools are now per-(thread, family), not per-thread */
 {
     VulkanCommandPool *vulkanCommandPool = NULL;
     VkCommandPoolCreateInfo commandPoolCreateInfo;
@@ -9798,8 +9846,9 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
     commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     commandPoolCreateInfo.pNext = NULL;
     commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    /* ENGINE-FORK: семья берётся из ключа, а не из глобальной renderer->queueFamilyIndex —
-     * иначе пул, заведённый под вторую семью, создался бы под первой. */
+    /* ENGINE-FORK: the family comes from the key, not from the global
+     * renderer->queueFamilyIndex -- otherwise a pool requested for the second family
+     * would be created for the first. */
     commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
 
     vulkanResult = renderer->vkCreateCommandPool(
@@ -9816,18 +9865,20 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
 
     vulkanCommandPool->threadID = threadID;
 
-    /* ENGINE-FORK: семья → очередь. Таблица renderer->queues[] индексируется РОЛЬЮ, а здесь у
-     * нас семья, поэтому ищем первую роль с этой семьёй. Ответ однозначен: роли, делящие семью,
-     * получили одну и ту же ручку (vkGetDeviceQueue с одинаковыми аргументами).
-     * Промах невозможен — семья пришла из этой же таблицы. */
+    /* ENGINE-FORK: family -> queue. renderer->queues[] is indexed by ROLE while what we
+     * have here is a family, so we look up the first role using that family. The answer is
+     * unambiguous: roles sharing a family were handed the same handle (vkGetDeviceQueue
+     * with identical arguments). A miss is impossible -- the family came out of this very
+     * table. */
     vulkanCommandPool->queueFamilyIndex = queueFamilyIndex;
     vulkanCommandPool->queue = VK_NULL_HANDLE;
     vulkanCommandPool->queueUsageModeMask = 0;
     for (Uint32 role = 0; role < SDL_GPU_QUEUETYPE_COUNT; role += 1) {
         if (renderer->queueFamilyIndices[role] == queueFamilyIndex) {
             vulkanCommandPool->queue = renderer->queues[role];
-            /* Маска — свойство СЕМЬИ, поэтому берётся тем же поиском, что и очередь: у ролей,
-             * делящих семью, она одинакова по построению (выводилась из флагов этой семьи). */
+            /* The mask is a property of the FAMILY, so it is fetched by the same lookup as the
+             * queue: for roles sharing a family it is identical by construction (it was
+             * derived from that family's flags). */
             vulkanCommandPool->queueUsageModeMask = renderer->queueUsageModeMasks[role];
             break;
         }
@@ -9861,7 +9912,7 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
 static VulkanCommandBuffer *VULKAN_INTERNAL_GetInactiveCommandBufferFromPool(
     VulkanRenderer *renderer,
     SDL_ThreadID threadID,
-    Uint32 queueFamilyIndex)   /* ENGINE-FORK: транзит семьи до пула */
+    Uint32 queueFamilyIndex)   /* ENGINE-FORK: carries the family through to the pool */
 {
     VulkanCommandPool *commandPool =
         VULKAN_INTERNAL_FetchCommandPool(renderer, threadID, queueFamilyIndex);
@@ -9895,9 +9946,10 @@ static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
 
     SDL_ThreadID threadID = SDL_GetCurrentThreadID();
 
-    /* ENGINE-FORK: РОЛЬ → СЕМЬЯ. Единственное место перевода: выше по стеку живёт намерение
-     * вызывающего, ниже — только индекс семьи (см. CommandPoolHashTableKey). Веток нет: роль
-     * без своей семьи получила графическую ещё при выборе устройства. */
+    /* ENGINE-FORK: ROLE -> FAMILY. The single place this mapping happens: above it lives
+     * the caller's intent, below it only a family index (see CommandPoolHashTableKey).
+     * No branches: a role without a family of its own was given the graphics one back at
+     * device selection. */
     Uint32 queueFamilyIndex = renderer->queueFamilyIndices[queueType];
 
     SDL_LockMutex(renderer->acquireCommandBufferLock);
@@ -11105,13 +11157,15 @@ static bool VULKAN_Submit(
     submitInfo.pSignalSemaphores = vulkanCommandBuffer->signalSemaphores;
     submitInfo.signalSemaphoreCount = vulkanCommandBuffer->signalSemaphoreCount;
 
-    /* ENGINE-FORK: в СВОЮ очередь, а не в глобальную. Буфер годен только для семьи своего пула,
-     * поэтому очередь берётся оттуда же — спрашивать роль на этом уровне не нужно и негде.
+    /* ENGINE-FORK: submit to its OWN queue, not to the global one. A buffer is only valid
+     * for the family of its pool, so the queue is taken from there -- asking about roles
+     * at this level is neither necessary nor possible.
      *
-     * submitLock остаётся ОДИН на все очереди, и это не пережиток: vkQueueSubmit требует внешней
-     * синхронизации на очередь, но под этим же замком идут ОБЩИЕ вещи — пул fence'ов, списки
-     * отложенного разрушения, дефраг. Их per-queue не разложить. Цена мала: vkQueueSubmit только
-     * ставит работу в очередь и возвращается, параллельность живёт на GPU, а не здесь. */
+     * submitLock stays a SINGLE lock across all queues, and that is not a leftover:
+     * vkQueueSubmit requires external synchronisation per queue, but the same lock also
+     * covers SHARED state -- the fence pool, the deferred-destroy lists, defragmentation.
+     * Those do not split per queue. The cost is small: vkQueueSubmit only enqueues work
+     * and returns; the parallelism lives on the GPU, not here. */
     if (renderer->debugMode) {
         Uint32 fam = vulkanCommandBuffer->commandPool->queueFamilyIndex;
         SDL_ThreadID tid = vulkanCommandBuffer->commandPool->threadID;
@@ -11155,14 +11209,16 @@ static bool VULKAN_Submit(
         presentInfo.pImageIndices = &presentData->swapchainImageIndex;
         presentInfo.pResults = NULL;
 
-        /* ENGINE-FORK: презент ВСЕГДА на графической, а не на очереди этого буфера. Семья под
-         * презент выбиралась с явной проверкой SDL_Vulkan_GetPresentationSupport — у
-         * копировальной и вычислительной семей его нет, и презент с них невалиден.
+        /* ENGINE-FORK: present ALWAYS goes on the graphics queue, not on this buffer's queue.
+         * The family used for presentation was chosen with an explicit
+         * SDL_Vulkan_GetPresentationSupport check -- the transfer and compute families do
+         * not have it, and presenting from them is invalid.
          *
-         * Сегодня это совпадает с очередью буфера (presentData появляется только у того, кто
-         * запрашивал свопчейн, а свопчейн — операция графической роли), но полагаться на
-         * совпадение нельзя: оно неявное, а нарушение дало бы не ошибку компиляции, а падение
-         * на чужой машине. */
+         * Today this coincides with the buffer's own queue (presentData only appears for
+         * whoever requested the swapchain, and the swapchain is a graphics-role
+         * operation), but the coincidence must not be relied on: it is implicit, and
+         * breaking it would produce not a compile error but a crash on someone else's
+         * machine. */
         presentResult = renderer->vkQueuePresentKHR(
             renderer->queues[SDL_GPU_QUEUETYPE_GRAPHICS],
             &presentInfo);
@@ -12502,8 +12558,9 @@ static Uint8 VULKAN_INTERNAL_IsDeviceSuitable(
     VkPhysicalDevice physicalDevice,
     VulkanExtensions *physicalDeviceExtensions,
     Uint32 *queueFamilyIndex,
-    /* ENGINE-FORK: выделенные семьи под COMPUTE и TRANSFER. SDL_MAX_UINT32 — не нашлось,
-     * тогда роль отдаётся графической (заполняется вызывающим). */
+    /* ENGINE-FORK: dedicated families for COMPUTE and TRANSFER. SDL_MAX_UINT32 means none
+     * was found, in which case the role falls back to graphics (filled in by the
+     * caller). */
     Uint32 *computeQueueFamilyIndex,
     Uint32 *transferQueueFamilyIndex)
 {
@@ -12610,20 +12667,24 @@ static Uint8 VULKAN_INTERNAL_IsDeviceSuitable(
         }
     }
 
-    /* ENGINE-FORK: ВЫДЕЛЕННЫЕ семьи под compute и transfer.
+    /* ENGINE-FORK: DEDICATED families for compute and transfer.
      *
-     * Ищем строго специализированные, а не «любую подходящую»: смысл второй очереди в том,
-     * чтобы работа шла на ДРУГОМ аппаратном движке. Семья с GRAPHICS_BIT — это тот же движок,
-     * что и рендер, и вынос на неё дал бы только иллюзию.
+     * We look for strictly specialised ones rather than "any that fits": the point of a
+     * second queue is to get work onto a DIFFERENT hardware engine. A family with
+     * GRAPHICS_BIT is the same engine that renders, and offloading onto it would buy
+     * nothing but the illusion of parallelism.
      *
-     *   compute   = COMPUTE, но НЕ GRAPHICS  (на AMD это ACE)
-     *   transfer  = TRANSFER, но НЕ GRAPHICS и НЕ COMPUTE  (выделенный DMA, на AMD SDMA)
+     *   compute  = COMPUTE but NOT GRAPHICS  (the ACEs on AMD)
+     *   transfer = TRANSFER but NOT GRAPHICS and NOT COMPUTE  (a dedicated DMA engine,
+     *              SDMA on AMD)
      *
-     * Про TRANSFER_BIT: спека разрешает семье с graphics/compute не выставлять его, хотя
-     * копирования она умеет. Нам это безразлично — мы ищем именно ту, где он выставлен ЯВНО и
-     * больше ничего нет, а такая семья бит проставляет всегда.
+     * About TRANSFER_BIT: the spec allows a graphics/compute family not to advertise it
+     * even though it can copy. That does not matter to us -- we are looking for the
+     * family that sets it EXPLICITLY and has nothing else, and such a family always
+     * advertises the bit.
      *
-     * Не нашлось — остаётся SDL_MAX_UINT32, и вызывающий подставит графическую. */
+     * If none is found the value stays SDL_MAX_UINT32 and the caller substitutes
+     * graphics. */
     *computeQueueFamilyIndex = SDL_MAX_UINT32;
     *transferQueueFamilyIndex = SDL_MAX_UINT32;
     for (i = 0; i < queueFamilyCount; i += 1) {
@@ -12633,7 +12694,7 @@ static Uint8 VULKAN_INTERNAL_IsDeviceSuitable(
             continue;
         }
         if (flags & VK_QUEUE_GRAPHICS_BIT) {
-            continue;   // тот же движок, что и рендер — не интересует
+            continue;   // same engine that renders -- not interesting
         }
 
         if ((flags & VK_QUEUE_COMPUTE_BIT) && *computeQueueFamilyIndex == SDL_MAX_UINT32) {
@@ -12710,7 +12771,7 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
     suitableIndex = -1;
     suitableQueueFamilyIndex = 0;
     highestRank = 0;
-    /* ENGINE-FORK: специализированные семьи выбранного устройства (SDL_MAX_UINT32 — нет такой) */
+    /* ENGINE-FORK: the specialised families of the chosen device (SDL_MAX_UINT32 = none) */
     suitableComputeQueueFamilyIndex = SDL_MAX_UINT32;
     suitableTransferQueueFamilyIndex = SDL_MAX_UINT32;
     for (i = 0; i < physicalDeviceCount; i += 1) {
@@ -12742,8 +12803,8 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
              */
             suitableIndex = i;
             suitableQueueFamilyIndex = queueFamilyIndex;
-            /* ENGINE-FORK: семьи принадлежат УСТРОЙСТВУ — берём вместе с ним, иначе при смене
-             * победителя остались бы индексы от чужой карты. */
+            /* ENGINE-FORK: the families belong to the DEVICE, so they are taken together with
+             * it -- otherwise a change of winner would leave indices from another card. */
             suitableComputeQueueFamilyIndex = computeQueueFamilyIndex;
             suitableTransferQueueFamilyIndex = transferQueueFamilyIndex;
             highestRank = deviceRank;
@@ -12755,34 +12816,36 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
         renderer->physicalDevice = physicalDevices[suitableIndex];
         renderer->queueFamilyIndex = suitableQueueFamilyIndex;
 
-        /* ENGINE-FORK: ЗДЕСЬ И ТОЛЬКО ЗДЕСЬ решается, что во что вырождается. Всё, что ниже
-         * (перевод роли, ключ пула, сабмит), работает дальше без единой проверки «а есть ли
-         * такая очередь».
+        /* ENGINE-FORK: THIS, AND ONLY THIS, is where it is decided what degrades into what.
+         * Everything below (role mapping, pool key, submission) then runs without a single
+         * "does that queue exist?" check.
          *
-         * Роль без своей семьи падает на БЛИЖАЙШУЮ БОЛЕЕ ШИРОКУЮ, потому что способности
-         * вложены: TRANSFER ⊂ COMPUTE ⊂ GRAPHICS. Падать можно только ВВЕРХ по вложению —
-         * compute-семья копирования исполнит (транспорт подразумевается спекой для любой
-         * graphics/compute-семьи), а transfer-семья диспатч не исполнит никогда.
+         * A role without its own family falls onto the NEAREST WIDER one, because the
+         * capabilities are nested: TRANSFER is a subset of COMPUTE is a subset of GRAPHICS.
+         * Falling is only possible UPWARDS through that nesting -- a compute family will
+         * perform copies (the spec implies transfer support for any graphics/compute
+         * family), whereas a transfer family will never perform a dispatch.
          *
-         * Отсюда важное для заливки: нет выделенной DMA-семьи, но есть compute — заливка
-         * уходит на неё, а НЕ на графику. Это всё ещё ДРУГОЙ аппаратный движок, то есть
-         * перекрытие с рендером сохраняется. Конфигурация «compute есть, transfer нет»
-         * распространённая, и потеря была бы обидной. */
+         * Which matters for uploads: if there is no dedicated DMA family but there is a
+         * compute one, uploads go to compute and NOT to graphics. That is still a DIFFERENT
+         * hardware engine, so the overlap with rendering survives. The "compute yes,
+         * transfer no" configuration is common, and losing it would be a shame. */
         renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_GRAPHICS] = suitableQueueFamilyIndex;
         renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_COMPUTE] =
             (suitableComputeQueueFamilyIndex != SDL_MAX_UINT32)
                 ? suitableComputeQueueFamilyIndex
                 : suitableQueueFamilyIndex;
-        /* Уже разрешённый COMPUTE — сам либо выделенная семья, либо графическая, поэтому одно
-         * выражение покрывает обе ступени спуска. */
+        /* The already-resolved COMPUTE entry is itself either a dedicated family or the
+         * graphics one, so this single expression covers both steps of the descent. */
         renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_TRANSFER] =
             (suitableTransferQueueFamilyIndex != SDL_MAX_UINT32)
                 ? suitableTransferQueueFamilyIndex
                 : renderer->queueFamilyIndices[SDL_GPU_QUEUETYPE_COMPUTE];
 
-        /* ENGINE-FORK: список РАЗЛИЧНЫХ семей — считается один раз здесь и используется дважды:
-         * для заявок очередей (одну семью нельзя перечислить в pQueueCreateInfos дважды) и для
-         * sharingMode ресурсов. При fallback роли делят семью, и список схлопывается. */
+        /* ENGINE-FORK: the list of DISTINCT families -- computed once here and used twice: for
+         * the queue creation requests (a family must not be listed twice in
+         * pQueueCreateInfos) and for resource sharingMode. Under fallback the roles share a
+         * family and the list collapses. */
         renderer->distinctQueueFamilyCount = 0;
         for (Uint32 role = 0; role < SDL_GPU_QUEUETYPE_COUNT; role += 1) {
             bool seen = false;
@@ -12799,8 +12862,9 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
             }
         }
 
-        /* ENGINE-FORK: маски по НАСТОЯЩИМ флагам семей выбранного устройства. Перезапрашиваем
-         * свойства семей: в цикле выше они были у устройств-кандидатов, а нужны у победителя. */
+        /* ENGINE-FORK: masks from the REAL family flags of the chosen device. The family
+         * properties are queried again: in the loop above they belonged to the candidate
+         * devices, and what we need are the winner's. */
         {
             Uint32 famCount = 0;
             VkQueueFamilyProperties *famProps;
@@ -12866,9 +12930,9 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
     VkPhysicalDevicePortabilitySubsetFeaturesKHR portabilityFeatures;
     const char **deviceExtensions;
 
-    /* ENGINE-FORK: по заявке на каждую РАЗЛИЧНУЮ семью — одну семью перечислить дважды нельзя
-     * (VUID-VkDeviceCreateInfo-queueFamilyIndex-02802), а при fallback роли делят одну и ту же.
-     * Множество уже посчитано при выборе устройства. */
+    /* ENGINE-FORK: one request per DISTINCT family -- a family must not be listed twice
+     * (VUID-VkDeviceCreateInfo-queueFamilyIndex-02802), and under fallback the roles share
+     * one. The set was already computed during device selection. */
     VkDeviceQueueCreateInfo queueCreateInfos[SDL_GPU_QUEUETYPE_COUNT];
     Uint32 queueCreateInfoCount = renderer->distinctQueueFamilyCount;
     Uint32 qi;
@@ -13017,9 +13081,10 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
                              #func);
 #include "SDL_gpu_vulkan_vkfuncs.h"
 
-    /* ENGINE-FORK: ручка на очередь каждой роли. vkGetDeviceQueue ничего не создаёт — очередь
-     * принадлежит устройству и умирает с ним, поэтому парного разрушения нет. Роли, делящие
-     * семью (fallback), получают одну и ту же ручку — это и есть вырождение в одну очередь. */
+    /* ENGINE-FORK: a queue handle per role. vkGetDeviceQueue creates nothing -- the queue
+     * belongs to the device and dies with it, so there is no matching destroy. Roles
+     * sharing a family (fallback) receive the same handle, and that is exactly what
+     * degrading to a single queue means. */
     for (qi = 0; qi < SDL_GPU_QUEUETYPE_COUNT; qi += 1) {
         renderer->vkGetDeviceQueue(
             renderer->logicalDevice,
@@ -13030,9 +13095,9 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
     renderer->unifiedQueue = renderer->queues[SDL_GPU_QUEUETYPE_GRAPHICS];
 
     if (renderer->debugMode) {
-        /* Класс маски печатается рядом с индексом, чтобы строка проверяла сама себя: маска
-         * выводится из ФЛАГОВ семьи, поэтому «transfer=2 [xfer]» подтверждает, что семья 2
-         * действительно копировальная, а «transfer=2 [gfx]» означал бы ошибку вывода. */
+        /* The mask class is printed next to the index so the line checks itself: the mask is
+         * derived from the family's FLAGS, so "transfer=2 [xfer]" confirms family 2 really
+         * is a copy family, while "transfer=2 [gfx]" would mean the derivation is wrong. */
         #define ENGINE_FORK_MASK_TAG(role)                                                        \
             (renderer->queueUsageModeMasks[role] == VULKAN_BUFFER_USAGE_MODE_MASK_GRAPHICS ? "gfx"   \
            : renderer->queueUsageModeMasks[role] == VULKAN_BUFFER_USAGE_MODE_MASK_COMPUTE  ? "comp"  \

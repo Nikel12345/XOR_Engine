@@ -1640,9 +1640,9 @@ void SDL_ReleaseGPUGraphicsPipeline(
 
 // Command Buffer
 
-/* ENGINE-FORK: прежняя форма сохранена как обёртка над очередь-осведомлённой. Так чужой код
- * (ImGui и прочие потребители SDL_gpu.h) не трогается вообще, а весь диф форка остаётся
- * аддитивным. */
+/* ENGINE-FORK: the original form is kept as a wrapper over the queue-aware one. That
+ * leaves every existing consumer of SDL_gpu.h (ImGui among others) completely
+ * untouched, and keeps the whole fork diff additive. */
 SDL_GPUCommandBuffer *SDL_AcquireGPUCommandBuffer(
     SDL_GPUDevice *device)
 {

@@ -27,8 +27,7 @@ void PreviewPacker::Destroy(SDL_GPUDevice* dev)
     dirty_.clear();
     free_cells_.clear();
     next_cell_ = 0;
-    published_.clear();
-    render_blits_.clear();
+    blits_.clear();
 }
 
 int32_t PreviewPacker::Alloc()
@@ -79,22 +78,18 @@ void PreviewPacker::Publish()
     dirty_.swap(retry);
 
     if (ready.empty()) return;
-    std::lock_guard lk(mtx_);
-    published_.insert(published_.end(), ready.begin(), ready.end());
+    blits_.insert(blits_.end(), ready.begin(), ready.end());
 }
 
 void PreviewPacker::Blit(SDL_GPUCommandBuffer* cb)
 {
-    // Запись на render-cb ПОСЛЕ заливки пикселей и мипов того же cb: порядок внутри cb гарантирует,
-    // что источник уже содержит пиксели. ImGui рисует превью-атлас этим же cb ниже по кадру.
-    {
-        std::lock_guard lk(mtx_);
-        if (published_.empty()) return;
-        published_.swap(render_blits_);   // render_blits_ пуст: его чистит хвост прошлого вызова
-    }
-    if (!atlas_) { render_blits_.clear(); return; }
+    // Запись на текстурный cb ПОСЛЕ заливки пикселей и мипов того же cb: порядок внутри cb
+    // гарантирует, что источник уже содержит пиксели. ImGui рисует превью-атлас позже и ДРУГИМ
+    // cb (render-поток) — там порядок держит уже очередь: этот cb сабмичен раньше кадра.
+    if (blits_.empty()) return;
+    if (!atlas_) { blits_.clear(); return; }
 
-    for (const BlitTask& t : render_blits_) {
+    for (const BlitTask& t : blits_) {
         SDL_GPUBlitInfo bi{};
         bi.source.texture = t.src;
         bi.source.mip_level = 0;
@@ -113,7 +108,7 @@ void PreviewPacker::Blit(SDL_GPUCommandBuffer* cb)
         bi.filter = (t.sw < CELL && t.sh < CELL) ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
         SDL_BlitGPUTexture(cb, &bi);
     }
-    render_blits_.clear();
+    blits_.clear();
 }
 
 PreviewPacker::UV PreviewPacker::GetUV(const std::string& name) const

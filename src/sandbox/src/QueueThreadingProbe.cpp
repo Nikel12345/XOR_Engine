@@ -294,19 +294,20 @@ int main(int, char**)
             if (!fence) { g_error = true; return; }
 
             pending_upload_tbs[slot] = tbd;
-            slots.GetSlotsData()[slot].submit_time = std::chrono::steady_clock::now();
-            slots.SetSlotFence(slot, fence);              // fence ДО флага — как в движке
+            slots.GetSlotsData()[slot].upload.submit_time = std::chrono::steady_clock::now();
+            slots.PushUploadFence(slot, fence);           // fence ДО флага — как в движке
             slots.SetSlotState(slot, SlotState::UPLOADING);
             ++g_prepares;
         };
 
         // upload-поток: ждёт upload-fence и промоутит слот в PREPARED
         auto upload_cb = [&](uint8_t slot) {
-            SDL_GPUFence* fence = slots.GetSlotsData()[slot].fence;
-            if (!fence) return;
-            SDL_WaitForGPUFences(dev, true, &fence, 1);
-            SDL_ReleaseGPUFence(dev, fence);
-            slots.GetSlotsData()[slot].fence = nullptr;
+            StageFences& uf = slots.GetSlotsData()[slot].upload;
+            if (uf.Empty()) return;
+            SDL_WaitForGPUFences(dev, true, uf.items, uf.count);
+            for (uint8_t i = 0; i < uf.count; ++i)
+                SDL_ReleaseGPUFence(dev, uf.items[i]);
+            uf.Clear();
 
             trm.ReleaseTB(pending_upload_tbs[slot]);   // только ПОСЛЕ fence
             pending_upload_tbs[slot] = nullptr;
@@ -352,19 +353,20 @@ int main(int, char**)
 
             SDL_GPUFence* fence = cb.SubmitAndAcquireFence();
             if (!fence) { g_error = true; return false; }
-            slots.GetSlotsData()[slot].submit_time = std::chrono::steady_clock::now();
-            slots.SetSlotFence(slot, fence);
+            slots.GetSlotsData()[slot].render.submit_time = std::chrono::steady_clock::now();
+            slots.SetRenderFence(slot, fence);
             ++g_renders;
             return true;
         };
 
         // fence-поток
         auto fence_cb = [&](uint8_t slot) {
-            SDL_GPUFence* fence = slots.GetSlotsData()[slot].fence;
-            if (!fence) return;
+            StageFences& rf = slots.GetSlotsData()[slot].render;
+            if (rf.Empty()) return;
+            SDL_GPUFence* fence = rf.items[0];
             SDL_WaitForGPUFences(dev, true, &fence, 1);
             SDL_ReleaseGPUFence(dev, fence);
-            slots.GetSlotsData()[slot].fence = nullptr;
+            rf.Clear();
             slots.NotifyRenderFenceDone();
             slots.SetSlotState(slot, SlotState::RENDERED);
             ++g_fences;
@@ -409,11 +411,13 @@ int main(int, char**)
         // дождаться фенса — тот остаётся живым и утекает (валидация ловит его как
         // VUID-vkDestroyDevice-device-05137 на VkFence). Дочищаем сами, потоки уже стоят.
         for (uint8_t i = 0; i < BUFFERING_LEVEL; ++i) {
-            SDL_GPUFence*& f = slots.GetSlotsData()[i].fence;
-            if (!f) continue;
-            SDL_WaitForGPUFences(dev, true, &f, 1);
-            SDL_ReleaseGPUFence(dev, f);
-            f = nullptr;
+            for (StageFences* sf : { &slots.GetSlotsData()[i].upload, &slots.GetSlotsData()[i].render }) {
+                if (sf->Empty()) continue;
+                SDL_WaitForGPUFences(dev, true, sf->items, sf->count);
+                for (uint8_t k = 0; k < sf->count; ++k)
+                    SDL_ReleaseGPUFence(dev, sf->items[k]);
+                sf->Clear();
+            }
         }
         SDL_WaitForGPUIdle(dev);
 

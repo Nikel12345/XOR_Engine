@@ -4,10 +4,6 @@
 #include "TextureSamplerPresets.h"
 #include "finders_interface.h"
 
-// Персистентный упаковщик атласа. Держим список свободных прямоугольников по слоям МЕЖДУ вызовами
-// PackAtlases. rectpack2D::empty_spaces прячет свой список свободных мест (вернуть регион нельзя),
-// поэтому строим свой тонкий упаковщик поверх свободной функции insert_and_split — с ним удаление
-// может честно вернуть регион в пул.
 struct AtlasPacker {
     struct Layer {
         std::vector<rectpack2D::space_rect> free_spaces;   // свободные прямоугольники слоя
@@ -17,8 +13,7 @@ struct AtlasPacker {
             free_spaces.push_back(rectpack2D::rect_xywh(0, 0, w, h));
         }
 
-        // Первое подходящее свободное место (порядок обхода — как в rectpack2D::empty_spaces::insert,
-        // ветка без flip: с конца к началу). При успехе разбивает место на остатки и возвращает угол.
+
         std::optional<rectpack2D::rect_xywh> insert(int w, int h) {
             using namespace rectpack2D;
             for (int i = (int)free_spaces.size() - 1; i >= 0; --i) {
@@ -34,10 +29,6 @@ struct AtlasPacker {
             return std::nullopt;
         }
 
-        // Вычесть ЗАНЯТЫЙ прямоугольник из свободного места (гильотинный разрез без перекрытий):
-        // каждый пересечённый свободный прямоугольник заменяется на не-перекрывающиеся куски вокруг
-        // занятого. Используется при пересборке слоя после удаления — слой сбрасывается в один целый
-        // прямоугольник, затем вычитаются прямоугольники выживших, и остаток остаётся КРУПНЫМ.
         void carve(rectpack2D::rect_xywh o) {
             using namespace rectpack2D;
             std::vector<space_rect> out;
@@ -67,14 +58,10 @@ TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_
 	CreateSampler(ENV_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::ENV_SAMPLER));
     CreateSampler("_SimpleSampler", SamplerPresets::GetSamplerCreateInfo(SamplerPreset::SIMPLE_SAMPLER));
 
-    // Единый текстовый атлас для глифов ВСЕХ шрифтов (см. DefaultAtlasNames::TEXT_ATLAS).
-    // Заводится заранее, как дефолт-буферы в BufferManager ctor; FontManager лишь пакует в него.
-    // ОДНОКАНАЛЬНЫЙ R8: у глифа значим один канал (покрытие/SDF), RGB не нужен → 4× экономия
-    // против BGRA. usage=SAMPLER — намерение (CreateTextureAtlas оставляет только его).
     {
         SDL_GPUTextureCreateInfo tci{};
         tci.type                 = SDL_GPU_TEXTURETYPE_2D_ARRAY;
-        tci.format               = SDL_GPU_TEXTUREFORMAT_R8_UNORM;   // покрытие/SDF в канале R
+        tci.format               = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
         tci.usage                = SDL_GPU_TEXTUREUSAGE_SAMPLER;
         tci.width                = 2048;
         tci.height               = 2048;
@@ -97,28 +84,12 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
 	}
 	auto atlas = std::make_unique<TextureAtlas>();
 
-    // ОТЛОЖЕННОЕ СОЗДАНИЕ: до бейка обёртка живёт без GPU-текстуры (texture == nullptr) — её
-    // создаст BakeGPUResources по сохранённому tci. После бейка (ресурсы игры, загрузка сцены)
-    // создаём сразу: точка бейка уже пройдена, ждать нечего.
     atlas->tci = tci;
     atlas->debug_name = name;
-
-    // РУЧНЫХ ФЛАГОВ БОЛЬШЕ НЕТ: из пришедшего tci.usage остаётся только НАМЕРЕНИЕ — SAMPLER.
-    // Его граф вывести НЕ МОЖЕТ, и это принципиально: атлас заводится ПУСТЫМ, текстуры и материалы
-    // приезжают позже (другая сцена, рантайм-загрузка), а GPU-текстура после создания неизменяема.
-    // Если ждать фактического использования, атлас, в который на этой сцене ничего не положили,
-    // родится без SAMPLER — и сломается, как только текстуру в него загрузят. Пустой атлас-под-
-    // материалы и пустой атлас-таргет неразличимы, поэтому цель заявляет ПРЕСЕТ (AlbedoAtlas/…).
-    // Остальные роли доложат ДЕКЛАРАЦИИ до бейка (проходы/sp/материалы/блиты — см. TextureData.h).
     atlas->tci.usage &= SDL_GPU_TEXTUREUSAGE_SAMPLER;
-
-    // Самовыводимый флаг: мип-ген требует ОБА — SAMPLER и COLOR_TARGET (SDL_gpu.c:2498, зонд).
-    // Это факт о самом ресурсе (его num_levels), а не о графе биндов, поэтому берётся здесь.
     if (tci.num_levels > 1)
         atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 
-    // GPU-текстуру создаст ближайший BakePending (начало PrepareFunc) — к тому моменту все
-    // объявления, дающие атласу флаги (sp/материалы/проходы), уже сделаны.
     atlas->texture_binding.sampler = sampler;
     atlas->width = tci.width;
     atlas->height = tci.height;
@@ -153,11 +124,8 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, Textur
         return it->second.get();
     }
     auto atlas = std::make_unique<TextureAtlas>();
-    // Свою GPU-текстуру не создаём — делим чужую. На момент вызова её может ещё не быть (источник
-    // сам ждёт бейка), поэтому запоминаем ИСТОЧНИК: BakePending создаст его первым и скопирует хэндл.
+
     atlas->shares_with = existing_atlas;
-    // tci (включая usage-декларации, собранные источником к этому моменту) — копией; свои
-    // декларации совладельца BakePending дольёт источнику перед созданием его текстуры.
     atlas->tci = existing_atlas->tci;
     atlas->debug_name = name;
     atlas->texture_binding.sampler = sampler;
@@ -180,25 +148,21 @@ void TextureManager::BakePending()
 {
     if (pending_atlas_bakes.empty()) return;
 
-    // Совладельцы (shares_with) доливают СВОИ декларации источнику ДО его создания: GPU-текстура
-    // одна, и она обязана покрыть роли всех, кто её делит.
     for (TextureAtlas* atlas : pending_atlas_bakes) {
         if (atlas && atlas->shares_with)
             atlas->shares_with->tci.usage |= atlas->tci.usage;
     }
 
-    // Сначала ВЛАДЕЛЬЦЫ текстур, потом совладельцы (shares_with): источник обязан существовать.
-    // Источник мог быть создан в прошлом дренаже — тогда его тут уже нет, и хэндл просто копируется.
+
     for (TextureAtlas* atlas : pending_atlas_bakes) {
         if (!atlas || atlas->shares_with || atlas->texture_binding.texture) continue;
-        // Ни одна декларация атлас не назвала — usage=0, SDL такой не примет. НЕ создаём, но и НЕ
-        // выкидываем из очереди: если позже проход/sp/материал объявит usage, ближайший бейк создаст.
+
         if (atlas->tci.usage == 0) continue;
         atlas->texture_binding.texture = CreateGPU_Texture(atlas->tci);
         if (!atlas->texture_binding.texture)
             SDL_Log("TextureManager::BakePending: atlas creation failed: %s", SDL_GetError());
         else
-            SDL_SetGPUTextureName(dev, atlas->texture_binding.texture, atlas->debug_name.c_str());   // имя в RenderDoc
+            SDL_SetGPUTextureName(dev, atlas->texture_binding.texture, atlas->debug_name.c_str()); 
     }
     for (TextureAtlas* atlas : pending_atlas_bakes) {
         if (!atlas || !atlas->shares_with || atlas->texture_binding.texture) continue;
@@ -206,9 +170,7 @@ void TextureManager::BakePending()
         if (!atlas->texture_binding.texture)
             SDL_Log("TextureManager::BakePending: shared atlas has no source texture.");
     }
-    // Убираем из очереди ТОЛЬКО реально созданные. nullptr-текстура (usage ещё не объявлен, источник
-    // совладельца ещё не создан, либо создание не удалось) остаётся ждать следующего кадра —
-    // создание гардится по !texture_binding.texture, дубля нет.
+
     std::erase_if(pending_atlas_bakes, [](TextureAtlas* a) { return !a || a->texture_binding.texture; });
 }
 
@@ -245,10 +207,9 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtl
     ptr->width = w;
     ptr->height = h;
     handles_data[name] = std::move(texture_handle);
-	atlas->textures.push_back(&ptr->texture_data);   // НЕвладеющая ссылка на размещение (владелец — handles_data)
+	atlas->textures.push_back(&ptr->texture_data); 
 
-	// Пиксели уходят в транзитную upload-задачу (перемещением); после заливки+мипов они
-	// освобождаются в GenerateMipmaps. На CPU ничего не дублируем — источник истины пикселей — GPU.
+
 	CreateUploadTask(ptr, w, h, std::move(pixels), name);
 
 	return ptr;
@@ -287,7 +248,6 @@ void TextureManager::QueueDeleteTexture(SDL_GPUTexture* texture)
 
 void TextureManager::TrashTextures(uint64_t fences_done)
 {
-    // Дренаж render-потоком (RenderFunc); логика стампа — как у TrashBuffers (см. BufferManager.cpp).
     auto it = texture_trash.begin();
     while (it != texture_trash.end()) {
         if (it->ready_at == 0) { it->ready_at = fences_done + BUFFERING_LEVEL; ++it; }
@@ -314,8 +274,7 @@ void TextureManager::ExecuteResizeInstructions(uint32_t w, uint32_t h)
 void TextureManager::RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci)
 {
     if (!atlas) return;
-    // Пресет даёт только ГЕОМЕТРИЮ; usage-флаги живут в атласе (собраны из деклараций sp/проходов/
-    // блитов) — пересоздание обязано их сохранить, иначе таргет родился бы без ролей.
+
     tci.usage = atlas->tci.usage;
     SDL_GPUTexture* old_tex = atlas->texture_binding.texture;
     atlas->texture_binding.texture = CreateGPU_Texture(tci);
@@ -340,7 +299,7 @@ void TextureManager::CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_
     task.width = w;
     task.height = h;
     task.size = (uint32_t)task.pixels.size();
-    upload_tasks.push_back(std::move(task));
+    texture_upload_tasks.push_back(std::move(task));
 }
 
 bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
@@ -507,7 +466,7 @@ void TextureManager::_BuildUploadTasks() {
     // Каждую новую задачу вставляем в ПЕРСИСТЕНТНЫЙ упаковщик её атласа. Уже размещённые задачи
     // (placed) пропускаются, поэтому существующие тайлы не двигаются, а новые садятся в остаток —
     // ни пересборки атласа, ни наложения на старое содержимое.
-    for (auto& task : upload_tasks)
+    for (auto& task : texture_upload_tasks)
         _PlaceTask(task);
 
     // Размер задачи ДОЛЖЕН совпадать с тем, сколько байт ждёт формат назначения: сюда приходят
@@ -518,7 +477,7 @@ void TextureManager::_BuildUploadTasks() {
     // Оффсеты в transfer-буфере здесь НЕ считаются: их назначает ExecuteUploadTasks, потому что
     // она может забрать несколько пачек разом (кадры со skip'ом) — нумеровать их по-пачечно
     // значило бы наложить задачи разных пачек друг на друга в одном TB.
-    for (auto& t : upload_tasks) {
+    for (auto& t : texture_upload_tasks) {
         const TextureAtlas* a = t.atlas;
         if (!a) continue;
         const uint32_t expect = SDL_CalculateGPUTextureFormatSize(a->format, t.width, t.height, 1);
@@ -528,38 +487,11 @@ void TextureManager::_BuildUploadTasks() {
     }
 }
 
-void TextureManager::_PublishUploadTasks() {
-    if (upload_tasks.empty()) return;
-    std::lock_guard lk(upload_handoff_mtx);
-    published_upload_tasks.insert(published_upload_tasks.end(),
-        std::make_move_iterator(upload_tasks.begin()),
-        std::make_move_iterator(upload_tasks.end()));
-    upload_tasks.clear();
-}
-
 TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
-    // Забор переданного sim'ом (см. _PublishUploadTasks). Лок держится только на перенос;
-    // дальше render работает со своим вектором без замков. Не swap, а append: с прошлого раза
-    // здесь могли остаться задачи (аренда TB не удалась), и терять их нельзя.
-    {
-        std::lock_guard lk(upload_handoff_mtx);
-        if (!published_upload_tasks.empty()) {
-            render_upload_tasks.insert(render_upload_tasks.end(),
-                std::make_move_iterator(published_upload_tasks.begin()),
-                std::make_move_iterator(published_upload_tasks.end()));
-            published_upload_tasks.clear();
-        }
-    }
-    if (render_upload_tasks.empty())
+    if (texture_upload_tasks.empty())
         return nullptr;
 
-    // SDL_GenerateMipmapsForGPUTexture — это ОТРИСОВКА в уровни, поэтому требует у текстуры ОБА
-    // флага: SAMPLER и COLOR_TARGET (SDL_gpu.c:2498; одного COLOR_TARGET мало — проверено зондом).
-    // При их отсутствии SDL бьёт SDL_assert_release, а он по умолчанию АБОРТИТ процесс. Пресеты
-    // ставят эти флаги при num_levels > 1 (см. _MaterialAtlas), но атлас может прийти и снаружи
-    // (Custom-tci из игры), поэтому здесь — явная проверка: промах даёт лог и пропуск, а не краш.
-    // Проверка живёт ЗДЕСЬ, а не в GenerateMipmaps: атлас берётся из task.atlas, и это последнее
-    // место, где он нужен — дальше в mip_tasks едет только хэндл текстуры.
+
     constexpr SDL_GPUTextureUsageFlags kMipUsage =
         SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 
@@ -572,10 +504,10 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
     // попадает в синий → вся текстурированная картинка в «синем фильтре»). Шаг берём у САМОГО
     // формата (SDL знает: 1 у R8, 4 у BGRA8, 8/16 у 16F/32F и BC), а не константой сверху — тогда
     // R8-глифы пакуются впритык, а платят выравниванием только те, кому оно правда нужно.
-    // Считаем ЗДЕСЬ, а не на упаковке: сюда могло приехать несколько пачек сразу, и у каждой
-    // нумерация с нуля — общий TB они бы перекрыли.
+    // Считаем ЗДЕСЬ, а не на упаковке: в векторе могли накопиться задачи нескольких кадров
+    // (прошлая аренда TB не удалась), и пер-кадровая нумерация с нуля наложила бы их друг на друга.
     uint32_t off = 0;
-    for (auto& t : render_upload_tasks) {
+    for (auto& t : texture_upload_tasks) {
         // Атлас у размещённой задачи есть всегда; проверка — чтобы оффсеты остались монотонными,
         // а не «залипли» на нуле, если задача не разместилась.
         const uint32_t align = t.atlas ? SDL_GPUTextureFormatTexelBlockSize(t.atlas->format) : 16;
@@ -591,7 +523,7 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
         // Иначе аренда TB реально провалилась (драйверная аллокация или маппинг) — задачи
         // ОСТАВЛЯЕМ на следующий кадр: места в атласе им уже розданы и не вернутся (_PlaceTask
         // идемпотентен по placed), так что потеря пикселей = мусор в этих регионах навсегда.
-        if (total == 0) render_upload_tasks.clear();
+        if (total == 0) texture_upload_tasks.clear();
         return nullptr;
     }
 
@@ -599,7 +531,7 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
     // каждый глиф, и без этого промах по usage залил бы лог сотнями одинаковых строк.
     std::unordered_set<SDL_GPUTexture*> mip_decided;
 
-    for (auto& task : render_upload_tasks) {
+    for (auto& task : texture_upload_tasks) {
         if (!task.dst.texture) continue;   // задача не разместилась (атлас переполнен) — не грузим
         // Пиксели уже декодированы TextureLoader'ом (BGRA32, плотно) — просто копируем.
         SDL_GPUTextureTransferInfo src{};
@@ -627,7 +559,7 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
         mip_tasks.insert(task.dst.texture);
     };
 
-    render_upload_tasks.clear();
+    texture_upload_tasks.clear();
     return tbd;
 }
 
@@ -689,15 +621,15 @@ void TextureManager::DeleteTextureHandle(const std::string& name)
         }
     }
 
-    // Чистим ТОЛЬКО sim-вектор; уже переданные render'у пачки не трогаем и не можем. Это
-    // оптимизация, а не корректность: место удалённой текстуры возвращается упаковщику, и если
-    // его в этом же кадре займёт новая — её задача попадёт в БОЛЕЕ ПОЗДНЮЮ пачку, а пачки
-    // исполняются по порядку. Значит последними в регион лягут актуальные пиксели; худшее, что
-    // даёт непойманная задача, — лишняя заливка байт, которые тут же перезапишутся.
-    upload_tasks.erase(
-        std::remove_if(upload_tasks.begin(), upload_tasks.end(),
+    // Вектор один, поэтому снимаются ВСЕ незалитые задачи хэндла — раньше половину было не
+    // достать (уже переданные render'у пачки), и держалось это на том, что место удалённой
+    // текстуры достаётся новой задаче ПОЗЖЕ по порядку, а значит её пиксели лягут последними.
+    // Порядок по-прежнему такой, просто лишней заливки байт, которые тут же перезапишутся,
+    // теперь не происходит вовсе.
+    texture_upload_tasks.erase(
+        std::remove_if(texture_upload_tasks.begin(), texture_upload_tasks.end(),
                        [handle](const UploadTaskTexture& t) { return t.target_handle == handle; }),
-        upload_tasks.end());
+        texture_upload_tasks.end());
 
     // Превью НЕ трогаем: его подсистема ключуется ИМЕНЕМ, а не хэндлом. При replace (пересоздание
     // того же имени) слот обязан пережить удаление — иначе плитка мигнёт. Реальное удаление

@@ -47,6 +47,32 @@ constexpr uint8_t SLOT_FLAG_IS_COMPUTING = 1u << 3;
 constexpr uint8_t SLOT_FLAG_HAS_COMPUTED = 1u << 4;
 constexpr uint8_t SLOT_FLAG_IS_RENDERING = 1u << 5;
 
+// Fences ОДНОЙ стадии слота — то есть всех сабмитов, которые эта стадия сделала для этого
+// слота. Поле такое есть ровно у тех стадий, чей fence отрабатывает ДРУГОЙ поток: prepare
+// только ставит задачи (ждёт UploadThread), render только пишет команды (ждёт FenceThread).
+// У compute такого поля нет и не должно быть: он не разводит вход и выход по потокам, его
+// работа обязана завершиться внутри его же вызова — fence он ждёт на месте, локальным.
+//
+// Больше одного fence бывает, когда стадия пишет в РАЗНЫЕ очереди (заливка: буферы на
+// копировальную, текстуры на графическую): межочередного порядка нет, поэтому ждутся они
+// вместе, одним wait_all. (items, count) — ровно та форма, что принимает SDL_WaitForGPUFences.
+//
+// Вектор не нужен: верхняя граница — «в сколько очередей пишет одна стадия», и молча она не
+// вырастет. Фиксированный массив заодно убирает аллокацию с кадрового пути.
+struct StageFences {
+    static constexpr uint8_t CAP = 2;
+    SDL_GPUFence* items[CAP] = {};
+    uint8_t       count = 0;
+    // [PROFILE] Момент сабмита стадии. Разница now() − submit_time при срабатывании fence =
+    // реальная GPU-латентность стадии. Лежит ЗДЕСЬ, а не в SlotData, по той же причине, что и
+    // сами fences: у каждой стадии свой, общее поле молча означало бы «чей сейчас — угадай».
+    std::chrono::steady_clock::time_point submit_time{};
+
+    void Push(SDL_GPUFence* f) { if (f && count < CAP) items[count++] = f; }
+    bool Empty() const { return count == 0; }
+    void Clear() { count = 0; }
+};
+
 struct SlotData {
     uint64_t frame_id = 0;              // порядковый номер prepare — порядок sim-тиков, не порядок прихода fences
     // Эпоха ПОЛНОГО ребилда дерева батчей, под которой готовились буферы слота. Рендер не
@@ -54,14 +80,8 @@ struct SlotData {
     // редкой пересборки дерева не показывается кадр со старой раскладкой indirect/out_pib.
     uint64_t epoch = 0;
     uint8_t  flags = 0;                 // защищается mutex_ внутри SlotController
-    SDL_GPUFence* fence = nullptr;      // upload-fence при UPLOADING, render-fence при RENDERING (взаимоисключающие)
-    // [PROFILE] Момент сабмита командбуфера, чей fence сейчас в поле fence — ОДНО поле
-    // на обе стадии по той же причине, что и сам fence: слот идёт UPLOADING → PREPARED →
-    // RENDERING, поэтому upload- и render-сабмит не пересекаются во времени.
-    //   • пишется в PrepareFuncPrepassUndepended (upload) и в RenderFunc (render), до публикации fence;
-    //   • читается в UploadFunc и в FenceFunc сразу после срабатывания fence.
-    // Разница now() − submit_time = реальная GPU-латентность стадии (submit → сигнал fence).
-    std::chrono::steady_clock::time_point submit_time{};
+    StageFences upload;                 // сабмитит sim (prepare), ждёт UploadThread
+    StageFences render;                 // сабмитит render-поток,  ждёт FenceThread
 };
 
 static constexpr uint8_t INVALID_SLOT = 0xFF;
@@ -87,7 +107,11 @@ public:
     SlotData* GetSlotsData() { return slots_data; }
 
     void SetSlotState(uint8_t slot, SlotState new_state);
-    void SetSlotFence(uint8_t slot, SDL_GPUFence* fence);
+    // Публикация fence'ов стадии — обе ДО перевода слота в соответствующее состояние: поток,
+    // который будет их ждать, гейтится флагом, и увидеть флаг раньше fence он не должен.
+    // Заливка добавляет по одному на очередь (Push, до CAP), рендер сабмитит ровно один.
+    void PushUploadFence(uint8_t slot, SDL_GPUFence* fence);
+    void SetRenderFence(uint8_t slot, SDL_GPUFence* fence);
 
     // Клеймит слоту эпоху ребилда, под которой залиты его буферы, и поднимает планку
     // required_epoch_ до неё. Зовётся каждый prepare (на не-ребилд-кадрах эпоха та же —
