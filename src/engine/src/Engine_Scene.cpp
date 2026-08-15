@@ -185,11 +185,12 @@ static void ReadMaterialParams(yyjson_val* obj, const MaterialParamsSpec& s, std
 }
 
 // Имя буфера из файла (std::string) → КАНОНИЧНЫЙ BufferDataName (ключ реестра = const char*
-// статического литерала). Совпадение по содержимому (карта ключуется по указателю). nullptr — нет.
+// статического литерала). Карта ищет по содержимому, но ХРАНИТ указатель: c_str() временной строки
+// в ссылки sp не положишь — отдаём сам ключ, он живёт столько же, сколько буфер. nullptr — нет.
 static BufferDataName ResolveBufferName(BufferManager* bm, const std::string& s) {
-	for (auto& [key, b] : bm->GetBuffersData())
-		if (b && b->debug_name == s) return key;
-	return nullptr;
+	const BufferDataRegistry& reg = bm->GetBuffersData();
+	auto it = reg.find(s.c_str());
+	return it != reg.end() ? it->first : nullptr;
 }
 
 static ShaderProgramDescription ReadSpd(yyjson_val* obj) {

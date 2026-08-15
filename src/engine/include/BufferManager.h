@@ -58,6 +58,27 @@ struct PendingDestroy {
 	uint64_t ready_at = 0;
 };
 
+// Ключ реестра буферов остаётся const char*, но хэшируется и сравнивается ПО СОДЕРЖИМОМУ.
+// С дефолтным std::hash<const char*> ключом был бы АДРЕС: имя, собранное в рантайме или пришедшее
+// из json, не находило бы буфер, созданный литералом, — при полностью совпадающем тексте. Ценой
+// это не является: имена спрашивают на регистрации, создании шейдеров и сборке батча, а покадровый
+// рендер держит BufferData* из слепка и в карту не ходит.
+// nullptr — валидный ключ-промах (эквивалентен пустой строке), поэтому обе операции его терпят.
+struct BufferDataNameHash {
+	size_t operator()(BufferDataName n) const noexcept {
+		return std::hash<std::string_view>{}(n ? std::string_view(n) : std::string_view{});
+	}
+};
+struct BufferDataNameEq {
+	bool operator()(BufferDataName a, BufferDataName b) const noexcept {
+		if (a == b) return true;
+		if (!a || !b) return false;
+		return std::string_view(a) == std::string_view(b);
+	}
+};
+using BufferDataRegistry =
+	std::unordered_map<BufferDataName, std::unique_ptr<BufferData>, BufferDataNameHash, BufferDataNameEq>;
+
 class BufferManager
 {
 public:
@@ -145,7 +166,7 @@ public:
 	BufferData* GetBufferData(BufferDataName name);
 	// Весь реестр буферов — для UI (перечень для дропдаунов). Ключ карты (BufferDataName) и есть
 	// каноничное имя буфера — его и показываем/кладём в ссылки sp (резолв назад через GetBufferData).
-	const std::unordered_map<BufferDataName, std::unique_ptr<BufferData>>& GetBuffersData() const { return buffers_data; }
+	const BufferDataRegistry& GetBuffersData() const { return buffers_data; }
 	~BufferManager();
 
 	std::atomic<uint8_t> logic_index{ 0 };
@@ -180,7 +201,7 @@ private:
 	// Обёртки, ждущие создания GPU-буфера. НЕвладеющие (владелец — buffers_data); буферы не
 	// удаляются поимённо, так что висячих указателей тут не бывает. Дренируется BakePending.
 	std::vector<BufferData*> pending_bakes;
-	std::unordered_map<BufferDataName, std::unique_ptr<BufferData>> buffers_data;
+	BufferDataRegistry buffers_data;
 
 	std::vector<UploadTask> prepass_upload_tasks;
 	std::vector<UploadTask> post_readback_upload_tasks;
