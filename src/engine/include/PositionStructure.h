@@ -1,15 +1,17 @@
 #pragma once
 #include <vector>
-#include <string_view>
+#include <cstddef>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <SDL3/SDL.h>
 #include "ShaderTypes.h"
+#include "GeometryPool.h"
+#include "Utils.h"
 
 
 // ФОРМАТ ЗАГРУЗКИ моделей (CPU-стейджинг, .bin-файлы, генераторы CreateModel): интерлив.
-// На GPU в таком виде БОЛЬШЕ НЕ ЖИВЁТ — заливка расщепляет его на стримы пула (см. ниже).
+// На GPU в таком виде НЕ ЖИВЁТ — заливка расщепляет его на стримы пула (см. PosUVNormLayout).
 struct PosUVNormal {
     float x, y, z;       // позиция
     float u, v;          // UV
@@ -18,87 +20,28 @@ struct PosUVNormal {
 };
 struct PosOnly { float x, y, z; };
 
-// ═══ Пул геометрии PosUVNorm: вершинные данные моделей, разложенные ПО СТРИМАМ ═══
-// Стрим = ОТДЕЛЬНЫЙ GPU-буфер со своей плотной раскладкой (не регион общего буфера: регионы не
-// могут расти независимо, а вся машинерия EnsureBufferCapacity/RESIZE_AND_COPY — пер-буферная).
-// Все стримы пула растут В НОГУ: вершина №N существует в каждом (vertex_offset индирект-команды
-// один на все слоты — это требование API, не выбор). Канон продвижения — элементный счётчик
-// ModelManager; байтовые append-точки стримов = счётчик × stride стрима.
+// Имя пула движковой раскладки: язык манифестов (models.json/shaders.json), ключ реестра пулов.
+inline constexpr const char* POS_UV_NORM_POOL = "PosUVNorm";
+
+// Разбивка PosUVNormal на стримы — аргумент CreateGeometryPool (тот сам заведёт буферы, сгенерит
+// им имена и зарегистрирует инструкции заливки).
 //
-// Шейдер объявляет ПОТРЕБЛЯЕМЫЕ стримы перечислением ИМЁН БУФЕРОВ по слотам
-// (CreateVertexShader) — теням достаточно Pos-стрима: 12 байт/вершину вместо 44 интерлива.
-// Раскладка слота (страйд/атрибуты) резолвится из таблицы пула ниже; локации атрибутов = семантики
-// ([[vk::location]]-конвенция), поэтому HLSL от разбивки не меняется.
-//
-// Normal и Tangent объединены в один стрим НАМЕРЕННО: они потребляются строго вместе
-// (нормал-маппингу нужны оба, теням — ни один). UV отдельно: будущий потребитель Pos+UV
-// без нормалей — alpha-tested тени.
-namespace GeometryStreams {
-    inline constexpr const char* VERTEX_POS_BUFFER     = "_VertexPosBuffer";
-    inline constexpr const char* VERTEX_UV_BUFFER      = "_VertexUVBuffer";
-    inline constexpr const char* VERTEX_NORMTAN_BUFFER = "_VertexNormTanBuffer";
-}
+// Normal и Tangent объединены в ОДИН стрим намеренно: они потребляются строго вместе
+// (нормал-маппингу нужны оба, теням — ни один). UV отдельно ради будущего потребителя Pos+UV без
+// нормалей — alpha-tested тени. Функция, а не глобальная константа: возвращает vector, а тот не
+// должен зависеть от порядка статической инициализации.
+inline std::vector<GeometryPool::StreamDesc> PosUVNormLayout()
+{
+    using namespace ShaderBase;
+    return {
+        { { { POSITION, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 } },
+          12, safe_u32(offsetof(PosUVNormal, x)) },
 
-// Плотные раскладки стримов. offset'ы — ВНУТРИ стрима (Pos: xyz с нуля; NormTan: normal, за ним tangent).
-inline const ShaderBase::VertexFormat FMT_PosStream = {   // inline: one entity per program (pointer identity!)
-    { { ShaderBase::POSITION, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 } },
-    12
-};
-inline const ShaderBase::VertexFormat FMT_UVStream = {
-    { { ShaderBase::UV, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2 } },
-    8
-};
-inline const ShaderBase::VertexFormat FMT_NormTanStream = {
-    {
-        { ShaderBase::NORMAL,  0,  SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 },
-        { ShaderBase::TANGENT, 12, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 },
-    },
-    24
-};
+        { { { UV, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2 } },
+          8, safe_u32(offsetof(PosUVNormal, u)) },
 
-namespace PosUVNormPool {
-    // Индексный буфер пула: у ОДНОГО пула — ОДИН. Индексное пространство общее для всех моделей
-    // пула (first_index индирект-команд — сквозной), а заливка финализируется индексным
-    // апдейтером ВМЕСТЕ со стримами — чужому пулу в этот цикл не встать.
-    inline constexpr const char* INDEX_BUFFER = "_PosUVNormIndexBuffer";
-
-    struct Stream {
-        const char* buffer_name;
-        const ShaderBase::VertexFormat* format;
-        uint32_t src_offset;   // офсет группы в PosUVNormal (формат ЗАГРУЗКИ) — для расщепления при заливке
+        { { { NORMAL,  0,  SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 },
+            { TANGENT, 12, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 } },
+          24, safe_u32(offsetof(PosUVNormal, nx)) },
     };
-    // Порядок объявления = канонический порядок слотов (Pos, UV, NormTan).
-    inline constexpr Stream streams[] = {
-        { GeometryStreams::VERTEX_POS_BUFFER,     &FMT_PosStream,     offsetof(PosUVNormal, x)  },
-        { GeometryStreams::VERTEX_UV_BUFFER,      &FMT_UVStream,      offsetof(PosUVNormal, u)  },
-        { GeometryStreams::VERTEX_NORMTAN_BUFFER, &FMT_NormTanStream, offsetof(PosUVNormal, nx) },
-    };
-    inline constexpr size_t stream_count = sizeof(streams) / sizeof(streams[0]);
-
-    inline const Stream* FindStream(std::string_view buffer_name) {
-        for (const Stream& s : streams)
-            if (buffer_name == s.buffer_name) return &s;
-        return nullptr;
-    }
-
-    // Семантики (язык манифеста shaders.json "pull" и UI-редактора) → имена стрим-буферов в
-    // каноническом порядке, без дублей (NORMAL и TANGENT сходятся в один стрим).
-    inline std::vector<const char*> StreamsForSemantics(const std::vector<ShaderBase::VertexSemantic>& pull) {
-        std::vector<const char*> out;
-        for (const Stream& s : streams) {
-            bool used = false;
-            for (ShaderBase::VertexSemantic sem : pull)
-                if (s.format->Find(sem)) { used = true; break; }
-            if (used) out.push_back(s.buffer_name);
-        }
-        return out;
-    }
-}
-
-// Индексный буфер пула, которому принадлежит стрим (nullptr — стрим неизвестен). Пул шейдер-батча
-// определяется его стримами, отсюда сборка батча резолвит индексный буфер в слепок. Появится
-// второй пул — добавить его проверку здесь.
-inline const char* IndexBufferForStream(std::string_view stream_buffer_name) {
-    if (PosUVNormPool::FindStream(stream_buffer_name)) return PosUVNormPool::INDEX_BUFFER;
-    return nullptr;
 }

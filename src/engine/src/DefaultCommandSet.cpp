@@ -361,10 +361,9 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
 				if (!c->oldName.empty() && c->oldName != c->name) sm->DeleteVertexShader(c->oldName);
-				// UI говорит семантиками (pull) — как манифест; резолв в стримы пула здесь.
-				std::vector<const char*> stream_names = PosUVNormPool::StreamsForSemantics(c->pull);
-				std::vector<std::string> buf_names(stream_names.begin(), stream_names.end());
-				sm->CreateVertexShader(c->name, c->path.c_str(), buf_names, ctx->GetBufferManager());
+				// UI говорит пулом + семантиками — тем же языком, что манифест; стримы резолвит пул.
+				sm->CreateVertexShader(c->name, c->path.c_str(), ctx->GetModelManager()->GetPool(c->pool),
+					c->pull, ctx->GetBufferManager());
 				for (auto& [sn, spp] : sm->GetShaderPrograms())   // пересобрать пайплайны sp на этом vs
 					if (spp->vs_name == c->name || spp->vs_name == c->oldName)
 						ctx->GetPipeManager()->InvalidatePipeline(spp.get(), ctx->GetBatchBuilder()->RebuildEpoch());

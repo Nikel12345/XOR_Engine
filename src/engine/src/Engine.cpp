@@ -118,6 +118,10 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	engine_context->SetFontManager(font_manager);   // кроссменеджерский CreateFont (см. CLAUDE.md)
 	engine_context->SetUIYoga(ui_yoga);   // игра берёт его отсюда для декларативной сборки UI
 	engine_context->SetEngine(this);   // делегирование Save/LoadScene (оркестрация сцены-папки)
+	// Пул движковой раскладки — ПЕРВЫМ из всего, что связано с геометрией: он заводит буферы стримов
+	// и индексный, а заодно вешает их инструкции заливки. Всё дальнейшее (вершинники, объявляющие
+	// usage, и модели) уже ссылается на него по имени.
+	engine_context->CreateGeometryPool(POS_UV_NORM_POOL, sizeof(PosUVNormal), PosUVNormLayout());
 	InitDefaultBufferUpdaters();
 	InitPasses();
 	InitUICommands();
@@ -208,7 +212,8 @@ void Engine::InitDefaultResources()
 		using namespace DefaultBuffersNames;
 		engine_context->CreateVertexShader("_fallback_vs",
 			"../engine/shaders_code/main_pass/main_pass.vert.hlsl",
-			{ GeometryStreams::VERTEX_POS_BUFFER, GeometryStreams::VERTEX_UV_BUFFER, GeometryStreams::VERTEX_NORMTAN_BUFFER },
+			POS_UV_NORM_POOL,
+			{ ShaderBase::POSITION, ShaderBase::UV, ShaderBase::NORMAL, ShaderBase::TANGENT },
 			/*dont_save=*/true);
 		engine_context->CreateFragmentShader("_fallback_fs", "../engine/shaders_code/main_pass/untextured/surface.hlsl", /*dont_save=*/true);
 		ShaderProgramDescription spd;
@@ -324,8 +329,6 @@ void Engine::InitDefaultBufferUpdaters()
 	SetDefaultInstanceDataUpdater(*engine_context, instance_data_module);
 	SetDefaultLightUpdater(*engine_context, light_data_module);
 	SetDefaultPositionIndexUpdater(*engine_context, pib_data_module);
-	SetDefaultVertexUpdater(*engine_context);
-	SetDefaultIndexUpdater(*engine_context);
 	SetDefaultLightCamerasUpdater(*engine_context, light_data_module);
 	SetDefaultIndirectUpdater(*engine_context, indirect_data_module, light_data_module);
 

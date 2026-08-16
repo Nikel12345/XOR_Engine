@@ -1,10 +1,15 @@
 #include "PCH.h"
 #include <fstream>
 #include <iostream>
+#include <cstring>
 #include "ModelManager.h"
 #include "BufferManager.h"
 
 ModelManager::ModelManager() {};
+
+// Ёмкости на заведение пула: обе растут сами (RESIZE_AND_COPY), это лишь стартовый размер.
+static constexpr uint32_t BASE_VERTEX_CAPACITY = 186150;    // вершин на стрим
+static constexpr uint32_t BASE_INDEX_CAPACITY = 2047501;    // индексов (uint32)
 
 struct SubMeshFileEntry {
     uint32_t vertexOffset;
@@ -14,11 +19,32 @@ struct SubMeshFileEntry {
     uint32_t material_index;
 };
 
+// Позиция вершины из байтового стейджинга. memcpy, а не reinterpret_cast: раскладка приходит
+// извне, и выравнивание её вершины/офсета позиции ничем не гарантировано.
+static inline glm::vec3 ReadPos(const std::byte* base, uint32_t vsize, uint32_t pos_off, size_t i)
+{
+    glm::vec3 p;
+    std::memcpy(&p, base + i * vsize + pos_off, sizeof(glm::vec3));
+    return p;
+}
+
+static inline void WritePos(std::byte* base, uint32_t vsize, uint32_t pos_off, size_t i, const glm::vec3& p)
+{
+    std::memcpy(base + i * vsize + pos_off, &p, sizeof(glm::vec3));
+}
+
 // Строит сабмеши модели из записей entries: глобальные смещения = курсоры + локальное
 // смещение записи, плюс bounding sphere по вершинам из staging. Общее для диска и генератора.
-static void BuildSubmeshes(const std::vector<PosUVNormal>& staging, ModelData* model,
+// Раскладка без читаемой позиции (нет POSITION либо он упакован) — законна: сабмеши тогда
+// получают вырожденную сферу w=-1, и каллинг трактует такую модель как «видима всегда»
+// (culling_pib.comp.hlsl: has_geom = sphere.w >= 0). Границы для неё обязаны прийти из данных.
+static void BuildSubmeshes(const std::byte* staging, const GeometryPool* pool, ModelData* model,
     const std::vector<SubMeshFileEntry>& entries, size_t vbase, uint32_t voff, uint32_t ioff)
 {
+    const bool     has_pos = pool->HasFloat3Position();
+    const uint32_t vsize = pool->VertexSize();
+    const uint32_t pos_off = has_pos ? pool->PositionOffset() : 0;
+
     model->submeshes.clear();
     model->submeshes.reserve(entries.size());
     for (const SubMeshFileEntry& e : entries) {
@@ -28,15 +54,15 @@ static void BuildSubmeshes(const std::vector<PosUVNormal>& staging, ModelData* m
         sub.vertexCount = e.vertexCount;
         sub.indexCount = e.indexCount;
         sub.material_index = e.material_index;
-        sub.sphere = glm::vec4(0.0f);
+        sub.sphere = glm::vec4(0.0f, 0.0f, 0.0f, -1.0f);
 
-        if (e.vertexCount > 0) {
-            const PosUVNormal& v0 = staging[vbase + e.vertexOffset];
+        if (e.vertexCount > 0 && has_pos) {
+            const size_t first = vbase + e.vertexOffset;
+            const glm::vec3 p0 = ReadPos(staging, vsize, pos_off, first);
             glm::vec3 center(0.0f);
-            glm::vec3 mn(v0.x, v0.y, v0.z), mx(v0.x, v0.y, v0.z);
+            glm::vec3 mn = p0, mx = p0;
             for (uint32_t k = 0; k < e.vertexCount; ++k) {
-                const PosUVNormal& v = staging[vbase + e.vertexOffset + k];
-                glm::vec3 p(v.x, v.y, v.z);
+                const glm::vec3 p = ReadPos(staging, vsize, pos_off, first + k);
                 center += p;
                 mn = glm::min(mn, p);
                 mx = glm::max(mx, p);
@@ -45,8 +71,7 @@ static void BuildSubmeshes(const std::vector<PosUVNormal>& staging, ModelData* m
 
             float radius = 0.0f;
             for (uint32_t k = 0; k < e.vertexCount; ++k) {
-                const PosUVNormal& v = staging[vbase + e.vertexOffset + k];
-                float d = glm::distance(center, glm::vec3(v.x, v.y, v.z));
+                float d = glm::distance(center, ReadPos(staging, vsize, pos_off, first + k));
                 if (d > radius) radius = d;
             }
             sub.sphere = glm::vec4(center, radius);
@@ -61,15 +86,20 @@ static void BuildSubmeshes(const std::vector<PosUVNormal>& staging, ModelData* m
 // Запекает пивот в вершины: один проход min/max по диапазону [vbase, vbase+vcount),
 // switch выбирает точку q из локального AABB, и геометрия сдвигается на -q. Вызывается
 // ДО BuildSubmeshes — тогда sphere/AABB сабмешей считаются уже от нового origin.
-static void ApplyAnchorShift(std::vector<PosUVNormal>& staging, size_t vbase, uint32_t vcount, AnchorShift anchor)
+// Раскладке без записываемой FLOAT3-позиции пивот недоступен в принципе — вызывающий обязан
+// отсеять такой случай раньше (см. _LoadModelFile).
+static void ApplyAnchorShift(std::byte* staging, const GeometryPool* pool, size_t vbase, uint32_t vcount, AnchorShift anchor)
 {
-    if (anchor == AnchorShift::Keep || vcount == 0) return;
+    if (anchor == AnchorShift::Keep || vcount == 0 || !pool->HasFloat3Position()) return;
 
-    glm::vec3 mn(staging[vbase].x, staging[vbase].y, staging[vbase].z), mx = mn;
+    const uint32_t vsize = pool->VertexSize();
+    const uint32_t pos_off = pool->PositionOffset();
+
+    glm::vec3 mn = ReadPos(staging, vsize, pos_off, vbase), mx = mn;
     for (uint32_t k = 1; k < vcount; ++k) {
-        const PosUVNormal& v = staging[vbase + k];
-        mn = glm::min(mn, glm::vec3(v.x, v.y, v.z));
-        mx = glm::max(mx, glm::vec3(v.x, v.y, v.z));
+        const glm::vec3 p = ReadPos(staging, vsize, pos_off, vbase + k);
+        mn = glm::min(mn, p);
+        mx = glm::max(mx, p);
     }
 
     glm::vec3 q;
@@ -86,13 +116,96 @@ static void ApplyAnchorShift(std::vector<PosUVNormal>& staging, size_t vbase, ui
     default: q = glm::vec3(0.0f);                     break;
     }
 
-    for (uint32_t k = 0; k < vcount; ++k) {
-        PosUVNormal& v = staging[vbase + k];
-        v.x -= q.x; v.y -= q.y; v.z -= q.z;
-    }
+    for (uint32_t k = 0; k < vcount; ++k)
+        WritePos(staging, vsize, pos_off, vbase + k,
+                 ReadPos(staging, vsize, pos_off, vbase + k) - q);
 }
 
-ModelData* ModelManager::CreateModel(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor)
+// ── Пулы геометрии ─────────────────────────────────────────────────────────────────────────
+
+GeometryPool* ModelManager::CreateGeometryPool(BufferManager* bm, const std::string& name, uint32_t vertex_size,
+    const std::vector<GeometryPool::StreamDesc>& streams)
+{
+    if (auto it = pools.find(name); it != pools.end()) {
+        SDL_Log("Geometry pool '%s' already exists, returning existing pool.", name.c_str());
+        return it->second.get();
+    }
+    if (!bm || name.empty()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "CreateGeometryPool: null BufferManager or empty name.");
+        return nullptr;
+    }
+
+    auto owned = std::make_unique<GeometryPool>(name, vertex_size, streams);
+    GeometryPool* pool = owned.get();
+    if (pool->Streams().empty()) {   // конструктор уже отругался — не заводим полупустой пул
+        return nullptr;
+    }
+    pools[name] = std::move(owned);
+    residency[pool];                 // пустая запись дозагрузки
+    if (!default_pool) default_pool = pool;
+
+    // Только РЕГИСТРАЦИЯ обёрток: SDL_GPUBuffer сделает BakePending, и только когда стримы назовёт
+    // вершинник (usage). Пул, которым никто не пользуется, не занимает ни байта VRAM.
+    for (const GeometryPool::Stream& s : pool->Streams())
+        bm->CreateBufferData(s.buffer_name, BASE_VERTEX_CAPACITY * s.format->stride,
+                             BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
+    bm->CreateBufferData(pool->IndexBuffer(), BASE_INDEX_CAPACITY * 4,
+                         BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
+
+    // Сначала ВСЕ стрим-инструкции пула, следом его индексная: последняя финализирует цикл
+    // дозагрузки (двигает счётчики, чистит стейджинг), а порядок регистрации = порядок исполнения
+    // в _ExecuteUpdateInstructions. Обе группы вешает один вызов — переставить их нельзя.
+    ModelManager* mm = this;
+    for (const GeometryPool::Stream& s : pool->Streams()) {
+        const uint32_t src_offset = s.src_offset;
+        const uint32_t stride = s.format->stride;
+        bm->CreateUpdateInstruction(s.buffer_name,
+            [mm, pool, src_offset, stride](SDL_GPUCopyPass*, BufferManager* b, UploadTask& task)
+        {
+            mm->UploadModelVertexStream(b, &task, pool, src_offset, stride);
+        },
+            [mm, pool, stride]() -> uint32_t { return mm->CalculateModelsVerticesSize(pool, stride); },
+            [mm, pool, stride]() -> uint32_t { return mm->GetVertexBaseOffset(pool, stride); });
+    }
+    bm->CreateUpdateInstruction(pool->IndexBuffer(),
+        [mm, pool](SDL_GPUCopyPass*, BufferManager* b, UploadTask& task)
+    {
+        mm->UploadModelIndexBuffer(b, &task, pool);
+    },
+        [mm, pool]() -> uint32_t { return mm->CalculateModelsIndicesSize(pool); },
+        [mm, pool]() -> uint32_t { return mm->GetIndexBaseOffset(pool); });
+
+    SDL_Log("Geometry pool '%s' created: %zu streams, %u-byte layout vertex.",
+        name.c_str(), pool->Streams().size(), vertex_size);
+    return pool;
+}
+
+GeometryPool* ModelManager::GetPool(const std::string& name)
+{
+    if (name.empty()) return default_pool;
+    auto it = pools.find(name);
+    if (it != pools.end()) return it->second.get();
+    SDL_Log("Geometry pool '%s' not found", name.c_str());
+    return nullptr;
+}
+
+GeometryPool* ModelManager::_ResolvePool(GeometryPool* pool)
+{
+    if (pool) return pool;
+    if (!default_pool)
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "ModelManager: no geometry pool created yet.");
+    return default_pool;
+}
+
+const ModelManager::PoolResidency* ModelManager::_FindResidency(const GeometryPool* pool) const
+{
+    auto it = residency.find(pool);
+    return it != residency.end() ? &it->second : nullptr;
+}
+
+// ── Модели ─────────────────────────────────────────────────────────────────────────────────
+
+ModelData* ModelManager::CreateModel(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor, GeometryPool* pool)
 {
     auto it = models_data.find(name);
     if (it != models_data.end()) {
@@ -103,11 +216,11 @@ ModelData* ModelManager::CreateModel(const std::string& name, const std::string&
     auto model_data = std::make_unique<ModelData>();
     ModelData* ptr = model_data.get();
     models_data[name] = std::move(model_data);
-    return _LoadModelFile(ptr, path_vert, path_ind, anchor);
+    return _LoadModelFile(ptr, _ResolvePool(pool), path_vert, path_ind, anchor);
 }
 
 // Upsert: существующий перезагружаем В ТОТ ЖЕ объект (указатель у энтити жив), новый — создаём.
-ModelData* ModelManager::LoadModelFromFile(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor)
+ModelData* ModelManager::LoadModelFromFile(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor, GeometryPool* pool)
 {
     ModelData* ptr;
     auto it = models_data.find(name);
@@ -119,7 +232,7 @@ ModelData* ModelManager::LoadModelFromFile(const std::string& name, const std::s
         ptr = model_data.get();
         models_data[name] = std::move(model_data);
     }
-    return _LoadModelFile(ptr, path_vert, path_ind, anchor);
+    return _LoadModelFile(ptr, _ResolvePool(pool), path_vert, path_ind, anchor);
 }
 
 size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries)
@@ -130,25 +243,33 @@ size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries
             SDL_Log("LoadSceneModels: incomplete entry ('%s') - skipped", e.name.c_str());
             continue;
         }
+        // Пул — по имени из манифеста; пусто/промах → дефолтный (сцены без поля не мигрируются).
+        GeometryPool* pool = GetPool(e.pool);
         // LoadModelFromFile = merge-upsert: существующую перезагружает В ТОТ ЖЕ объект (указатель
         // у энтити жив), новую создаёт. Битые файлы логирует сам _LoadModelFile.
-        if (LoadModelFromFile(e.name, e.vertex_path, e.index_path, e.anchor)) ++loaded;
+        if (LoadModelFromFile(e.name, e.vertex_path, e.index_path, e.anchor, pool)) ++loaded;
     }
     return loaded;
 }
 
-ModelData* ModelManager::_LoadModelFile(ModelData* ptr, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor)
+ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor)
 {
+    if (!pool) return ptr;
+
     ptr->model_path = path_vert;   // self-describing: рецепт для редактора/сериализации
     ptr->index_path = path_ind;
+    ptr->pool_name = pool->Name();
+
+    PoolResidency& res = _Residency(pool);
+    const uint32_t vsize = pool->VertexSize();
 
     // Жадное чтение: submeshes готовы сразу после возврата (CreateModel всегда на prep-потоке,
     // гонок с общим staging нет). Отложена только заливка на GPU — staging копит данные
     // моделей до батч-апдейтера, который дозаписывает их в конец GPU-буфера.
     // Курсоры глобальных смещений = уже залито (total_*) + уже в staging (ещё не залито).
-    const size_t   vbase = staging_vertices.size();
-    const uint32_t voff = total_vertices_count + safe_u32(staging_vertices.size());
-    const uint32_t ioff = total_indices_count + safe_u32(staging_indices.size());
+    const size_t   vbase = res.staging_vertices.size() / vsize;
+    const uint32_t voff = res.total_vertices_count + safe_u32(vbase);
+    const uint32_t ioff = res.total_indices_count + safe_u32(res.staging_indices.size());
 
     std::vector<SubMeshFileEntry> entries;
 
@@ -178,12 +299,14 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, const std::string& path_
     vf.seekg(0, std::ios::end);
     size_t file_size = vf.tellg();
     size_t vdata_size = file_size - header_size;
-    if (vdata_size == 0 || vdata_size % sizeof(PosUVNormal) != 0) {
-        SDL_Log("CreateModel: invalid vertex data size in: %s", path_vert.c_str());
+    // Размер вершины даёт РАСКЛАДКА пула — файл обязан ей соответствовать.
+    if (vdata_size == 0 || vdata_size % vsize != 0) {
+        SDL_Log("CreateModel: vertex data size %zu does not match pool '%s' layout (%u B/vertex) in: %s",
+            vdata_size, pool->Name().c_str(), vsize, path_vert.c_str());
         assert(false && "CreateModel: invalid vertex data size");
         return ptr;
     }
-    uint32_t vcount = safe_u32(vdata_size / sizeof(PosUVNormal));
+    uint32_t vcount = safe_u32(vdata_size / vsize);
 
     // --- 2. размер индексного файла (без роста staging) ---
     std::ifstream indf(path_ind, std::ios::binary);
@@ -202,11 +325,19 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, const std::string& path_
     }
     uint32_t icount = safe_u32(isize / sizeof(uint32_t));
 
+    // Пивот переписывает позиции — раскладке без записываемой FLOAT3-позиции он недоступен.
+    // Это не дыра, а честное свойство раскладки: сообщаем и грузим как Keep.
+    if (anchor != AnchorShift::Keep && !pool->HasFloat3Position()) {
+        SDL_Log("CreateModel: pool '%s' has no float3 POSITION - anchor shift ignored for '%s'",
+            pool->Name().c_str(), path_vert.c_str());
+        anchor = AnchorShift::Keep;
+    }
+
     // Все проверки пройдены — растим staging и читаем данные.
     // --- 3. вершины ---
     vf.seekg(static_cast<std::streamoff>(header_size), std::ios::beg);
-    staging_vertices.resize(vbase + vcount, PosUVNormal{});
-    vf.read(reinterpret_cast<char*>(staging_vertices.data() + vbase), vdata_size);
+    res.staging_vertices.resize((vbase + vcount) * size_t(vsize));
+    vf.read(reinterpret_cast<char*>(res.staging_vertices.data() + vbase * size_t(vsize)), vdata_size);
     if (!vf) {
         SDL_Log("CreateModel: incomplete vertex read (%zu / %zu) from %s",
             size_t(vf.gcount()), vdata_size, path_vert.c_str());
@@ -214,9 +345,9 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, const std::string& path_
     }
 
     // --- 4. индексы ---
-    size_t ibase = staging_indices.size();
-    staging_indices.resize(ibase + icount, 0);
-    indf.read(reinterpret_cast<char*>(staging_indices.data() + ibase), isize);
+    size_t ibase = res.staging_indices.size();
+    res.staging_indices.resize(ibase + icount, 0);
+    indf.read(reinterpret_cast<char*>(res.staging_indices.data() + ibase), isize);
     if (!indf) {
         SDL_Log("CreateModel: incomplete index read (%zu / %zu) from %s",
             size_t(indf.gcount()), isize, path_ind.c_str());
@@ -225,17 +356,17 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, const std::string& path_
 
     // --- 5. пивот (до сабмешей, чтобы sphere/AABB считались от нового origin) ---
     ptr->anchor = anchor;
-    ApplyAnchorShift(staging_vertices, vbase, vcount, anchor);
+    ApplyAnchorShift(res.staging_vertices.data(), pool, vbase, vcount, anchor);
 
     // --- 6. сабмеши + bounding sphere ---
-    BuildSubmeshes(staging_vertices, ptr, entries, vbase, voff, ioff);
+    BuildSubmeshes(res.staging_vertices.data(), pool, ptr, entries, vbase, voff, ioff);
 
-    dirty = true;
+    res.dirty = true;
     dirty_spheres = true;
     return ptr;
 }
 
-ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn generator, AnchorShift anchor)
+ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn generator, AnchorShift anchor, GeometryPool* pool)
 {
     auto it = models_data.find(name);
     if (it != models_data.end()) {
@@ -243,14 +374,29 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
         return it->second.get();
     }
 
+    GeometryPool* p = _ResolvePool(pool);
+    if (!p) return nullptr;
+    // Генератор типизирован PosUVNormal — годится только раскладке того же размера. Пулу с другой
+    // вершиной нужна своя форма генератора, а не молчаливая порча памяти.
+    if (p->VertexSize() != sizeof(PosUVNormal)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "CreateModel('%s'): PosUVNormal generator does not fit pool '%s' (%u B/vertex).",
+            name.c_str(), p->Name().c_str(), p->VertexSize());
+        return nullptr;
+    }
+
     auto model_data = std::make_unique<ModelData>();
     ModelData* ptr = model_data.get();
     models_data[name] = std::move(model_data);
+    ptr->pool_name = p->Name();
+
+    PoolResidency& res = _Residency(p);
+    const uint32_t vsize = p->VertexSize();
 
     // Жадная генерация: submeshes готовы сразу (как и у дискового пути). Отложена только заливка.
-    const size_t   vbase = staging_vertices.size();
-    const uint32_t voff = total_vertices_count + safe_u32(staging_vertices.size());
-    const uint32_t ioff = total_indices_count + safe_u32(staging_indices.size());
+    const size_t   vbase = res.staging_vertices.size() / vsize;
+    const uint32_t voff = res.total_vertices_count + safe_u32(vbase);
+    const uint32_t ioff = res.total_indices_count + safe_u32(res.staging_indices.size());
 
     std::vector<PosUVNormal> verts;
     std::vector<Uint32>      inds;
@@ -262,70 +408,101 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
     }
     uint32_t vcount = safe_u32(verts.size());
     uint32_t icount = safe_u32(inds.size());
-    staging_vertices.insert(staging_vertices.end(), verts.begin(), verts.end());
-    staging_indices.insert(staging_indices.end(), inds.begin(), inds.end());
+
+    res.staging_vertices.resize((vbase + vcount) * size_t(vsize));
+    std::memcpy(res.staging_vertices.data() + vbase * size_t(vsize), verts.data(), verts.size() * sizeof(PosUVNormal));
+    res.staging_indices.insert(res.staging_indices.end(), inds.begin(), inds.end());
 
     // Пивот — до сабмешей, чтобы sphere/AABB считались от нового origin.
     ptr->anchor = anchor;
-    ApplyAnchorShift(staging_vertices, vbase, vcount, anchor);
+    ApplyAnchorShift(res.staging_vertices.data(), p, vbase, vcount, anchor);
 
     // Вся геометрия — один сабмеш, материал 0.
     std::vector<SubMeshFileEntry> entries{ SubMeshFileEntry{ 0, 0, vcount, icount, 0 } };
-    BuildSubmeshes(staging_vertices, ptr, entries, vbase, voff, ioff);
+    BuildSubmeshes(res.staging_vertices.data(), p, ptr, entries, vbase, voff, ioff);
 
-    dirty = true;
+    res.dirty = true;
     dirty_spheres = true;
     return ptr;
 }
 
-uint32_t ModelManager::CalculateModelsVerticesSize(uint32_t stream_stride)
+// ── Заливка ────────────────────────────────────────────────────────────────────────────────
+
+uint32_t ModelManager::CalculateModelsVerticesSize(const GeometryPool* pool, uint32_t stream_stride)
 {
     // Чистый геттер: staging заполнен жадно в CreateModel. Размер — на ОДИН стрим пула.
-    if (!dirty)
-        return 0;
-    return safe_u32(staging_vertices.size() * stream_stride);
+    const PoolResidency* res = _FindResidency(pool);
+    if (!res || !res->dirty) return 0;
+    return safe_u32(res->staging_vertices.size() / pool->VertexSize() * stream_stride);
 }
 
-uint32_t ModelManager::CalculateModelsIndicesSize()
+uint32_t ModelManager::CalculateModelsIndicesSize(const GeometryPool* pool)
 {
-    if (!dirty)
-        return 0;
-    return safe_u32(staging_indices.size() * sizeof(Uint32));
+    const PoolResidency* res = _FindResidency(pool);
+    if (!res || !res->dirty) return 0;
+    return safe_u32(res->staging_indices.size() * sizeof(Uint32));
 }
 
-void ModelManager::UploadModelVertexStream(BufferManager* bm, UploadTask* task, uint32_t src_offset, uint32_t stream_stride)
+uint32_t ModelManager::GetVertexBaseOffset(const GeometryPool* pool, uint32_t stream_stride) const
 {
-    if (!dirty || staging_vertices.empty()) return;
-    // Стейджинг — интерлив (формат ЗАГРУЗКИ, PosUVNormal); стрим — плотный срез каждой вершины.
+    const PoolResidency* res = _FindResidency(pool);
+    return res ? res->gpu_vertices_count * stream_stride : 0;
+}
+
+uint32_t ModelManager::GetIndexBaseOffset(const GeometryPool* pool) const
+{
+    const PoolResidency* res = _FindResidency(pool);
+    return res ? res->gpu_indices_bytes : 0;
+}
+
+void ModelManager::UploadModelVertexStream(BufferManager* bm, UploadTask* task, const GeometryPool* pool,
+    uint32_t src_offset, uint32_t stream_stride)
+{
+    PoolResidency& res = _Residency(pool);
+    if (!res.dirty || res.staging_vertices.empty()) return;
+
+    // Стейджинг — интерлив (формат ЗАГРУЗКИ пула); стрим — плотный срез каждой вершины.
     // Гатер прямо в mapped transfer-буфер (write-combined: только писать), без промежуточной копии.
-    const uint32_t bytes = safe_u32(staging_vertices.size() * stream_stride);
+    const uint32_t vsize = pool->VertexSize();
+    const size_t   count = res.staging_vertices.size() / vsize;
+    const uint32_t bytes = safe_u32(count * stream_stride);
     std::byte* dst = static_cast<std::byte*>(bm->AcquireTransferWritePtr(task, bytes));
     if (!dst) return;
-    const std::byte* src = reinterpret_cast<const std::byte*>(staging_vertices.data()) + src_offset;
-    for (size_t i = 0; i < staging_vertices.size(); ++i)
-        SDL_memcpy(dst + i * stream_stride, src + i * sizeof(PosUVNormal), stream_stride);
+    const std::byte* src = res.staging_vertices.data() + src_offset;
+    for (size_t i = 0; i < count; ++i)
+        SDL_memcpy(dst + i * stream_stride, src + i * vsize, stream_stride);
 }
 
-void ModelManager::UploadModelIndexBuffer(BufferManager* bm, UploadTask* task)
+void ModelManager::UploadModelIndexBuffer(BufferManager* bm, UploadTask* task, const GeometryPool* pool)
 {
-    if (!dirty || staging_indices.empty()) return;
-    uint32_t ibytes = safe_u32(staging_indices.size() * sizeof(Uint32));
-    bm->UploadToTransferBuffer(task, ibytes, staging_indices.data());
+    PoolResidency& res = _Residency(pool);
+    if (!res.dirty || res.staging_indices.empty()) return;
 
-    // Индексный апдейтер идёт последним (после ВСЕХ стрим-заливок) — финализируем цикл дозагрузки.
+    uint32_t ibytes = safe_u32(res.staging_indices.size() * sizeof(Uint32));
+    bm->UploadToTransferBuffer(task, ibytes, res.staging_indices.data());
+
+    // Индексный апдейтер идёт последним (после ВСЕХ стрим-заливок ЭТОГО пула) — финализируем цикл.
     // Счётчики двигаем только здесь, после реальной заливки: пока модели лежат в staging,
     // CreateModel считает их смещения от total_* + размера staging (см. курсоры там).
-    total_vertices_count += safe_u32(staging_vertices.size());
-    total_indices_count += safe_u32(staging_indices.size());
-    gpu_vertices_count += safe_u32(staging_vertices.size());
-    gpu_indices_bytes += ibytes;
+    const uint32_t vcount = safe_u32(res.staging_vertices.size() / pool->VertexSize());
+    res.total_vertices_count += vcount;
+    res.total_indices_count += safe_u32(res.staging_indices.size());
+    res.gpu_vertices_count += vcount;
+    res.gpu_indices_bytes += ibytes;
 
-    staging_vertices.clear();
-    staging_vertices.shrink_to_fit();
-    staging_indices.clear();
-    staging_indices.shrink_to_fit();
+    res.staging_vertices.clear();
+    res.staging_vertices.shrink_to_fit();
+    res.staging_indices.clear();
+    res.staging_indices.shrink_to_fit();
 
-    dirty = false;
+    res.dirty = false;
+}
+
+bool ModelManager::CheckDirty() const
+{
+    for (const auto& [pool, res] : residency)
+        if (res.dirty) return true;
+    return false;
 }
 
 ModelData* ModelManager::operator[](const std::string& name)
@@ -341,6 +518,6 @@ ModelData* ModelManager::operator[](const std::string& name)
 ModelManager::~ModelManager()
 {
     models_data.clear();
-    staging_vertices.clear();
-    staging_indices.clear();
+    residency.clear();
+    pools.clear();
 }

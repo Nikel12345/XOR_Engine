@@ -203,14 +203,21 @@ FontData* EngineContext::CreateFont(const std::string& name, const char* path, f
 	return font_manager->CreateFont(texture_manager, name, path, px, sdf);
 }
 
-ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor)
+GeometryPool* EngineContext::CreateGeometryPool(const std::string& name, uint32_t vertex_size,
+	const std::vector<GeometryPool::StreamDesc>& streams)
 {
-	return model_manager->CreateModel(name, model_path, index_path, anchor);
+	// Кроссменеджерская связка: BufferManager уходит ПАРАМЕТРОМ, MM его не хранит (см. CLAUDE.md).
+	return model_manager->CreateGeometryPool(buffer_manager, name, vertex_size, streams);
 }
 
-ModelData* EngineContext::CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor, bool dont_save)
+ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor, const std::string& pool_name)
 {
-	ModelData* m = model_manager->CreateModel(name, std::move(generator), anchor);
+	return model_manager->CreateModel(name, model_path, index_path, anchor, model_manager->GetPool(pool_name));
+}
+
+ModelData* EngineContext::CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor, bool dont_save, const std::string& pool_name)
+{
+	ModelData* m = model_manager->CreateModel(name, std::move(generator), anchor, model_manager->GetPool(pool_name));
 	if (m) m->dont_save = dont_save;   // флаг ставим тут, не тащим в сигнатуру MM (см. ModelData::dont_save)
 	return m;
 }
@@ -352,8 +359,11 @@ void EngineContext::CreateFragmentShader(const std::string& name, const char* pa
 	if (auto* d = shader_manager->GetFragmentShader(name)) d->dont_save = dont_save;
 }
 
-void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<const char*> vertex_buffer_names, bool dont_save) {
-	gpu_ctx->CreateVertexShader(name, hlsl_path, vertex_buffer_names);
+void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,
+	std::initializer_list<ShaderBase::VertexSemantic> pull, bool dont_save) {
+	// Резолв пула — здесь: его реестр в ModelManager, а gpu_ctx о нём не знает (там только GPU-менеджеры).
+	gpu_ctx->CreateVertexShader(name, hlsl_path, model_manager->GetPool(pool_name),
+		std::vector<ShaderBase::VertexSemantic>(pull));
 	if (auto* d = shader_manager->GetVertexShader(name)) d->dont_save = dont_save;
 }
 

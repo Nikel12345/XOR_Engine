@@ -41,10 +41,15 @@ struct VertexShaderData {
     std::string source_path;
     std::vector<ShaderBase::VertexBufferBinding> bindings;
     // Потребляемые вершинные СТРИМЫ пула — КАНОНИЧНЫЕ имена буферов (BufferDataName = ключ
-    // реестра BufferManager, указатель на inline-литерал из таблицы пула). ПОРЯДОК = порядок
+    // реестра BufferManager, указатель на строку, которой владеет пул). ПОРЯДОК = порядок
     // слотов пайплайна; бинд-шаг рендера биндит ровно этот список с нулевого слота
-    // (BufferManager::BindGPUVertexBuffers). Заполняется CreateVertexShader из перечисления имён.
+    // (BufferManager::BindGPUVertexBuffers). Заполняет CreateVertexShader из pull через пул.
     std::vector<BufferDataName> vertex_buffer_names;
+    // Пул, из которого взяты стримы. Имя — для сериализации и формы редактора (ссылка по имени,
+    // как у моделей). index_buffer отрезолвлен ЗДЕСЬ, на создании (у пула он один): сборка батча
+    // читает готовое поле и потому не зависит от ModelManager, где живёт реестр пулов.
+    std::string    pool_name;
+    BufferDataName index_buffer = nullptr;
     bool dont_save = false;   // движковый дефолт (_fallback_vs) — в shaders.json не пишется
 };
 

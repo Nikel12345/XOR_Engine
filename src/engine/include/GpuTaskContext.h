@@ -10,6 +10,7 @@ class ShaderManager;
 class PassManager;
 class TextureManager;
 class BufferManager;
+class GeometryPool;
 
 
 class GpuTaskContext {
@@ -17,8 +18,10 @@ public:
 	GpuTaskContext(BufferManager* bm, ShaderManager* sm, PassManager* pm, TextureManager* tm);
 
 	void CreateFragmentShader(const std::string& name, const char* hlsl_path);
-	// Вершинник перечисляет потребляемые стримы пула ИМЕНАМИ вершинных буферов (порядок = слоты).
-	void CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<const char*> vertex_buffer_names);
+	// Вершинник называет ПУЛ и потребляемые СЕМАНТИКИ; порядок слотов задаёт таблица стримов пула.
+	// Пул приходит уже отрезолвленным: его реестр живёт в ModelManager, которого тут нет.
+	void CreateVertexShader(const std::string& name, const char* hlsl_path, const GeometryPool* pool,
+		const std::vector<ShaderBase::VertexSemantic>& pull);
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 		const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 		const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,

@@ -972,18 +972,20 @@ namespace {
         }
     }
 
-    // Форма вершинного шейдера: имя + путь + РАСКЛАДКА (pull) — семантики добавляются/удаляются и
-    // переставляются стрелками (реестра форматов пока нет; формат фиксирован FMT_PosUVNormal).
+    // Форма вершинного шейдера: имя + путь + ПУЛ + раскладка (pull). Набор доступных семантик
+    // предлагает сам пул — фиксированной четвёрки POSITION/UV/NORMAL/TANGENT больше нет.
     void VsdEditor(EngineContext* ctx)
     {
         static char nameBuf[128] = "", pathBuf[512] = "";
         static std::vector<VertexSemantic> pull;
+        static std::string poolSel;
         static std::string syncedFor = "\x01";
         if (g_sel.name != syncedFor) {
             syncedFor = g_sel.name;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
             VertexShaderData* d = ctx->GetShaderManager()->GetVertexShader(g_sel.name);
             std::snprintf(pathBuf, sizeof pathBuf, "%s", d ? d->source_path.c_str() : "");
+            poolSel = d ? d->pool_name : std::string();
             pull.clear();
             // Все слоты (со стримами пула биндингов несколько — Pos/UV/NormTan): pull формы =
             // объединение семантик по слотам, как в манифесте.
@@ -999,38 +1001,59 @@ namespace {
         ImGui::SameLine();
         if (ImGui::Button("Browse...##vsd")) OpenFileDialog(PickTarget::ShaderVert, kHlslFilters, 2);
 
-        // Раскладка pull: строки со стрелками up/dn (перестановка) и x (удаление).
+        // Пул выбирается ЯВНО: он задаёт и набор доступных семантик, и порядок слотов. У новой
+        // формы — дефолтный, чтобы обычный случай был на клик короче.
+        ModelManager* mm = ctx->GetModelManager();
+        if (poolSel.empty() && mm->DefaultPool()) poolSel = mm->DefaultPool()->Name();
+        GeometryPool* pool = nullptr;
+        if (auto pit = mm->GetPools().find(poolSel); pit != mm->GetPools().end()) pool = pit->second.get();
+
+        if (ImGui::BeginCombo("Pool", poolSel.c_str())) {
+            for (auto& [pname, pp] : mm->GetPools())
+                if (ImGui::Selectable(pname.c_str(), pname == poolSel)) poolSel = pname;
+            ImGui::EndCombo();
+        }
+
+        // Раскладка pull: строка на семантику с кнопкой удаления. Стрелок перестановки тут НЕТ и
+        // быть не должно: порядок pull никуда не доезжает — слоты задаёт таблица стримов пула
+        // (StreamsForSemantics обходит её, а не pull), и сохранение пишет каноничный порядок.
         ImGui::SeparatorText("Vertex layout (pull)");
-        int mv_from = -1, mv_to = -1, rm_at = -1;
+        int rm_at = -1;
         for (int i = 0; i < static_cast<int>(pull.size()); ++i) {
             ImGui::PushID(i);
-            if (ImGui::ArrowButton("up", ImGuiDir_Up)   && i > 0)                               { mv_from = i; mv_to = i - 1; }
-            ImGui::SameLine();
-            if (ImGui::ArrowButton("dn", ImGuiDir_Down) && i < static_cast<int>(pull.size()) - 1) { mv_from = i; mv_to = i + 1; }
-            ImGui::SameLine();
             if (ImGui::SmallButton("x")) rm_at = i;
             ImGui::SameLine();
             ImGui::TextUnformatted(SemName(pull[i]));
             ImGui::PopID();
         }
-        if (mv_from >= 0) std::swap(pull[mv_from], pull[mv_to]);
-        if (rm_at  >= 0) pull.erase(pull.begin() + rm_at);
+        if (rm_at >= 0) pull.erase(pull.begin() + rm_at);
 
-        // Добавить недостающую семантику (набор фиксирован).
-        static const VertexSemantic kSems[] = { POSITION, UV, NORMAL, TANGENT };
-        if (ImGui::BeginCombo("+ field", "(add)")) {
-            for (VertexSemantic sem : kSems) {
+        // Добавить недостающую семантику — только из того, что эта раскладка вообще даёт.
+        if (pool && ImGui::BeginCombo("+ field", "(add)")) {
+            for (VertexSemantic sem : pool->AvailableSemantics()) {
                 if (std::find(pull.begin(), pull.end(), sem) != pull.end()) continue;
                 if (ImGui::Selectable(SemName(sem))) pull.push_back(sem);
             }
             ImGui::EndCombo();
         }
 
-        const bool ready = nameBuf[0] && pathBuf[0] && !pull.empty();
+        // Правятся семантики, а биндятся СТРИМЫ, и это не один к одному (NORMAL и TANGENT — один
+        // стрим, снять только один из них ничего не изменит). Показываем результат резолва, чтобы
+        // схлопывание было видно, а не удивляло.
+        if (pool) {
+            std::string slots;
+            for (const GeometryPool::Stream* st : pool->StreamsForSemantics(pull)) {
+                if (!slots.empty()) slots += ", ";
+                slots += st->buffer_name;
+            }
+            ImGui::TextDisabled("-> slots: %s", slots.empty() ? "(none)" : slots.c_str());
+        }
+
+        const bool ready = nameBuf[0] && pathBuf[0] && !pull.empty() && pool;
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
             ctx->GetInputManager()->PushCommand(CommandId::UpsertVertexShader,
-                new UpsertVertexShaderCmd{ nameBuf, pathBuf, g_sel.name, pull });
+                new UpsertVertexShaderCmd{ nameBuf, pathBuf, g_sel.name, poolSel, pull });
             g_sel = Selection{}; g_sel.kind = SelKind::Vsd; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();

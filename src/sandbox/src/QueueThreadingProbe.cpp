@@ -67,6 +67,7 @@
 #include "SlotController.h"
 #include "ThreadController.h"
 #include "PositionStructure.h"
+#include "ModelManager.h"
 #include "TextureData.h"
 
 extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
@@ -143,6 +144,12 @@ int main(int, char**)
         TransferManager trm(dev);
         BufferManager   bm(dev, &trm);
         ShaderManager   sm(dev);
+        // Буферы геометрии живут в пуле, а не заводятся BufferManager'ом — зонду хватает
+        // POSITION-стрима, поэтому заводим свою минимальную раскладку.
+        ModelManager    mm;
+        GeometryPool*   pool = mm.CreateGeometryPool(&bm, "Probe", 12,
+            { { { { ShaderBase::POSITION, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 } }, 12, 0 } });
+        const BufferDataName VPOS = pool->Streams()[0].buffer_name;
         PassManager     pm;
         PipeManager     pipes(dev, win);
         BatchBuilder    bb;
@@ -161,7 +168,7 @@ int main(int, char**)
         rptd.SetColorTexture(pm.GetSwapchainAtlas(), 0);
 
         pm.CreateRenderPass("TRIANGLE_PASS",
-            [&bm, pipeline_slot](SDL_GPUCommandBuffer* cb, PassManager* p, RenderPassStep& rp)
+            [&bm, VPOS, pipeline_slot](SDL_GPUCommandBuffer* cb, PassManager* p, RenderPassStep& rp)
         {
             rp.renderPassTexsData.ResolveTargets();
             if (!rp.renderPassTexsData.colorTargetInfos[0].texture) return;
@@ -170,7 +177,7 @@ int main(int, char**)
                 cb, rp.renderPassTexsData.colorTargetInfos.data(),
                 (Uint32)rp.renderPassTexsData.colorTargetInfos.size(), nullptr);
 
-            BufferData* vb = bm.GetBufferData(GeometryStreams::VERTEX_POS_BUFFER);
+            BufferData* vb = bm.GetBufferData(VPOS);
             if (*pipeline_slot && vb && vb->Static.buffer) {
                 SDL_BindGPUGraphicsPipeline(sdl_rp, *pipeline_slot);
                 const TextureAtlas* sw = p->GetSwapchainAtlas();
@@ -200,8 +207,7 @@ int main(int, char**)
         },
             0);
 
-        sm.CreateVertexShader("triangle_vs", vs_path.c_str(),
-                              { GeometryStreams::VERTEX_POS_BUFFER }, &bm);
+        sm.CreateVertexShader("triangle_vs", vs_path.c_str(), pool, { ShaderBase::POSITION }, &bm);
         sm.CreateFragmentShader("triangle_fs", fs_path.c_str());
 
         ShaderProgramDescription spd;
@@ -215,7 +221,7 @@ int main(int, char**)
 
         sm.CreateComputeShader("rotate_tick_cs", cs_path.c_str());
         ComputeShaderProgram* csp = sm.CreateComputeShaderProgram("csp_rotate_tick", "rotate_tick_cs",
-            { bm.GetBufferData(GeometryStreams::VERTEX_POS_BUFFER) },   // rw  u0 space1
+            { bm.GetBufferData(VPOS) },   // rw  u0 space1
             { bm.GetBufferData(TICK_BUFFER) },                          // ro  t0 space0
             {}, {}, {}, rot_pass);
         if (!csp) { SDL_Log("CreateComputeShaderProgram не вернул программу."); return 1; }
@@ -239,7 +245,7 @@ int main(int, char**)
             []() -> uint32_t { return sizeof(float); });
 
         bm.BakePending();
-        BufferData* vb = bm.GetBufferData(GeometryStreams::VERTEX_POS_BUFFER);
+        BufferData* vb = bm.GetBufferData(VPOS);
         if (!vb || !vb->Static.buffer) { SDL_Log("BakePending не создал вершинный буфер."); return 1; }
 
         pipes.CreateGraphicsPiplenes(sm.GetShaderPrograms(), &sm);

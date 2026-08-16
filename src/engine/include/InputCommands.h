@@ -44,8 +44,9 @@ struct SetShaderPassCmd {
 
 // Upsert шейдер-данных из формы редактора SD (как UpsertTexture/UpsertModel): компиляция по имени,
 // oldName != name → удалить старую запись. Пайплайны ссылающихся sp/csp инвалидируются в хендлере.
-// pull у вершинника — набор+ПОРЯДОК семантик из FMT_PosUVNormal (пока без реестра раскладок).
-struct UpsertVertexShaderCmd   { std::string name, path, oldName; std::vector<ShaderBase::VertexSemantic> pull; };
+// У вершинника — имя ПУЛА и набор семантик (pull). Порядок pull не значим: слоты задаёт таблица
+// стримов пула. Пустой pool = дефолтный.
+struct UpsertVertexShaderCmd   { std::string name, path, oldName, pool; std::vector<ShaderBase::VertexSemantic> pull; };
 struct UpsertFragmentShaderCmd { std::string name, path, oldName; };
 struct UpsertComputeShaderCmd  { std::string name, path, oldName; };
 struct ShaderDataNameCmd       { std::string name; };   // удаление vs/fs/cs (тип — по CommandId)

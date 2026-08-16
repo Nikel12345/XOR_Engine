@@ -274,6 +274,7 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 			yyjson_mut_obj_add_strcpy(doc, e, "vertex", m->model_path.c_str());
 			yyjson_mut_obj_add_strcpy(doc, e, "index",  m->index_path.c_str());
 			yyjson_mut_obj_add_int   (doc, e, "anchor", (int)m->anchor);
+			yyjson_mut_obj_add_strcpy(doc, e, "pool",   m->pool_name.c_str());
 			++saved;
 		}
 		yyjson_write_err werr;
@@ -301,6 +302,7 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 			yyjson_mut_val* e = yyjson_mut_arr_add_obj(doc, vsa);
 			yyjson_mut_obj_add_strcpy(doc, e, "name", name.c_str());
 			yyjson_mut_obj_add_strcpy(doc, e, "path", d.source_path.c_str());
+			yyjson_mut_obj_add_strcpy(doc, e, "pool", d.pool_name.c_str());
 			yyjson_mut_val* pull = yyjson_mut_obj_add_arr(doc, e, "pull");
 			// Все биндинги, не только первый: со стримами пула их несколько (Pos/UV/NormTan —
 			// по слоту на стрим), а pull манифеста — объединение семантик по всем слотам.
@@ -470,7 +472,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 			size_t idx, max; yyjson_val* m;
 			yyjson_arr_foreach(arr, idx, max, m) {
 				entries.push_back({ JsonStr(m, "name"), JsonStr(m, "vertex"), JsonStr(m, "index"),
-				                    (AnchorShift)JsonInt(m, "anchor", 0) });
+				                    (AnchorShift)JsonInt(m, "anchor", 0), JsonStr(m, "pool") });
 			}
 			yyjson_doc_free(doc);
 			const size_t loaded_n = model_manager->LoadSceneModels(entries);
@@ -513,14 +515,11 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 						size_t pi, pm; yyjson_val* ps;
 						yyjson_arr_foreach(pa, pi, pm, ps) pull.push_back(SemFromStr(yyjson_get_str(ps)));
 					}
-					if (pull.empty()) {
-					}
-					// Манифест говорит СЕМАНТИКАМИ (pull) — язык стабилен, файлы сцен не мигрируются.
-					// Семантики → имена стрим-буферов пула (POSITION→Pos, UV→UV, NORMAL/TANGENT→NormTan):
-					// shadow_vs [POSITION] получает один Pos-стрим — 12 байт/вершину вместо интерлива.
-					std::vector<const char*> stream_names = PosUVNormPool::StreamsForSemantics(pull);
-					std::vector<std::string> buf_names(stream_names.begin(), stream_names.end());
-					sm->CreateVertexShader(name, path.c_str(), buf_names, buffer_manager);
+					// Манифест говорит ПУЛОМ и СЕМАНТИКАМИ — язык стабилен, файлы сцен не мигрируются
+					// (нет поля "pool" → дефолтный). Резолв семантик в стримы и порядок слотов —
+					// дело пула: shadow_vs [POSITION] получит один Pos-стрим, 12 байт/вершину.
+					sm->CreateVertexShader(name, path.c_str(), model_manager->GetPool(JsonStr(e, "pool")),
+						pull, buffer_manager);
 					invalidate_vs(name);
 				}
 			}

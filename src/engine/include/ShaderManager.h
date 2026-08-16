@@ -8,6 +8,7 @@
 
 
 class BufferManager;
+class GeometryPool;
 struct RenderPassStep;
 
 class ShaderManager
@@ -18,12 +19,15 @@ public:
 	// fragment_shaders/compute_shaders); sp/csp ссылаются на них по ИМЕНИ. Повтор с тем же именем
 	// перезаписывает запись.
 	//
-	// Вершинник объявляет ПОТРЕБЛЯЕМЫЕ СТРИМЫ пула перечислением имён вершинных буферов
-	// (порядок списка = порядок слотов пайплайна; раскладка слота — из таблицы PosUVNormPool).
-	// Тени перечисляют один Pos-стрим; main — все три. ПОРЯДОК КРИТИЧЕН: слот со сдвинутым
-	// буфером = чтение чужого страйда = UB. bm — на вызове (не полем): каждому названному буферу
-	// декларируется VERTEX, индексному буферу их пула — INDEX (см. BufferData::usage).
-	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::vector<std::string>& vertex_buffer_names, BufferManager* bm);
+	// Вершинник объявляет ПУЛ явно, а потребляемые стримы — СЕМАНТИКАМИ (pull): тем же языком
+	// говорят манифест сцены и форма редактора, так что путь один на всех. Обратный вывод пула из
+	// набора стримов больше не годится — POSITION есть в каждом пуле.
+	// Порядок слотов задаёт ТАБЛИЦА СТРИМОВ пула (порядок pull не значим): слот со сдвинутым
+	// буфером = чтение чужого страйда = UB, и решать это должен пул, а не порядок аргументов.
+	// bm — на вызове (не полем): каждому выбранному стриму декларируется VERTEX, индексному
+	// буферу пула — INDEX (см. BufferData::usage).
+	void CreateVertexShader(const std::string& name, const char* hlsl_path, const GeometryPool* pool,
+	                        const std::vector<ShaderBase::VertexSemantic>& pull, BufferManager* bm);
 	void CreateFragmentShader(const std::string& name, const char* path);
 
 	// bm передаётся НА ВЫЗОВЕ (не хранится полем): sp ссылается на буферы по имени, а usage-флаг

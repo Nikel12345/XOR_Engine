@@ -6,11 +6,8 @@
 
 BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_manager) : dev(device), trm(transfer_manager) {
     using namespace DefaultBuffersNames;
-	constexpr Uint32 BASE_VERTEX_CAPACITY = 186150;
-	CreateBufferData(GeometryStreams::VERTEX_POS_BUFFER,     BASE_VERTEX_CAPACITY * 12, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
-	CreateBufferData(GeometryStreams::VERTEX_UV_BUFFER,      BASE_VERTEX_CAPACITY * 8,  BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
-	CreateBufferData(GeometryStreams::VERTEX_NORMTAN_BUFFER, BASE_VERTEX_CAPACITY * 24, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
-	CreateBufferData(PosUVNormPool::INDEX_BUFFER, 8190006, BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
+	// Вершинных/индексного буферов тут НЕТ: их заводит ModelManager::CreateGeometryPool вместе с
+	// именами стримов и инструкциями заливки — буфер геометрии не существует отдельно от пула.
 	CreateBufferData(DEFAULT_TRANSFORM_BUFFER, BASE_TB_SIZE / 10, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_LIGHT_BUFFER, sizeof(LightLayout) * 2, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_CAMERA_BUFFER, sizeof(CameraData), BufferDataType::Dynamic);

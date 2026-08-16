@@ -16,10 +16,10 @@ void GpuTaskContext::CreateFragmentShader(const std::string& name, const char* p
 	shader_manager->CreateFragmentShader(name, path);
 }
 
-void GpuTaskContext::CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<const char*> vertex_buffer_names) {
-	std::vector<std::string> names(vertex_buffer_names.begin(), vertex_buffer_names.end());
-	// buffer_manager — сбор usage-флага VERTEX по перечисленным стримам (декларация бинда).
-	shader_manager->CreateVertexShader(name, hlsl_path, names, buffer_manager);
+void GpuTaskContext::CreateVertexShader(const std::string& name, const char* hlsl_path, const GeometryPool* pool,
+	const std::vector<ShaderBase::VertexSemantic>& pull) {
+	// buffer_manager — сбор usage-флагов (VERTEX выбранным стримам, INDEX индексному буферу пула).
+	shader_manager->CreateVertexShader(name, hlsl_path, pool, pull, buffer_manager);
 }
 
 ShaderProgram* GpuTaskContext::CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,

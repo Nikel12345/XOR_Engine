@@ -181,6 +181,7 @@ set(ENGINE_MANAGERS_SRC
     src/CameraManager.cpp
     src/MaterialManager.cpp
     src/ModelManager.cpp
+    src/GeometryPool.cpp
     src/PipeManager.cpp
     src/ThreadController.cpp
     src/SlotController.cpp
@@ -192,6 +193,7 @@ set(ENGINE_MANAGERS_HDR
     include/Camera.h
     include/MaterialManager.h
     include/ModelManager.h
+    include/GeometryPool.h
     include/PipeManager.h
     include/ThreadController.h
     include/SlotController.h

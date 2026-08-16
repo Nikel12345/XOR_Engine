@@ -14,9 +14,9 @@
 #include "BufferUpdateStruct.h"
 
 namespace DefaultBuffersNames {
-	// Вершинного буфера-монолита больше нет: геометрия моделей лежит ПО СТРИМАМ пула
-	// PosUVNormPool (Pos/UV/NormTan) + его ИНДЕКСНЫЙ буфер — имена в PositionStructure.h
-	// (GeometryStreams::*, PosUVNormPool::INDEX_BUFFER). У одного пула — один индексный буфер.
+	// Буферов геометрии тут нет вовсе: стримы пула и его ИНДЕКСНЫЙ буфер заводит
+	// ModelManager::CreateGeometryPool, он же генерит им имена (GeometryPool::Stream::buffer_name,
+	// GeometryPool::IndexBuffer). У одного пула — один индексный буфер.
 	inline constexpr const char* DEFAULT_TRANSFORM_BUFFER = "_DefaultTransformBuffer";
 	inline constexpr const char* DEFAULT_CAMERA_BUFFER = "_cameraBuffer";
 	inline constexpr const char* DEFAULT_LIGHT_BUFFER = "_lightBuffer";

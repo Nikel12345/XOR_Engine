@@ -305,7 +305,7 @@ void DefaultShaderProgramSet::SetUIProgram(EngineContext* ctx)
 
     // VS тянет POSITION+UV (юнит-квад); матрица даёт NDC. FS: обычный albedo (без света) + текст.
     ctx->CreateVertexShader("ui_vs", "../engine/shaders_code/ui/ui.vert.hlsl",
-        { GeometryStreams::VERTEX_POS_BUFFER, GeometryStreams::VERTEX_UV_BUFFER }, /*dont_save=*/true);
+        POS_UV_NORM_POOL, { ShaderBase::POSITION, ShaderBase::UV }, /*dont_save=*/true);
     ctx->CreateFragmentShader("ui_fs", "../engine/shaders_code/ui/ui.frag.hlsl", /*dont_save=*/true);
 
     ShaderProgramDescription spd;

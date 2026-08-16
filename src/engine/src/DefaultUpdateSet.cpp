@@ -22,8 +22,6 @@ namespace DefaultUpdateSet
     bool position_update_inited = false;
     bool light_update_inited = false;
     bool position_index_update_inited = false;
-    bool vertex_update_inited = false;
-    bool index_update_inited = false;
     bool light_cameras_update_inited = false;
     bool indirect_update_inited = false;
     bool bound_sphere_update_intited = false;
@@ -155,67 +153,6 @@ void DefaultUpdateSet::SetDefaultPositionIndexUpdater(EngineContext& ctx, PIB_Da
     }
     );
     position_index_update_inited = true;
-}
-
-void DefaultUpdateSet::SetDefaultVertexUpdater(EngineContext& ctx)
-{
-    if (vertex_update_inited) {
-        SDL_Log("Default vertex updater is already initialized.");
-        return;
-    }
-    auto* bm = ctx.GetBufferManager();
-    auto* mm = ctx.GetModelManager();
-    // По инструкции НА КАЖДЫЙ СТРИМ пула: стейджинг один (интерлив PosUVNormal), каждая заливка
-    // выдирает свой срез (src_offset/stride из таблицы пула). Индексный апдейтер регистрируется
-    // ПОЗЖЕ (см. Engine::InitDefaultBufferUpdaters) — он финализирует счётчики и чистит стейджинг,
-    // поэтому все стрим-инструкции обязаны отработать до него (порядок регистрации = порядок
-    // исполнения в _ExecuteUpdateInstructions).
-    for (const PosUVNormPool::Stream& s : PosUVNormPool::streams) {
-        const uint32_t src_offset = s.src_offset;
-        const uint32_t stride = s.format->stride;
-        bm->CreateUpdateInstruction(s.buffer_name,
-            [mm, src_offset, stride](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
-        {
-            mm->UploadModelVertexStream(bm, &task, src_offset, stride);
-        },
-            [mm, stride]() -> uint32_t
-        {
-            return mm->CalculateModelsVerticesSize(stride);
-        },
-            [mm, stride]() -> uint32_t
-        {
-            return mm->GetVertexBaseOffset(stride);
-        }
-        );
-    }
-    vertex_update_inited = true;
-}
-
-void DefaultUpdateSet::SetDefaultIndexUpdater(EngineContext& ctx)
-{
-    if (index_update_inited) {
-        SDL_Log("Default index updater is already initialized.");
-        return;
-    }
-    auto* bm = ctx.GetBufferManager();
-    auto* mm = ctx.GetModelManager();
-    // Индексный буфер — ПУЛА (PosUVNormPool), не глобальный: финализирует цикл дозагрузки
-    // своего пула (см. инвариант порядка у SetDefaultVertexUpdater выше).
-    bm->CreateUpdateInstruction(PosUVNormPool::INDEX_BUFFER,
-        [mm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
-    {
-        mm->UploadModelIndexBuffer(bm, &task);
-    },
-        [mm]() -> uint32_t
-    {
-        return mm->CalculateModelsIndicesSize();
-    },
-        [mm]() -> uint32_t
-    {
-        return mm->GetIndexBaseOffset();
-    }
-    );
-    index_update_inited = true;
 }
 
 void DefaultUpdateSet::SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDataModule* ldm)

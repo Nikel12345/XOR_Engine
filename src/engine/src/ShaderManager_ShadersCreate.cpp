@@ -197,32 +197,36 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
 }
 
 void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl_path,
-    const std::vector<std::string>& vertex_buffer_names, BufferManager* bm)
+    const GeometryPool* pool, const std::vector<VertexSemantic>& pull, BufferManager* bm)
 {
-    // Имена стримов → биндинги слотов: раскладку каждого слота даёт таблица пула. Слот получает
-    // ВСЕ семантики своего стрима (лишние атрибуты валидны — HLSL может их не читать; обратное —
-    // чтение необъявленного — ловит рефлексия в BuildVertexShader). Неизвестное имя = отказ
-    // ЦЕЛИКОМ: собрать пайплайн с пропущенным слотом = UB со сдвинутыми страйдами.
-    // Резолвим ИМЕНА (в т.ч. динамические строки из манифеста/UI) в записи таблицы пула.
-    // stream->buffer_name — КАНОНИЧНЫЙ BufferDataName (тот же inline-constexpr литерал, которым
-    // буфер создан): реестр BufferManager ключуется по указателю, динамическая строка мимо.
+    if (!pool) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "CreateVertexShader '%s': no geometry pool - shader NOT created.", name.c_str());
+        return;
+    }
+    // Семантики → стримы: пул отдаёт их в каноническом порядке слотов и схлопывает те, что живут
+    // вместе (NORMAL+TANGENT — один стрим). Слот получает ВСЕ семантики своего стрима: лишние
+    // атрибуты валидны (HLSL может их не читать), а обратное — чтение необъявленного — ловит
+    // рефлексия в BuildVertexShader. Пустой резолв = отказ ЦЕЛИКОМ: пайплайн без вершинных слотов
+    // читал бы мусор.
+    const std::vector<const GeometryPool::Stream*> streams = pool->StreamsForSemantics(pull);
+    if (streams.empty()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "CreateVertexShader '%s': pull resolves to no streams of pool '%s' - shader NOT created.",
+            name.c_str(), pool->Name().c_str());
+        return;
+    }
+
     std::vector<VertexBufferBinding> bindings;
     std::vector<BufferDataName> canonical_names;
-    bindings.reserve(vertex_buffer_names.size());
-    canonical_names.reserve(vertex_buffer_names.size());
-    for (const std::string& buf_name : vertex_buffer_names) {
-        const PosUVNormPool::Stream* stream = PosUVNormPool::FindStream(buf_name);
-        if (!stream) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                "CreateVertexShader '%s': '%s' is not a vertex stream of any geometry pool - shader NOT created.",
-                name.c_str(), buf_name.c_str());
-            return;
-        }
-        std::vector<VertexSemantic> pull;
-        pull.reserve(stream->format->attrs.size());
-        for (const auto& a : stream->format->attrs) pull.push_back(a.semantic);
-        bindings.push_back({ stream->format, std::move(pull) });
-        canonical_names.push_back(stream->buffer_name);
+    bindings.reserve(streams.size());
+    canonical_names.reserve(streams.size());
+    for (const GeometryPool::Stream* stream : streams) {
+        std::vector<VertexSemantic> slot_pull;
+        slot_pull.reserve(stream->format->attrs.size());
+        for (const auto& a : stream->format->attrs) slot_pull.push_back(a.semantic);
+        bindings.push_back({ stream->format, std::move(slot_pull) });
+        canonical_names.push_back(stream->buffer_name);   // строка живёт в пуле — ключ реестра валиден
     }
 
     size_t n = 0;
@@ -232,17 +236,19 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
     SDL_free(spv);
 
     vs.vertex_buffer_names = std::move(canonical_names);
-    // Декларация usage (по ней и СОЗДАЮТСЯ буферы — см. BufferData.h): перечисление здесь =
+    vs.pool_name = pool->Name();
+    vs.index_buffer = pool->IndexBuffer();   // у пула он один — резолвим тут, сборке батча хватит поля
+
+    // Декларация usage (по ней буферы и СОЗДАЮТСЯ — см. BufferData.h): выбор стримов здесь =
     // «эти буфера биндятся вершинными», а заодно «дроу этим vs индексируются из индексного
-    // буфера ИХ пула» — ровно этот вывод делает сборка батча (IndexBufferForStream).
-    if (bm)
-        for (BufferDataName canon : vs.vertex_buffer_names) {
+    // буфера ИХ пула». До этого момента буферы пула зарегистрированы, но VRAM не занимают.
+    if (bm) {
+        for (BufferDataName canon : vs.vertex_buffer_names)
             if (BufferData* bd = bm->GetBufferData(canon))
                 bd->usage |= SDL_GPU_BUFFERUSAGE_VERTEX;
-            if (const char* ib = IndexBufferForStream(canon))
-                if (BufferData* ibd = bm->GetBufferData(ib))
-                    ibd->usage |= SDL_GPU_BUFFERUSAGE_INDEX;
-        }
+        if (BufferData* ibd = bm->GetBufferData(vs.index_buffer))
+            ibd->usage |= SDL_GPU_BUFFERUSAGE_INDEX;
+    }
 
     vertex_shaders[name] = std::move(vs);
 }

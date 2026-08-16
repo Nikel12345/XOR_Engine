@@ -240,13 +240,13 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
                 // Вершинные СТРИМЫ пула — из объявления вершинника (vs.vertex_buffer_names,
                 // порядок = слоты пайплайна). Резолв здесь же; пустой список = vs не найден или
                 // стрим-имя протухло → бинд-шаг пропустит draw (сдвиг слота = UB).
-                // Индексный буфер — принадлежность ПУЛА: у одного пула — один, определяется
-                // стримами vs (все стримы объявления из одного пула — валидирует CreateVertexShader).
+                // Индексный буфер — принадлежность ПУЛА: у одного пула он один, и vs запомнил его
+                // на создании. Читаем поле, а не ищем пул: реестр пулов живёт в ModelManager,
+                // которого у сборки батча нет и быть не должно.
                 if (VertexShaderData* vsd = sm->GetVertexShader(sp->vs_name)) {
                     new_batch.vertexBuffers = resolve_buffers(vsd->vertex_buffer_names);
-                    if (!vsd->vertex_buffer_names.empty())
-                        if (const char* ib = IndexBufferForStream(vsd->vertex_buffer_names.front()))
-                            new_batch.indexBuffer = bm->GetBufferData(ib);
+                    if (vsd->index_buffer)
+                        new_batch.indexBuffer = bm->GetBufferData(vsd->index_buffer);
                 }
                 FragmentShaderData* fsd = sm->GetFragmentShader(sp->fs_name);   // fs по имени из реестра
                 new_batch.frag_uniform_count = fsd ? fsd->shader_data.num_uniform_buffers : 0u;

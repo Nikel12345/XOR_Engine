@@ -26,8 +26,9 @@ namespace DefaultUpdateSet
 	void SetDefaultInstanceDataUpdater(EngineContext& ctx, InstanceDataModule* idm);
 	void SetDefaultLightUpdater(EngineContext& ctx, LightDataModule* ldm);
 	void SetDefaultPositionIndexUpdater(EngineContext& ctx, PIB_DataModule* pib_dm);
-	void SetDefaultVertexUpdater(EngineContext& ctx);
-	void SetDefaultIndexUpdater(EngineContext& ctx);
+	// Стрим- и индексная инструкции геометрии живут не здесь: их вешает
+	// ModelManager::CreateGeometryPool вместе с буферами пула — иначе их порядок (все стримы, затем
+	// индексная-финализатор) держался бы только на договорённости между двумя вызовами.
 	void SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDataModule* ldm);
 	// Индирект ПО-КАМЕРНЫЙ и per-frame (num_instances=0, scatter дозаполняет атомиком).
 	void SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDataModule* idm, LightDataModule* ldm);

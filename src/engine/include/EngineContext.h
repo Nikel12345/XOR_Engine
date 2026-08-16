@@ -12,6 +12,7 @@
 #include "MaterialParamsSpec.h"
 #include "TextureData.h"
 #include "ModelData.h"
+#include "GeometryPool.h"   // StreamDesc в сигнатуре CreateGeometryPool — нужен полный тип
 
 // Менеджеры — ТОЛЬКО forward: контекст держит их указателями, а сигнатуры фасада отдают
 // указатели/принимают имена. Полные заголовки инклюдит тот cpp, который реально зовёт
@@ -72,9 +73,19 @@ public:
 	// друг другом — см. CLAUDE.md), передаёт TextureManager/BufferManager параметрами в FontManager.
 	FontData* CreateFont(const std::string& name, const char* path, float px, bool sdf = false);
 
-	ModelData* CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor = AnchorShift::Keep);
+	// Кроссменеджерская операция: развернуть раскладку вершин в рабочий пул. Живёт на контексте,
+	// потому что трогает и ModelManager (реестр пулов, стейджинг), и BufferManager (буферы стримов
+	// + инструкции заливки) — второй уходит ПАРАМЕТРОМ, см. CLAUDE.md. Зовётся на инициализации,
+	// ДО создания вершинных шейдеров: те объявляют usage, по которому буферы и бейкаются.
+	GeometryPool* CreateGeometryPool(const std::string& name, uint32_t vertex_size,
+		const std::vector<GeometryPool::StreamDesc>& streams);
+
+	// pool_name пусто = дефолтный пул (первый созданный) — старые сцены и код не мигрируются.
+	ModelData* CreateModel(const ModelName& name, const char* model_path, const char* index_path,
+		AnchorShift anchor = AnchorShift::Keep, const std::string& pool_name = {});
 	// dont_save=true — движковая/кодовая процедурная модель (sphere/quad/cubes), в models.json не пишется.
-	ModelData* CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep, bool dont_save = false);
+	ModelData* CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep,
+		bool dont_save = false, const std::string& pool_name = {});
 
 	void CreateGraphicsPipelines();
 	void CreateComputePipelines();
@@ -128,7 +139,10 @@ public:
 	// ссылается на них по имени (vs_name/fs_name/cs_name). dont_save=true — движковый дефолт
 	// (_fallback_vs/_fallback_fs/_FallbackShader), в shaders.json не пишется (см. *ShaderData::dont_save).
 	void CreateFragmentShader(const std::string& name, const char* hlsl_path, bool dont_save = false);
-	void CreateVertexShader(const std::string& name, const char* hlsl_path, std::initializer_list<const char*> vertex_buffer_names, bool dont_save = false);
+	// Вершинник называет ПУЛ (по имени, как модели) и потребляемые СЕМАНТИКИ; набор и порядок
+	// слотов выводит сам пул. Пустое имя пула = дефолтный.
+	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,
+		std::initializer_list<ShaderBase::VertexSemantic> pull, bool dont_save = false);
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 		const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 		const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
