@@ -5,6 +5,7 @@
 #include "BufferManager.h"
 #include "TextureManager.h"
 #include "PipeManager.h"
+#include "ModelManager.h"   // ReclaimRanges — дренаж отложенных возвратов места в пулах
 #include "TransferManager.h"
 #include "SlotController.h"
 #include "RenderManager.h"
@@ -35,6 +36,9 @@ void Engine::PrepareFunc(uint8_t slot)
 		const uint64_t fences_done = slot_controller->RenderFencesDone();
 		buffer_manager->TrashBuffers(fences_done);
 		pipe_manager->TrashPipelines(fences_done, slot_controller->RequiredEpoch(), batch_builder->ComputeRebuildEpoch());
+		// Место снятых моделей — тем же штампом: диапазон вернётся в разметку пула, только когда
+		// уйдут все кадры, которые могли по нему рисовать.
+		model_manager->ReclaimRanges(fences_done);
 	}
 
 	{

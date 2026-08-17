@@ -81,8 +81,11 @@ public:
 	uint32_t CalculateModelsVerticesSize(const GeometryPool* pool, uint32_t stream_stride);
 	uint32_t CalculateModelsIndicesSize(const GeometryPool* pool);
 
-	uint32_t GetVertexBaseOffset(const GeometryPool* pool, uint32_t stream_stride) const;
-	uint32_t GetIndexBaseOffset(const GeometryPool* pool) const;
+	// База заливки = НАЧАЛО ВЫДЕЛЕННОГО пачке диапазона, а не конец занятого: место снятых моделей
+	// переиспользуется. Выделение ленивое и общее на кадр (см. _EnsureBatchAllocation), поэтому
+	// не const.
+	uint32_t GetVertexBaseOffset(const GeometryPool* pool, uint32_t stream_stride);
+	uint32_t GetIndexBaseOffset(const GeometryPool* pool);
 
 	// Заливка одного стрима: выдирает из интерлив-стейджинга (раскладка пула) срез
 	// [src_offset, src_offset + stream_stride) каждой вершины и пишет плотно в transfer-буфер.
@@ -90,6 +93,11 @@ public:
 	                             uint32_t src_offset, uint32_t stream_stride);
 	// Идёт ПОСЛЕДНЕЙ инструкцией своего пула: финализирует цикл дозагрузки.
 	void UploadModelIndexBuffer(BufferManager* bm, UploadTask* task, const GeometryPool* pool);
+
+	// Дренаж отложенных возвратов места. Диапазон снятой модели нельзя отдать под новую заливку
+	// сразу: слоты в полёте по нему ещё рисуют. Штамп тот же, что у PendingDestroy в BufferManager
+	// (ready_at = fences_done + BUFFERING_LEVEL), и зовётся рядом с TrashBuffers — на sim.
+	void ReclaimRanges(uint64_t fences_done);
 
 	bool CheckDirty() const;
 	bool CheckDirtySpheres() const { return dirty_spheres; };
@@ -100,6 +108,22 @@ public:
 	~ModelManager();
 
 private:
+	// Модель в пачке текущего кадра. Смещения ОТНОСИТЕЛЬНЫ стейджинга: абсолютную базу даст
+	// выделение, а оно случается позже загрузки — поэтому сабмеши патчатся в финализаторе.
+	struct BatchEntry {
+		ModelData* model = nullptr;
+		uint32_t vbase = 0, vcount = 0;   // элементы вершин
+		uint32_t ibase = 0, icount = 0;   // элементы индексов
+	};
+
+	// Снятое место, ждущее возврата аллокатору. ready_at == 0 — штамп ещё не проставлен
+	// (ставится при первом дренаже, как у PendingDestroy).
+	struct PendingFree {
+		RangeAllocator::Range verts;
+		RangeAllocator::Range index;
+		uint64_t ready_at = 0;
+	};
+
 	// Состояние дозагрузки ОДНОГО пула. Пер-пульное, а не менеджерское: у каждого пула своя
 	// раскладка (значит свой размер CPU-вершины), свои буферы и своё элементное пространство.
 	struct PoolResidency {
@@ -109,13 +133,22 @@ private:
 		std::vector<Uint32>    staging_indices;
 		bool dirty = false;
 
-		// Счётчики, растущие за каждую загрузку модели (а не размер CPU-буфера).
-		uint32_t total_vertices_count = 0;   // всего зарегистрировано вершин (элементы) — для submesh offset
-		uint32_t total_indices_count = 0;    // всего зарегистрировано индексов (элементы)
-		// Уже залито на GPU. Вершины — В ЭЛЕМЕНТАХ (канон lockstep-продвижения всех стримов пула:
-		// байтовая append-точка стрима = счётчик × его stride); индексы — в байтах, буфер один.
-		uint32_t gpu_vertices_count = 0;
-		uint32_t gpu_indices_bytes = 0;
+		// Разметка буферов пула. Вершинная одна на ВСЕ стримы: они растут в ногу, элемент №N
+		// существует в каждом, поэтому и место у них общее (байты стрима = элементы × его stride).
+		RangeAllocator verts;
+		RangeAllocator index;
+
+		// Пачка кадра. Выделение ОДНО на весь стейджинг, а не на модель: заливка умеет писать
+		// только непрерывный диапазон (одна UpdateInstruction = одна задача), поэтому в дыру
+		// садится вся пачка целиком либо она уходит в конец. Освобождение при этом остаётся
+		// по-модельным, и соседние возвраты сливаются — поэтому перезагрузка той же сцены
+		// попадает ровно в освободившееся от неё же место.
+		RangeAllocator::Range batch_verts;
+		RangeAllocator::Range batch_index;
+		bool batch_allocated = false;
+		std::vector<BatchEntry> batch;
+
+		std::vector<PendingFree> pending_free;
 	};
 
 	// Общая загрузка файловой модели В переданный ptr (читает staging, пересчитывает submeshes,
@@ -124,6 +157,16 @@ private:
 	                          const std::string& path_ind, AnchorShift anchor);
 	// Пул модели: явный аргумент, иначе дефолтный. nullptr — пулов вообще нет (ошибка вызывающего).
 	GeometryPool* _ResolvePool(GeometryPool* pool);
+	// Выделение пачки кадра — лениво и один раз. Зовут его и вершинные offset_fn, и индексная;
+	// какая доберётся первой, та и выделит. Порядок не гарантирован: стрим бейкается только когда
+	// его назвал шейдер, так что при теневом vs вершинных инструкций может отработать всего одна.
+	void _EnsureBatchAllocation(const GeometryPool* pool);
+	// Место модели — в отложенный возврат (сразу отдать нельзя: слоты в полёте по нему рисуют).
+	// Пул берём из самой модели: она могла быть загружена в другой, и вернуть надо туда.
+	void _ReleaseModelRanges(ModelData* model);
+	// Регистрация модели в пачке кадра: без дубля (перезагрузка того же имени дважды за кадр).
+	void _PushBatchEntry(PoolResidency& res, ModelData* model, uint32_t vbase, uint32_t vcount,
+	                     uint32_t ibase, uint32_t icount);
 	PoolResidency& _Residency(const GeometryPool* pool) { return residency[pool]; }
 	const PoolResidency* _FindResidency(const GeometryPool* pool) const;
 

@@ -215,15 +215,24 @@ void* BufferManager::AcquireTransferWritePtr(UploadTask* task, Uint32 size)
     task->written_size += size;
 
     // Использованный объём = базовое смещение + дозаписанное (dst_offset включает базу).
-    // Used size = base offset + appended bytes (dst_offset includes the base).
+    // МАКСИМУМ, а не присваивание: с тех пор как база заливки может быть НЕ концом занятого
+    // (аллокатор диапазонов сажает пачку в освободившуюся дыру), запись в начало буфера занизила
+    // бы эту величину — а её берёт copy_size в EnsureBufferCapacity, и ближайший рост буфера
+    // молча отрезал бы весь хвост. Смысл поля от этого — «высокая вода», а не «занято сейчас»;
+    // единственный потребитель (RESIZE_AND_COPY) от лишних скопированных байт не страдает.
+    // Used size = base offset + appended bytes (dst_offset includes the base). MAX, not assign:
+    // an upload into a reclaimed hole would otherwise lower the high-water mark that
+    // EnsureBufferCapacity copies on resize, silently truncating the buffer's tail.
     const Uint32 used = task->dst_offset + task->written_size;
     switch (task->dst_buffer_data->type) {
     case BufferDataType::Static:
-        task->dst_buffer_data->Static.used_buffer_size = used;
+        if (used > task->dst_buffer_data->Static.used_buffer_size)
+            task->dst_buffer_data->Static.used_buffer_size = used;
         break;
 
     case BufferDataType::Dynamic:
-        task->dst_buffer_data->Dynamic.used_buffer_size[li] = used;
+        if (used > task->dst_buffer_data->Dynamic.used_buffer_size[li])
+            task->dst_buffer_data->Dynamic.used_buffer_size[li] = used;
         break;
     }
 

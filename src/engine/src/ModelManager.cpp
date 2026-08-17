@@ -33,13 +33,15 @@ static inline void WritePos(std::byte* base, uint32_t vsize, uint32_t pos_off, s
     std::memcpy(base + i * vsize + pos_off, &p, sizeof(glm::vec3));
 }
 
-// Строит сабмеши модели из записей entries: глобальные смещения = курсоры + локальное
-// смещение записи, плюс bounding sphere по вершинам из staging. Общее для диска и генератора.
+// Строит сабмеши модели из записей entries: смещения ОТНОСИТЕЛЬНО стейджинга + bounding sphere по
+// вершинам оттуда же. Общее для диска и генератора.
+// Смещения именно относительные: абсолютная база — начало диапазона, который аллокатор выдаст
+// пачке при заливке, а он неизвестен до неё. Переводит их UploadModelIndexBuffer (финализатор).
 // Раскладка без читаемой позиции (нет POSITION либо он упакован) — законна: сабмеши тогда
 // получают вырожденную сферу w=-1, и каллинг трактует такую модель как «видима всегда»
 // (culling_pib.comp.hlsl: has_geom = sphere.w >= 0). Границы для неё обязаны прийти из данных.
 static void BuildSubmeshes(const std::byte* staging, const GeometryPool* pool, ModelData* model,
-    const std::vector<SubMeshFileEntry>& entries, size_t vbase, uint32_t voff, uint32_t ioff)
+    const std::vector<SubMeshFileEntry>& entries, uint32_t vbase, uint32_t ibase)
 {
     const bool     has_pos = pool->HasFloat3Position();
     const uint32_t vsize = pool->VertexSize();
@@ -49,15 +51,15 @@ static void BuildSubmeshes(const std::byte* staging, const GeometryPool* pool, M
     model->submeshes.reserve(entries.size());
     for (const SubMeshFileEntry& e : entries) {
         SubMeshData sub{};
-        sub.vertexOffset = voff + e.vertexOffset;
-        sub.indexOffset = ioff + e.indexOffset;
+        sub.vertexOffset = vbase + e.vertexOffset;
+        sub.indexOffset = ibase + e.indexOffset;
         sub.vertexCount = e.vertexCount;
         sub.indexCount = e.indexCount;
         sub.material_index = e.material_index;
         sub.sphere = glm::vec4(0.0f, 0.0f, 0.0f, -1.0f);
 
         if (e.vertexCount > 0 && has_pos) {
-            const size_t first = vbase + e.vertexOffset;
+            const size_t first = size_t(vbase) + e.vertexOffset;
             const glm::vec3 p0 = ReadPos(staging, vsize, pos_off, first);
             glm::vec3 center(0.0f);
             glm::vec3 mn = p0, mx = p0;
@@ -256,6 +258,11 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
 {
     if (!pool) return ptr;
 
+    // Перезагрузка В ТОТ ЖЕ объект: место старой геометрии возвращаем аллокатору (отложенно —
+    // по нему ещё рисуют слоты в полёте). У модели, не дошедшей до заливки, диапазоны пусты,
+    // так что двойного возврата при двойной перезагрузке за кадр не будет.
+    _ReleaseModelRanges(ptr);
+
     ptr->model_path = path_vert;   // self-describing: рецепт для редактора/сериализации
     ptr->index_path = path_ind;
     ptr->pool_name = pool->Name();
@@ -264,12 +271,11 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
     const uint32_t vsize = pool->VertexSize();
 
     // Жадное чтение: submeshes готовы сразу после возврата (CreateModel всегда на prep-потоке,
-    // гонок с общим staging нет). Отложена только заливка на GPU — staging копит данные
-    // моделей до батч-апдейтера, который дозаписывает их в конец GPU-буфера.
-    // Курсоры глобальных смещений = уже залито (total_*) + уже в staging (ещё не залито).
-    const size_t   vbase = res.staging_vertices.size() / vsize;
-    const uint32_t voff = res.total_vertices_count + safe_u32(vbase);
-    const uint32_t ioff = res.total_indices_count + safe_u32(res.staging_indices.size());
+    // гонок с общим staging нет). Отложена только заливка на GPU — staging копит данные моделей
+    // до батч-апдейтера. Смещения тут СТЕЙДЖИНГ-относительные: куда пачка ляжет в буфере, решит
+    // аллокатор при заливке, и он же (через финализатор) переведёт их в абсолютные.
+    const uint32_t vbase = safe_u32(res.staging_vertices.size() / vsize);
+    const uint32_t ibase = safe_u32(res.staging_indices.size());
 
     std::vector<SubMeshFileEntry> entries;
 
@@ -336,8 +342,8 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
     // Все проверки пройдены — растим staging и читаем данные.
     // --- 3. вершины ---
     vf.seekg(static_cast<std::streamoff>(header_size), std::ios::beg);
-    res.staging_vertices.resize((vbase + vcount) * size_t(vsize));
-    vf.read(reinterpret_cast<char*>(res.staging_vertices.data() + vbase * size_t(vsize)), vdata_size);
+    res.staging_vertices.resize((size_t(vbase) + vcount) * size_t(vsize));
+    vf.read(reinterpret_cast<char*>(res.staging_vertices.data() + size_t(vbase) * vsize), vdata_size);
     if (!vf) {
         SDL_Log("CreateModel: incomplete vertex read (%zu / %zu) from %s",
             size_t(vf.gcount()), vdata_size, path_vert.c_str());
@@ -345,8 +351,7 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
     }
 
     // --- 4. индексы ---
-    size_t ibase = res.staging_indices.size();
-    res.staging_indices.resize(ibase + icount, 0);
+    res.staging_indices.resize(size_t(ibase) + icount, 0);
     indf.read(reinterpret_cast<char*>(res.staging_indices.data() + ibase), isize);
     if (!indf) {
         SDL_Log("CreateModel: incomplete index read (%zu / %zu) from %s",
@@ -359,8 +364,9 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
     ApplyAnchorShift(res.staging_vertices.data(), pool, vbase, vcount, anchor);
 
     // --- 6. сабмеши + bounding sphere ---
-    BuildSubmeshes(res.staging_vertices.data(), pool, ptr, entries, vbase, voff, ioff);
+    BuildSubmeshes(res.staging_vertices.data(), pool, ptr, entries, vbase, ibase);
 
+    _PushBatchEntry(res, ptr, vbase, vcount, ibase, icount);
     res.dirty = true;
     dirty_spheres = true;
     return ptr;
@@ -394,9 +400,9 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
     const uint32_t vsize = p->VertexSize();
 
     // Жадная генерация: submeshes готовы сразу (как и у дискового пути). Отложена только заливка.
-    const size_t   vbase = res.staging_vertices.size() / vsize;
-    const uint32_t voff = res.total_vertices_count + safe_u32(vbase);
-    const uint32_t ioff = res.total_indices_count + safe_u32(res.staging_indices.size());
+    // Смещения стейджинг-относительные — как и у файлового пути (см. BuildSubmeshes).
+    const uint32_t vbase = safe_u32(res.staging_vertices.size() / vsize);
+    const uint32_t ibase = safe_u32(res.staging_indices.size());
 
     std::vector<PosUVNormal> verts;
     std::vector<Uint32>      inds;
@@ -409,8 +415,8 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
     uint32_t vcount = safe_u32(verts.size());
     uint32_t icount = safe_u32(inds.size());
 
-    res.staging_vertices.resize((vbase + vcount) * size_t(vsize));
-    std::memcpy(res.staging_vertices.data() + vbase * size_t(vsize), verts.data(), verts.size() * sizeof(PosUVNormal));
+    res.staging_vertices.resize((size_t(vbase) + vcount) * size_t(vsize));
+    std::memcpy(res.staging_vertices.data() + size_t(vbase) * vsize, verts.data(), verts.size() * sizeof(PosUVNormal));
     res.staging_indices.insert(res.staging_indices.end(), inds.begin(), inds.end());
 
     // Пивот — до сабмешей, чтобы sphere/AABB считались от нового origin.
@@ -419,8 +425,9 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
 
     // Вся геометрия — один сабмеш, материал 0.
     std::vector<SubMeshFileEntry> entries{ SubMeshFileEntry{ 0, 0, vcount, icount, 0 } };
-    BuildSubmeshes(res.staging_vertices.data(), p, ptr, entries, vbase, voff, ioff);
+    BuildSubmeshes(res.staging_vertices.data(), p, ptr, entries, vbase, ibase);
 
+    _PushBatchEntry(res, ptr, vbase, vcount, ibase, icount);
     res.dirty = true;
     dirty_spheres = true;
     return ptr;
@@ -443,16 +450,74 @@ uint32_t ModelManager::CalculateModelsIndicesSize(const GeometryPool* pool)
     return safe_u32(res->staging_indices.size() * sizeof(Uint32));
 }
 
-uint32_t ModelManager::GetVertexBaseOffset(const GeometryPool* pool, uint32_t stream_stride) const
+uint32_t ModelManager::GetVertexBaseOffset(const GeometryPool* pool, uint32_t stream_stride)
 {
+    _EnsureBatchAllocation(pool);
     const PoolResidency* res = _FindResidency(pool);
-    return res ? res->gpu_vertices_count * stream_stride : 0;
+    // Элементы → байты СВОЕГО стрима: стримы растут в ногу, поэтому один элементный диапазон
+    // обслуживает все три, каждый по своему страйду.
+    return (res && res->batch_allocated) ? res->batch_verts.first * stream_stride : 0;
 }
 
-uint32_t ModelManager::GetIndexBaseOffset(const GeometryPool* pool) const
+uint32_t ModelManager::GetIndexBaseOffset(const GeometryPool* pool)
 {
+    _EnsureBatchAllocation(pool);
     const PoolResidency* res = _FindResidency(pool);
-    return res ? res->gpu_indices_bytes : 0;
+    // Аллокатор индексов считает В ЭЛЕМЕНТАХ (как first_index команды), а заливке нужны БАЙТЫ.
+    return (res && res->batch_allocated) ? res->batch_index.first * safe_u32(sizeof(Uint32)) : 0;
+}
+
+void ModelManager::_EnsureBatchAllocation(const GeometryPool* pool)
+{
+    PoolResidency& res = _Residency(pool);
+    if (res.batch_allocated || !res.dirty || res.staging_vertices.empty()) return;
+
+    // Одно выделение на всю пачку: инструкция заливки пишет один непрерывный диапазон. Не нашлось
+    // подходящей дыры — аллокатор отдаст место с вершины, то есть ровно прежнее поведение
+    // «дозаписать в конец». Хуже, чем было, не станет никогда.
+    res.batch_verts = res.verts.Allocate(safe_u32(res.staging_vertices.size() / pool->VertexSize()));
+    res.batch_index = res.index.Allocate(safe_u32(res.staging_indices.size()));
+    res.batch_allocated = true;
+}
+
+void ModelManager::_PushBatchEntry(PoolResidency& res, ModelData* model, uint32_t vbase, uint32_t vcount,
+    uint32_t ibase, uint32_t icount)
+{
+    // Без дубля: одно имя могли перезагрузить дважды за кадр — тогда актуальна последняя запись
+    // (её сабмеши и лежат в модели), а первая стала мусором в стейджинге.
+    for (BatchEntry& e : res.batch)
+        if (e.model == model) { e = { model, vbase, vcount, ibase, icount }; return; }
+    res.batch.push_back({ model, vbase, vcount, ibase, icount });
+}
+
+void ModelManager::_ReleaseModelRanges(ModelData* model)
+{
+    if (!model || (model->vertex_range.count == 0 && model->index_range.count == 0)) return;
+    auto pit = pools.find(model->pool_name);
+    if (pit == pools.end()) return;   // пул не резолвится — место вернуть некуда
+
+    _Residency(pit->second.get()).pending_free.push_back({ model->vertex_range, model->index_range, 0 });
+    model->vertex_range = {};
+    model->index_range = {};
+}
+
+void ModelManager::ReclaimRanges(uint64_t fences_done)
+{
+    // Тот же приём, что у PendingDestroy в BufferManager: штамп ставится при ПЕРВОМ визите (позже
+    // момента снятия — консервативно, безопасно), а возврат идёт после BUFFERING_LEVEL завершённых
+    // render-fence, когда все кадры, отправленные до штампа, гарантированно дошли.
+    for (auto& [pool, res] : residency) {
+        auto it = res.pending_free.begin();
+        while (it != res.pending_free.end()) {
+            if (it->ready_at == 0) { it->ready_at = fences_done + BUFFERING_LEVEL; ++it; }
+            else if (fences_done >= it->ready_at) {
+                res.verts.Free(it->verts);
+                res.index.Free(it->index);
+                it = res.pending_free.erase(it);
+            }
+            else ++it;
+        }
+    }
 }
 
 void ModelManager::UploadModelVertexStream(BufferManager* bm, UploadTask* task, const GeometryPool* pool,
@@ -482,13 +547,26 @@ void ModelManager::UploadModelIndexBuffer(BufferManager* bm, UploadTask* task, c
     bm->UploadToTransferBuffer(task, ibytes, res.staging_indices.data());
 
     // Индексный апдейтер идёт последним (после ВСЕХ стрим-заливок ЭТОГО пула) — финализируем цикл.
-    // Счётчики двигаем только здесь, после реальной заливки: пока модели лежат в staging,
-    // CreateModel считает их смещения от total_* + размера staging (см. курсоры там).
-    const uint32_t vcount = safe_u32(res.staging_vertices.size() / pool->VertexSize());
-    res.total_vertices_count += vcount;
-    res.total_indices_count += safe_u32(res.staging_indices.size());
-    res.gpu_vertices_count += vcount;
-    res.gpu_indices_bytes += ibytes;
+    // База пачки теперь известна И залита, поэтому здесь и только здесь смещения сабмешей
+    // переводятся из стейджинг-относительных в абсолютные. Батч-дерево держит УКАЗАТЕЛИ на
+    // SubMeshData, так что правка на месте видна уже собранным батчам; а индиректы читают
+    // submesh->indexOffset в своём апдейтере, зарегистрированном ПОЗЖЕ этого — значит порядок фаз
+    // сам гарантирует, что они увидят уже абсолютные.
+    _EnsureBatchAllocation(pool);
+    for (const BatchEntry& e : res.batch) {
+        if (!e.model) continue;
+        for (SubMeshData& s : e.model->submeshes) {
+            s.vertexOffset += res.batch_verts.first;
+            s.indexOffset += res.batch_index.first;
+        }
+        // Место модели — чтобы вернуть его аллокатору при следующей перезагрузке.
+        e.model->vertex_range = { res.batch_verts.first + e.vbase, e.vcount };
+        e.model->index_range = { res.batch_index.first + e.ibase, e.icount };
+    }
+    res.batch.clear();
+    res.batch_allocated = false;
+    res.batch_verts = {};
+    res.batch_index = {};
 
     res.staging_vertices.clear();
     res.staging_vertices.shrink_to_fit();
