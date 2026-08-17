@@ -232,7 +232,7 @@ void Engine::InitDefaultResources()
 	// ВНИЗ (v=0 у геометрического ВЕРХА). Верхние вершины (y=1) получают v=0 → верх картинки сверху.
 	// Развёртка при этом левосторонняя относительно нормали — компенсируется глобально одним
 	// cross(T,N) в main_pass.vert (не флаг). НЕ возвращай v-up: это перевернёт ориентированные текстуры.
-	engine_context->CreateModel("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
+	engine_context->CreateModel<PosUVNormal>("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
 		v = {
 			{ 0,0,0,  0,1,  0,0,1,  1,0,0 },
 			{ 1,0,0,  1,1,  0,0,1,  1,0,0 },
@@ -242,7 +242,7 @@ void Engine::InitDefaultResources()
 		i = { 0, 1, 2, 0, 2, 3 };
 	}, AnchorShift::Keep, /*dont_save=*/true);
 
-	engine_context->CreateModel("sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
+	engine_context->CreateModel<PosUVNormal>("sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
 		const uint32_t stacks = 32;   // деления по широте
 		const uint32_t slices = 48;   // деления по долготе
 		const float R = 1.0f;
@@ -283,7 +283,7 @@ void Engine::InitDefaultResources()
 	// Единичный куб (центр 0, полу-размер 1), v-down канон — как quad/sphere. Движковый примитив,
 	// чтобы любая игра ссылалась по имени "cube" без своего кода генерации (был копией в mygame).
 	// 6 граней, CCW наружу; тангенс = направление U; хранимый v = 1-параметр (позиция по исходному uv).
-	engine_context->CreateModel("cube", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
+	engine_context->CreateModel<PosUVNormal>("cube", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
 		struct FaceDef { float c[3], U[3], V[3], N[3]; };
 		static const FaceDef faces[6] = {
 			{{ 1,-1, 1}, { 0, 0,-2}, { 0, 2, 0}, { 1, 0, 0}},  // +X

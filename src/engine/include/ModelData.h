@@ -2,17 +2,30 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <cstddef>
+#include <cstring>
 #include <SDL3/SDL_stdinc.h>
 #include <glm/glm.hpp>
 #include "RangeAllocator.h"
 
-struct PosUVNormal;   // полное определение — PositionStructure.h (алиасу ниже хватает fwd)
-
-// Генератор геометрии процедурной модели: заполняет переданные массивы вершин/индексов
-// как угодно — от руками записанного квада до математической поверхности. MM это безразлично.
+// Генератор геометрии процедурной модели: заполняет вершины БАЙТАМИ в раскладке своего пула и
+// индексы. Тип вершины движку не нужен нигде — заливка копирует count × VertexSize() пула, поэтому
+// раскладку задаёт ПУЛ, а не сигнатура; иначе процедурная модель была бы навсегда привязана к одной
+// структуре. Типизированную структуру генератор объявляет у себя и укладывает хелпером ниже.
 // Живёт здесь (а не в ModelManager.h), чтобы сигнатуры фасадов (EngineContext::CreateModel)
 // не тянули весь ModelManager.h ради одного алиаса.
-using ModelGeneratorFn = std::function<void(std::vector<PosUVNormal>&, std::vector<Uint32>&)>;
+using ModelGeneratorFn = std::function<void(std::vector<std::byte>&, std::vector<Uint32>&)>;
+
+// Укладка типизированных вершин в байтовый выход. Деталь ТИПИЗИРОВАННОЙ обёртки
+// (EngineContext::CreateModel<V>), а не то, что зовёт сам генератор: тот просто заполняет свой
+// вектор, как раньше, а стиранием типа занимается обёртка — ровно как ShaderProgram::BindPushConstants<T>.
+template<class V>
+inline void WriteVertices(std::vector<std::byte>& out, const std::vector<V>& src)
+{
+    const size_t base = out.size();
+    out.resize(base + src.size() * sizeof(V));
+    if (!src.empty()) std::memcpy(out.data() + base, src.data(), src.size() * sizeof(V));
+}
 
 struct SubMeshData {
     Uint32 vertexOffset = 0;

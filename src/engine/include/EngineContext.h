@@ -84,8 +84,26 @@ public:
 	ModelData* CreateModel(const ModelName& name, const char* model_path, const char* index_path,
 		AnchorShift anchor = AnchorShift::Keep, const std::string& pool_name = {});
 	// dont_save=true — движковая/кодовая процедурная модель (sphere/quad/cubes), в models.json не пишется.
+	// Форма со СТЁРТЫМ типом: вершины — байты в раскладке пула. Прямо её зовут редко, обычно берут
+	// типизированную обёртку ниже.
 	ModelData* CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep,
 		bool dont_save = false, const std::string& pool_name = {});
+
+	// Типизированная форма: V — структура вершины, которую заполняет генератор. Задаётся ЯВНО, как
+	// T у ShaderProgram::BindPushConstants<T>, и стирание типа делает обёртка — генератор просто
+	// заполняет свой вектор и про байты не знает. Раскладку по-прежнему определяет ПУЛ; V обязан ей
+	// соответствовать (грубое несовпадение ловит проверка кратности в ModelManager).
+	template<typename V, typename Fn>
+	ModelData* CreateModel(const ModelName& name, Fn&& generator, AnchorShift anchor = AnchorShift::Keep,
+		bool dont_save = false, const std::string& pool_name = {})
+	{
+		return CreateModel(name, ModelGeneratorFn(
+			[gen = std::forward<Fn>(generator)](std::vector<std::byte>& out, std::vector<Uint32>& indices) {
+				std::vector<V> verts;
+				gen(verts, indices);
+				WriteVertices(out, verts);
+			}), anchor, dont_save, pool_name);
+	}
 
 	void CreateGraphicsPipelines();
 	void CreateComputePipelines();

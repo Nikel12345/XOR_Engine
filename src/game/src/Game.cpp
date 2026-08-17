@@ -93,7 +93,7 @@ SDL_AppResult Game::MainInit()
 
     ModelData* sphere = (*ctx->GetModelManager())["sphere"];
 
-    debug_box_model = ctx->CreateModel("debug_box", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
+    debug_box_model = ctx->CreateModel<PosUVNormal>("debug_box", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
         auto P = [](float x, float y, float z) {
             PosUVNormal vert{}; vert.x = x; vert.y = y; vert.z = z; return vert;
         };
@@ -108,7 +108,7 @@ SDL_AppResult Game::MainInit()
         };
     });
 
-    debug_sphere_model = ctx->CreateModel("debug_sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
+    debug_sphere_model = ctx->CreateModel<PosUVNormal>("debug_sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
         const uint32_t stacks = 8, slices = 12;
         const float PI = 3.14159265358979323846f;
         for (uint32_t i = 0; i <= stacks; ++i) {
@@ -145,8 +145,7 @@ SDL_AppResult Game::MainInit()
         const float hx = 0.3f + 0.2f * float((ci * 7)  % 5);
         const float hy = 0.3f + 0.2f * float((ci * 3)  % 5);
         const float hz = 0.3f + 0.2f * float((ci * 11) % 5);
-        ctx->CreateModel("cube_" + std::to_string(ci),
-            [hx, hy, hz](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
+        ctx->CreateModel<PosUVNormal>("cube_" + std::to_string(ci), [hx, hy, hz](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
             const float H[3] = { hx, hy, hz };
             // 6 граней. c — угол-начало, U/V — рёбра (в долях полу-размеров, per-axis);
             // cross(U,V) = ВНЕШНЯЯ нормаль → CCW наружу (как у quad). p0=c, p1=c+U, p2=c+U+V, p3=c+V.
