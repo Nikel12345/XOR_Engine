@@ -237,6 +237,17 @@ ModelData* ModelManager::LoadModelFromFile(const std::string& name, const std::s
     return _LoadModelFile(ptr, _ResolvePool(pool), path_vert, path_ind, anchor);
 }
 
+void ModelManager::DeleteModel(const std::string& name)
+{
+    auto it = models_data.find(name);
+    if (it == models_data.end()) return;
+
+    // Место — в отложенный возврат: PendingFree держит КОПИИ Range, поэтому сам объект можно
+    // сносить прямо сейчас. Про висячий SubMeshData* в батчах — см. заголовок.
+    _ReleaseModelRanges(it->second.get());
+    models_data.erase(it);
+}
+
 size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries)
 {
     size_t loaded = 0;
@@ -247,9 +258,11 @@ size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries
         }
         // Пул — по имени из манифеста; пусто/промах → дефолтный (сцены без поля не мигрируются).
         GeometryPool* pool = GetPool(e.pool);
-        // LoadModelFromFile = merge-upsert: существующую перезагружает В ТОТ ЖЕ объект (указатель
-        // у энтити жив), новую создаёт. Битые файлы логирует сам _LoadModelFile.
-        if (LoadModelFromFile(e.name, e.vertex_path, e.index_path, e.anchor, pool)) ++loaded;
+        // Замена под тем же именем = снос + создание, как у текстур. Место старой геометрии уходит
+        // в отложенный возврат и достаётся новой уже в этом кадре (ReclaimRanges идёт раньше
+        // размещения). Битый файл при этом стирает прежнюю геометрию — та же цена, что у текстур.
+        if (models_data.count(e.name)) DeleteModel(e.name);
+        if (CreateModel(e.name, e.vertex_path, e.index_path, e.anchor, pool)) ++loaded;
     }
     return loaded;
 }
@@ -496,27 +509,22 @@ void ModelManager::_ReleaseModelRanges(ModelData* model)
     auto pit = pools.find(model->pool_name);
     if (pit == pools.end()) return;   // пул не резолвится — место вернуть некуда
 
-    _Residency(pit->second.get()).pending_free.push_back({ model->vertex_range, model->index_range, 0 });
+    _Residency(pit->second.get()).pending_free.push_back({ model->vertex_range, model->index_range });
     model->vertex_range = {};
     model->index_range = {};
 }
 
-void ModelManager::ReclaimRanges(uint64_t fences_done)
+void ModelManager::ReclaimRanges()
 {
-    // Тот же приём, что у PendingDestroy в BufferManager: штамп ставится при ПЕРВОМ визите (позже
-    // момента снятия — консервативно, безопасно), а возврат идёт после BUFFERING_LEVEL завершённых
-    // render-fence, когда все кадры, отправленные до штампа, гарантированно дошли.
+    // Массовое освобождение перед массовым размещением — та же двухфазность, что у атласов
+    // (PackAtlases: сначала _ReleasePendingRegions, потом раскладка новых). Обоснование отсутствия
+    // фенс-штампа — в заголовке.
     for (auto& [pool, res] : residency) {
-        auto it = res.pending_free.begin();
-        while (it != res.pending_free.end()) {
-            if (it->ready_at == 0) { it->ready_at = fences_done + BUFFERING_LEVEL; ++it; }
-            else if (fences_done >= it->ready_at) {
-                res.verts.Free(it->verts);
-                res.index.Free(it->index);
-                it = res.pending_free.erase(it);
-            }
-            else ++it;
+        for (const PendingFree& p : res.pending_free) {
+            res.verts.Free(p.verts);
+            res.index.Free(p.index);
         }
+        res.pending_free.clear();
     }
 }
 

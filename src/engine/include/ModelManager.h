@@ -68,10 +68,24 @@ public:
 	ModelData* LoadModelFromFile(const std::string& name, const std::string& path, const std::string& path_ind,
 	                             AnchorShift anchor = AnchorShift::Keep, GeometryPool* pool = nullptr);
 
-	// Merge-upsert моделей из манифеста сцены (см. SceneModelEntry): каждая запись через
-	// LoadModelFromFile (существующая перезагружается в тот же объект, новая создаётся). MM сам
-	// читает .bin — колбэк не нужен. Модели вне манифеста не трогаются (кодовая инфраструктура
-	// переживает загрузку). Возвращает число успешно загруженных.
+	// Снос модели: из словаря СРАЗУ, место в пуле — в отложенный возврат (одной пачкой в ближайшем
+	// ReclaimRanges). Дисциплина ровно как у TextureManager::DeleteTextureHandle — объект уходит
+	// немедленно, GPU-место возвращается позже и разом.
+	//
+	// ⚠️ Батчи держат СЫРОЙ SubMeshData* внутрь ModelData (ModelBatchData::submesh) — благодаря ему
+	// же финализатор заливки правит смещения на месте, и уже собранный батч это видит. Значит после
+	// сноса вызывающий ОБЯЗАН взвести пересборку батчей (BatchBuilder::SetDirtyBatches) раньше, чем
+	// IndirectDataModule::StoreIndirect снова пройдёт по дереву, иначе это чтение освобождённой
+	// памяти. LoadScene это уже делает; команда редактора обязана делать так же.
+	// Только sim-поток — как и всякая мутация моделей.
+	void DeleteModel(const std::string& name);
+
+	// Модели из манифеста сцены (см. SceneModelEntry): снос существующей + создание заново, ровно
+	// как у текстур (TextureManager::LoadSceneTextures). MM сам читает .bin — колбэк не нужен.
+	// Модели вне манифеста не трогаются (кодовая инфраструктура переживает загрузку).
+	// Ссылки на модель — ИМЕНА (ModelComponent, резолв в BatchBuilder), поэтому смена объекта
+	// никого не рвёт: сырой ModelData* держит только процедурная геометрия кода, а её в манифесте
+	// не бывает по определению. Возвращает число успешно загруженных.
 	size_t LoadSceneModels(const std::vector<SceneModelEntry>& entries);
 
 	// ── Заливка (зовут инструкции, зарегистрированные CreateGeometryPool) ───────────────────
@@ -94,10 +108,16 @@ public:
 	// Идёт ПОСЛЕДНЕЙ инструкцией своего пула: финализирует цикл дозагрузки.
 	void UploadModelIndexBuffer(BufferManager* bm, UploadTask* task, const GeometryPool* pool);
 
-	// Дренаж отложенных возвратов места. Диапазон снятой модели нельзя отдать под новую заливку
-	// сразу: слоты в полёте по нему ещё рисуют. Штамп тот же, что у PendingDestroy в BufferManager
-	// (ready_at = fences_done + BUFFERING_LEVEL), и зовётся рядом с TrashBuffers — на sim.
-	void ReclaimRanges(uint64_t fences_done);
+	// МАССОВОЕ освобождение: возвращает аллокатору всё место, накопленное сносами, одной пачкой.
+	// Зовётся раз в кадр в начале PrepareFunc — то есть ДО того, как _EnsureBatchAllocation выберет
+	// место под пачку этого кадра; только так перезагруженная модель садится в освободившееся от
+	// неё же место в ТОМ ЖЕ кадре (сначала освобождение, потом размещение).
+	//
+	// Штампа фенса тут нет НАМЕРЕННО — та же дисциплина, что у текстур
+	// (TextureManager::_ReleasePendingRegions): освобождается не GPU-ресурс, а РАЗМЕТКА. Худшее,
+	// что даёт переиспользование места под кадром в полёте, — один рваный кадр, который гейт эпох
+	// и так отбрасывает. Сам GPU-буфер живёт своей жизнью и сносится по фенсу (PendingDestroy).
+	void ReclaimRanges();
 
 	bool CheckDirty() const;
 	bool CheckDirtySpheres() const { return dirty_spheres; };
@@ -116,12 +136,11 @@ private:
 		uint32_t ibase = 0, icount = 0;   // элементы индексов
 	};
 
-	// Снятое место, ждущее возврата аллокатору. ready_at == 0 — штамп ещё не проставлен
-	// (ставится при первом дренаже, как у PendingDestroy).
+	// Снятое место, ждущее возврата аллокатору. Копии Range, а не указатели в ModelData —
+	// поэтому саму модель можно снести сразу, не дожидаясь возврата.
 	struct PendingFree {
 		RangeAllocator::Range verts;
 		RangeAllocator::Range index;
-		uint64_t ready_at = 0;
 	};
 
 	// Состояние дозагрузки ОДНОГО пула. Пер-пульное, а не менеджерское: у каждого пула своя
