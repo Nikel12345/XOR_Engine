@@ -37,15 +37,57 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 			ctx->DeleteEntity(ctx->GetObjectManager()->GetActiveSceneName(), e);
 		});
 
+	// Draw.visible живой энтити: поле объявлено в схеме с .Cmd(HideEntity), поэтому правка
+	// приходит общей нагрузкой полей. Запись флага И дельта в батчи — обе внутри HideEntity:
+	// прямая запись с UI-потока перестроить дерево не может.
 	im.RegisterCommand(CommandId::HideEntity,
 		[](EngineContext* ctx, const void* data)
 		{
-			// Данных-структуры нет — Entity и флаг упакованы прямо в указатель:
-			// младшие 32 бита — Entity, бит 32 — visible (см. UI_ImGui::InspectEntity).
-			const uintptr_t packed = reinterpret_cast<uintptr_t>(data);
-			const Entity e = static_cast<Entity>(packed & 0xFFFFFFFFu);
-			const bool visible = ((packed >> 32) & 0x1u) != 0u;
-			ctx->HideEntity(ctx->GetObjectManager()->GetActiveSceneName(), e, visible);
+			const FieldEditCmd* c = static_cast<const FieldEditCmd*>(data);
+			ctx->HideEntity(ctx->GetObjectManager()->GetActiveSceneName(), c->entity, c->num != 0.0);
+			delete c;
+		});
+
+	// Model.name живой энтити (.Cmd(SetEntityModel)). Смена модели меняет и состав батчей, и
+	// число сабмешей — значит длину списка материалов: material_index сабмеша адресует именно
+	// его, лишние записи не адресуются ничем, недостающие не отрисуются. Поэтому имя, длина и
+	// перевешивание в дереве — одной операцией здесь, а не тремя правками из UI.
+	im.RegisterCommand(CommandId::SetEntityModel,
+		[](EngineContext* ctx, const void* data)
+		{
+			const FieldEditCmd* c = static_cast<const FieldEditCmd*>(data);
+			ObjectManager* om = ctx->GetObjectManager();
+			SceneData* scene = om->GetActiveScene();
+			if (scene && om->Has<ModelComponent>(scene, c->entity)) {
+				om->GetComponent<ModelComponent>(scene, c->entity).name = c->str;
+				if (om->Has<MaterialComponent>(scene, c->entity)) {
+					const auto& models = ctx->GetModelManager()->GetModels();
+					auto it = models.find(c->str);   // через карту: Get* логировал бы промах
+					om->GetComponent<MaterialComponent>(scene, c->entity).names.resize(
+						it != models.end() ? it->second->submeshes.size() : 0);
+				}
+				ctx->GetBatchBuilder()->QueueUpdate(c->entity);
+			}
+			delete c;
+		});
+
+	// Один слот Material.names живой энтити (num = индекс сабмеша). Материал определяет sp и
+	// атлас, то есть ключи шейдерного и текстурного батчей — энтити переезжает в дереве.
+	im.RegisterCommand(CommandId::SetEntityMaterial,
+		[](EngineContext* ctx, const void* data)
+		{
+			const FieldEditCmd* c = static_cast<const FieldEditCmd*>(data);
+			ObjectManager* om = ctx->GetObjectManager();
+			SceneData* scene = om->GetActiveScene();
+			if (scene && om->Has<MaterialComponent>(scene, c->entity)) {
+				auto& names = om->GetComponent<MaterialComponent>(scene, c->entity).names;
+				const size_t k = static_cast<size_t>(c->num);
+				if (k < names.size()) {
+					names[k] = c->str;
+					ctx->GetBatchBuilder()->QueueUpdate(c->entity);
+				}
+			}
+			delete c;
 		});
 
 	// Правка трансформа гизмой. Продьюсер (UI) выделил SetTransformCmd на куче — здесь

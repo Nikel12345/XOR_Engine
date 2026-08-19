@@ -184,6 +184,28 @@ SDL_AppResult Game::MainInit()
         }, AnchorShift::Keep, /*dont_save=*/true);   // процедурные кубы игры — в models.json не идут
     }
 
+    // --- "two_quads": ОДИН меш из двух НЕСВЯЗАННЫХ островов (ни общих вершин, ни общих рёбер). ---
+    // Процедурный путь кладёт всю геометрию генератора в ОДИН сабмеш (ModelManager::CreateModel),
+    // так что это ровно «1 меш, 2 разъединённые части»: один индирект-дроу на оба квада.
+    // Индексы острова смещены на его vbase — нумерация идёт от вершины 0 МОДЕЛИ, не острова.
+    // Цена объединения: bounding sphere считается по всем вершинам сразу и накрывает зазор между
+    // квадами (каллинг от этого лишь консервативнее, мис-каллить не начнёт), а авто-бокс коллайдера
+    // по сабмешу станет монолитным — обе части в одном ящике.
+    ctx->CreateModel<PosUVNormal>("two_quads", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
+        const float cx[2] = { -1.0f, 1.0f };   // зазор 1.0 между квадами — разрыв виден глазом
+        for (int q = 0; q < 2; ++q) {
+            const uint32_t vbase = static_cast<uint32_t>(v.size());
+            // Квад 1×1 в плоскости XY, нормаль +Z, обход CCW наружу. v-down канон (как quad в
+            // Engine.cpp): v=0 у геометрического ВЕРХА, иначе текстура встанет вверх ногами.
+            v.push_back({ cx[q] - 0.5f, -0.5f, 0.0f,  0,1,  0,0,1,  1,0,0 });
+            v.push_back({ cx[q] + 0.5f, -0.5f, 0.0f,  1,1,  0,0,1,  1,0,0 });
+            v.push_back({ cx[q] + 0.5f,  0.5f, 0.0f,  1,0,  0,0,1,  1,0,0 });
+            v.push_back({ cx[q] - 0.5f,  0.5f, 0.0f,  0,0,  0,0,1,  1,0,0 });
+            i.insert(i.end(), { vbase + 0, vbase + 1, vbase + 2,
+                                vbase + 0, vbase + 2, vbase + 3 });
+        }
+    }, AnchorShift::Keep, /*dont_save=*/true);
+
     // Пере-привязку push-констант к sp движок зовёт сам В КОНЦЕ каждой загрузки (в т.ч.
     // UI-рантаймовой): sp из манифеста пересозданы голыми, а перенос по имени ломался бы
     // на переименовании. Регистрируем ДО первого LoadScene.
@@ -224,7 +246,7 @@ SDL_AppResult Game::MainInit()
     {
         MaterialManager* mm = ctx->GetMaterialManager();
     }
-	//ctx->ExecuteGenerators();   // CreateDebugColliders
+	ctx->ExecuteGenerators();   // CreateDebugColliders
     ChangeState(GameState::MAIN_MENU);
     return SDL_APP_CONTINUE;
 }

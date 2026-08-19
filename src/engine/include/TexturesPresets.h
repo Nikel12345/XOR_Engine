@@ -435,7 +435,10 @@ namespace TexturePresets {
         info.width = faceSize;
         info.height = faceSize;
         info.layer_count_or_depth = 6;
-        info.num_levels = 1;
+        // Мип-цепочка ОБЯЗАТЕЛЬНА: sampleEnv переводит roughness в мип-LOD (roughness·(levels-1)),
+        // при num_levels==1 LOD всегда 0 → отражение перестаёт размываться и roughness на металле
+        // виден только в лобе Blinn-Phong. Гранью gutter не грозит: w==atlas->width → padX/padY = 0.
+        info.num_levels = FullMipLevels(faceSize);
         info.sample_count = SDL_GPU_SAMPLECOUNT_1;
         info.props = 0;
         return info;

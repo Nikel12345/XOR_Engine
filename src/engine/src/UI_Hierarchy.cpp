@@ -9,8 +9,6 @@
 #include "InputCommands.h"
 #include "ComponentSerializer.h"
 #include "UI_ComponentEditor.h"
-#include "ModelManager.h"
-#include "MaterialManager.h"
 #include "UI_Yoga.h"
 #include <set>
 
@@ -18,9 +16,10 @@ using namespace ui;
 
 // «+ create entity» разворачивает форму: чекбоксы компонентов из реестра + поля выбранных.
 // Черновик — НАСТОЯЩАЯ энтити в сцене "_staging" (created в Engine-ините, никогда не активна:
-// дата-модули/батчи её не видят, UI-поток правит её монопольно). Поля рисует тот же
-// DrawComponentFields, что у инспектора. Create = SaveScene(staging) → CreateEntityCmd в
-// sim-поток (LoadScene тем же путём, что файл сцены, + фиксап ассетов + пересборка батчей).
+// дата-модули/батчи её не видят, UI-поток правит её монопольно). Компоненты рисует ui::
+// DrawEntityComponents — ТОТ ЖЕ вид, что у инспектора, только цель не живая (EditTarget).
+// Create = SaveScene(staging) → CreateEntityCmd в sim-поток (LoadScene тем же путём, что файл
+// сцены, + пересборка батчей).
 namespace {
     constexpr Entity kNoEntity = static_cast<Entity>(-1);
 
@@ -114,55 +113,9 @@ namespace {
                 Archetype& arch = *ait->second;
                 const size_t row = iit->second;
                 ImGui::Separator();
-                for (const ComponentSpec* s : CheckedSpecs()) {
-                    const bool is_model    = (s->name == "Model");
-                    const bool is_material = (s->name == "Material");
-                    if (s->fields.empty() && !is_material) continue;   // теги — править нечего
-                    if (!ImGui::CollapsingHeader(s->name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) continue;
-
-                    if (is_model) {
-                        // В форме имя модели ВЫБИРАЕТСЯ (в отличие от ReadOnly у живой энтити):
-                        // черновик ещё не в дереве батчей, менять состав нечему.
-                        ModelComponent& mdl = (*arch.get_array<ModelComponent>())[row];
-                        if (ImGui::BeginCombo("model", mdl.name.empty() ? "(none)" : mdl.name.c_str())) {
-                            if (ImGui::Selectable("(none)", mdl.name.empty())) mdl.name.clear();
-                            for (auto& [nm, m] : ctx->GetModelManager()->GetModels()) {
-                                if (!g_show_internal && IsInternalName(nm)) continue;
-                                if (ImGui::Selectable(nm.c_str(), nm == mdl.name)) mdl.name = nm;
-                            }
-                            ImGui::EndCombo();
-                        }
-                    }
-                    else if (is_material) {
-                        // Слоты ФИКСИРОВАНЫ моделью (как слот-роли текстур у материала фиксирует
-                        // required_slots его sp): слот = сабмеш, его material_index адресует этот
-                        // список — значит длина всегда равна числу сабмешей, добавить/убрать нечего.
-                        // Модель не выбрана или не найдена (процедурная, битое имя) → список пуст.
-                        MaterialComponent& mats = (*arch.get_array<MaterialComponent>())[row];
-                        size_t sub_count = 0;
-                        if (auto* mdl_arr = arch.get_array<ModelComponent>()) {
-                            const auto& models = ctx->GetModelManager()->GetModels();
-                            auto mit = models.find((*mdl_arr)[row].name);
-                            if (mit != models.end()) sub_count = mit->second->submeshes.size();
-                        }
-                        if (mats.names.size() != sub_count) mats.names.resize(sub_count);   // смена модели
-                        for (size_t k = 0; k < mats.names.size(); ++k) {
-                            std::string& cur = mats.names[k];
-                            char label[32];
-                            snprintf(label, sizeof(label), "submesh %zu", k);
-                            if (ImGui::BeginCombo(label, cur.empty() ? "(none)" : cur.c_str())) {
-                                for (auto& [nm, m] : ctx->GetMaterialManager()->GetMaterials()) {
-                                    if (!g_show_internal && IsInternalName(nm)) continue;
-                                    if (ImGui::Selectable(nm.c_str(), nm == cur)) cur = nm;
-                                }
-                                ImGui::EndCombo();
-                            }
-                        }
-                    }
-                    else {
-                        DrawComponentFields(*s, arch, row);
-                    }
-                }
+                // Тот же вид, что у инспектора: черновик — это НАСТОЯЩАЯ энтити, просто не живая
+                // (kNoEntity по умолчанию в EditTarget) → правки идут прямо в колонки.
+                DrawEntityComponents(EditTarget{ ctx }, arch, row);
             }
         }
 

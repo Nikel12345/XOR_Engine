@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "ComponentSerializer.h"
 #include <cfloat>
 #include <string>
@@ -72,6 +72,7 @@ void ComponentSpec::Save(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyj
 {
     if (custom_save) { custom_save(arch, count, doc, comp); return; }
     for (const FieldSpec& f : fields) {
+        if (!f.set_num && !f.set_str) continue;   // вычисляемое: колонки нет, Load её не примет
         yyjson_mut_val* col = yyjson_mut_obj_add_arr(doc, comp, f.key);
         switch (f.kind) {
         case FieldKind::F32:
@@ -98,6 +99,7 @@ void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count) const
     if (!comp) return;                                        // компонент без данных (тег) / форма создания
     const size_t base = arch.entities.size() - count;         // строки дописаны в хвост (инвариант в .h)
     for (const FieldSpec& f : fields) {
+        if (!f.set_num && !f.set_str) continue;               // вычисляемое: писать некуда
         yyjson_val* col = yyjson_obj_get(comp, f.key);
         if (!col) continue;                                   // нет колонки → дефолт
         size_t idx, max; yyjson_val* v;
@@ -132,8 +134,50 @@ void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count) const
     [](Archetype& a, size_t i) -> const std::string& { return (*a.get_array<T>())[i].path; }, \
     [](Archetype& a, size_t i, std::string v) { (*a.get_array<T>())[i].path = std::move(v); }
 
+//  ВЫЧИСЛЯЕМОЕ поле — только геттер, сеттер nullptr: величина, которой в данных нет, а есть
+//  расчёт по ним. Отдельного флага не нужно, всё выводится из отсутствия сеттера: Save её не
+//  пишет (иначе в файле окажется колонка, которую Load некуда положить), Load не читает,
+//  UI рисует нередактируемой. Выражение видит ряд компонента как `c` (у SoA — хранилище `c`
+//  и индекс `i`) и может звать методы, а не только читать члены.
+#define AOS_CALC(T, expr) \
+    [](Archetype& a, size_t i) -> double { auto& c = (*a.get_array<T>())[i]; return (double)(expr); }, \
+    nullptr
+#define SOA_CALC(S, expr) \
+    [](Archetype& a, size_t i) -> double { auto& c = a.get_array<S>()->data; return (double)(expr); }, \
+    nullptr
+//  Строковый вариант: производная величина не обязана быть числом (таблица, режим, диагностика).
+//  Он же — единственный способ показать то, чьё КОЛИЧЕСТВО лежит в данных: схема описывает тип
+//  компонента и переменного числа полей выразить не может, а геттер — обычный код, он может всё.
+#define AOS_CALC_STR(T, expr) \
+    [](Archetype& a, size_t i) -> const std::string& { \
+        auto& c = (*a.get_array<T>())[i]; \
+        thread_local std::string s; s = (expr); return s; }, \
+    nullptr
+
 //  Material — escape hatch: список имён на сущность не колонка одного поля,
 //  а зубчатый массив array-of-arrays. Схемой не выражается — рукописная пара.
+namespace {
+
+// Диагностика каскадов направленного света. Строк ровно cascade_count — то есть их ЧИСЛО
+// лежит в данных, а схема описывает тип компонента; поэтому это одно вычисляемое строковое
+// поле, а не MAX_CASCADES числовых, из которых часть описывала бы несуществующие каскады.
+std::string FormatCascades(const DirectLightComponent::DirectLightData& d)
+{
+    std::string out;
+    char line[96];
+    for (int c = 0; c < d.cascade_count; ++c) {
+        const float he = d.CascadeExtent(c);
+        const float dp = d.CascadeDepth(c);
+        snprintf(line, sizeof(line), "c%d: %.1f x %.1f, depth %.1f, texel %.4f",
+                 c, 2.0f * he, 2.0f * he, 2.0f * dp, (2.0f * he) / 1024.0f);
+        if (c) out += '\n';
+        out += line;
+    }
+    return out;
+}
+
+} // namespace
+
 namespace {
 
 void SaveMaterial(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
@@ -175,7 +219,7 @@ void RegisterBuiltinComponentSpecs()
     reg.Register({ .name = "Transform", .sig_type = typeid(Positions),
         .add_default = AddDefaultSoA<Positions, PositionProxy16>,
         .fields = {
-            FieldSpec::Num("x", F32, SOA_NUM(Positions, x)), FieldSpec::Num("y", F32, SOA_NUM(Positions, y)),
+            FieldSpec::Num("x", F32, SOA_NUM(Positions, x)).Group(FieldGroup::Mat4), FieldSpec::Num("y", F32, SOA_NUM(Positions, y)),
             FieldSpec::Num("z", F32, SOA_NUM(Positions, z)), FieldSpec::Num("w", F32, SOA_NUM(Positions, w)),
             FieldSpec::Num("a", F32, SOA_NUM(Positions, a)), FieldSpec::Num("b", F32, SOA_NUM(Positions, b)),
             FieldSpec::Num("c", F32, SOA_NUM(Positions, c)), FieldSpec::Num("d", F32, SOA_NUM(Positions, d)),
@@ -188,9 +232,10 @@ void RegisterBuiltinComponentSpecs()
     // ---- Model: имя ассета (оно же рантайм-ссылка — фиксапа после загрузки нет) ----
     reg.Register({ .name = "Model", .sig_type = typeid(ModelComponent),
         .add_default = AddDefaultAoS<ModelComponent>,
-        .fields = { FieldSpec::Str("name", AOS_STR(ModelComponent, name), AssetModel).ReadOnly() } });
-        // ReadOnly: смена модели меняет состав батчей (и число сабмешей → длину списка
-        // материалов), поэтому это будущая команда, а не запись строки из UI-потока
+        // Смена модели меняет состав батчей И число сабмешей (значит длину списка материалов) —
+        // одной записью строки с UI-потока не обойтись, отсюда .Cmd.
+        .fields = { FieldSpec::Str("name", AOS_STR(ModelComponent, name), AssetModel)
+                        .Cmd(CommandId::SetEntityModel) } });
 
     // ---- Material: зубчатый массив имён — рукописная пара (см. выше) ----
     reg.Register({ .name = "Material", .sig_type = typeid(MaterialComponent),
@@ -201,9 +246,9 @@ void RegisterBuiltinComponentSpecs()
     reg.Register({ .name = "Draw", .sig_type = typeid(DrawComponent),
         .add_default = AddDefaultAoS<DrawComponent>,
         .fields = {
-            // visible менять ТОЛЬКО через EngineContext::HideEntity (дельта в батчи): generic-рендерер
-            // его не рисует, правильный чекбокс-через-команду даёт ComponentExtraUI инспектора.
-            FieldSpec::Num("visible", Bool, AOS_NUM(DrawComponent, visible)).Hidden(),
+            // visible у ЖИВОЙ энтити менять ТОЛЬКО через EngineContext::HideEntity: прямая запись
+            // флага не поставит дельту в батчи. Отсюда .Cmd — рендерер сам отправит правку туда.
+            FieldSpec::Num("visible", Bool, AOS_NUM(DrawComponent, visible)).Cmd(CommandId::HideEntity),
             FieldSpec::Num("alpha",   F32,  AOS_NUM(DrawComponent, alpha), 0, 1, 0.01f),
             FieldSpec::Num("flags",   U32,  AOS_NUM(DrawComponent, flags)),
         } });
@@ -216,7 +261,7 @@ void RegisterBuiltinComponentSpecs()
     reg.Register({ .name = "LocalMatrix", .sig_type = typeid(LocalMatrices),
         .add_default = AddDefaultSoA<LocalMatrices, LocalMatrixProxy16>,
         .fields = {
-            FieldSpec::Num("m0",  F32, SOA_NUM(LocalMatrices, m0)),  FieldSpec::Num("m1",  F32, SOA_NUM(LocalMatrices, m1)),
+            FieldSpec::Num("m0",  F32, SOA_NUM(LocalMatrices, m0)).Group(FieldGroup::Mat4), FieldSpec::Num("m1",  F32, SOA_NUM(LocalMatrices, m1)),
             FieldSpec::Num("m2",  F32, SOA_NUM(LocalMatrices, m2)),  FieldSpec::Num("m3",  F32, SOA_NUM(LocalMatrices, m3)),
             FieldSpec::Num("m4",  F32, SOA_NUM(LocalMatrices, m4)),  FieldSpec::Num("m5",  F32, SOA_NUM(LocalMatrices, m5)),
             FieldSpec::Num("m6",  F32, SOA_NUM(LocalMatrices, m6)),  FieldSpec::Num("m7",  F32, SOA_NUM(LocalMatrices, m7)),
@@ -241,15 +286,17 @@ void RegisterBuiltinComponentSpecs()
         .add_default = AddDefaultAoS<SpotLightComponent>,
         .fields = {
             FieldSpec::Num("source_radius", F32, AOS_NUM(SpotLightComponent, light_data.source_radius), 0, FLT_MAX, 0.01f),
-            FieldSpec::Num("dir_x", F32, AOS_NUM(SpotLightComponent, light_data.dir_x), -1, 1, 0.01f),
+            FieldSpec::Num("dir_x", F32, AOS_NUM(SpotLightComponent, light_data.dir_x), -1, 1, 0.01f).Group(FieldGroup::Vec3, "dir"),
             FieldSpec::Num("dir_y", F32, AOS_NUM(SpotLightComponent, light_data.dir_y), -1, 1, 0.01f),
             FieldSpec::Num("dir_z", F32, AOS_NUM(SpotLightComponent, light_data.dir_z), -1, 1, 0.01f),
             FieldSpec::Num("source_angle", Angle, AOS_NUM(SpotLightComponent, light_data.source_angle), 1, 89),
-            FieldSpec::Num("r", F32, AOS_NUM(SpotLightComponent, light_data.r), 0, 1, 0.01f),
+            FieldSpec::Num("r", F32, AOS_NUM(SpotLightComponent, light_data.r), 0, 1, 0.01f).Group(FieldGroup::Color3, "color"),
             FieldSpec::Num("g", F32, AOS_NUM(SpotLightComponent, light_data.g), 0, 1, 0.01f),
             FieldSpec::Num("b", F32, AOS_NUM(SpotLightComponent, light_data.b), 0, 1, 0.01f),
             FieldSpec::Num("power", F32, AOS_NUM(SpotLightComponent, light_data.power), 0, FLT_MAX),
             FieldSpec::Num("attenuation", F32, AOS_NUM(SpotLightComponent, light_data.attenuation), 0, FLT_MAX),
+            FieldSpec::Num("max_distance", F32,
+                AOS_CALC(SpotLightComponent, (c.light_data.ResolveDistance(), c.light_data.GetMaxDistance()))),
         },
         .after_edit = [](Archetype& a, size_t i) { (*a.get_array<SpotLightComponent>())[i].needsUpdate = true; } });
 
@@ -257,25 +304,27 @@ void RegisterBuiltinComponentSpecs()
         .add_default = AddDefaultAoS<SphereLightComponent>,
         .fields = {
             FieldSpec::Num("source_radius", F32, AOS_NUM(SphereLightComponent, light_data.source_radius), 0, FLT_MAX, 0.01f),
-            FieldSpec::Num("r", F32, AOS_NUM(SphereLightComponent, light_data.r), 0, 1, 0.01f),
+            FieldSpec::Num("r", F32, AOS_NUM(SphereLightComponent, light_data.r), 0, 1, 0.01f).Group(FieldGroup::Color3, "color"),
             FieldSpec::Num("g", F32, AOS_NUM(SphereLightComponent, light_data.g), 0, 1, 0.01f),
             FieldSpec::Num("b", F32, AOS_NUM(SphereLightComponent, light_data.b), 0, 1, 0.01f),
             FieldSpec::Num("power", F32, AOS_NUM(SphereLightComponent, light_data.power), 0, FLT_MAX),
             FieldSpec::Num("attenuation", F32, AOS_NUM(SphereLightComponent, light_data.attenuation), 0, FLT_MAX),
+            FieldSpec::Num("max_distance", F32,
+                AOS_CALC(SphereLightComponent, (c.light_data.ResolveDistance(), c.light_data.GetMaxDistance()))),
         },
         .after_edit = [](Archetype& a, size_t i) { (*a.get_array<SphereLightComponent>())[i].needsUpdate = true; } });
 
     reg.Register({ .name = "DirectLight", .sig_type = typeid(DirectLightComponent),
         .add_default = AddDefaultAoS<DirectLightComponent>,
         .fields = {
-            FieldSpec::Num("dir_x", F32, AOS_NUM(DirectLightComponent, light_data.dir_x), -1, 1, 0.01f),
+            FieldSpec::Num("dir_x", F32, AOS_NUM(DirectLightComponent, light_data.dir_x), -1, 1, 0.01f).Group(FieldGroup::Vec3, "dir"),
             FieldSpec::Num("dir_y", F32, AOS_NUM(DirectLightComponent, light_data.dir_y), -1, 1, 0.01f),
             FieldSpec::Num("dir_z", F32, AOS_NUM(DirectLightComponent, light_data.dir_z), -1, 1, 0.01f),
-            FieldSpec::Num("r", F32, AOS_NUM(DirectLightComponent, light_data.r), 0, 1, 0.01f),
+            FieldSpec::Num("r", F32, AOS_NUM(DirectLightComponent, light_data.r), 0, 1, 0.01f).Group(FieldGroup::Color3, "color"),
             FieldSpec::Num("g", F32, AOS_NUM(DirectLightComponent, light_data.g), 0, 1, 0.01f),
             FieldSpec::Num("b", F32, AOS_NUM(DirectLightComponent, light_data.b), 0, 1, 0.01f),
             FieldSpec::Num("power", F32, AOS_NUM(DirectLightComponent, light_data.power), 0, FLT_MAX),
-            FieldSpec::Num("center_x", F32, AOS_NUM(DirectLightComponent, light_data.center_x)),
+            FieldSpec::Num("center_x", F32, AOS_NUM(DirectLightComponent, light_data.center_x)).Group(FieldGroup::Vec3, "center"),
             FieldSpec::Num("center_y", F32, AOS_NUM(DirectLightComponent, light_data.center_y)),
             FieldSpec::Num("center_z", F32, AOS_NUM(DirectLightComponent, light_data.center_z)),
             FieldSpec::Num("half_extent", F32, AOS_NUM(DirectLightComponent, light_data.half_extent), 0.01f, FLT_MAX, 0.1f),
@@ -284,6 +333,7 @@ void RegisterBuiltinComponentSpecs()
             FieldSpec::Num("cascade_count", U32, AOS_NUM(DirectLightComponent, light_data.cascade_count),
                            1, (float)DirectLightComponent::DirectLightData::MAX_CASCADES, 1).Clamp(),
             FieldSpec::Num("cascade_ratio", F32, AOS_NUM(DirectLightComponent, light_data.cascade_ratio), 1, FLT_MAX),
+            FieldSpec::Str("cascades", AOS_CALC_STR(DirectLightComponent, FormatCascades(c.light_data))),
         },
         .after_edit = [](Archetype& a, size_t i) { (*a.get_array<DirectLightComponent>())[i].needsUpdate = true; } });
 
@@ -300,7 +350,7 @@ void RegisterBuiltinComponentSpecs()
     reg.Register({ .name = "Velocity", .sig_type = typeid(Velocities),
         .add_default = AddDefaultSoA<Velocities, VelocityProxy>,
         .fields = {
-            FieldSpec::Num("x", F32, SOA_NUM(Velocities, x)),
+            FieldSpec::Num("x", F32, SOA_NUM(Velocities, x)).Group(FieldGroup::Vec3, "velocity"),
             FieldSpec::Num("y", F32, SOA_NUM(Velocities, y)),
             FieldSpec::Num("z", F32, SOA_NUM(Velocities, z)),
         } });
@@ -308,7 +358,7 @@ void RegisterBuiltinComponentSpecs()
     reg.Register({ .name = "Acceleration", .sig_type = typeid(Accelerations),
         .add_default = AddDefaultSoA<Accelerations, AccelerationProxy>,
         .fields = {
-            FieldSpec::Num("x", F32, SOA_NUM(Accelerations, x)),
+            FieldSpec::Num("x", F32, SOA_NUM(Accelerations, x)).Group(FieldGroup::Vec3, "acceleration"),
             FieldSpec::Num("y", F32, SOA_NUM(Accelerations, y)),
             FieldSpec::Num("z", F32, SOA_NUM(Accelerations, z)),
         } });

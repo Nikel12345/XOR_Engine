@@ -117,44 +117,9 @@ namespace {
     void BufferListEditor(const char* label, std::vector<BufferDataName>& list, const std::vector<BufferDataName>& avail);
     void RoleListEditor(std::vector<TextureSlotRole>& list);
 
-    // Пост-блоки компонентов после generic-полей: производные значения, которые схема не
-    // описывает (вычисления, не поля), и контролы-через-команду (visible). Рукописный
-    // остаток UI компонентов — всё остальное рисует DrawComponentFields по схеме.
-    void ComponentExtraUI(EngineContext* ctx, Entity e, const std::string& name, Archetype& arch, size_t row)
-    {
-        if (name == "Draw") {
-            // visible — ЧЕРЕЗ команду HideEntity (та же упаковка, что у рамок коллайдеров):
-            // прямая запись флага не перестроила бы батчи, поэтому в схеме поле ui_hidden.
-            bool visible = (*arch.get_array<DrawComponent>())[row].visible;
-            if (ImGui::Checkbox("visible", &visible)) {
-                const uintptr_t packed = static_cast<uintptr_t>(e)
-                    | (visible ? (static_cast<uintptr_t>(1) << 32) : static_cast<uintptr_t>(0));
-                ctx->GetInputManager()->PushCommand(CommandId::HideEntity, reinterpret_cast<const void*>(packed));
-            }
-        }
-        else if (name == "SpotLight") {
-            auto& d = (*arch.get_array<SpotLightComponent>())[row].light_data;
-            d.ResolveDistance();
-            ImGui::Text("Max Distance: %.3f", d.GetMaxDistance());
-        }
-        else if (name == "SphereLight") {
-            auto& d = (*arch.get_array<SphereLightComponent>())[row].light_data;
-            d.ResolveDistance();
-            ImGui::Text("Max Distance: %.3f", d.GetMaxDistance());
-        }
-        else if (name == "DirectLight") {
-            auto& d = (*arch.get_array<DirectLightComponent>())[row].light_data;
-            for (int c = 0; c < d.cascade_count; ++c) {
-                float he = d.CascadeExtent(c);
-                float dp = d.CascadeDepth(c);
-                ImGui::Text("  c%d: %.1f x %.1f, depth %.1f, texel %.4f",
-                    c, 2.0f * he, 2.0f * he, 2.0f * dp, (2.0f * he) / 1024.0f);
-            }
-        }
-    }
-
-    // Единый инспектор сущности: свет — такая же сущность, отдельного «типа выбора» нет. Показываем
-    // то, что есть по компонентам: удаление (всегда) + трансформ (если Positions) + коллайдеры + свет.
+    // Единый инспектор сущности: свет — такая же сущность, отдельного «типа выбора» нет. Шапка
+    // (удаление + перенос + рамки коллайдеров) — про ЭНТИТИ, а не про компонент; сами компоненты
+    // рисует общий с формой создания вид (ui::DrawEntityComponents).
     void InspectEntity(EngineContext* ctx, ObjectManager* om, SceneData* scene, Entity e)
     {
         ImGui::Text("Entity %u", static_cast<unsigned>(e));
@@ -167,13 +132,11 @@ namespace {
             return;
         }
 
-        // Трансформ — только если есть Positions.
-        if (om->Has<Positions>(scene, e)) {
-            SoAElement<Positions> el = om->GetComponent<Positions>(scene, e);
-            Positions& P = el.container(); size_t i = el.i();
-            float pos[3] = { P.w[i], P.d[i], P.h[i] };
-            if (ImGui::DragFloat3("Offset", pos, 0.05f)) { P.w[i] = pos[0]; P.d[i] = pos[1]; P.h[i] = pos[2]; }
-        }
+        auto arch_it = scene->entity_to_archetype.find(e);
+        auto idx_it  = scene->entity_to_index.find(e);
+        if (arch_it == scene->entity_to_archetype.end() || idx_it == scene->entity_to_index.end()) return;
+        Archetype& arch = *arch_it->second;
+        const size_t row = idx_it->second;
 
         // Debug-рамки коллайдеров (дети): галочка visible → HideEntity.
         auto kids_it = scene->children.find(e);
@@ -183,39 +146,13 @@ namespace {
                 if (!om->Has<DrawComponent>(scene, c)) continue;
                 bool visible = om->GetComponent<DrawComponent>(scene, c).visible;
                 char clabel[40]; snprintf(clabel, sizeof(clabel), "visible (collider %u)", static_cast<unsigned>(c));
-                if (ImGui::Checkbox(clabel, &visible)) {
-                    const uintptr_t packed = static_cast<uintptr_t>(c)
-                        | (visible ? (static_cast<uintptr_t>(1) << 32) : static_cast<uintptr_t>(0));
-                    ctx->GetInputManager()->PushCommand(CommandId::HideEntity, reinterpret_cast<const void*>(packed));
-                }
+                if (ImGui::Checkbox(clabel, &visible))   // то же поле схемы, только у ребёнка
+                    ctx->GetInputManager()->PushCommand(CommandId::HideEntity,
+                        new FieldEditCmd{ c, "Draw", "visible", visible ? 1.0 : 0.0, {} });
             }
         }
 
-        // Остальные компоненты — generic по схемам реестра: секция на компонент архетипа
-        // (порядок = порядок регистрации, детерминирован), поля рисует DrawComponentFields,
-        // производные значения — ComponentExtraUI. Новый зарегистрированный компонент
-        // появляется здесь сам, без правки инспектора.
-        auto arch_it = scene->entity_to_archetype.find(e);
-        auto idx_it  = scene->entity_to_index.find(e);
-        if (arch_it != scene->entity_to_archetype.end() && idx_it != scene->entity_to_index.end()) {
-            Archetype& arch = *arch_it->second;
-            const size_t row = idx_it->second;
-            std::string tags;   // теги без данных — одной строкой внизу, не секциями
-            for (const ComponentSpec& s : ComponentSpecRegistry::Get().All()) {
-                if (!arch.components.count(s.sig_type)) continue;
-                // Transform выше (Offset+гизмо), Material редактируется как ассет (вкладка Materials).
-                if (s.name == "Transform" || s.name == "Material") continue;
-                if (s.fields.empty() && !s.custom_save) {
-                    tags += tags.empty() ? s.name : ", " + s.name;
-                    continue;
-                }
-                if (ImGui::CollapsingHeader(s.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-                    DrawComponentFields(s, arch, row);
-                    ComponentExtraUI(ctx, e, s.name, arch, row);
-                }
-            }
-            if (!tags.empty()) { ImGui::Separator(); ImGui::Text("Tags: %s", tags.c_str()); }
-        }
+        DrawEntityComponents(EditTarget{ ctx, e }, arch, row);
     }
 
     void InspectMaterial(EngineContext* ctx, const std::string& matName, Material* mat)

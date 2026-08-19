@@ -3,6 +3,7 @@
         {
             "name": "skybox_vs",
             "path": "../engine/shaders_code/skybox/skybox.vert.hlsl",
+            "pool": "PosUVNorm",
             "pull": [
                 "POSITION"
             ]
@@ -10,6 +11,7 @@
         {
             "name": "main_pass_vs",
             "path": "../engine/shaders_code/main_pass/main_pass.vert.hlsl",
+            "pool": "PosUVNorm",
             "pull": [
                 "POSITION",
                 "UV",
@@ -20,6 +22,7 @@
         {
             "name": "shadow_vs",
             "path": "../engine/shaders_code/shadow_pass/shadow_pass.vert.hlsl",
+            "pool": "PosUVNorm",
             "pull": [
                 "POSITION"
             ]
@@ -27,6 +30,7 @@
         {
             "name": "debug_collider_vs",
             "path": "../engine/shaders_code/debug/debug_collider.vert.hlsl",
+            "pool": "PosUVNorm",
             "pull": [
                 "POSITION"
             ]
@@ -42,12 +46,12 @@
             "path": "../engine/shaders_code/skybox/skybox.frag.hlsl"
         },
         {
-            "name": "shadow_fs",
-            "path": "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl"
-        },
-        {
             "name": "transparent_surface_fs",
             "path": "../engine/shaders_code/transparent_pass/surface.hlsl"
+        },
+        {
+            "name": "shadow_fs",
+            "path": "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl"
         },
         {
             "name": "untextured_surface_fs",
@@ -60,20 +64,20 @@
     ],
     "compute_shaders": [
         {
-            "name": "bloom_up_cs",
-            "path": "../engine/shaders_code/comp/bloom_up.comp.hlsl"
-        },
-        {
             "name": "bloom_prefilter_cs",
             "path": "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl"
         },
         {
-            "name": "culling_clear_cs",
-            "path": "../engine/shaders_code/comp/culling_clear.comp.hlsl"
+            "name": "bloom_up_cs",
+            "path": "../engine/shaders_code/comp/bloom_up.comp.hlsl"
         },
         {
             "name": "bloom_down_cs",
             "path": "../engine/shaders_code/comp/bloom_down.comp.hlsl"
+        },
+        {
+            "name": "culling_clear_cs",
+            "path": "../engine/shaders_code/comp/culling_clear.comp.hlsl"
         },
         {
             "name": "bloom_composite_cs",
@@ -119,33 +123,6 @@
             }
         },
         {
-            "name": "sp_shadow",
-            "vs": "shadow_vs",
-            "fs": "shadow_fs",
-            "pass": "_DefaultShadowRenderPass",
-            "vs_buffers": [
-                "_DefaultTransformBuffer",
-                "DefaultOutPibBuffer",
-                "DefaultLightCameraBuffer"
-            ],
-            "fs_buffers": [],
-            "slots": [],
-            "spd": {
-                "cull_mode": 0,
-                "fill_mode": 0,
-                "primitive_type": 0,
-                "depth_test": true,
-                "depth_write": true,
-                "depth_compare": 2,
-                "stencil_test": false,
-                "color_blend": false,
-                "bias_enable": false,
-                "bias_constant": 0.0,
-                "bias_slope": 0.0,
-                "bias_clamp": 0.0
-            }
-        },
-        {
             "name": "sp_debug_collider",
             "vs": "debug_collider_vs",
             "fs": "debug_collider_fs",
@@ -163,6 +140,33 @@
                 "primitive_type": 2,
                 "depth_test": false,
                 "depth_write": false,
+                "depth_compare": 2,
+                "stencil_test": false,
+                "color_blend": false,
+                "bias_enable": false,
+                "bias_constant": 0.0,
+                "bias_slope": 0.0,
+                "bias_clamp": 0.0
+            }
+        },
+        {
+            "name": "sp_shadow",
+            "vs": "shadow_vs",
+            "fs": "shadow_fs",
+            "pass": "_DefaultShadowRenderPass",
+            "vs_buffers": [
+                "_DefaultTransformBuffer",
+                "DefaultOutPibBuffer",
+                "DefaultLightCameraBuffer"
+            ],
+            "fs_buffers": [],
+            "slots": [],
+            "spd": {
+                "cull_mode": 0,
+                "fill_mode": 0,
+                "primitive_type": 0,
+                "depth_test": true,
+                "depth_write": true,
                 "depth_compare": 2,
                 "stencil_test": false,
                 "color_blend": false,

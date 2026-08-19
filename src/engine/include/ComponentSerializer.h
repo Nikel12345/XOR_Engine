@@ -13,12 +13,31 @@
 #include <typeindex>
 #include <unordered_map>
 #include "BaseComponents.h"
+#include "CommandId.h"   // FieldSpec::cmd — чем уходит правка поля; сам InputManager сюда не тянется
 #include "yyjson.h"
 
 // Вид поля: json-тип колонки (real/uint/bool/str) и виджет UI (Drag/Checkbox/Input/комбо).
 // Asset* — строка-имя ассета: сериализуется как Str, UI рисует комбо из менеджера.
 // Angle — радианы в данных/файле (как F32), но слайдер UI в градусах; lo/hi у него — ГРАДУСЫ.
 enum class FieldKind : uint8_t { F32, U32, Bool, Str, AssetModel, Angle };
+
+// Сколько ПОДРЯД идущих полей рисуются ОДНИМ виджетом. Ставится на первое поле группы
+// (.Group(...)), остальные рендерер пропускает — они уже нарисованы.
+//
+// Раньше группы UI угадывал по именам колонок ("r","g","b" → ColorEdit3, "x","y","z" →
+// DragFloat3) и на Transform ошибался: там x,y,z — это m00,m01,m02 матрицы, а перенос лежит
+// в w,d,h. Догадок больше нет: что с чем рисуется, объявляет схема, UI только исполняет.
+enum class FieldGroup : uint8_t { None, Vec3, Color3, Mat4 };
+
+constexpr size_t FieldGroupSize(FieldGroup g)
+{
+    switch (g) {
+    case FieldGroup::Vec3:
+    case FieldGroup::Color3: return 3;
+    case FieldGroup::Mat4:   return 16;
+    default:                 return 1;
+    }
+}
 
 struct FieldSpec {
     const char* key = nullptr;     // json-ключ колонки И лейбл поля в инспекторе
@@ -42,9 +61,21 @@ struct FieldSpec {
     // инварианты движка: Parent.parent (обратный индекс scene->children), Model.name у ЖИВОЙ
     // энтити (смена модели = резолв указателя + пересборка батчей → команда).
     bool  ui_readonly = false;
-    // Поле generic-рендерер не рисует вовсе — у него отдельный правильный контрол в UI-слое
-    // (Draw.visible: чекбокс через команду HideEntity — см. ComponentExtraUI в инспекторе).
-    bool  ui_hidden = false;
+
+    // Правка поля у ЖИВОЙ энтити уходит ЭТОЙ командой в sim-поток ВМЕСТО записи в колонку.
+    // Для полей, чья запись меняет состояние движка мимо ECS: Draw.visible — состав дерева
+    // батчей, имя ассета — ключ батча. У staging-черновика (форма создания) команде некому
+    // адресоваться и он не в батчах — там всегда прямая запись, cmd игнорируется.
+    //
+    // ВАЖНО: значение возвращается в UI через кадр-другой (пишет sim), поэтому вешать cmd
+    // можно на ДИСКРЕТНЫЕ виджеты — чекбокс, комбо. На драг-слайдер нельзя: он перечитывает
+    // колонку каждый кадр и без локального кэша «отправленного» просто не сдвинется.
+    CommandId cmd = CommandId::None;
+
+    // Группа, которую открывает это поле (см. FieldGroup), и подпись её виджета.
+    // group_label == nullptr → подписью служит key самого поля.
+    FieldGroup  group = FieldGroup::None;
+    const char* group_label = nullptr;
 
     static FieldSpec Num(const char* key, FieldKind kind,
                          double (*get)(Archetype&, size_t), void (*set)(Archetype&, size_t, double),
@@ -53,10 +84,12 @@ struct FieldSpec {
                          const std::string& (*get)(Archetype&, size_t), void (*set)(Archetype&, size_t, std::string),
                          FieldKind kind = FieldKind::Str);
 
-    // Модификаторы-цепочки к фабрикам: FieldSpec::Num(...).Clamp() / .ReadOnly() / .Hidden()
+    // Модификаторы-цепочки к фабрикам: FieldSpec::Num(...).Clamp() / .ReadOnly() / .Cmd(id) / .Group(g)
     FieldSpec&& Clamp()    && { clamp_on_load = true; return std::move(*this); }
     FieldSpec&& ReadOnly() && { ui_readonly   = true; return std::move(*this); }
-    FieldSpec&& Hidden()   && { ui_hidden     = true; return std::move(*this); }
+    FieldSpec&& Cmd(CommandId id) && { cmd = id; return std::move(*this); }
+    FieldSpec&& Group(FieldGroup g, const char* label = nullptr) &&
+    { group = g; group_label = label; return std::move(*this); }
 };
 
 // Дефолтный ряд компонента. Истина о значениях по умолчанию — member-инициализаторы
