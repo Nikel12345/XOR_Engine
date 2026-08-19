@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "BatchBuilder.h"
 #include "RenderCommandData.h"
 #include "RenderSnapshot.h"
@@ -157,7 +157,7 @@ void BatchBuilder::QueueUpdate(Entity entity)
     entities_to_update.push_back(entity);
 }
 
-void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManager* pass_manager, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
     ModelManager* mdm, MaterialManager* mtm,
     const MaterialComponent& material_component, const ModelComponent& model_component) {
 
@@ -215,7 +215,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, TextureMan
                 sp = (sm && !fallback_shader_name.empty()) ? sm->GetShaderProgram(fallback_shader_name) : nullptr;
                 if (!sp) continue;
             }
-            RenderPassStep* rp = sp->associated_render_pass;
+            RenderPassStep* rp = pass_manager->GetRenderPassStep(sp->render_pass_name);
             if (!rp) continue;
 
             auto& shader_map = rp->shader_batches;
@@ -461,7 +461,7 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
             return;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
         const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
-        AddEntityToBatches(entity, pm, tm, sm, bm, mdm, mtm, material_component, model_component);
+        AddEntityToBatches(entity, pm, pass_manager, tm, sm, bm, mdm, mtm, material_component, model_component);
     }
     );
 
@@ -492,7 +492,7 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
             return;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
         const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
-        AddEntityToBatches(entity, pm, tm, sm, bm, mdm, mtm, material_component, model_component);
+        AddEntityToBatches(entity, pm, pass_manager, tm, sm, bm, mdm, mtm, material_component, model_component);
     };
 
     // Перевесить — ПЕРВЫМИ и в обход обоих гардов create-стороны: энтити жива, просто её место
@@ -629,7 +629,8 @@ uint32_t BatchBuilder::AskNumInstances(uint8_t slot) const
     return l ? l->num_instances : 0u;
 }
 
-void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm) {
+void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm,
+    BufferManager* bm, TextureManager* tm) {
     // Батчи ПЕРСИСТЕНТНЫ: пересобираем только при создании compute-программ (флаг), не каждый кадр.
     // Батч хранит СТАБИЛЬНЫЕ TextureAtlas* (не снапшот SDL_GPUTexture*), а резолв в актуальные
     // биндинги — в ComputePassStandardBody. Поэтому ресайз (пересоздание текстур) ребилда НЕ требует.
@@ -646,35 +647,66 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         rp->shader_batches.clear();
     }
 
-    auto& compute_programs = sm->GetComputeShaderPrograms();
-    for (auto& sp : compute_programs) {
-        SDL_GPUComputePipeline* pipe = pm->GetComputePipeline(sp.get());
+    for (auto& slot : sm->GetComputeShaderPrograms()) {
+        ComputeShaderProgram* sp = slot.program.get();
+        if (!sp) continue;
+        SDL_GPUComputePipeline* pipe = pm->GetComputePipeline(sp);
         if (!pipe) continue;
 
-        ComputePassStep* cmp = sp->associated_compute_pass;
+        // Пассы и препассы делят пространство имён (см. PassManager::CreateComputePass),
+        // поэтому «сначала пасс, иначе препасс» однозначно.
+        ComputePassStep* cmp = pass_manager->GetComputePassStep(sp->compute_pass_name);
+        if (!cmp) cmp = pass_manager->GetComputePrepassStep(sp->compute_pass_name);
         if (!cmp) continue;
+
+        // Резолв имён в указатели — ЗДЕСЬ (csp хранит только имена, чтобы сериализоваться).
+        // Промах = пропуск ресурса, а не пропуск программы: слоты бинда съедут, поэтому громко логируем.
+        auto resolve_buffers = [&](const std::vector<BufferDataName>& names, const char* kind) {
+            std::vector<BufferData*> out;
+            out.reserve(names.size());
+            for (BufferDataName n : names) {
+                BufferData* bd = bm ? bm->GetBufferData(n) : nullptr;
+                if (!bd) { SDL_Log("BuildComputeBatches '%s': %s storage buffer '%s' not found - binding slots will shift", slot.name.c_str(), kind, n); continue; }
+                out.push_back(bd);
+            }
+            return out;
+        };
+        auto resolve_atlases = [&](const std::vector<AtlasName>& names, const char* kind) {
+            std::vector<TextureAtlas*> out;
+            out.reserve(names.size());
+            for (const AtlasName& n : names) {
+                TextureAtlas* a = tm ? tm->GetTextureAtlas(n) : nullptr;
+                if (!a) { SDL_Log("BuildComputeBatches '%s': %s atlas '%s' not found - binding slots will shift", slot.name.c_str(), kind, n.c_str()); continue; }
+                out.push_back(a);
+            }
+            return out;
+        };
 
         ComputeShaderBatchData new_batch{};
         new_batch.pipeline = pipe;
-        new_batch.rw_storage_buffers = sp->rw_storage_buffers;
-        new_batch.ro_storage_buffers = sp->ro_storage_buffers;
+        new_batch.rw_storage_buffers = resolve_buffers(sp->rw_storage_buffer_names, "rw");
+        new_batch.ro_storage_buffers = resolve_buffers(sp->ro_storage_buffer_names, "ro");
 
-        // Копируем СТАБИЛЬНЫЕ атласы (без резолва SDL_GPUTexture* — он в ComputePassStandardBody).
+        // Атласы СТАБИЛЬНЫ (резолв SDL_GPUTexture* — позже, в ComputePassStandardBody): ресайз
+        // пересоздаёт текстуру внутри того же TextureAtlas, указатель на обёртку переживает его.
         new_batch.rw_storage_textures.reserve(sp->rw_storage_textures.size());
         for (const auto& d : sp->rw_storage_textures) {
-            new_batch.rw_storage_textures.push_back({ d.texture_atlas, d.mip_level, d.layer });
+            TextureAtlas* a = tm ? tm->GetTextureAtlas(d.texture_atlas) : nullptr;
+            if (!a) { SDL_Log("BuildComputeBatches '%s': rw atlas '%s' not found - binding slots will shift", slot.name.c_str(), d.texture_atlas.c_str()); continue; }
+            new_batch.rw_storage_textures.push_back({ a, d.mip_level, d.layer });
         }
-        new_batch.ro_storage_textures = sp->ro_storage_textures;   // vector<TextureAtlas*>
-        new_batch.texture_binding     = sp->texture_samplers;      // vector<TextureAtlas*>, даёт texture+sampler
+        new_batch.ro_storage_textures = resolve_atlases(sp->ro_storage_texture_names, "ro");
+        new_batch.texture_binding     = resolve_atlases(sp->texture_sampler_names, "sampler");   // даёт texture+sampler
         new_batch.push_func = sp->push_func;
         new_batch.dispatch_func = sp->dispatch_func;
 
         ComputeShaderData* csd = sm->GetComputeShader(sp->cs_name);   // cs по имени из реестра
+        if (!csd)
+            SDL_Log("BuildComputeBatches '%s': compute shader '%s' not found in registry - dispatch falls back to 1x1x1",
+                slot.name.c_str(), sp->cs_name.c_str());
         new_batch.threadcount_x = csd ? csd->threadcount_x : 1u;
         new_batch.threadcount_y = csd ? csd->threadcount_y : 1u;
         new_batch.threadcount_z = csd ? csd->threadcount_z : 1u;
-
-        new_batch.debug_name = sp->debug_name;
 
         cmp->shader_batches.push_back(std::move(new_batch));
     }

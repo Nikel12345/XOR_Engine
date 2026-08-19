@@ -614,7 +614,7 @@ namespace {
             if (sp) {
                 vsSel = sp->vs_name;
                 fsSel = sp->fs_name;
-                passSel = sp->associated_render_pass ? sp->associated_render_pass->debug_name : "";
+                passSel = sp->render_pass_name;
                 spdBuf = sp->spd;
                 vsBufSel = sp->vertex_shader_buffer_names;     // ссылки по имени — берём как есть
                 fsBufSel = sp->fragment_shader_buffer_names;

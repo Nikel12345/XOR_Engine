@@ -335,8 +335,7 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 			yyjson_mut_obj_add_strcpy(doc, e, "name", name.c_str());
 			yyjson_mut_obj_add_strcpy(doc, e, "vs",   sp->vs_name.c_str());
 			yyjson_mut_obj_add_strcpy(doc, e, "fs",   sp->fs_name.c_str());
-			yyjson_mut_obj_add_strcpy(doc, e, "pass",
-				sp->associated_render_pass ? sp->associated_render_pass->debug_name.c_str() : "");
+			yyjson_mut_obj_add_strcpy(doc, e, "pass", sp->render_pass_name.c_str());
 			yyjson_mut_val* vbuf = yyjson_mut_obj_add_arr(doc, e, "vs_buffers");
 			for (BufferDataName b : sp->vertex_shader_buffer_names) yyjson_mut_arr_add_strcpy(doc, vbuf, b);
 			yyjson_mut_val* fbuf = yyjson_mut_obj_add_arr(doc, e, "fs_buffers");
@@ -346,7 +345,34 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 			yyjson_mut_val* spd = yyjson_mut_obj_add_obj(doc, e, "spd");
 			WriteSpd(doc, spd, sp->spd);
 		}
-		yyjson_mut_obj_add_arr(doc, root, "compute_shader_programs");   // заготовка (см. выше)
+		// -- compute_shader_programs. ПОРЯДОК МАССИВА ЗНАЧИМ: он же порядок исполнения внутри
+		//    прохода (см. ShaderManager::CreateComputeShaderProgram). Пишем в порядке вектора —
+		//    ровно в том, в каком программы создавались. --
+		yyjson_mut_val* cspa = yyjson_mut_obj_add_arr(doc, root, "compute_shader_programs");
+		for (auto& [csp_name, csp] : sm->GetComputeShaderPrograms()) {
+			if (!csp || csp->dont_save) continue;
+			yyjson_mut_val* e = yyjson_mut_arr_add_obj(doc, cspa);
+			yyjson_mut_obj_add_strcpy(doc, e, "name", csp_name.c_str());
+			yyjson_mut_obj_add_strcpy(doc, e, "cs",   csp->cs_name.c_str());
+			yyjson_mut_obj_add_strcpy(doc, e, "pass", csp->compute_pass_name.c_str());
+			yyjson_mut_val* rwb = yyjson_mut_obj_add_arr(doc, e, "rw_buffers");
+			for (BufferDataName b : csp->rw_storage_buffer_names) yyjson_mut_arr_add_strcpy(doc, rwb, b);
+			yyjson_mut_val* rob = yyjson_mut_obj_add_arr(doc, e, "ro_buffers");
+			for (BufferDataName b : csp->ro_storage_buffer_names) yyjson_mut_arr_add_strcpy(doc, rob, b);
+			yyjson_mut_val* rwt = yyjson_mut_obj_add_arr(doc, e, "rw_textures");
+			for (const auto& t : csp->rw_storage_textures) {
+				yyjson_mut_val* te = yyjson_mut_arr_add_obj(doc, rwt);
+				yyjson_mut_obj_add_strcpy(doc, te, "atlas", t.texture_atlas.c_str());
+				yyjson_mut_obj_add_uint(doc, te, "mip",   t.mip_level);
+				yyjson_mut_obj_add_uint(doc, te, "layer", t.layer);
+				// Ручной тег (факт о теле шейдера, вывести нельзя) — см. ComputeRWTextureBindingParametr.
+				yyjson_mut_obj_add_bool(doc, te, "simultaneous", t.need_simultaneous);
+			}
+			yyjson_mut_val* rot = yyjson_mut_obj_add_arr(doc, e, "ro_textures");
+			for (const AtlasName& a : csp->ro_storage_texture_names) yyjson_mut_arr_add_strcpy(doc, rot, a.c_str());
+			yyjson_mut_val* smp = yyjson_mut_obj_add_arr(doc, e, "samplers");
+			for (const AtlasName& a : csp->texture_sampler_names) yyjson_mut_arr_add_strcpy(doc, smp, a.c_str());
+		}
 
 		yyjson_write_err werr;
 		const std::string path = dir + "/shaders.json";
@@ -544,7 +570,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 				yyjson_arr_foreach(arr, idx, max, e) {
 					const std::string name = JsonStr(e, "name");
 					if (name.empty()) continue;
-					RenderPassStep* pass = pass_manager->GetRenderPassStep(JsonStr(e, "pass"));
+					const std::string pass = JsonStr(e, "pass");
 					const std::string vs = JsonStr(e, "vs"), fs = JsonStr(e, "fs");
 
 					std::vector<BufferDataName> vbufs, fbufs;
@@ -579,11 +605,66 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 					sm->CreateShaderProgram(name, spd, pass, vs, vbufs, fs, fbufs, slots, buffer_manager);
 				}
 			}
-			// -- compute_shader_programs: заготовка. compute-sp держит указатели (буферы/атласы),
-			//    а не имена → пока не грузим, только сообщаем, что запись пропущена. --
+			// -- compute_shader_programs. НЕ merge-upsert, а СНЕСТИ И СОЗДАТЬ ЗАНОВО: порядок csp
+			//    внутри прохода = порядок создания и он значим (см. ShaderManager), а upsert по
+			//    имени переставил бы пересозданную программу в конец вектора. Сносим только
+			//    сериализуемые (dont_save == false) — кодовые/движковые переживают загрузку, как
+			//    и прочие ресурсы, которых нет в манифесте.
+			//    Пайплайны снимаем ДО сноса: кэш PipeManager ключуется по csp*, а объекты умрут.
+			//    Удаление отложенное (compute_trash + эпоха compute-дерева) — кадры in-flight целы.
+			{
+				for (auto& slot : sm->GetComputeShaderPrograms())
+					if (slot.program && !slot.program->dont_save)
+						pipe_manager->InvalidateComputePipeline(slot.program.get(), batch_builder->ComputeRebuildEpoch());
+				sm->ClearSavableComputeShaderPrograms();
+			}
 			if (yyjson_val* arr = yyjson_obj_get(root, "compute_shader_programs")) {
-				yyjson_arr_foreach(arr, idx, max, e)
-					SDL_Log("LoadScene: compute shader program '%s' not supported yet - skipped", JsonStr(e, "name"));
+				size_t made = 0, total = 0;
+				yyjson_arr_foreach(arr, idx, max, e) {
+					++total;
+					const std::string name = JsonStr(e, "name");
+					if (name.empty()) continue;
+
+					auto read_buffers = [&](const char* key) {
+						std::vector<BufferDataName> out;
+						if (yyjson_val* a = yyjson_obj_get(e, key)) {
+							size_t bi, bm2; yyjson_val* bv;
+							yyjson_arr_foreach(a, bi, bm2, bv)
+								if (const char* str = yyjson_get_str(bv))         // guard: null → не std::string(nullptr)
+									if (BufferDataName n = ResolveBufferName(buffer_manager, str)) out.push_back(n);
+						}
+						return out;
+					};
+					auto read_atlases = [&](const char* key) {
+						std::vector<AtlasName> out;
+						if (yyjson_val* a = yyjson_obj_get(e, key)) {
+							size_t bi, bm2; yyjson_val* bv;
+							yyjson_arr_foreach(a, bi, bm2, bv)
+								if (const char* str = yyjson_get_str(bv)) out.emplace_back(str);
+						}
+						return out;
+					};
+
+					std::vector<ComputeRWTextureBindingParametr> rw_tex;
+					if (yyjson_val* a = yyjson_obj_get(e, "rw_textures")) {
+						size_t bi, bm2; yyjson_val* bv;
+						yyjson_arr_foreach(a, bi, bm2, bv) {
+							ComputeRWTextureBindingParametr b{};
+							b.texture_atlas     = JsonStr(bv, "atlas");
+							b.mip_level         = safe_i_u32(JsonInt(bv, "mip", 0));
+							b.layer             = safe_i_u32(JsonInt(bv, "layer", 0));
+							b.need_simultaneous = JsonBool(bv, "simultaneous", false);
+							if (!b.texture_atlas.empty()) rw_tex.push_back(std::move(b));
+						}
+					}
+
+					if (sm->CreateComputeShaderProgram(name, JsonStr(e, "cs"),
+							read_buffers("rw_buffers"), read_buffers("ro_buffers"), std::move(rw_tex),
+							read_atlases("ro_textures"), read_atlases("samplers"),
+							JsonStr(e, "pass"), buffer_manager, texture_manager))
+						++made;
+				}
+				if (total) SDL_Log("LoadScene: %zu/%zu compute shader programs from manifest", made, total);
 			}
 			yyjson_doc_free(doc);
 

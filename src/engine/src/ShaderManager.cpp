@@ -1,8 +1,10 @@
 ﻿#include "PCH.h"
 #include "ShaderManager.h"
 #include "BufferManager.h"
+#include "TextureManager.h"
 #include "TextureData.h"
 #include <filesystem>
+#include <set>
 
 ShaderManager::ShaderManager(SDL_GPUDevice* device) {
     dev = device;
@@ -21,7 +23,7 @@ ShaderManager::ShaderManager(SDL_GPUDevice* device) {
 };
 
 ShaderProgram* ShaderManager::CreateShaderProgram(
-    const std::string& name, const ShaderProgramDescription& spd, RenderPassStep* associated_pass,
+    const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& render_pass_name,
     const std::string& vs_name, std::vector<BufferDataName> vertex_shader_buffer_names,
     const std::string& fs_name, std::vector<BufferDataName> fragment_shader_buffer_names,
     const std::vector<TextureSlotRole>& texture_slots, BufferManager* bm)
@@ -48,7 +50,8 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
 		program->required_slots.push_back(role);
 	}
 	program->spd = spd;
-    program->associated_render_pass = associated_pass;
+    program->render_pass_name = render_pass_name;
+    program->debug_name = name;   // только для логов (см. ShaderProgram::debug_name)
 
     // ── Сбор usage-флагов ──
     // Storage-буферы обеих стадий биндятся через SDL_BindGPUVertex/FragmentStorageBuffers, а те
@@ -80,30 +83,32 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
 }
 
 ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
-    std::vector<BufferData*> rw_storage_buffers, std::vector<BufferData*> ro_storage_buffers,
-    std::vector<ComputeShaderProgram::ComputeRWTextureBinding> rw_storage_textures,
-    std::vector<TextureAtlas*> ro_storage_textures,
-    std::vector<TextureAtlas*> texture_samplers,
-    ComputePassStep* associated_compute_pass)
+    std::vector<BufferDataName> rw_storage_buffers, std::vector<BufferDataName> ro_storage_buffers,
+    std::vector<ComputeRWTextureBindingParametr> rw_storage_textures,
+    std::vector<AtlasName> ro_storage_textures,
+    std::vector<AtlasName> texture_samplers,
+    const ComputePassName& compute_pass_name,
+    BufferManager* bm, TextureManager* tm, bool dont_save)
 {
-    auto it = compute_shader_programs_by_name.find(name);
-    if (it != compute_shader_programs_by_name.end()) {
+    if (ComputeShaderProgram* existing = GetComputeShaderProgram(name)) {
         SDL_Log("Compute shader program '%s' already exists, returning existing.", name.c_str());
-        return it->second;
+        return existing;
     }
 
     auto result = std::make_unique<ComputeShaderProgram>();
     result->cs_name = cs_name;   // ссылка по имени на реестр compute_shaders
-    result->associated_compute_pass = associated_compute_pass;
+    result->compute_pass_name = compute_pass_name;
+    result->debug_name = name;   // только для логов (см. ComputeShaderProgram::debug_name)
 
-    result->ro_storage_buffers = std::move(ro_storage_buffers);
-    result->rw_storage_buffers = std::move(rw_storage_buffers);
+    result->dont_save = dont_save;
+
+    result->ro_storage_buffer_names = std::move(ro_storage_buffers);
+    result->rw_storage_buffer_names = std::move(rw_storage_buffers);
     result->rw_storage_textures = std::move(rw_storage_textures);
 
-    result->ro_storage_textures = std::move(ro_storage_textures);
-    result->texture_samplers = std::move(texture_samplers);
+    result->ro_storage_texture_names = std::move(ro_storage_textures);
+    result->texture_sampler_names = std::move(texture_samplers);
 
-    result->debug_name = name;
 
     // ── Сбор usage-флагов ──
     // Роль задаёт СПИСОК, в котором ресурс объявлен, — каждый SDL_Bind* проверяет свой бит:
@@ -116,21 +121,38 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     // need_simultaneous на самом rw-биндинге: это факт о теле шейдера (читает ли он соседние
     // тексели, пока другие потоки их пишут), а bloom_up и bloom_composite регистрируются
     // одинаково. См. ComputeRWTextureBindingParametr::need_simultaneous.
-    for (BufferData* bd : result->ro_storage_buffers)
-        if (bd) bd->usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
-    for (BufferData* bd : result->rw_storage_buffers)
-        if (bd) bd->usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+    // Резолв ТОЛЬКО ради флагов (сама программа хранит имена). Промах здесь не отменяет создание:
+    // ресурс может появиться позже — тогда батч его и найдёт, а вот флаг уже опоздает, см.
+    // warnings.md («usage-флаг после бейка»).
+    auto buf = [bm](BufferDataName n) -> BufferData* {
+        if (!bm) return nullptr;
+        BufferData* bd = bm->GetBufferData(n);
+        if (!bd) SDL_Log("ShaderManager::CreateComputeShaderProgram: storage buffer '%s' not found - usage flag not declared", n);
+        return bd;
+    };
+    auto atlas = [tm](const AtlasName& n) -> TextureAtlas* {
+        if (!tm) return nullptr;
+        TextureAtlas* a = tm->GetTextureAtlas(n);
+        if (!a) SDL_Log("ShaderManager::CreateComputeShaderProgram: texture atlas '%s' not found - usage flag not declared", n.c_str());
+        return a;
+    };
 
-    for (TextureAtlas* a : result->ro_storage_textures)
-        if (a) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
-    for (const ComputeShaderProgram::ComputeRWTextureBinding& b : result->rw_storage_textures) {
-        if (!b.texture_atlas) continue;
-        b.texture_atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+    for (BufferDataName n : result->ro_storage_buffer_names)
+        if (BufferData* bd = buf(n)) bd->usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+    for (BufferDataName n : result->rw_storage_buffer_names)
+        if (BufferData* bd = buf(n)) bd->usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+
+    for (const AtlasName& n : result->ro_storage_texture_names)
+        if (TextureAtlas* a = atlas(n)) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
+    for (const ComputeRWTextureBindingParametr& b : result->rw_storage_textures) {
+        TextureAtlas* a = atlas(b.texture_atlas);
+        if (!a) continue;
+        a->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
         if (b.need_simultaneous)
-            b.texture_atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE;
+            a->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE;
     }
-    for (TextureAtlas* a : result->texture_samplers)
-        if (a) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    for (const AtlasName& n : result->texture_sampler_names)
+        if (TextureAtlas* a = atlas(n)) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
     // См. CreateShaderProgram: зарегистрированные push/dispatch вешаются сразу.
     if (auto pit = compute_push_instructions_.find(name); pit != compute_push_instructions_.end())
@@ -139,8 +161,7 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
         result->dispatch_func = dit->second;
 
     ComputeShaderProgram* ptr = result.get();
-    compute_shader_programs.push_back(std::move(result));
-    compute_shader_programs_by_name.emplace(name, ptr);
+    compute_shader_programs.push_back({ name, std::move(result) });
 
     dirty_compute_pipelines = true;
     dirty_compute_batches = true;
@@ -162,15 +183,13 @@ void ShaderManager::CreatePushFunc(const std::string& sp_name, PushFunc fn)
 void ShaderManager::CreateComputePushFunc(const std::string& csp_name, PushFunc fn)
 {
     auto& slot = compute_push_instructions_[csp_name] = std::move(fn);
-    if (auto it = compute_shader_programs_by_name.find(csp_name); it != compute_shader_programs_by_name.end())
-        it->second->push_func = slot;
+    if (ComputeShaderProgram* csp = GetComputeShaderProgram(csp_name)) csp->push_func = slot;
 }
 
 void ShaderManager::CreateDispatchFunc(const std::string& csp_name, DispatchFunc fn)
 {
     auto& slot = dispatch_instructions_[csp_name] = std::move(fn);
-    if (auto it = compute_shader_programs_by_name.find(csp_name); it != compute_shader_programs_by_name.end())
-        it->second->dispatch_func = slot;
+    if (ComputeShaderProgram* csp = GetComputeShaderProgram(csp_name)) csp->dispatch_func = slot;
 }
 
 void ShaderManager::BindShaderFunctions()
@@ -178,11 +197,13 @@ void ShaderManager::BindShaderFunctions()
     // Осиротевшие записи — не ошибка: сцена могла просто не привезти свою программу (у каждого
     // фрактала свой sp, а функции обоих зарегистрированы разом в Init). Но это ровно тот случай,
     // который разовый колбэк с if (sp) съедал молча, — поэтому он идёт в лог одной строкой.
-    std::string orphans;
+    // set, а не строка: push и dispatch — РАЗНЫЕ реестры, и csp без программы попадала в отчёт
+    // дважды, что читалось как удвоение списка.
+    std::set<std::string> orphans;
     auto bind = [&orphans](auto& instructions, auto&& lookup, auto&& assign) {
         for (auto& [name, fn] : instructions) {
             if (auto* prog = lookup(name)) assign(prog, fn);
-            else { if (!orphans.empty()) orphans += ", "; orphans += name; }
+            else orphans.insert(name);
         }
     };
 
@@ -193,17 +214,31 @@ void ShaderManager::BindShaderFunctions()
         },
         [](ShaderProgram* sp, const PushFunc& fn) { sp->push_func = fn; });
 
-    auto find_csp = [this](const std::string& n) -> ComputeShaderProgram* {
-        auto it = compute_shader_programs_by_name.find(n);
-        return it != compute_shader_programs_by_name.end() ? it->second : nullptr;
-    };
+    auto find_csp = [this](const std::string& n) { return GetComputeShaderProgram(n); };
     bind(compute_push_instructions_, find_csp,
         [](ComputeShaderProgram* csp, const PushFunc& fn) { csp->push_func = fn; });
     bind(dispatch_instructions_, find_csp,
         [](ComputeShaderProgram* csp, const DispatchFunc& fn) { csp->dispatch_func = fn; });
 
-    if (!orphans.empty())
-        SDL_Log("ShaderManager: push/dispatch funcs without a program: %s", orphans.c_str());
+    if (!orphans.empty()) {
+        std::string list;
+        for (const std::string& n : orphans) { if (!list.empty()) list += ", "; list += n; }
+        SDL_Log("ShaderManager: push/dispatch funcs without a program: %s", list.c_str());
+    }
+}
+
+void ShaderManager::ClearSavableComputeShaderPrograms()
+{
+    const size_t before = compute_shader_programs.size();
+    // Порядок уцелевших сохраняем — он же порядок их исполнения.
+    std::erase_if(compute_shader_programs,
+        [](const ComputeProgramSlot& s) { return !s.program || !s.program->dont_save; });
+    const size_t removed = before - compute_shader_programs.size();
+    if (removed) {
+        dirty_compute_pipelines = true;
+        dirty_compute_batches = true;
+        SDL_Log("ShaderManager: %zu savable compute shader programs cleared", removed);
+    }
 }
 
 ShaderProgram* ShaderManager::GetShaderProgram(const std::string& name)
@@ -247,12 +282,12 @@ bool ShaderManager::DeleteComputeShader(const std::string& name)
     return true;
 }
 
+// Линейный поиск по единственному реестру: программ десятки, а все вызовы — холодные (создание,
+// регистрация код-байндингов, редактор). Отдельный индекс по имени был бы вторым источником истины.
 ComputeShaderProgram* ShaderManager::GetComputeShaderProgram(const std::string& name)
 {
-    auto it = compute_shader_programs_by_name.find(name);
-    if (it != compute_shader_programs_by_name.end())
-        return it->second;
-    SDL_Log("Compute shader data '%s' not found", name.c_str());
+    for (auto& slot : compute_shader_programs)
+        if (slot.name == name) return slot.program.get();
 	return nullptr;
 }
 

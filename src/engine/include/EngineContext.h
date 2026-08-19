@@ -174,7 +174,7 @@ public:
 		std::initializer_list<ComputeRWTextureBindingParametr> rw_storage_textures,   // топ-левел тип (ShaderTypes.h)
 		std::initializer_list<AtlasName> ro_storage_textures,
 		std::initializer_list<AtlasName> texture_samplers,
-		const ComputePassName& associated_compute_pass);
+		const ComputePassName& associated_compute_pass, bool dont_save = false);
 
 	BufferManager* GetBufferManager() const { return buffer_manager; }
 	TextureManager* GetTextureManager() const { return texture_manager; }

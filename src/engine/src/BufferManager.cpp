@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "BufferManager.h"
 #include "CameraStruct.h"
 #include "LightStruct.h"
@@ -22,21 +22,20 @@ BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_ma
     CreateBufferData(DEFAULT_OUT_PIB_BUFFER, BASE_TB_SIZE / 16 / 10, BufferDataType::Dynamic);
     CreateBufferData(DEFAULT_ENTITY_TO_CMD_BUFFER, BASE_TB_SIZE / 16 / 10, BufferDataType::Dynamic);
 
-    // ── UI-текст (концепт): 4 буфера разреженного текст-канала (см. UI_DataModule).
-    // Только РЕГИСТРАЦИЯ обёрток (имена+размеры) под будущий UI-проход. usage НЕ трогаем —
-    // буфер ещё не участвует ни в одной шейдер-программе, значит флаги ему не нужны и GPU-буфер
-    // сейчас не создаётся (BakePending пропустит с логом «нет деклараций» — это честный сигнал
-    // «потребителя пока нет»). Флаги придут из декларации UI-SP, когда она появится.
-    // NB: BakePending одноразовый (очищает pending_bakes), поэтому при реальной проводке буферы
-    // надо будет либо создавать РЯДОМ с UI-SP (декларация в том же кадре запросит их бейк), либо
-    // повторно поставить в очередь — иначе поздняя декларация usage сама по себе не пере-бейкнет.
+    // ── UI-текст: 4 буфера разреженного текст-канала (см. UI_DataModule).
+    // Только РЕГИСТРАЦИЯ обёрток (имена+размеры). usage НЕ трогаем: флаги приходят из декларации
+    // потребителя — программы "UI" (Engine::InitDefaultShaders), она называет эти буферы
+    // фрагментными. Незабейканный буфер ЖДЁТ в pending_bakes сколько угодно кадров: BakePending
+    // пропускает usage==0 и НЕ выкидывает из очереди, так что поздняя декларация его оживит.
+    // ОБРАТНОЕ НЕВЕРНО: уже созданный буфер из очереди удаляется, и usage, добавленный после
+    // этого, не применится молча — см. WARNINGS.md.
     CreateBufferData(UI_TEXT_BITS_BUFFER,     sizeof(uint32_t) * 64,      BufferDataType::Dynamic);
     CreateBufferData(UI_TEXT_WORDBASE_BUFFER, sizeof(uint32_t) * 64,      BufferDataType::Dynamic);
     CreateBufferData(UI_TEXT_INDEX_BUFFER,    sizeof(uint32_t) * 2 * 256, BufferDataType::Dynamic);
     CreateBufferData(UI_TEXT_BUFFER,          sizeof(uint32_t) * 4096,    BufferDataType::Dynamic);
 
-    // GlyphUVL шрифта (FontManager::StoreGlyphUVL). Тоже только обёртка без usage — флаг придёт
-    // от декларации UI-SP, когда она появится (как остальные UI-буферы).
+    // GlyphUVL шрифта (FontManager::StoreGlyphUVL). Тоже обёртка без usage — флаг приходит от
+    // декларации программы "UI" (как остальные UI-буферы).
     CreateBufferData(UI_FONT_UVL_BUFFER, sizeof(uint32_t) * 4 * 256, BufferDataType::Dynamic);
 }
 

@@ -99,29 +99,36 @@ struct ShaderProgram {
         };
     }
 	ShaderProgramDescription spd;   // ПО ЗНАЧЕНИЮ: параметры пайплайна живут в самом sp (не в словаре)
-    RenderPassStep* associated_render_pass = nullptr;
+    // Проход — ССЫЛКА ПО ИМЕНИ, как vs_name/fs_name и буферы. Резолв в RenderPassStep* делают
+    // потребители (PipeManager на сборке пайплайна, BatchBuilder на сборке батча), получая
+    // PassManager параметром. Указатель здесь держать нельзя: имя обязано пережить сериализацию,
+    // а восстанавливать его из RenderPassStep::debug_name запрещено — тот только для UI.
+    RenderPassName render_pass_name;
+
+    // ИНФОРМАЦИОННОЕ поле: только для логов, чтобы код, которому досталась голая программа
+    // (PipeManager получает указатель без доступа к реестру), мог назвать её в сообщении.
+    // Ключом реестра НЕ является и в логике не участвует — см. правило про debug_name в CLAUDE.md.
+    std::string debug_name;
     bool dont_save = false;   // движковый дефолт (Lit/Skybox/_Fallback/…) — в shaders.json не пишется
 
 };
 
 
 struct ComputeShaderProgram {
-    struct ComputeRWTextureBinding {
-        TextureAtlas* texture_atlas = nullptr;
-        Uint32 mip_level = 0;
-        Uint32 layer = 0;
-        bool need_simultaneous = false;   // см. ComputeRWTextureBindingParametr::need_simultaneous
-    };
-    // Форма создания «по именам» — теперь топ-левел тип в ShaderTypes.h (сигнатуры фасадов
-    // не требуют полного ComputeShaderProgram); алиас сохраняет старое вложенное написание.
+    // ВСЕ ресурсы — ССЫЛКИ ПО ИМЕНИ, как vs_name/fs_name у ShaderProgram. Резолв в указатели
+    // идёт на сборке батча (BatchBuilder::BuildComputeBatches), а не при создании: указатель
+    // нельзя записать в манифест, а csp обязана сериализоваться так же, как render-sp.
+    // Форма создания «по именам» (топ-левел тип в ShaderTypes.h) совпала с формой хранения —
+    // отдельного ComputeRWTextureBinding больше нет, оба прежних написания остались алиасами.
     using ComputeRWTextureBindingParametr = ::ComputeRWTextureBindingParametr;
+    using ComputeRWTextureBinding         = ::ComputeRWTextureBindingParametr;
+
     std::string cs_name;   // ссылка по имени на ComputeShaderData в реестре ShaderManager (см. ShaderProgram)
-    std::vector<BufferData*> rw_storage_buffers;
-    std::vector<BufferData*> ro_storage_buffers;
-    std::vector<ComputeRWTextureBinding> rw_storage_textures;
-    std::vector<TextureAtlas*> ro_storage_textures;
-    std::vector<TextureAtlas*> texture_samplers;
-    std::string debug_name;
+    std::vector<BufferDataName> rw_storage_buffer_names;
+    std::vector<BufferDataName> ro_storage_buffer_names;
+    std::vector<ComputeRWTextureBindingParametr> rw_storage_textures;
+    std::vector<AtlasName> ro_storage_texture_names;
+    std::vector<AtlasName> texture_sampler_names;
 
     std::function<void(const PushConstantBinder&, const void*)> push_func = nullptr;
     template<typename T, typename Fn>
@@ -139,6 +146,21 @@ struct ComputeShaderProgram {
         };
     }
 
-    ComputePassStep* associated_compute_pass = nullptr;
-    BufferData* indirect_buffer = nullptr;
+    ComputePassName compute_pass_name;   // ссылка по имени, см. ShaderProgram::render_pass_name
+
+    bool dont_save = false;   // см. ShaderProgram::dont_save
+
+    // ИНФОРМАЦИОННОЕ поле: только для логов, чтобы код, которому досталась голая программа
+    // (PipeManager получает указатель без доступа к реестру), мог назвать её в сообщении.
+    // Ключом реестра НЕ является и в логике не участвует — см. правило про debug_name в CLAUDE.md.
+    std::string debug_name;
+};
+
+// Ячейка реестра compute-программ. Имя лежит ЗДЕСЬ, а не в самой программе: у ShaderProgram его
+// тоже нет — там реестр это словарь, и обход сам отдаёт ключ. У compute-программ реестр обязан
+// быть УПОРЯДОЧЕННЫМ (порядок = порядок исполнения внутри прохода), поэтому вместо словаря вектор
+// ячеек: обход так же отдаёт пару «имя + программа», и объекту незачем помнить собственный ключ.
+struct ComputeProgramSlot {
+    std::string name;
+    std::unique_ptr<ComputeShaderProgram> program;
 };

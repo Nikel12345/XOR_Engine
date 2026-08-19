@@ -31,10 +31,10 @@ ShaderProgram* GpuTaskContext::CreateShaderProgram(const std::string& name, cons
 	// в BufferData* отложен на сборку батча (BatchBuilder). Существование здесь не проверяем.
 	std::vector<BufferDataName> vertex_buffer_names(vertex_shader_buffers.begin(), vertex_shader_buffers.end());
 	std::vector<BufferDataName> fragment_buffer_names(fragment_shader_buffers.begin(), fragment_shader_buffers.end());
-	RenderPassStep* associated_pass = pass_manager->GetRenderPassStep(associated_pass_name);
+	// Проход — тоже ссылка по имени (резолв у PipeManager/BatchBuilder), поэтому здесь не ищется.
 	// buffer_manager — только чтобы sp записал GRAPHICS_STORAGE_READ в обёртки своих буферов
 	// (ShaderManager чужих менеджеров не хранит, получает на вызове).
-	return shader_manager->CreateShaderProgram(name, spd, associated_pass, vs_name, std::move(vertex_buffer_names), fs_name, std::move(fragment_buffer_names), texture_slots, buffer_manager);
+	return shader_manager->CreateShaderProgram(name, spd, associated_pass_name, vs_name, std::move(vertex_buffer_names), fs_name, std::move(fragment_buffer_names), texture_slots, buffer_manager);
 }
 
 void GpuTaskContext::CreateComputeShader(const std::string& name, const char* hlsl_path) {
@@ -47,73 +47,13 @@ ComputeShaderProgram* GpuTaskContext::CreateComputeShaderProgram(const std::stri
 	std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
 	std::initializer_list<AtlasName> ro_storage_textures,
 	std::initializer_list<AtlasName> texture_samplers,
-	const ComputePassName& associated_compute_pass)
+	const ComputePassName& associated_compute_pass, bool dont_save)
 {
-	std::vector<BufferData*> rw_buffers;
-	rw_buffers.reserve(rw_storage_buffers.size());
-	for (const auto& buffer_name : rw_storage_buffers) {
-		BufferData* bd = buffer_manager->GetBufferData(buffer_name);
-		if (!bd) {
-			SDL_Log("GpuTaskContext::Creating compute shader program with non existing RW storage buffer '%s'", buffer_name);
-			continue;
-		}
-		rw_buffers.push_back(bd);
-	}
-	std::vector<BufferData*> ro_buffers;
-	ro_buffers.reserve(ro_storage_buffers.size());
-	for (const auto& buffer_name : ro_storage_buffers) {
-		BufferData* bd = buffer_manager->GetBufferData(buffer_name);
-		if (!bd) {
-			SDL_Log("GpuTaskContext::Creating compute shader program with non existing RO storage buffer '%s'", buffer_name);
-			continue;
-		}
-		ro_buffers.push_back(bd);
-	}
-	std::vector<ComputeShaderProgram::ComputeRWTextureBinding> rw_textures;
-	rw_textures.reserve(rw_storage_textures.size());
-
-	for (const auto& binding : rw_storage_textures) {
-		TextureAtlas* atlas = texture_manager->GetTextureAtlas(binding.texture_atlas);
-		if (!atlas) {
-			SDL_Log("GpuTaskContext::Creating compute shader program with non existing RW storage texture atlas '%s'", binding.texture_atlas.c_str());
-			continue;
-		}
-		rw_textures.push_back({ atlas, binding.mip_level, binding.layer, binding.need_simultaneous });
-	}
-	std::vector<TextureAtlas*> ro_texture_atlases;
-	ro_texture_atlases.reserve(ro_storage_textures.size());
-	for (const auto& atlas_name : ro_storage_textures) {
-		TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
-		if (!atlas) {
-			SDL_Log("GpuTaskContext::Creating compute shader program with non existing RO storage texture atlas '%s'", atlas_name.c_str());
-			continue;
-		}
-		ro_texture_atlases.push_back(atlas);
-	}
-	std::vector<TextureAtlas*> samplers;
-	samplers.reserve(texture_samplers.size());
-	for (const auto& atlas_name : texture_samplers) {
-		TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
-		if (!atlas) {
-			SDL_Log("GpuTaskContext::Creating compute shader program with non existing texture sampler atlas '%s'", atlas_name.c_str());
-			continue;
-		}
-		samplers.push_back(atlas);
-	}
-
-	ComputePassStep* associated_compute_pass_ptr = nullptr;
-	associated_compute_pass_ptr = pass_manager->GetComputePassStep(associated_compute_pass);
-	if (associated_compute_pass_ptr) {
-		return shader_manager->CreateComputeShaderProgram(name, cs_name, std::move(rw_buffers), std::move(ro_buffers), std::move(rw_textures), std::move(ro_texture_atlases), std::move(samplers), associated_compute_pass_ptr);
-
-	}
-	associated_compute_pass_ptr = pass_manager->GetComputePrepassStep(associated_compute_pass);
-	if (associated_compute_pass_ptr) {
-		return shader_manager->CreateComputeShaderProgram(name, cs_name, std::move(rw_buffers), std::move(ro_buffers), std::move(rw_textures), std::move(ro_texture_atlases), std::move(samplers), associated_compute_pass_ptr);
-
-	}
-	SDL_Log("GpuTaskContext::Creating compute shader program with non existing associated compute pass '%s'", associated_compute_pass.c_str());
-	return nullptr;
+	// Ничего не резолвится: csp хранит ИМЕНА (сериализуемо) — и ресурсов, и прохода. Резолв
+	// делает сборка батча, у неё для этого есть все менеджеры.
+	return shader_manager->CreateComputeShaderProgram(name, cs_name,
+		rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers,
+		associated_compute_pass, buffer_manager, texture_manager, dont_save);
 }
 
 // --- Буферы: форвард в BufferManager ---

@@ -1,6 +1,7 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "PipeManager.h"
 #include "RenderCommandData.h"
+#include "RenderManager.h"   // PassManager: резолв прохода sp по имени
 #include "ShaderManager.h"
 
 
@@ -41,45 +42,52 @@ void PipeManager::TrashPipelines(uint64_t fences_done, uint64_t graphics_require
     }
 }
 
-void PipeManager::CreateGraphicsPiplenes(std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& shader_programs, ShaderManager* sm)
+void PipeManager::CreateGraphicsPiplenes(std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& shader_programs, ShaderManager* sm, PassManager* pass_manager)
 {
     for (auto& pair : shader_programs) {
         ShaderProgram* sp = pair.second.get();
-        SDL_GPUGraphicsPipeline* pipe = GetOrCreatePipeline(sp, sm);
+        SDL_GPUGraphicsPipeline* pipe = GetOrCreatePipeline(sp, sm, pass_manager);
         if (!pipe) {
 			SDL_Log("Failed to create pipeline for shader program: %s", pair.first.c_str());
         }
 	}
 }
 
-void PipeManager::CreateComputePipelines(std::vector<std::unique_ptr<ComputeShaderProgram>>& compute_shader_programs, ShaderManager* sm)
+void PipeManager::CreateComputePipelines(std::vector<ComputeProgramSlot>& compute_shader_programs, ShaderManager* sm)
 {
-    for (auto& pair : compute_shader_programs) {
-        ComputeShaderProgram* sp = pair.get();
-		SDL_GPUComputePipeline* pipe = GetOrCreateComputePipeline(sp, sm);
+    for (auto& slot : compute_shader_programs) {
+        if (!slot.program) continue;
+		SDL_GPUComputePipeline* pipe = GetOrCreateComputePipeline(slot.program.get(), sm);
         if (!pipe) {
-            SDL_Log("Failed to create compute pipeline for shader program: %s", sp->debug_name.c_str());
+            SDL_Log("Failed to create compute pipeline for shader program: %s", slot.name.c_str());
 		}
     }
 }
 
-SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp, ShaderManager* sm)
+SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp, ShaderManager* sm, PassManager* pass_manager)
 {
     auto it = graphics_pipelines.find(sp);
     if (it != graphics_pipelines.end()) {
 		if (it->second == nullptr) {
-			SDL_Log("Pipeline for given ShaderProgram is nullptr!");
+			SDL_Log("Pipeline for shader program '%s' is nullptr!", sp->debug_name.c_str());
         }
         return it->second;
+    }
+
+    // Проход — по имени из sp: форматы целей прохода задают раскладку пайплайна, без него сборка
+    // невозможна (в отличие от промаха буфера, который лишь сдвинет слот).
+    RenderPassStep* pass = pass_manager ? pass_manager->GetRenderPassStep(sp->render_pass_name) : nullptr;
+    if (!pass) {
+        SDL_Log("Pipeline '%s': render pass '%s' not found", sp->debug_name.c_str(), sp->render_pass_name.c_str());
+        return nullptr;
     }
 
     // vs/fs — по имени из реестра ShaderManager (sp хранит только имена).
     VertexShaderData*   vsd = sm->GetVertexShader(sp->vs_name);
     FragmentShaderData* fsd = sm->GetFragmentShader(sp->fs_name);
-    if (!vsd || !fsd) {
-        SDL_Log("Pipeline: vs '%s' or fs '%s' not found in registry", sp->vs_name.c_str(), sp->fs_name.c_str());
-        return nullptr;
-    }
+    if (!vsd) SDL_Log("Pipeline '%s': vertex shader '%s' not found in registry", sp->debug_name.c_str(), sp->vs_name.c_str());
+    if (!fsd) SDL_Log("Pipeline '%s': fragment shader '%s' not found in registry", sp->debug_name.c_str(), sp->fs_name.c_str());
+    if (!vsd || !fsd) return nullptr;
 
     SDL_GPUGraphicsPipelineCreateInfo pci;
     SDL_zero(pci);
@@ -108,7 +116,7 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp, Sha
     pci.depth_stencil_state.compare_op = sp->spd.depth_compare_op;
 
 
-    const auto& color_formats = sp->associated_render_pass->renderPassTexsData.color_formats;
+    const auto& color_formats = pass->renderPassTexsData.color_formats;
     std::vector<SDL_GPUColorTargetDescription> ctds;
     ctds.reserve(color_formats.size());
     for (SDL_GPUTextureFormat fmt : color_formats) {
@@ -144,7 +152,7 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp, Sha
     // законен (полноэкранный эффект в один цвет, отладочная отрисовка), а раньше жёсткий true
     // отправлял в SDL depth_stencil_format = INVALID — то есть ассерт «Invalid texture format
     // enum!» внутри SDL_CreateGPUGraphicsPipeline. У проходов С глубиной поведение прежнее.
-    const SDL_GPUTextureFormat ds_fmt = sp->associated_render_pass->renderPassTexsData.depth_format;
+    const SDL_GPUTextureFormat ds_fmt = pass->renderPassTexsData.depth_format;
     pci.target_info.has_depth_stencil_target = (ds_fmt != SDL_GPU_TEXTUREFORMAT_INVALID);
     pci.target_info.depth_stencil_format = ds_fmt;
 
@@ -169,13 +177,13 @@ SDL_GPUComputePipeline* PipeManager::GetOrCreateComputePipeline(ComputeShaderPro
     auto it = compute_pipelines.find(sp);
     if (it != compute_pipelines.end()) {
         if (it->second == nullptr)
-            SDL_Log("Pipeline for given ComputeShaderProgram is nullptr!");
+            SDL_Log("Pipeline for compute shader program '%s' is nullptr!", sp->debug_name.c_str());
         return it->second;
     }
 
     ComputeShaderData* csd = sm->GetComputeShader(sp->cs_name);   // cs по имени из реестра
     if (!csd) {
-        SDL_Log("Compute pipeline: cs '%s' not found in registry", sp->cs_name.c_str());
+        SDL_Log("Compute pipeline '%s': cs '%s' not found in registry", sp->debug_name.c_str(), sp->cs_name.c_str());
         return nullptr;
     }
 
@@ -202,7 +210,7 @@ SDL_GPUComputePipeline* PipeManager::GetOrCreateComputePipeline(ComputeShaderPro
 
     SDL_GPUComputePipeline* pipeline = SDL_CreateGPUComputePipeline(dev, &ci);
     if (!pipeline)
-        SDL_Log("Failed to create compute pipeline: %s", SDL_GetError());
+        SDL_Log("Failed to create compute pipeline '%s': %s", sp->debug_name.c_str(), SDL_GetError());
 
     compute_pipelines.emplace(sp, pipeline);
     return pipeline;
@@ -234,7 +242,7 @@ SDL_GPUGraphicsPipeline* PipeManager::GetGraphicPipeline(ShaderProgram* sp)
     auto it = graphics_pipelines.find(sp);
     if (it != graphics_pipelines.end()) {
         if (it->second == nullptr) {
-            SDL_Log("Pipeline for given ShaderProgram is nullptr!");
+            SDL_Log("Pipeline for shader program '%s' is nullptr!", sp->debug_name.c_str());
         }
         return it->second;
 	}
@@ -247,7 +255,7 @@ SDL_GPUComputePipeline* PipeManager::GetComputePipeline(ComputeShaderProgram* sp
     auto it = compute_pipelines.find(sp);
     if (it != compute_pipelines.end()) {
         if (it->second == nullptr) {
-            SDL_Log("Pipeline for given ComputeShaderProgram is nullptr!");
+            SDL_Log("Pipeline for compute shader program '%s' is nullptr!", sp->debug_name.c_str());
 			assert(it->second && "Compute pipeline should not be null here!");
 		}
         return it->second;

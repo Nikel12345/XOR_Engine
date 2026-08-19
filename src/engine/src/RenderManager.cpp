@@ -49,6 +49,7 @@ ComputePassStep* PassManager::CreateComputePass(const ComputePassName& name, std
 	auto data = std::make_unique<ComputePassStep>();
 	data->compute_function = compute_function;
 	data->pass_index = pass_index;
+	data->debug_name = name;
 
 	ComputePassStep* ptr = data.get();
 	compute_steps[name] = std::move(data);
@@ -74,6 +75,7 @@ ComputePassStep* PassManager::CreateComputePrepass(const ComputePrepassName& nam
 	auto data = std::make_unique<ComputePassStep>();
 	data->compute_function = compute_function;
 	data->pass_index = pass_index;
+	data->debug_name = name;
 
 	ComputePassStep* ptr = data.get();
 	compute_prepass_steps[name] = std::move(data);

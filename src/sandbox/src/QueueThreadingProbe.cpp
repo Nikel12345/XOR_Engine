@@ -215,15 +215,15 @@ int main(int, char**)
         spd.depth_test = false;
         spd.depth_write = false;
         ShaderProgram* sp = sm.CreateShaderProgram("sp_triangle", spd,
-            pm.GetRenderPassStep("TRIANGLE_PASS"),
+            "TRIANGLE_PASS",
             "triangle_vs", {}, "triangle_fs", {}, {}, &bm);
         if (!sp) { SDL_Log("CreateShaderProgram не вернул программу."); return 1; }
 
         sm.CreateComputeShader("rotate_tick_cs", cs_path.c_str());
         ComputeShaderProgram* csp = sm.CreateComputeShaderProgram("csp_rotate_tick", "rotate_tick_cs",
-            { bm.GetBufferData(VPOS) },   // rw  u0 space1
-            { bm.GetBufferData(TICK_BUFFER) },                          // ro  t0 space0
-            {}, {}, {}, rot_pass);
+            { VPOS },          // rw  u0 space1
+            { TICK_BUFFER },   // ro  t0 space0
+            {}, {}, {}, "ROTATE_PREPASS", &bm, /*tm=*/nullptr);   // ссылки по имени; атласов у зонда нет
         if (!csp) { SDL_Log("CreateComputeShaderProgram не вернул программу."); return 1; }
 
         csp->BindPushConstants<RotateParams>(
@@ -248,12 +248,12 @@ int main(int, char**)
         BufferData* vb = bm.GetBufferData(VPOS);
         if (!vb || !vb->Static.buffer) { SDL_Log("BakePending не создал вершинный буфер."); return 1; }
 
-        pipes.CreateGraphicsPiplenes(sm.GetShaderPrograms(), &sm);
+        pipes.CreateGraphicsPiplenes(sm.GetShaderPrograms(), &sm, &pm);
         *pipeline_slot = pipes.GetGraphicPipeline(sp);
         if (!*pipeline_slot) { SDL_Log("Графический пайплайн не собрался."); return 1; }
         pipes.CreateComputePipelines(sm.GetComputeShaderPrograms(), &sm);
         pm.FillRenderPasses();
-        bb.BuildComputeBatches(&pm, &pipes, &sm);
+        bb.BuildComputeBatches(&pm, &pipes, &sm, &bm, /*tm=*/nullptr);
 
         // ── Стартовая заливка вершин: ОДИН раз, до старта потоков. Дальше их правит только
         //    GPU (вращение), CPU к ним не возвращается. ──

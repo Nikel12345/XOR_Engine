@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <vector>
 #include <unordered_map>
 #include <SDL3/SDL_gpu.h>
@@ -93,7 +93,9 @@ struct RenderPassStep {
     std::vector<TextureAtlas*> global_texture_bindings;
     // Единственная точка записи global_texture_bindings: ставит атласы и копит им SAMPLER.
     void SetGlobalTextures(std::vector<TextureAtlas*> atlases);
-    std::string debug_name;   // = ключ в render_steps; нужен UI для дропдауна прохода у sp
+    // ТОЛЬКО для UI (дропдаун прохода у sp) и логов. В логике не использовать: sp хранит имя
+    // прохода сама (render_pass_name) — см. правило про debug_name в CLAUDE.md.
+    std::string debug_name;
     int pass_index = -1;
     // Порядковый номер в ordered_passes (ставит FillRenderPasses) — индекс прохода в
     // RenderSnap::BatchLayout::passes. Стабилен после старта.
@@ -118,7 +120,7 @@ struct BlitPassStep {
     uint32_t src_layer = 0;
     SDL_GPUFilter filter = SDL_GPU_FILTER_NEAREST;
     SDL_GPULoadOp load_op = SDL_GPU_LOADOP_DONT_CARE;
-    std::string debug_name;   // = ключ в blit_steps
+    std::string debug_name;   // ТОЛЬКО для UI/логов (см. CLAUDE.md)
     int pass_index = -1;
 };
 
@@ -136,7 +138,6 @@ struct ComputeShaderBatchData {
     std::vector<TextureAtlas*> ro_storage_textures;
     std::vector<ComputeRWStorageTextureRef> rw_storage_textures;
     std::vector<TextureAtlas*> texture_binding;
-    std::string debug_name;
     uint32_t threadcount_x = 1;
     uint32_t threadcount_y = 1;
     uint32_t threadcount_z = 1;
@@ -146,6 +147,11 @@ struct ComputeShaderBatchData {
 struct ComputePassStep {
     std::vector<ComputeShaderBatchData> shader_batches;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function;
+    // ТОЛЬКО для UI/логов (см. CLAUDE.md): csp хранит имя прохода сама (compute_pass_name).
+    // NB про резолв по этому имени: пространство имён у пассов и препассов ОБЩЕЕ —
+    // CreateComputePass/CreateComputePrepass отказывают, если имя занято в соседнем реестре,
+    // поэтому «сначала пасс, иначе препасс» однозначно.
+    std::string debug_name;
     int pass_index = -1;
 };
 

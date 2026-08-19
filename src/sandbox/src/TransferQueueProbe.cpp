@@ -272,9 +272,9 @@ int main(int, char**)
         sm.CreateComputeShader("rotate_verts_cs", cs_path.c_str());
         ComputeShaderProgram* csp = sm.CreateComputeShaderProgram(
             "csp_rotate_verts", "rotate_verts_cs",
-            { bm.GetBufferData(GeometryStreams::VERTEX_POS_BUFFER) },   // rw (u0, space1)
+            { GeometryStreams::VERTEX_POS_BUFFER },   // rw (u0, space1), ссылка по имени
             {}, {}, {}, {},
-            rot_pass);
+            "ROTATE_PREPASS", &bm, /*tm=*/nullptr);
         if (!csp) { SDL_Log("CreateComputeShaderProgram не вернул программу."); return 1; }
 
         // push_func: лямбда получает заготовку из тела прохода и досылает её шейдеру.
@@ -294,14 +294,14 @@ int main(int, char**)
         BufferData* vb = bm.GetBufferData(GeometryStreams::VERTEX_POS_BUFFER);
         if (!vb || !vb->Static.buffer) { SDL_Log("BakePending не создал вершинный буфер."); return 1; }
 
-        pipes.CreateGraphicsPiplenes(sm.GetShaderPrograms(), &sm);
+        pipes.CreateGraphicsPiplenes(sm.GetShaderPrograms(), &sm, &pm);
         *pipeline_slot = pipes.GetGraphicPipeline(sp);
         if (!*pipeline_slot) { SDL_Log("Пайплайн не собрался — рисовать нечем."); return 1; }
         pipes.CreateComputePipelines(sm.GetComputeShaderPrograms(), &sm);
         // Порядок обязателен: FillRenderPasses сливает ordered-списки, по которым идёт
         // BuildComputeBatches. Наоборот — батчи собрались бы по пустому списку.
         pm.FillRenderPasses();
-        bb.BuildComputeBatches(&pm, &pipes, &sm);
+        bb.BuildComputeBatches(&pm, &pipes, &sm, &bm, /*tm=*/nullptr);
 
         // ── Инструкции жизненного цикла буфера (как DefaultUpdateSet) ──
         bm.CreateUpdateInstruction(GeometryStreams::VERTEX_POS_BUFFER,

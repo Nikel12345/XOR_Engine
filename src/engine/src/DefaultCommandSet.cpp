@@ -356,8 +356,9 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 				finalName = c->newName;
 			}
 
-			RenderPassStep* pass = ctx->GetPassManager()->GetRenderPassStep(c->passName);
-			if (!pass && old) pass = old->associated_render_pass;   // пустой/неизвестный проход → прежний (правка)
+			// Проход — по имени. Пустое/неизвестное имя при правке → оставляем прежнее.
+			std::string passName = c->passName;
+			if (!ctx->GetPassManager()->GetRenderPassStep(passName) && old) passName = old->render_pass_name;
 			// Буферы — из формы, ПО ИМЕНИ (BufferDataName, как vs/fs): храним ключи, резолв на сборке батча.
 			const std::vector<BufferDataName>   vbufs = c->vsBuffers;
 			const std::vector<BufferDataName>   fbufs = c->fsBuffers;
@@ -372,23 +373,24 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			// push_func не переносим руками: CreateShaderProgram сам возьмёт код-байндинг из
 			// реестра ПО ИМЕНИ. Переименование = смена владельца функции — перенос со старого
 			// имени всё равно жил бы лишь до ближайшей LoadScene, где связывает имя.
-			ShaderProgram* nw = sm->CreateShaderProgram(finalName, c->spd, pass, vsName, vbufs, fsName, fbufs, slots, ctx->GetBufferManager());
+			ShaderProgram* nw = sm->CreateShaderProgram(finalName, c->spd, passName, vsName, vbufs, fsName, fbufs, slots, ctx->GetBufferManager());
 			sm->SetDirtyGraphicsPipelines(true);
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
 		});
 
-	// Смена прохода sp — моментально (без подтверждения, как spd-тумблеры). associated_render_pass
-	// = выбранный RenderPassStep*; пайплайн зависит от форматов прохода → инвалидация + пересборка.
+	// Смена прохода sp — моментально (без подтверждения, как spd-тумблеры). Пишем ИМЯ из команды;
+	// проход ищем только чтобы убедиться, что он есть. Пайплайн зависит от форматов прохода →
+	// инвалидация + пересборка.
 	im.RegisterCommand(CommandId::SetShaderPass,
 		[](EngineContext* ctx, const void* data)
 		{
 			const SetShaderPassCmd* c = static_cast<const SetShaderPassCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
 			ShaderProgram*  sp = sm->GetShaderProgram(c->shader);
-			RenderPassStep* rp = ctx->GetPassManager()->GetRenderPassStep(c->pass);
-			if (sp && rp) {
-				sp->associated_render_pass = rp;
+			const bool pass_exists = ctx->GetPassManager()->GetRenderPassStep(c->pass) != nullptr;
+			if (sp && pass_exists) {
+				sp->render_pass_name = c->pass;
 				ctx->GetPipeManager()->InvalidatePipeline(sp, ctx->GetBatchBuilder()->RebuildEpoch());
 				sm->SetDirtyGraphicsPipelines(true);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
@@ -441,9 +443,9 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			if (!c->name.empty() && !c->path.empty()) {
 				if (!c->oldName.empty() && c->oldName != c->name) sm->DeleteComputeShader(c->oldName);
 				sm->CreateComputeShader(c->name, c->path.c_str());
-				for (auto& csp : sm->GetComputeShaderPrograms())
-					if (csp->cs_name == c->name || csp->cs_name == c->oldName)
-						ctx->GetPipeManager()->InvalidateComputePipeline(csp.get(), ctx->GetBatchBuilder()->ComputeRebuildEpoch());
+				for (auto& slot : sm->GetComputeShaderPrograms())
+					if (slot.program && (slot.program->cs_name == c->name || slot.program->cs_name == c->oldName))
+						ctx->GetPipeManager()->InvalidateComputePipeline(slot.program.get(), ctx->GetBatchBuilder()->ComputeRebuildEpoch());
 				sm->SetDirtyComputePipelines(true);
 				sm->SetDirtyComputeBatches(true);
 			}

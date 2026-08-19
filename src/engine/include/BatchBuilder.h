@@ -38,8 +38,10 @@ public:
 	void UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
 		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
 		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
-	void BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm);
-	void BuildComputePrepassBatches(PipeManager* pm, ShaderManager* sm);
+	// bm/tm — резолверы name-based ссылок csp (буферы/атласы), тем же параметром, что и у
+	// UpdateRenderBatches: сборка батча — единственное место, где имена становятся указателями.
+	void BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm,
+		BufferManager* bm, TextureManager* tm);
 
 	// Incremental delta (queued from UI thread, drained on prepare thread).
 	void QueueCreate(Entity entity);
@@ -107,7 +109,7 @@ private:
 
 	// Find-or-create the batch nodes for a single entity and record its slots.
 	// Shared by full rebuild and incremental add.
-	void AddEntityToBatches(Entity entity, PipeManager* pm, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+	void AddEntityToBatches(Entity entity, PipeManager* pm, PassManager* pass_manager, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
 		ModelManager* mdm, MaterialManager* mtm,
 		const MaterialComponent& material_component, const ModelComponent& model_component);
 	void RemoveEntityFromBatches(Entity entity);

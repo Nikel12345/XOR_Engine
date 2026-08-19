@@ -71,7 +71,7 @@ void Engine::PrepareFunc(uint8_t slot)
 
 	{
 		PROF_SCOPE(Sim, " build_compute_batches");
-		batch_builder->BuildComputeBatches(pass_manager, pipe_manager, shader_manager);
+		batch_builder->BuildComputeBatches(pass_manager, pipe_manager, shader_manager, buffer_manager, texture_manager);
 	}
 
 	{

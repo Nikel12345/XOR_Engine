@@ -66,6 +66,9 @@ void DefaultShaderProgramSet::RegisterShaderFuncs(EngineContext* ctx)
 
 void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDataModule* ldm)
 {
+    // push/dispatch регистрируем в РЕЕСТРЕ по имени программы (не полем csp):
+    // загрузка сцены пересоздаёт csp, и реестр вешает функции на неё сам.
+    ShaderManager* sm = ctx->GetShaderManager();
     using namespace DefaultBuffersNames;
     if (culling_pib_inited) {
         SDL_Log("Culling PIB program already initialized.");
@@ -90,13 +93,13 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
     ComputeShaderProgram* csp_clear = ctx->CreateComputeShaderProgram("csp_culling_clear", "culling_clear_cs",
         { DEFAULT_INDIRECT_BUFFER },   // rw (u0)
         {}, {}, {}, {},
-        RP::CULLING_PASS);
-    csp_clear->BindPushConstants<RP::CullingClearUniform>(
+        RP::CULLING_PASS, /*dont_save=*/true);
+    sm->CreateComputePushFunc<RP::CullingClearUniform>("csp_culling_clear",
         [ldm, bb](const PushConstantBinder& binder, RP::CullingClearUniform data) {
         data.total_slots = (1 + ldm->AskNumLightCameras(binder.slot)) * bb->AskNumCommands(binder.slot);
         binder.Push(0, data);
     });
-    csp_clear->BindDispatch<RP::DummyDispatchData>(
+    sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_culling_clear",
         [ldm, bb](DispatchSizeBinder& binder, RP::DummyDispatchData) {
         binder.element_count = { (1 + ldm->AskNumLightCameras(binder.slot)) * bb->AskNumCommands(binder.slot), 1, 1 };
     });
@@ -109,8 +112,8 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
         { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
           DEFAULT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4 (Cameras = игрок)
         {}, {}, {},
-        RP::CULLING_PASS);
-    csp_player->BindPushConstants<RP::CullingPibUniform>(
+        RP::CULLING_PASS, /*dont_save=*/true);
+    sm->CreateComputePushFunc<RP::CullingPibUniform>("csp_cull_player",
         [bb, shadow_ord](const PushConstantBinder& binder, RP::CullingPibUniform data) {
         const RenderSnap::BatchLayout* lo = bb->AskLayout(binder.slot);
         uint32_t sp = ShadowPib(lo, shadow_ord);
@@ -123,7 +126,7 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
         data.total_commands = lo ? lo->num_commands : 0u;
         binder.Push(0, data);
     });
-    csp_player->BindDispatch<RP::DummyDispatchData>(
+    sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_cull_player",
         [bb, shadow_ord](DispatchSizeBinder& binder, RP::DummyDispatchData) {
         const RenderSnap::BatchLayout* lo = bb->AskLayout(binder.slot);
         uint32_t sp = ShadowPib(lo, shadow_ord);
@@ -138,8 +141,8 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
         { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
           DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4 (Cameras = свет)
         {}, {}, {},
-        RP::CULLING_PASS);
-    csp_light->BindPushConstants<RP::CullingPibUniform>(
+        RP::CULLING_PASS, /*dont_save=*/true);
+    sm->CreateComputePushFunc<RP::CullingPibUniform>("csp_cull_light",
         [ldm, bb, shadow_ord](const PushConstantBinder& binder, RP::CullingPibUniform data) {
         const RenderSnap::BatchLayout* lo = bb->AskLayout(binder.slot);
         uint32_t L  = ldm->AskNumLightCameras(binder.slot);
@@ -152,7 +155,7 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
         data.total_commands = lo ? lo->num_commands : 0u;
         binder.Push(0, data);
     });
-    csp_light->BindDispatch<RP::DummyDispatchData>(
+    sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_cull_light",
         [ldm, bb, shadow_ord](DispatchSizeBinder& binder, RP::DummyDispatchData) {
         uint32_t L = ldm->AskNumLightCameras(binder.slot);
         binder.element_count = { (L > 0) ? ShadowPib(bb->AskLayout(binder.slot), shadow_ord) : 0u, 1, 1 };
@@ -163,6 +166,9 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
 
 void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm)
 {
+    // push/dispatch регистрируем в РЕЕСТРЕ по имени программы (не полем csp):
+    // загрузка сцены пересоздаёт csp, и реестр вешает функции на неё сам.
+    ShaderManager* sm = ctx->GetShaderManager();
     using namespace DefaultRenderPassNamespace;
     if (shadow_blur_inited) {
         SDL_Log("Shadow blur programs already initialized.");
@@ -182,14 +188,14 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
             { { SHADOW_MOMENTS_BLUR_TEMP, 0, 0 } },   // rw textures
             {},                                       // ro storage textures
             { SHADOW_MOMENTS_ARRAY },                 // samplers
-            SHADOW_BLUR_PASS);
+            SHADOW_BLUR_PASS, /*dont_save=*/true);
 
-        csp_h->BindPushConstants<ShadowBlurUniform>(
+        sm->CreateComputePushFunc<ShadowBlurUniform>(name_h,
             [L](const PushConstantBinder& binder, ShadowBlurUniform data) {
             data.layerIndex = L;
             binder.Push(0, data);
         });
-        csp_h->BindDispatch<DummyDispatchData>(
+        sm->CreateDispatchFunc<DummyDispatchData>(name_h,
             [L, blur_temp_atlas, ldm](DispatchSizeBinder& binder, DummyDispatchData) {
             if (ldm->IsShadowLayerDirty(binder.slot, L))
                 binder.element_count = { blur_temp_atlas->width, blur_temp_atlas->height, 1 };
@@ -204,9 +210,9 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
             { { SHADOW_MOMENTS_ARRAY, 0, L } },       // rw textures
             {},
             { SHADOW_MOMENTS_BLUR_TEMP },             // samplers
-            SHADOW_BLUR_PASS);
+            SHADOW_BLUR_PASS, /*dont_save=*/true);
 
-        csp_v->BindDispatch<DummyDispatchData>(
+        sm->CreateDispatchFunc<DummyDispatchData>(name_v,
             [L, moments_atlas, ldm](DispatchSizeBinder& binder, DummyDispatchData) {
             if (ldm->IsShadowLayerDirty(binder.slot, L))
                 binder.element_count = { moments_atlas->width, moments_atlas->height, 1 };
@@ -220,6 +226,9 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
 
 void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
 {
+    // push/dispatch регистрируем в РЕЕСТРЕ по имени программы (не полем csp):
+    // загрузка сцены пересоздаёт csp, и реестр вешает функции на неё сам.
+    ShaderManager* sm = ctx->GetShaderManager();
     using namespace DefaultRenderPassNamespace;
     static bool inited = false;
     if (inited) { SDL_Log("Bloom shader programs already initialized."); return; }
@@ -239,8 +248,8 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
         { { L(0), 0, 0 } },                                            // rw: bloom_L0
         {},
         { std::string("scene_hdr"), std::string("scene_emission") },   // sampler t0/s0, t1/s1
-        BLOOM_PASS);
-    p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+        BLOOM_PASS, /*dont_save=*/true);
+    sm->CreateComputePushFunc<BloomParams>("bloom_down_0",[](const PushConstantBinder& b, BloomParams d) {
         d.threshold = 1.2f;   // ПОЛ: диффуз ≤1 не блумит вообще; ярче — только глинт/пересвет
         d.knee      = 0.9f;   // ширина гладкого разгона ВВЕРХ от порога
         d.intensity = 0.1f;   // сила вклада сцены (блик/пересвет); эмиссия идёт в полную силу
@@ -248,45 +257,47 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     });
     {
         TextureAtlas* dst = ctx->GetTextureAtlas(L(0));
-        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchFunc<DummyDispatchData>("bloom_down_0",[dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };
         });
     }
 
     // --- Downsample: уровень i-1 → уровень i (1..N-1). Источник — sampler соседнего уровня. ---
     for (uint32_t i = 1; i < BLOOM_LEVELS; ++i) {
+        const std::string down_name = "bloom_down_" + std::to_string(i);
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
-            "bloom_down_" + std::to_string(i), "bloom_down_cs",
+            down_name, "bloom_down_cs",
             {}, {},
             { { L(i), 0, 0 } },   // rw: bloom_L<i>
             {},
             { L(i - 1) },         // combined sampler: предыдущий (вдвое крупнее) уровень
-            BLOOM_PASS);
-        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            BLOOM_PASS, /*dont_save=*/true);
+        sm->CreateComputePushFunc<BloomParams>(down_name,[](const PushConstantBinder& b, BloomParams d) {
             d.useKaris = 0u; b.Push(0, d);
         });
         TextureAtlas* dst = ctx->GetTextureAtlas(L(i));
-        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchFunc<DummyDispatchData>(down_name,[dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };
         });
     }
 
     // --- Upsample (tent, аддитивно): уровень i+1 → += уровень i, от мелкого к крупному. ---
     for (int i = (int)BLOOM_LEVELS - 2; i >= 0; --i) {
+        const std::string up_name = "bloom_up_" + std::to_string(i);
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
-            "bloom_up_" + std::to_string(i), "bloom_up_cs",
+            up_name, "bloom_up_cs",
             {}, {},
             // rw: bloom_L<i>. Tent-фильтр читает СОСЕДНИЕ тексели того же уровня, пока другие потоки
             // диспатча их пишут → нужен SIMULTANEOUS (не выводится из формы бинда — ручной тег).
             { { .texture_atlas = L((uint32_t)i), .need_simultaneous = true } },
             {},
             { L((uint32_t)i + 1) },         // combined sampler: следующий (вдвое мельче) уровень
-            BLOOM_PASS);
-        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            BLOOM_PASS, /*dont_save=*/true);
+        sm->CreateComputePushFunc<BloomParams>(up_name,[](const PushConstantBinder& b, BloomParams d) {
             b.Push(0, d);
         });
         TextureAtlas* dst = ctx->GetTextureAtlas(L((uint32_t)i));
-        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchFunc<DummyDispatchData>(up_name,[dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };
         });
     }
@@ -300,11 +311,11 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             { { std::string("scene_hdr"), 0, 0 } },   // rw: scene_hdr (RMW)
             {},
             { L(0) },                                 // combined sampler: bloom_L0
-            BLOOM_PASS);
-        p->BindPushConstants<BloomParams>([](const PushConstantBinder& b, BloomParams d) {
+            BLOOM_PASS, /*dont_save=*/true);
+        sm->CreateComputePushFunc<BloomParams>("bloom_composite",[](const PushConstantBinder& b, BloomParams d) {
             d.intensity = 0.5f; b.Push(0, d);   // сила свечения — главная ручка
         });
-        p->BindDispatch<DummyDispatchData>([dst](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchFunc<DummyDispatchData>("bloom_composite",[dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };
         });
     }

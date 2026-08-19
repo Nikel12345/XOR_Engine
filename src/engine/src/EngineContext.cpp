@@ -336,7 +336,7 @@ void EngineContext::CreateGraphicsPipelines()
 	}
 	
 	auto& shader_programs = shader_manager->GetShaderPrograms();
-	pipe_manager->CreateGraphicsPiplenes(shader_programs, shader_manager);
+	pipe_manager->CreateGraphicsPiplenes(shader_programs, shader_manager, pass_manager);
 	shader_manager->SetDirtyGraphicsPipelines(false);
 }
 
@@ -387,7 +387,7 @@ ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::strin
 	std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
 	std::initializer_list<AtlasName> ro_storage_textures,
 	std::initializer_list<AtlasName> texture_samplers,
-	const ComputePassName& associated_compute_pass)
+	const ComputePassName& associated_compute_pass, bool dont_save)
 {
-	return gpu_ctx->CreateComputeShaderProgram(name, cs_name, rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers, associated_compute_pass);
+	return gpu_ctx->CreateComputeShaderProgram(name, cs_name, rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers, associated_compute_pass, dont_save);
 }

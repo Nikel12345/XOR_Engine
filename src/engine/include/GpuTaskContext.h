@@ -35,7 +35,7 @@ public:
 		std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
 		std::initializer_list<AtlasName> ro_storage_textures,
 		std::initializer_list<AtlasName> texture_samplers,
-		const ComputePassName& associated_compute_pass);
+		const ComputePassName& associated_compute_pass, bool dont_save = false);
 
 	// --- Буферы: создание и инструкции жизненного цикла (форвард в BufferManager) ---
 	// Без usage-флагов: BufferData::usage наполняют декларации до бейка (см. BufferData.h).

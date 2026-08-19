@@ -8,6 +8,7 @@
 
 
 class BufferManager;
+class TextureManager;
 class GeometryPool;
 struct RenderPassStep;
 
@@ -34,20 +35,35 @@ public:
 	// (GRAPHICS_STORAGE_READ) надо записать в саму обёртку BufferData. Владельцем связки менеджеров
 	// остаётся EngineContext — менеджер не держит указателей на другие менеджеры.
 	ShaderProgram* CreateShaderProgram(
-		const std::string& name, const ShaderProgramDescription& spd, RenderPassStep* associated_pass,
+		const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& render_pass_name,
 		const std::string& vs_name, std::vector<BufferDataName> vertex_shader_buffer_names,
 		const std::string& fs_name, std::vector<BufferDataName> fragment_shader_buffer_names,
 		const std::vector<TextureSlotRole>& texture_slots, BufferManager* bm);
 
 	void CreateComputeShader(const std::string& name, const char* path);
-	// The order in which ComputeShaderPrograms are created does not determine the order in which they are executed in a pass!
+	// ПОРЯДОК СОЗДАНИЯ ЗНАЧИМ: BuildComputeBatches обходит compute_shader_programs по порядку и
+	// складывает батчи в проход push_back'ом, а RenderManager исполняет их прямым обходом, без
+	// сортировки. Т.е. csp, созданная раньше, и исполняется раньше внутри своего прохода — на этом
+	// держится culling (csp_culling_clear обязан быть batch[0], иначе scatter видит ненулевые
+	// счётчики → дубли строк на больших сценах). Сериализация обязана сохранять порядок массива.
+	//
+	// Ресурсы — ПО ИМЕНИ (см. ComputeShaderProgram). bm/tm нужны только чтобы записать usage-флаги
+	// в сами обёртки буферов/атласов и отчитаться о промахах; менеджер их НЕ хранит (см. CLAUDE.md).
 	ComputeShaderProgram* CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
-		std::vector<BufferData*> rw_storage_buffers,
-		std::vector<BufferData*> ro_storage_buffers,
-		std::vector<ComputeShaderProgram::ComputeRWTextureBinding> rw_storage_textures,
-		std::vector<TextureAtlas*> ro_storage_textures,
-		std::vector<TextureAtlas*> texture_samplers,
-		ComputePassStep* associated_compute_pass);
+		std::vector<BufferDataName> rw_storage_buffers,
+		std::vector<BufferDataName> ro_storage_buffers,
+		std::vector<ComputeRWTextureBindingParametr> rw_storage_textures,
+		std::vector<AtlasName> ro_storage_textures,
+		std::vector<AtlasName> texture_samplers,
+		const ComputePassName& compute_pass_name,
+		BufferManager* bm, TextureManager* tm, bool dont_save = false);
+
+	// Снос csp, за которые отвечает манифест сцены (dont_save == false) — загрузка их пересоздаёт
+	// целиком, а не мержит: порядок внутри прохода значим (см. выше), и upsert по имени переставил
+	// бы пересозданную программу в конец вектора. Кодовые/движковые (dont_save) переживают загрузку,
+	// как и прочие ресурсы, которых нет в манифесте. Пайплайны инвалидирует ВЫЗЫВАЮЩИЙ до этого:
+	// кэш PipeManager ключуется по csp*, а здесь объекты разрушаются.
+	void ClearSavableComputeShaderPrograms();
 
 	// Именованные шейдер-данные: доступ/удаление по имени (владелец — реестр, не sp/csp). Резолв
 	// делают потребители на сборке (PipeManager/BatchBuilder). nullptr при промахе.
@@ -67,7 +83,7 @@ public:
 		return false;
 	}
 	bool IsComputeShaderUsed(const std::string& name) const {
-		for (auto& csp : compute_shader_programs) if (csp->cs_name == name) return true;
+		for (auto& slot : compute_shader_programs) if (slot.program && slot.program->cs_name == name) return true;
 		return false;
 	}
 
@@ -106,7 +122,7 @@ public:
 	// наоборот значения не имеет; программы нет вовсе — запись ждёт её и попадает в отчёт,
 	// а не теряется молча, как при разовом колбэке с if (sp) внутри.
 	//
-	// Ключ = ИМЯ программы, тот же, что в shader_programs/compute_shader_programs_by_name: пространство
+	// Ключ = ИМЯ программы, тот же, что в реестрах shader_programs/compute_shader_programs: пространство
 	// имён программ уже глобально (LoadScene делает merge-upsert в тот же словарь), так что
 	// реестр функций наследует ровно тот же контракт уникальности, а не вводит новый. Захотим
 	// сцено-локальные имена — менять надо ключ САМИХ программ, и эти словари пойдут за ним.
@@ -142,7 +158,8 @@ public:
 	void BindShaderFunctions();
 
 	std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& GetShaderPrograms() { return shader_programs; }
-	std::vector<std::unique_ptr<ComputeShaderProgram>>& GetComputeShaderPrograms() { return compute_shader_programs; };
+	// Обход отдаёт пару «имя + программа» (см. ComputeProgramSlot) — как у GetShaderPrograms().
+	std::vector<ComputeProgramSlot>& GetComputeShaderPrograms() { return compute_shader_programs; };
 
 	bool IsDirtyGraphicsPipelines() const { return dirty_graphics_pipelines; }
 	void SetDirtyGraphicsPipelines(bool dirty) { dirty_graphics_pipelines = dirty; }
@@ -178,8 +195,10 @@ private:
 
 	std::unordered_map<std::string, std::unique_ptr<ShaderProgram>> shader_programs;
 
-	std::vector<std::unique_ptr<ComputeShaderProgram>> compute_shader_programs;
-	std::unordered_map<std::string, ComputeShaderProgram*>  compute_shader_programs_by_name;
+	// Единственный реестр compute-программ: упорядоченный (порядок исполнения) и он же
+	// именованный. Отдельного индекса по имени НЕТ намеренно — второй источник истины про то же
+	// самое рассинхронизируется, а программ десятки, линейный поиск на холодных путях бесплатен.
+	std::vector<ComputeProgramSlot> compute_shader_programs;
 
 	// Реестры именованных шейдер-данных — владельцы. compute_shaders владеет сырым spv_code
 	// (free в деструкторе идёт отсюда, а не с csp, т.к. csp держит только имя).

@@ -6,15 +6,19 @@
 #include "config.h"
 
 class ShaderManager;
+class PassManager;
 struct ShaderProgram;
 struct ComputeShaderProgram;
+struct ComputeProgramSlot;
 
 class PipeManager
 {
 public:
 	PipeManager(SDL_GPUDevice* device, SDL_Window* win);
-	void CreateGraphicsPiplenes(std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& shader_programs, ShaderManager* sm);
-	void CreateComputePipelines(std::vector<std::unique_ptr<ComputeShaderProgram>>& compute_shader_programs, ShaderManager* sm);
+	// pass_manager — резолвер прохода sp по имени (sp хранит имя, не указатель), тем же
+	// параметром, что и ShaderManager: PipeManager чужих менеджеров не держит.
+	void CreateGraphicsPiplenes(std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& shader_programs, ShaderManager* sm, PassManager* pass_manager);
+	void CreateComputePipelines(std::vector<ComputeProgramSlot>& compute_shader_programs, ShaderManager* sm);
 
 	SDL_GPUColorTargetDescription MakeDefaultColorTarget();
 	SDL_GPUColorTargetDescription MakeNoColorTarget();
@@ -55,7 +59,7 @@ public:
 	~PipeManager();
 
 private:
-	SDL_GPUGraphicsPipeline* GetOrCreatePipeline(ShaderProgram* sp, ShaderManager* sm);
+	SDL_GPUGraphicsPipeline* GetOrCreatePipeline(ShaderProgram* sp, ShaderManager* sm, PassManager* pass_manager);
 	SDL_GPUComputePipeline* GetOrCreateComputePipeline(ComputeShaderProgram* sp, ShaderManager* sm);
 
 	std::unordered_map<ShaderProgram*, SDL_GPUGraphicsPipeline*> graphics_pipelines;

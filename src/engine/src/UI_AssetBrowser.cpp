@@ -158,7 +158,7 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
         }
         if (ImGui::BeginTabItem("Compute")) {                                        // compute sp
             tiles(SelKind::Compute, false, []{},
-                [&](auto&& emit) { for (auto& csp : ctx->GetShaderManager()->GetComputeShaderPrograms()) emit(csp->debug_name); });
+                [&](auto&& emit) { for (auto& slot : ctx->GetShaderManager()->GetComputeShaderPrograms()) emit(slot.name); });
             ImGui::EndTabItem();
         }
         // Именованные шейдер-данные (vs/fs/cs) — только список; редактирование (пути) появится позже.
