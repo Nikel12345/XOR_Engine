@@ -421,6 +421,12 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
 // функция от (w,h,atlas), поэтому декод даёт РОВНО уложенный внешний прямоугольник (без over-/under-
 // оценки): carve при удалении освобождает точно занятое место.
 static rectpack2D::rect_xywh _DecodeOuterRect(const TextureData& td, const TextureAtlas* atlas) {
+    // Нет UVL — текстура ещё НЕ размещалась (создана после прошлого PackAtlases), места в слое не
+    // занимает: honest zero. Иначе нулевой внутренний прямоугольник раздулся бы gutter'ом до
+    // (0,0,P,P) — фантомный тайл в углу слоя 0, который вырезает у него место навсегда. Для
+    // мипованного КУБА (P=16, слой = ровно одна грань) это ломало перезагрузку сцены: грань не
+    // влезала в свой слой, все шесть съезжали на +1, шестая не помещалась вовсе.
+    if (td.uv_packed_scale == 0) return rectpack2D::rect_xywh(0, 0, 0, 0);
     auto unpack_lo = [](uint32_t p) { return (float)(p & 0xFFFFu) / 65535.0f; };
     auto unpack_hi = [](uint32_t p) { return (float)(p >> 16)      / 65535.0f; };
     const int w  = (int)(unpack_lo(td.uv_packed_scale)  * atlas->width  + 0.5f);
