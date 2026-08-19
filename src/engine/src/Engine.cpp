@@ -185,6 +185,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	// промах на сборке батча даёт пропуск отрисовки (пустой рендер), а не разыменование мёртвого хэндла.
 	batch_builder->SetDummyTexture("_NoTextureDummy", texture_manager);
 	InitDefaultResources();
+	InitDefaultShaders();
 	// Бейк GPU-ресурсов здесь НЕ делаем: игра объявляет свои ресурсы и шейдерные программы позже
 	// (атласы в Game::Init, sp — в манифесте сцены), а именно объявления sp несут usage-флаги.
 	// Точка бейка — конец первого Engine::LoadScene.
@@ -204,26 +205,6 @@ void Engine::InitDefaultResources()
 		texture_manager->CreateTexture("default_emissive", "_FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF })),
 	};
 	for (TextureHandle* h : def_tex) if (h) h->dont_save = true;
-
-	// Fallback-sp: материал с УДАЛЁННОЙ sp рисуется им (аналог textureless — цвет из params, без
-	// текстур). Буферы (InitDefaultBufferUpdaters) и MAIN_PASS (InitPasses) к этому моменту готовы.
-	// dont_save=true у всей тройки vs/fs/sp — движковая инфраструктура, в shaders.json не идёт.
-	{
-		using namespace DefaultBuffersNames;
-		engine_context->CreateVertexShader("_fallback_vs",
-			"../engine/shaders_code/main_pass/main_pass.vert.hlsl",
-			POS_UV_NORM_POOL,
-			{ ShaderBase::POSITION, ShaderBase::UV, ShaderBase::NORMAL, ShaderBase::TANGENT },
-			/*dont_save=*/true);
-		engine_context->CreateFragmentShader("_fallback_fs", "../engine/shaders_code/main_pass/untextured/surface.hlsl", /*dont_save=*/true);
-		ShaderProgramDescription spd;
-		spd.BehavesAsOpaqueGeometry()->DoesNotCull();
-		engine_context->CreateShaderProgram("_FallbackShader", spd, DefaultRenderPassNamespace::MAIN_PASS,
-			"_fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-			"_fallback_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
-			{ }, /*dont_save=*/true);   // текстур нет
-		batch_builder->SetFallbackShader("_FallbackShader");   // ПО ИМЕНИ: удаление fallback → промах → пустой рендер
-	}
 
 	// Примитивы-дефолты движка (quad/sphere): генерируются кодом, поэтому dont_save (в models.json
 	// не идут). Раньше жили в игре — вынесены сюда, чтобы любая игра/сцена могла ссылаться на них по
@@ -320,6 +301,157 @@ void Engine::InitDefaultResources()
 	// Классический скайбокс — src/game/saved_scene, фрактал — src/mygame/saved_scene_fractal.
 }
 
+// Движковый набор шейдеров: вершинники/фрагментники/compute + render-программы, которыми рисуются
+// штатные проходы. Раньше он ехал в манифесте сцены (game/saved_scene/shaders.json) — то есть каждая
+// сцена возила КОПИЮ движковой инфраструктуры, а сцена без неё оставалась без базового рендера.
+// Теперь это дефолтные ресурсы, как quad/sphere/cube и default_albedo: создаются кодом на старте,
+// у всех dont_save (в shaders.json не пишутся и оттуда не грузятся).
+//
+// Цена резидентности замерена зондом sandbox/ShaderVramProbe.cpp: 0 байт VRAM и на шейдер, и на
+// пайплайн; ~160 KB RAM драйвера на весь набор — против 5.3 MB у ОДНОЙ текстуры 1024² с мипами.
+// Поэтому «создаём всегда, даже если сцена этим не рисует» здесь ничего не стоит.
+//
+// Сцена объявляет в своём манифесте только СВОИ шейдеры — те, которых движок не предусматривает
+// (фрактальные фоны mygame: fractal_fs/anchor_surface_fs и их sp живут в манифесте своей сцены).
+//
+// Требует готовыми: пул геометрии (вершинники объявляют по нему usage буферов), буферы
+// (InitDefaultBufferUpdaters) и проходы (InitPasses) — sp ссылается на проход по имени.
+void Engine::InitDefaultShaders()
+{
+	using namespace DefaultBuffersNames;
+	using namespace ShaderBase;
+	namespace RP = DefaultRenderPassNamespace;
+
+	// ── Fallback: материал с УДАЛЁННОЙ sp рисуется им (аналог untextured — цвет из params, без
+	//    текстур). Держим ОТДЕЛЬНОЙ тройкой, а не ссылкой на main_pass_vs/untextured_surface_fs
+	//    ниже: смысл fallback-а в том, чтобы пережить удаление любого шейдера из редактора.
+	//    Одинаковый с ними байткод дедуплицируется по хэшу SPIR-V — второго GPU-шейдера не будет. ──
+	engine_context->CreateVertexShader("_fallback_vs",
+		"../engine/shaders_code/main_pass/main_pass.vert.hlsl",
+		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, /*dont_save=*/true);
+	engine_context->CreateFragmentShader("_fallback_fs",
+		"../engine/shaders_code/main_pass/untextured/surface.hlsl", /*dont_save=*/true);
+	{
+		ShaderProgramDescription spd;
+		spd.BehavesAsOpaqueGeometry()->DoesNotCull();
+		engine_context->CreateShaderProgram("_Fallback", spd, RP::MAIN_PASS,
+			"_fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"_fallback_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
+			{ }, /*dont_save=*/true);   // текстур нет
+		batch_builder->SetFallbackShader("_Fallback");   // ПО ИМЕНИ: удаление fallback → промах → пустой рендер
+	}
+
+	// ── Вершинники. Пул один (PosUVNorm), различаются НАБОРОМ семантик: теневому и скайбоксу
+	//    хватает позиции, лишние стримы они не биндят (и не объявляют им VERTEX-usage). ──
+	engine_context->CreateVertexShader("main_pass_vs", "../engine/shaders_code/main_pass/main_pass.vert.hlsl",
+		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, /*dont_save=*/true);
+	engine_context->CreateVertexShader("shadow_vs", "../engine/shaders_code/shadow_pass/shadow_pass.vert.hlsl",
+		POS_UV_NORM_POOL, { POSITION }, /*dont_save=*/true);
+	engine_context->CreateVertexShader("skybox_vs", "../engine/shaders_code/skybox/skybox.vert.hlsl",
+		POS_UV_NORM_POOL, { POSITION }, /*dont_save=*/true);
+	engine_context->CreateVertexShader("debug_collider_vs", "../engine/shaders_code/debug/debug_collider.vert.hlsl",
+		POS_UV_NORM_POOL, { POSITION }, /*dont_save=*/true);
+
+	// ── Фрагментники ──
+	engine_context->CreateFragmentShader("main_surface_fs",        "../engine/shaders_code/main_pass/surface.hlsl", /*dont_save=*/true);
+	engine_context->CreateFragmentShader("untextured_surface_fs",  "../engine/shaders_code/main_pass/untextured/surface.hlsl", /*dont_save=*/true);
+	engine_context->CreateFragmentShader("transparent_surface_fs", "../engine/shaders_code/transparent_pass/surface.hlsl", /*dont_save=*/true);
+	engine_context->CreateFragmentShader("shadow_fs",              "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl", /*dont_save=*/true);
+	engine_context->CreateFragmentShader("skybox_fs",              "../engine/shaders_code/skybox/skybox.frag.hlsl", /*dont_save=*/true);
+	engine_context->CreateFragmentShader("debug_collider_fs",      "../engine/shaders_code/debug/debug_collider.frag.hlsl", /*dont_save=*/true);
+
+	// ── Compute-ШЕЙДЕРЫ (не программы). Программы (csp) держат указатели на буферы/атласы и
+	//    создаются игрой (DefaultShaderProgramSet::Set*Programs); сюда идут только сами CSD,
+	//    на которые те ссылаются по имени. ──
+	engine_context->CreateComputeShader("bloom_prefilter_cs", "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl", /*dont_save=*/true);
+	engine_context->CreateComputeShader("bloom_down_cs",      "../engine/shaders_code/comp/bloom_down.comp.hlsl", /*dont_save=*/true);
+	engine_context->CreateComputeShader("bloom_up_cs",        "../engine/shaders_code/comp/bloom_up.comp.hlsl", /*dont_save=*/true);
+	engine_context->CreateComputeShader("bloom_composite_cs", "../engine/shaders_code/comp/bloom_composite.comp.hlsl", /*dont_save=*/true);
+	engine_context->CreateComputeShader("culling_clear_cs",   "../engine/shaders_code/comp/culling_clear.comp.hlsl", /*dont_save=*/true);
+	engine_context->CreateComputeShader("culling_pib_cs",     "../engine/shaders_code/comp/culling_pib.comp.hlsl", /*dont_save=*/true);
+
+	// ── Render-программы. Имена — короткие, в стиле URP: их видно в списке шейдеров редактора
+	//    и в materials.json, читаются они чаще, чем пишутся. Подчёркивание = служебная программа,
+	//    которую не выбирают руками (движковое соглашение: _FallbackAtlas, _staging, _cameraBuffer).
+	//    "LitColor" — тот же свет и тот же PBR, что у Lit, но БЕЗ карт: цвет берётся из params
+	//    материала. Именно "Lit", а не "Unlit": освещение здесь считается полностью. ──
+	{
+		ShaderProgramDescription spd;
+		spd.BehavesAsOpaqueGeometry();
+		engine_context->CreateShaderProgram("Lit", spd, RP::MAIN_PASS,
+			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
+			{ TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive },
+			/*dont_save=*/true);
+
+		// Тот же vs и те же буферы, но fs без текстур: материал без карт рисуется цветом из params.
+		engine_context->CreateShaderProgram("LitColor", spd, RP::MAIN_PASS,
+			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"untextured_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
+			{ }, /*dont_save=*/true);
+	}
+	{
+		// Прозрачные: глубину читают, но НЕ пишут (иначе перекрывали бы друг друга), блендинг включён.
+		// Из света берут только _lightBuffer — теневые карты прозрачные не читают.
+		ShaderProgramDescription spd;
+		spd.BehavesAsTransparentGeometry();
+		engine_context->CreateShaderProgram("LitTransparent", spd, RP::TRANSPARENT_PASS,
+			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
+			"transparent_surface_fs", { DEFAULT_LIGHT_BUFFER },
+			{ TextureSlotRole::Albedo, TextureSlotRole::Normal }, /*dont_save=*/true);
+	}
+	{
+		// Теневой: камера СВЕТОВАЯ (DefaultLightCameraBuffer вместо _cameraBuffer), цвета нет.
+		ShaderProgramDescription spd;
+		spd.BehavesAsShadowCaster();
+		engine_context->CreateShaderProgram("ShadowCaster", spd, RP::SHADOW_PASS,
+			"shadow_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"shadow_fs", { }, { }, /*dont_save=*/true);
+	}
+	{
+		// Каркас коллайдеров: линии поверх картинки, глубина не участвует вовсе.
+		ShaderProgramDescription spd;
+		spd.BehavesAsOpaqueGeometry()->IgnoresDepth()->AsLineList();
+		engine_context->CreateShaderProgram("Wireframe", spd, RP::DEBUG_PASS,
+			"debug_collider_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
+			"debug_collider_fs", { }, { }, /*dont_save=*/true);
+	}
+	{
+		// Скайбокс: transformless (без Positions, PIB=-1) — из буферов ему нужна только камера.
+		// z=w в вершиннике даёт глубину РОВНО на клире, поэтому LESS не пройдёт — нужен LESS_OR_EQUAL.
+		ShaderProgramDescription spd;
+		spd.BehavesAsOpaqueGeometry()->ReadsDepthOnly()->WithDepthCompare(SDL_GPU_COMPAREOP_LESS_OR_EQUAL);
+		engine_context->CreateShaderProgram("Skybox", spd, RP::MAIN_PASS,
+			"skybox_vs", { DEFAULT_CAMERA_BUFFER },
+			"skybox_fs", { }, { }, /*dont_save=*/true);
+	}
+
+	{
+		// UI-оверлей: рисует энтити, которые emit-ит UI_Yoga. Программа движковая — раньше жила
+		// в игре (DefaultShaderProgramSet::SetUIProgram), хотя сам UI_Yoga давно подсистема движка,
+		// и без неё UI не рисовался бы вообще. VS тянет POSITION+UV (юнит-квад), матрица даёт NDC;
+		// FS — заливка albedo (без света) + текст. Объявление FS-буферов здесь = их usage, по
+		// которому BakePending эти буферы и создаёт. Слот Albedo = фон узла.
+		engine_context->CreateVertexShader("ui_vs", "../engine/shaders_code/ui/ui.vert.hlsl",
+			POS_UV_NORM_POOL, { POSITION, UV }, /*dont_save=*/true);
+		engine_context->CreateFragmentShader("ui_fs", "../engine/shaders_code/ui/ui.frag.hlsl", /*dont_save=*/true);
+
+		ShaderProgramDescription spd;
+		spd.BehavesAsUIOverlay();
+		engine_context->CreateShaderProgram("UI", spd, RP::UI_PASS,
+			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_INSTANCE_BUFFER },
+			"ui_fs", { UI_TEXT_BITS_BUFFER, UI_TEXT_WORDBASE_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER },
+			{ TextureSlotRole::Albedo }, /*dont_save=*/true);
+	}
+
+	// ── Push-константы движковых sp: код-байндинг живёт рядом с созданием программы. Реестр
+	//    ShaderManager вешает его по имени — и здесь, и на любой будущей пересборке этой sp. ──
+	shader_manager->CreatePushFunc<RP::ShadowPushData>("ShadowCaster",
+		[](const PushConstantBinder& b, RP::ShadowPushData data) { b.PushFragment(data); });   // слот 0
+	shader_manager->CreatePushFunc<RP::DebugColliderPushData>("Wireframe",
+		[](const PushConstantBinder& b, RP::DebugColliderPushData data) { b.PushFragment(data); });   // fragment slot 0 -> b0, space3
+}
+
 void Engine::InitDefaultBufferUpdaters()
 {
 	using namespace DefaultUpdateSet;
@@ -339,7 +471,7 @@ void Engine::InitDefaultBufferUpdaters()
 	SetDefaultOutPibUpdater(*engine_context, light_data_module);
 
 	// UI-текст: bits/wordbase/index/text (UI_DataModule) + GlyphUVL (FontManager, шрифт "default").
-	// Буферы бейкаются, когда sp_ui объявит их usage (создаётся в Game::MainInit до старта потоков).
+	// Буферы бейкаются, когда программа "UI" объявит их usage (InitDefaultShaders, ниже по Init).
 	SetUITextUpdaters(*engine_context, ui_data_module, font_manager, "default");
 }
 

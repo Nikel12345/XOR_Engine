@@ -34,22 +34,6 @@ namespace DefaultShaderProgramSet
 
 }
 
-// Единая точка привязки push-констант к render-sp — ПОСЛЕ LoadScene (push не сериализуется, у
-// загруженных из манифеста sp его нет; см. заголовок). Промах имени → пропуск (лог внутри GetShaderProgram).
-void DefaultShaderProgramSet::BindDefaultPushFuncs(EngineContext* ctx)
-{
-    namespace RP = DefaultRenderPassNamespace;
-    ShaderManager* sm = ctx->GetShaderManager();
-
-    if (ShaderProgram* sp = sm->GetShaderProgram("sp_shadow"))
-        sp->BindPushConstants<RP::ShadowPushData>(
-            [](const PushConstantBinder& b, RP::ShadowPushData data) { b.PushFragment(data); });   // слот 0
-
-    if (ShaderProgram* sp = sm->GetShaderProgram("sp_debug_collider"))
-        sp->BindPushConstants<RP::DebugColliderPushData>(
-            [](const PushConstantBinder& b, RP::DebugColliderPushData data) { b.PushFragment(data); });   // fragment slot 0 → b0, space3
-}
-
 void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDataModule* ldm)
 {
     using namespace DefaultBuffersNames;
@@ -296,24 +280,4 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     }
 
     inited = true;
-}
-
-void DefaultShaderProgramSet::SetUIProgram(EngineContext* ctx)
-{
-    using namespace DefaultBuffersNames;
-    namespace RP = DefaultRenderPassNamespace;
-
-    // VS тянет POSITION+UV (юнит-квад); матрица даёт NDC. FS: обычный albedo (без света) + текст.
-    ctx->CreateVertexShader("ui_vs", "../engine/shaders_code/ui/ui.vert.hlsl",
-        POS_UV_NORM_POOL, { ShaderBase::POSITION, ShaderBase::UV }, /*dont_save=*/true);
-    ctx->CreateFragmentShader("ui_fs", "../engine/shaders_code/ui/ui.frag.hlsl", /*dont_save=*/true);
-
-    ShaderProgramDescription spd;
-    spd.BehavesAsUIOverlay();
-    // VS-буферы: transform/outpib/instance. FS-буферы: разреженный текст-канал + GlyphUVL. Их
-    // объявление здесь = usage, по которому BakePending создаёт эти буферы. Слот Albedo = фон.
-    ctx->CreateShaderProgram("sp_ui", spd, RP::UI_PASS,
-        "ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_INSTANCE_BUFFER },
-        "ui_fs", { UI_TEXT_BITS_BUFFER, UI_TEXT_WORDBASE_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER },
-        { TextureSlotRole::Albedo }, /*dont_save=*/true);
 }

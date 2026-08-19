@@ -1,23 +1,5 @@
 {
-    "vertex_shaders": [
-        {
-            "name": "skybox_vs",
-            "path": "../engine/shaders_code/skybox/skybox.vert.hlsl",
-            "pull": [
-                "POSITION"
-            ]
-        },
-        {
-            "name": "main_pass_vs",
-            "path": "../engine/shaders_code/main_pass/main_pass.vert.hlsl",
-            "pull": [
-                "POSITION",
-                "UV",
-                "NORMAL",
-                "TANGENT"
-            ]
-        }
-    ],
+    "vertex_shaders": [],
     "fragment_shaders": [
         {
             "name": "fractal_fs",
@@ -28,32 +10,7 @@
             "path": "../engine/shaders_code/main_pass/fractal/surface.hlsl"
         }
     ],
-    "compute_shaders": [
-        {
-            "name": "bloom_down_cs",
-            "path": "../engine/shaders_code/comp/bloom_down.comp.hlsl"
-        },
-        {
-            "name": "culling_clear_cs",
-            "path": "../engine/shaders_code/comp/culling_clear.comp.hlsl"
-        },
-        {
-            "name": "culling_pib_cs",
-            "path": "../engine/shaders_code/comp/culling_pib.comp.hlsl"
-        },
-        {
-            "name": "bloom_up_cs",
-            "path": "../engine/shaders_code/comp/bloom_up.comp.hlsl"
-        },
-        {
-            "name": "bloom_prefilter_cs",
-            "path": "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl"
-        },
-        {
-            "name": "bloom_composite_cs",
-            "path": "../engine/shaders_code/comp/bloom_composite.comp.hlsl"
-        }
-    ],
+    "compute_shaders": [],
     "render_shader_programs": [
         {
             "name": "AnchorObject",

@@ -65,6 +65,12 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
         collect(program->fragment_shader_buffer_names);
     }
 
+    // Код-байндинг по имени — сразу на создании, если он уже зарегистрирован (CreatePushFunc).
+    // Так порядок «функция / программа» не значит ничего, и sp, пересозданная загрузкой сцены
+    // или редактором, приходит в мир уже с push_func, а не голой до ближайшего BindShaderFunctions.
+    if (auto pit = push_instructions_.find(name); pit != push_instructions_.end())
+        program->push_func = pit->second;
+
     ShaderProgram* ptr = program.get();
 
     shader_programs.emplace(name, std::move(program));
@@ -126,6 +132,12 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     for (TextureAtlas* a : result->texture_samplers)
         if (a) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
+    // См. CreateShaderProgram: зарегистрированные push/dispatch вешаются сразу.
+    if (auto pit = compute_push_instructions_.find(name); pit != compute_push_instructions_.end())
+        result->push_func = pit->second;
+    if (auto dit = dispatch_instructions_.find(name); dit != dispatch_instructions_.end())
+        result->dispatch_func = dit->second;
+
     ComputeShaderProgram* ptr = result.get();
     compute_shader_programs.push_back(std::move(result));
     compute_shader_programs_by_name.emplace(name, ptr);
@@ -133,6 +145,65 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     dirty_compute_pipelines = true;
     dirty_compute_batches = true;
     return ptr;
+}
+
+// ── Реестр код-байндингов ───────────────────────────────────────────────────────────────────
+// Регистрация двусторонняя: кладём запись И тут же вешаем её на программу, если та уже есть.
+// Вместе с привязкой на создании программы это даёт инвариант «push_func программы == запись
+// реестра под её именем» без единой точки синхронизации.
+
+void ShaderManager::CreatePushFunc(const std::string& sp_name, PushFunc fn)
+{
+    auto& slot = push_instructions_[sp_name] = std::move(fn);   // 1 программа — 1 функция (перезапись)
+    if (auto it = shader_programs.find(sp_name); it != shader_programs.end())
+        it->second->push_func = slot;
+}
+
+void ShaderManager::CreateComputePushFunc(const std::string& csp_name, PushFunc fn)
+{
+    auto& slot = compute_push_instructions_[csp_name] = std::move(fn);
+    if (auto it = compute_shader_programs_by_name.find(csp_name); it != compute_shader_programs_by_name.end())
+        it->second->push_func = slot;
+}
+
+void ShaderManager::CreateDispatchFunc(const std::string& csp_name, DispatchFunc fn)
+{
+    auto& slot = dispatch_instructions_[csp_name] = std::move(fn);
+    if (auto it = compute_shader_programs_by_name.find(csp_name); it != compute_shader_programs_by_name.end())
+        it->second->dispatch_func = slot;
+}
+
+void ShaderManager::BindShaderFunctions()
+{
+    // Осиротевшие записи — не ошибка: сцена могла просто не привезти свою программу (у каждого
+    // фрактала свой sp, а функции обоих зарегистрированы разом в Init). Но это ровно тот случай,
+    // который разовый колбэк с if (sp) съедал молча, — поэтому он идёт в лог одной строкой.
+    std::string orphans;
+    auto bind = [&orphans](auto& instructions, auto&& lookup, auto&& assign) {
+        for (auto& [name, fn] : instructions) {
+            if (auto* prog = lookup(name)) assign(prog, fn);
+            else { if (!orphans.empty()) orphans += ", "; orphans += name; }
+        }
+    };
+
+    bind(push_instructions_,
+        [this](const std::string& n) -> ShaderProgram* {
+            auto it = shader_programs.find(n);
+            return it != shader_programs.end() ? it->second.get() : nullptr;
+        },
+        [](ShaderProgram* sp, const PushFunc& fn) { sp->push_func = fn; });
+
+    auto find_csp = [this](const std::string& n) -> ComputeShaderProgram* {
+        auto it = compute_shader_programs_by_name.find(n);
+        return it != compute_shader_programs_by_name.end() ? it->second : nullptr;
+    };
+    bind(compute_push_instructions_, find_csp,
+        [](ComputeShaderProgram* csp, const PushFunc& fn) { csp->push_func = fn; });
+    bind(dispatch_instructions_, find_csp,
+        [](ComputeShaderProgram* csp, const DispatchFunc& fn) { csp->dispatch_func = fn; });
+
+    if (!orphans.empty())
+        SDL_Log("ShaderManager: push/dispatch funcs without a program: %s", orphans.c_str());
 }
 
 ShaderProgram* ShaderManager::GetShaderProgram(const std::string& name)

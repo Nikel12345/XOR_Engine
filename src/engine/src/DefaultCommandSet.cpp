@@ -193,16 +193,16 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			delete c;
 		});
 
-	// Новый материал: sp "sp" (main) + дефолт-текстуры по его required_slots + дефолт-params.
+	// Новый материал: sp "Lit" (главный PBR) + дефолт-текстуры по его required_slots + дефолт-params.
 	// Имя приходит из UI (уже свободное); если вдруг занято — CreateMaterial вернёт существующий.
 	im.RegisterCommand(CommandId::CreateMaterial,
 		[](EngineContext* ctx, const void* data)
 		{
 			const CreateMaterialCmd* c = static_cast<const CreateMaterialCmd*>(data);
-			ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram("sp");
+			ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram("Lit");
 			std::vector<std::pair<TextureSlotRole, TextureName>> texs;
 			if (sp) for (TextureSlotRole role : sp->required_slots) texs.emplace_back(role, DefaultTextureForRole(role));
-			Material* m = ctx->GetMaterialManager()->CreateMaterial(c->name, std::move(texs), std::vector<ShaderName>{ "sp" });
+			Material* m = ctx->GetMaterialManager()->CreateMaterial(c->name, std::move(texs), std::vector<ShaderName>{ "Lit" });
 			if (m) ctx->SetMaterialParams(m, OpaqueMaterialParams{});   // sp несёт MaterialBlock → нужен блоб
 			ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->name);
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
@@ -364,14 +364,15 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const std::vector<TextureSlotRole>  slots = c->slots;   // роли из формы (дубли отсеет CreateShaderProgram)
 			const std::string vsName = !c->vsName.empty() ? c->vsName : (old ? old->vs_name : std::string());
 			const std::string fsName = !c->fsName.empty() ? c->fsName : (old ? old->fs_name : std::string());
-			auto push = old ? old->push_func : nullptr;   // push-константы — код-байндинг; у UI-создания их нет
 
 			if (old) {   // правка: снять кэш пайплайна старой sp ДО её удаления (ключ кэша — sp*)
 				ctx->GetPipeManager()->InvalidatePipeline(old, ctx->GetBatchBuilder()->RebuildEpoch());
 				sm->DeleteShaderProgram(c->oldName);
 			}
+			// push_func не переносим руками: CreateShaderProgram сам возьмёт код-байндинг из
+			// реестра ПО ИМЕНИ. Переименование = смена владельца функции — перенос со старого
+			// имени всё равно жил бы лишь до ближайшей LoadScene, где связывает имя.
 			ShaderProgram* nw = sm->CreateShaderProgram(finalName, c->spd, pass, vsName, vbufs, fsName, fbufs, slots, ctx->GetBufferManager());
-			if (nw) nw->push_func = std::move(push);
 			sm->SetDirtyGraphicsPipelines(true);
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;

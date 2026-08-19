@@ -99,6 +99,48 @@ public:
 
 	ComputeShaderProgram* GetComputeShaderProgram(const std::string& name);
 
+	// ── Код-байндинги (push/dispatch) — ИНСТРУКЦИИ ПО ИМЕНИ, как resize-инструкции атласов ──
+	// Лямбды живут в игровом коде и НЕ сериализуются: sp/csp из манифеста сцены рождается
+	// голым. Поэтому функция регистрируется ОДИН РАЗ (Game::Init), а привязка идёт сама — на создании
+	// программы И в BindShaderFunctions в конце LoadScene. Порядок «функция раньше программы» или
+	// наоборот значения не имеет; программы нет вовсе — запись ждёт её и попадает в отчёт,
+	// а не теряется молча, как при разовом колбэке с if (sp) внутри.
+	//
+	// Ключ = ИМЯ программы, тот же, что в shader_programs/compute_shader_programs_by_name: пространство
+	// имён программ уже глобально (LoadScene делает merge-upsert в тот же словарь), так что
+	// реестр функций наследует ровно тот же контракт уникальности, а не вводит новый. Захотим
+	// сцено-локальные имена — менять надо ключ САМИХ программ, и эти словари пойдут за ним.
+	using PushFunc     = std::function<void(const PushConstantBinder&, const void*)>;
+	using DispatchFunc = std::function<void(DispatchSizeBinder&, const void*)>;
+
+	// Сырая форма: лямбда сама разбирается с raw (или игнорирует его — тело MAIN_PASS передаёт nullptr).
+	void CreatePushFunc(const std::string& sp_name, PushFunc fn);
+	// Типизированная: T — структура push-данных прохода, стирание типа делает обёртка
+	// (как ShaderProgram::BindPushConstants<T>, который остался для прямой правки готовой sp).
+	template<typename T, typename Fn> void CreatePushFunc(const std::string& sp_name, Fn&& fn) {
+		CreatePushFunc(sp_name, PushFunc([fn = std::forward<Fn>(fn)](const PushConstantBinder& b, const void* raw) {
+			fn(b, *static_cast<const T*>(raw));
+		}));
+	}
+
+	void CreateComputePushFunc(const std::string& csp_name, PushFunc fn);
+	template<typename T, typename Fn> void CreateComputePushFunc(const std::string& csp_name, Fn&& fn) {
+		CreateComputePushFunc(csp_name, PushFunc([fn = std::forward<Fn>(fn)](const PushConstantBinder& b, const void* raw) {
+			fn(b, *static_cast<const T*>(raw));
+		}));
+	}
+
+	void CreateDispatchFunc(const std::string& csp_name, DispatchFunc fn);
+	template<typename T, typename Fn> void CreateDispatchFunc(const std::string& csp_name, Fn&& fn) {
+		CreateDispatchFunc(csp_name, DispatchFunc([fn = std::forward<Fn>(fn)](DispatchSizeBinder& b, const void* raw) {
+			fn(b, *static_cast<const T*>(raw));
+		}));
+	}
+
+	// Пере-привязка всех зарегистрированных функций к текущим программам + лог записей, которым
+	// программы не нашлось (тот самый случай «функция есть, шейдера нет»). Зовёт Engine в конце LoadScene.
+	void BindShaderFunctions();
+
 	std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& GetShaderPrograms() { return shader_programs; }
 	std::vector<std::unique_ptr<ComputeShaderProgram>>& GetComputeShaderPrograms() { return compute_shader_programs; };
 
@@ -146,6 +188,12 @@ private:
 	std::unordered_map<std::string, ComputeShaderData>  compute_shaders;
 
 	SDL_GPUDevice* dev;
+
+	// Инструкции код-байндингов по имени программы (см. CreatePushFunc): переживают пересоздание
+	// самих программ — 1 программа = 1 функция (повторная регистрация перезаписывает).
+	std::unordered_map<std::string, PushFunc>     push_instructions_;
+	std::unordered_map<std::string, PushFunc>     compute_push_instructions_;
+	std::unordered_map<std::string, DispatchFunc> dispatch_instructions_;
 
 	std::unordered_map<uint64_t, std::weak_ptr<SDL_GPUShader>> gpu_shaders;
 	// Токен живости: делитер шейдера освобождает GPU-ресурс лишь пока менеджер жив (а с ним и

@@ -155,7 +155,7 @@ public:
 
 	// Create*Shader регистрируют шейдер-данные по имени в ShaderManager; CreateShaderProgram
 	// ссылается на них по имени (vs_name/fs_name/cs_name). dont_save=true — движковый дефолт
-	// (_fallback_vs/_fallback_fs/_FallbackShader), в shaders.json не пишется (см. *ShaderData::dont_save).
+	// (весь набор Engine::InitDefaultShaders), в shaders.json не пишется (см. *ShaderData::dont_save).
 	void CreateFragmentShader(const std::string& name, const char* hlsl_path, bool dont_save = false);
 	// Вершинник называет ПУЛ (по имени, как модели) и потребляемые СЕМАНТИКИ; набор и порядок
 	// слотов выводит сам пул. Пустое имя пула = дефолтный.

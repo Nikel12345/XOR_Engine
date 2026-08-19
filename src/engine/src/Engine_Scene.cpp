@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "Engine.h"
 #include "EngineProfiler.h"
 // Engine.h теперь только forward-декларации — полные типы тянет этот TU.
@@ -569,8 +569,8 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 					const ShaderProgramDescription spd = ReadSpd(yyjson_obj_get(e, "spd"));
 
 					// Merge-upsert: занятое имя = delete+create (кэш пайплайна по sp* — снять ДО).
-					// push_func НЕ переносим: код-байндинги пере-привязывает bind_shader_functions
-					// в конце LoadScene (перенос по имени ломался бы на переименовании sp).
+					// push_func НЕ переносим: его вернёт реестр код-байндингов по имени (внутри
+					// CreateShaderProgram) — перенос со старой sp ломался бы на переименовании.
 					auto& progs = sm->GetShaderPrograms();
 					if (auto it = progs.find(name); it != progs.end()) {
 						pipe_manager->InvalidatePipeline(it->second.get(), batch_builder->RebuildEpoch());
@@ -688,9 +688,10 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 		}
 	}
 
-	// Пере-привязка код-байндингов (push_func) к загруженным sp — колбэк игры (у неё живут
-	// лямбды). После КАЖДОЙ загрузки, в т.ч. UI-рантаймовой: sp из манифеста пересозданы голыми.
-	if (bind_shader_functions) bind_shader_functions();
+	// Пере-привязка код-байндингов (push/dispatch) к загруженным программам по имени. Сами
+	// инструкции игра регистрирует один раз (ShaderManager::CreatePushFunc), CreateShaderProgram
+	// вешает их уже на создании — здесь остаётся общий проход и отчёт об осиротевших записях.
+	shader_manager->BindShaderFunctions();
 
 	// Бейк GPU-ресурсов здесь НЕ делается: он дренируется каждый кадр в начале Engine::PrepareFunc
 	// (BakePending). Всё, что объявила эта загрузка (атласы, буферы, sp, материалы), попадёт в

@@ -3,8 +3,8 @@
         {
             "name": "ground",
             "shaders": [
-                "sp",
-                "sp_shadow"
+                "Lit",
+                "ShadowCaster"
             ],
             "textures": [
                 {
@@ -47,22 +47,22 @@
         {
             "name": "_skybox",
             "shaders": [
-                "_skybox"
+                "Skybox"
             ],
             "textures": []
         },
         {
             "name": "debug_collider",
             "shaders": [
-                "sp_debug_collider"
+                "Wireframe"
             ],
             "textures": []
         },
         {
             "name": "car2",
             "shaders": [
-                "sp",
-                "sp_shadow"
+                "Lit",
+                "ShadowCaster"
             ],
             "textures": [
                 {
@@ -105,7 +105,7 @@
         {
             "name": "material_sun",
             "shaders": [
-                "sp"
+                "Lit"
             ],
             "textures": [
                 {
@@ -148,7 +148,7 @@
         {
             "name": "transparent",
             "shaders": [
-                "sp_transparent"
+                "LitTransparent"
             ],
             "textures": [
                 {
@@ -168,8 +168,8 @@
         {
             "name": "car",
             "shaders": [
-                "sp",
-                "sp_shadow"
+                "Lit",
+                "ShadowCaster"
             ],
             "textures": [
                 {
@@ -212,7 +212,7 @@
         {
             "name": "ship",
             "shaders": [
-                "sp_untextured"
+                "LitColor"
             ],
             "textures": [],
             "params_type": "Opaque",
@@ -238,8 +238,8 @@
         {
             "name": "m_orange",
             "shaders": [
-                "sp_untextured",
-                "sp_shadow"
+                "LitColor",
+                "ShadowCaster"
             ],
             "textures": [],
             "params_type": "Opaque",
@@ -265,8 +265,8 @@
         {
             "name": "m_gray",
             "shaders": [
-                "sp_untextured",
-                "sp_shadow"
+                "LitColor",
+                "ShadowCaster"
             ],
             "textures": [],
             "params_type": "Opaque",
@@ -292,8 +292,8 @@
         {
             "name": "brick",
             "shaders": [
-                "sp",
-                "sp_shadow"
+                "Lit",
+                "ShadowCaster"
             ],
             "textures": [
                 {
@@ -336,8 +336,8 @@
         {
             "name": "metal1",
             "shaders": [
-                "sp_untextured",
-                "sp_shadow"
+                "LitColor",
+                "ShadowCaster"
             ],
             "textures": [],
             "params_type": "Opaque",
@@ -363,8 +363,8 @@
         {
             "name": "metal2",
             "shaders": [
-                "sp_untextured",
-                "sp_shadow"
+                "LitColor",
+                "ShadowCaster"
             ],
             "textures": [],
             "params_type": "Opaque",
@@ -390,8 +390,8 @@
         {
             "name": "emission",
             "shaders": [
-                "sp_untextured",
-                "sp_shadow"
+                "LitColor",
+                "ShadowCaster"
             ],
             "textures": [],
             "params_type": "Opaque",
@@ -417,7 +417,7 @@
         {
             "name": "iron_block",
             "shaders": [
-                "sp"
+                "Lit"
             ],
             "textures": [
                 {
@@ -460,8 +460,8 @@
         {
             "name": "wood",
             "shaders": [
-                "sp",
-                "sp_shadow"
+                "Lit",
+                "ShadowCaster"
             ],
             "textures": [
                 {

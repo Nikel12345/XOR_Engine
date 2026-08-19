@@ -13,14 +13,15 @@ class LightDataModule;
 
 namespace DefaultShaderProgramSet
 {
-    // Render shader programs больше НЕ создаются кодом — идут из сцены (shaders.json).
-    // Осталась только привязка их push-констант.
+    // Движковые render-программы (Lit/ShadowCaster/…) и их push-константы — дефолты движка
+    // (Engine::InitDefaultShaders). Из сцены идут только СВОИ: фрактальные фоны.
 
-    // Пере-привязка push-констант к render-sp ПО ИМЕНИ. push_func — код-байндинг, он НЕ
-    // сериализуется: после LoadScene загруженные sp (пересозданы из манифеста) остаются без него,
-    // поэтому его вешают здесь, ПОСЛЕ загрузки сцены. Промах sp → пропуск. Пуши фрактальных
-    // фонов ("Fractal"/"Mandelbrot" из shaders.json своих сцен) — под if'ом с именем сцены.
-    void BindDefaultPushFuncs(EngineContext* ctx, const std::string& scene_name);
+    // Регистрация push-констант render-sp ПО ИМЕНИ в реестре ShaderManager. push_func — код-байндинг,
+    // он НЕ сериализуется: загруженная из манифеста sp рождается без него. Реестр это и решает —
+    // зовётся ОДИН РАЗ на инициализации, ДО первой LoadScene, а привязка к sp идёт сама.
+    // Пуши фрактальных фонов ("Fractal"/"Mandelbrot") регистрируются ОБА, без разбора имени сцены:
+    // сцена привозит свой sp — он и получит свою функцию, вторая просто ждёт (одна строка в логе).
+    void RegisterShaderFuncs(EngineContext* ctx);
 
     // GPU-каллинг (culling_pib.comp): пишет out_pib блоками по камерам (0 — игрок, 1..N — световые).
     // Проход создаёт engine (SetDefaultCullingPass); здесь программа + её push/dispatch.

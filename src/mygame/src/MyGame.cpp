@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "MyGame.h"
 // Engine.h теперь только forward-декларации — полные типы тянет этот TU.
 #include "EngineContext.h"
@@ -57,9 +57,9 @@ SDL_AppResult MyGame::MainInit()
         SetCullingPibPrograms(ctx, engine->GetLightDataModule());   // GPU-каллинг: out_pib
     }
 
-    // Сцена = выбор фрактала. Всё сценозависимое — буфер кадра (CreateBufferData), его
-    // апдейтер (FractalUpdateSet) и пуши шейдеров (в BindDefaultPushFuncs) — под if'ом
-    // с её именем. Буфер — ДО LoadScene: sp из манифеста сцены ссылается на него по имени,
+    // Сцена = выбор фрактала. Всё сценозависимое — буфер кадра (CreateBufferData) и его
+    // апдейтер (FractalUpdateSet) — под if'ом с её именем (пуши шейдеров уже нет: она
+    // находит свой sp по имени сама, см. RegisterShaderFuncs). Буфер — ДО LoadScene: sp из манифеста сцены ссылается на него по имени,
     // резолв идёт по уже существующим. Рендер-ресурсы (vs/fs/sp/материал) — в манифестах.
     const std::string scene_name = "scene_fractal";
     BufferManager* bm = ctx->GetBufferManager();
@@ -81,11 +81,11 @@ SDL_AppResult MyGame::MainInit()
         FractalUpdateSet::SetMandelbrotOrbitUpdater(ctx);
     }
 
-    // Пере-привязку push-констант к sp движок зовёт сам В КОНЦЕ каждой загрузки (в т.ч.
-    // UI-рантаймовой): sp из манифеста пересозданы голыми. Регистрируем ДО первого LoadScene.
-    engine->SetBindShaderFunctions([this, scene_name] {
-        DefaultShaderProgramSet::BindDefaultPushFuncs(ctx, scene_name);
-    });
+    // Push-константы sp — ИНСТРУКЦИИ ПО ИМЕНИ в реестре ShaderManager (как resize-инструкции
+    // атласов): регистрируем ДО первого LoadScene, а вешает их на sp сам движок — и на создании
+    // программы, и общим проходом в конце каждой загрузки. Имя сцены сюда не идёт: функции
+    // фракталов названы по своим sp и находят их сами.
+    DefaultShaderProgramSet::RegisterShaderFuncs(ctx);
 
     objectManager->CreateScene(scene_name);
     ctx->LoadScene(scene_name, "saved_" + scene_name);   // папка сцены (scene.json + ресурсы)

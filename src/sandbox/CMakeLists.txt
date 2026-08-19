@@ -4,6 +4,7 @@ add_executable(Sandbox)
 # Каждый сценарий — свой .cpp; main решает, что именно запустить.
 set(SANDBOX_SRC
     src/QueueThreadingProbe.cpp       # зонд: очереди под конвейером потоков движка (ThreadController+SlotController) — потокобезопасность
+    # src/ShaderVramProbe.cpp         # зонд: цена резидентного шейдера — модуль/пайплайн, VRAM vs RAM (см. шапку файла)
     # src/TransferQueueProbe.cpp      # зонд: три очереди последовательно, без потоков (см. шапку файла)
     # src/CopyComputeBarrierProbe.cpp # зонд: порядок нескольких операций над одним буфером в одном cb, без fence (см. шапку файла)
     # src/ClaimWindowProbe.cpp        # зонд: claim окна GPU-девайсом — им найден баг «первого окна» в SDL 3.4 (см. шапку файла)

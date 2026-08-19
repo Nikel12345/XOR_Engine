@@ -79,13 +79,13 @@ SDL_AppResult Game::MainInit()
         using namespace DefaultShaderProgramSet;
         SetBloomPrograms(ctx);
         SetCullingPibPrograms(ctx, engine->GetLightDataModule());   // GPU-каллинг: out_pib
-        SetUIProgram(ctx);   // sp_ui (ui_vs/ui_fs): объявляет UI-буферы → они бейкаются, обновлялки наполнят
     }
 
-	// UI-материал (тип UI: bg/text цвета, albedo=default_albedo). ПОСЛЕ SetUIProgram — sp_ui уже есть.
+	// UI-материал (тип UI: bg/text цвета, albedo=default_albedo). Программу "UI" создаёт движок
+	// (InitDefaultShaders) — к MainInit она уже есть.
 	{
 		Material* ui_mat = ctx->CreateMaterial("ui_mat",
-			{ { TextureSlotRole::Albedo, "default_albedo" } }, { "sp_ui" }, /*dont_save=*/true);
+			{ { TextureSlotRole::Albedo, "default_albedo" } }, { "UI" }, /*dont_save=*/true);
 		// Посадку/размер теперь считает Yoga (rect узла), поэтому text_height/anchor нейтральны
 		// (1,0) — шейдер просто заливает узел текстом. Цвета: тёмный фон + золотой текст.
 		ctx->SetMaterialParams(ui_mat, UIMaterialParams{ { 0.10f, 0.10f, 0.15f, 1.0f }, { 1.0f, 0.85f, 0.2f, 1.0f }, 1.0f, 0.0f });
@@ -206,11 +206,6 @@ SDL_AppResult Game::MainInit()
         }
     }, AnchorShift::Keep, /*dont_save=*/true);
 
-    // Пере-привязку push-констант к sp движок зовёт сам В КОНЦЕ каждой загрузки (в т.ч.
-    // UI-рантаймовой): sp из манифеста пересозданы голыми, а перенос по имени ломался бы
-    // на переименовании. Регистрируем ДО первого LoadScene.
-    engine->SetBindShaderFunctions([this] { DefaultShaderProgramSet::BindDefaultPushFuncs(ctx); });
-
     ctx->RegisterGenerator("main_menu", [this] { CreateDebugColliders(); });
     ctx->LoadScene("main_menu", "saved_scene");   // папка сцены (scene.json + ресурсы внутри)
 
@@ -239,9 +234,6 @@ SDL_AppResult Game::MainInit()
         ui->Text(panel, textS, "Hello U Hello U Hello U Hello\n U Hello U Hello U Hello UI",    uimat, quad, uifont, fm);
         ui->Text(panel, textS, "Yoga layout", uimat, quad, uifont, fm);
     }
-
-    // BindDefaultPushFuncs здесь больше не зовём: движок дёргает зарегистрированный колбэк
-    // сам в конце LoadScene (см. SetBindShaderFunctions выше).
 
     {
         MaterialManager* mm = ctx->GetMaterialManager();

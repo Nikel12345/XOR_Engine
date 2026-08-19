@@ -27,7 +27,7 @@ enum class CommandId : uint32_t {
     UpsertTexture,      // payload: UpsertTextureCmd* на куче (имя+атлас+путь+old_name). Создать/заменить
                         // текстуру; если old_name != name — это переименование, старую снимаем
     DeleteTexture,      // payload: DeleteTextureCmd* — удалить текстуру (материалы по имени → dummy)
-    CreateMaterial,       // payload: CreateMaterialCmd* (имя из UI). Новый материал с sp "sp" + дефолты
+    CreateMaterial,       // payload: CreateMaterialCmd* (имя из UI). Новый материал с sp "Lit" + дефолты
     AddMaterialShader,    // payload: MaterialShaderCmd* — добавить sp материалу (+ дефолты НОВЫХ ролей)
     RemoveMaterialShader, // payload: MaterialShaderCmd* — убрать sp у материала
     RenameMaterial,       // payload: RenameMaterialCmd* — ре-кей материала в словаре + пересборка

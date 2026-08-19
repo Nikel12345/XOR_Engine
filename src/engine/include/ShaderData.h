@@ -100,7 +100,7 @@ struct ShaderProgram {
     }
 	ShaderProgramDescription spd;   // ПО ЗНАЧЕНИЮ: параметры пайплайна живут в самом sp (не в словаре)
     RenderPassStep* associated_render_pass = nullptr;
-    bool dont_save = false;   // движковый дефолт (_FallbackShader) — в shaders.json не пишется
+    bool dont_save = false;   // движковый дефолт (Lit/Skybox/_Fallback/…) — в shaders.json не пишется
 
 };
 

@@ -116,11 +116,6 @@ public:
     void SaveScene(const SceneName& scene_name, const std::string& dir);
     void LoadScene(const SceneName& scene_name, const std::string& dir);
 
-    // Колбэк пере-привязки код-байндингов (push_func и т.п.) к sp ПОСЛЕ каждой загрузки сцены.
-    // Регистрирует игра (у неё живут лямбды), зовёт LoadScene в конце: код-байндинги не
-    // сериализуются, а перенос со старой sp по имени ломался бы на переименовании.
-    void SetBindShaderFunctions(std::function<void()> fn) { bind_shader_functions = std::move(fn); }
-
     void PrepareFunc(uint8_t idx);
 
     void UploadFunc(uint8_t slot);
@@ -166,6 +161,11 @@ private:
     // Движковые дефолтные текстуры (albedo/normal/orm/emissive) в _FallbackAtlas — чтобы редактор
     // мог создавать материалы и заполнять слоты по ролям без ассетов игры.
     void InitDefaultResources();
+
+    // Движковый набор шейдеров (vs/fs/cs + render-программы штатных проходов) и их push-константы.
+    // Всё с dont_save: сцена их не возит и не может потерять. Только СВОИ шейдеры сцена объявляет
+    // в манифесте. Зовётся после InitDefaultResources — нужны пул, буферы и проходы.
+    void InitDefaultShaders();
 
     PrepassTimingReport PrepareFuncPrepassDepended_Original(uint8_t slot);
     PrepassTimingReport PrepareFuncPrepassDepended_Optimized(uint8_t slot);
@@ -219,7 +219,6 @@ private:
 	UI_Yoga* ui_yoga = nullptr;
 
 	EngineContext* engine_context;
-	std::function<void()> bind_shader_functions;   // см. SetBindShaderFunctions
     std::atomic<bool> running = true;
     ImDrawData* imgui_draw_data = nullptr;
 
