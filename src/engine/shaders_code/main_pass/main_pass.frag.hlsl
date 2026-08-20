@@ -1,4 +1,4 @@
-#include "main_pass/math.hlsl"
+﻿#include "main_pass/math.hlsl"
 #include "main_pass/lighting.hlsl"
 #include "main_pass/shadowPCF.hlsl"
 
@@ -228,7 +228,10 @@ PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
         lightSum += light.color_power.rgb * intensity;
 
         // Спекуляр от спота/точки (тот же Френель-Blinn-Phong). intensity уже несёт NdotL,
-        // затухание, конус и тень → маскирует блик так же, как диффуз.
+        // затухание, конус, тень И МОЩНОСТЬ (color_power.a входит в computePoint/SpotLight) →
+        // маскирует блик так же, как диффуз. Отдельно на .a здесь умножать НЕЛЬЗЯ: получится
+        // квадрат по мощности, и блик улетает сверхлинейно (у directional этой ошибки не было —
+        // там берётся свежий NdotL_s, и мощность встречается ровно один раз).
         {
             float3 HV = L + V;
             float  hl = length(HV);
@@ -239,7 +242,7 @@ PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
             float3 F     = F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);
             float  norm  = (shininess + 8.0) / (8.0 * 3.14159265);
             float  spec  = norm * pow(saturate(dot(n, H)), shininess);
-            specSum += light.color_power.rgb * (spec * intensity * light.color_power.a) * F;
+            specSum += light.color_power.rgb * (spec * intensity) * F;
             }
         }
     }
