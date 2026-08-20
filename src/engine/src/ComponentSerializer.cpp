@@ -192,39 +192,6 @@ void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count, SceneP
     }
 }
 
-//  Аксессоры полей: пара (get, set) каптурлесс-лямбдами.
-//  AoS — поле по цепочке членов компонента T; SoA — колонка col хранилища S.
-//  set приводит double к фактическому типу поля (float/int/uint32_t/bool).
-#define AOS_NUM(T, path) \
-    [](Archetype& a, size_t i) -> double { return (double)(*a.get_array<T>())[i].path; }, \
-    [](Archetype& a, size_t i, double v) { auto& r = (*a.get_array<T>())[i].path; r = (std::decay_t<decltype(r)>)v; }
-#define SOA_NUM(S, col) \
-    [](Archetype& a, size_t i) -> double { return (double)a.get_array<S>()->data.col[i]; }, \
-    [](Archetype& a, size_t i, double v) { auto& r = a.get_array<S>()->data.col[i]; r = (std::decay_t<decltype(r)>)v; }
-#define AOS_STR(T, path) \
-    [](Archetype& a, size_t i) -> const std::string& { return (*a.get_array<T>())[i].path; }, \
-    [](Archetype& a, size_t i, std::string v) { (*a.get_array<T>())[i].path = std::move(v); }
-
-//  ВЫЧИСЛЯЕМОЕ поле — только геттер, сеттер nullptr: величина, которой в данных нет, а есть
-//  расчёт по ним. Отдельного флага не нужно, всё выводится из отсутствия сеттера: Save её не
-//  пишет (иначе в файле окажется колонка, которую Load некуда положить), Load не читает,
-//  UI рисует нередактируемой. Выражение видит ряд компонента как `c` (у SoA — хранилище `c`
-//  и индекс `i`) и может звать методы, а не только читать члены.
-#define AOS_CALC(T, expr) \
-    [](Archetype& a, size_t i) -> double { auto& c = (*a.get_array<T>())[i]; return (double)(expr); }, \
-    nullptr
-#define SOA_CALC(S, expr) \
-    [](Archetype& a, size_t i) -> double { auto& c = a.get_array<S>()->data; return (double)(expr); }, \
-    nullptr
-//  Строковый вариант: производная величина не обязана быть числом (таблица, режим, диагностика).
-//  Он же — единственный способ показать то, чьё КОЛИЧЕСТВО лежит в данных: схема описывает тип
-//  компонента и переменного числа полей выразить не может, а геттер — обычный код, он может всё.
-#define AOS_CALC_STR(T, expr) \
-    [](Archetype& a, size_t i) -> const std::string& { \
-        auto& c = (*a.get_array<T>())[i]; \
-        thread_local std::string s; s = (expr); return s; }, \
-    nullptr
-
 //  Material — escape hatch: список имён на сущность не колонка одного поля,
 //  а зубчатый массив array-of-arrays. Схемой не выражается — рукописная пара.
 namespace {
@@ -417,16 +384,6 @@ void RegisterBuiltinComponentSpecs()
             FieldSpec::Str("cascades", AOS_CALC_STR(DirectLightComponent, FormatCascades(c.light_data))),
         },
         .after_edit = [](Archetype& a, size_t i) { (*a.get_array<DirectLightComponent>())[i].needsUpdate = true; } });
-
-    // ---- Mass ----
-    reg.Register({ .name = "Mass", .sig_type = typeid(MassComponent),
-        .add_default = AddDefaultAoS<MassComponent>,
-        .fields = { FieldSpec::Num("mass", F32, AOS_NUM(MassComponent, mass), 0, FLT_MAX) } });
-
-    // ---- Gravity: центр притяжения; ЕГО позиция (Transform той же сущности) и есть центр ----
-    reg.Register({ .name = "Gravity", .sig_type = typeid(GravityComponent),
-        .add_default = AddDefaultAoS<GravityComponent>,
-        .fields = { FieldSpec::Num("gm", F32, AOS_NUM(GravityComponent, gm), 0, FLT_MAX, 1.0f) } });
 
     // ---- EditorHidden (тег: скрыт из списка UI; персистится как авторское состояние) ----
     reg.Register({ .name = "EditorHidden", .sig_type = typeid(EditorHiddenComponent),

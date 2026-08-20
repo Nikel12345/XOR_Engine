@@ -4,6 +4,7 @@ target_sources(Game PRIVATE
     src/main.cpp
     src/Game.cpp
     src/DefaultShaderSet.cpp
+    src/GameComponents.cpp
 )
 
 target_include_directories(Game PRIVATE

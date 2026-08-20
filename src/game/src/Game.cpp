@@ -25,6 +25,7 @@
 // Свой тип params регистрируется отсюда же одной записью, движок для этого не правится:
 //   MaterialParamsSpecRegistry::Get().Register(MakeMaterialParamsSpec<MyParams>("MyType", {...}));
 // см. MaterialParamsSpec.h
+#include "GameComponents.h"   // игровые компоненты: объявление + своя регистрация в реестре
 #include "Colliders.h"
 #include "ContactSystem.h"
 #include "DebugColliderSystem.h"
@@ -53,6 +54,7 @@ Game::Game(Engine* engine)
 
 SDL_AppResult Game::MainInit()
 {
+    RegisterGameComponents();   // ДО LoadScene: он резолвит компоненты по имени через реестр
     objectManager->CreateScene("main_menu");
     Camera* camera = cameraManager->CreateCamera(width, height);
     cameraManager->SetActiveCamera(0);
@@ -238,7 +240,7 @@ SDL_AppResult Game::MainInit()
     {
         MaterialManager* mm = ctx->GetMaterialManager();
     }
-	//ctx->ExecuteGenerators();   // CreateDebugColliders
+	ctx->ExecuteGenerators();   // CreateDebugColliders
     ChangeState(GameState::MAIN_MENU);
     return SDL_APP_CONTINUE;
 }
