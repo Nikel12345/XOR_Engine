@@ -1,5 +1,6 @@
 ﻿#include "PCH.h"
 #include "ComponentSerializer.h"
+#include "BaseComponents.h"   // регистрация движковых компонентов — их определения нужны здесь
 #include <cfloat>
 #include <string>
 #include <vector>

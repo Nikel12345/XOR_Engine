@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "BaseComponents.h"
 #include "DefaultCommandSet.h"
 #include "InputManager.h"
 #include "InputCommands.h"

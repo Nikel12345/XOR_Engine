@@ -6,7 +6,7 @@
 #include "TextureManager.h"
 #include "ModelManager.h"
 #include "MaterialManager.h"
-#include "MaterialParamsSpec.h"
+#include "ParamsSpec.h"
 #include "ShaderManager.h"
 #include "PipeManager.h"
 #include "RenderManager.h"
@@ -123,7 +123,7 @@ static void WriteSpd(yyjson_mut_doc* doc, yyjson_mut_val* obj, const ShaderProgr
 	yyjson_mut_obj_add_real(doc, obj, "bias_slope",     d.rasterizer_bias.depth_bias_slope_factor);
 	yyjson_mut_obj_add_real(doc, obj, "bias_clamp",     d.rasterizer_bias.depth_bias_clamp);
 }
-// ── params материала ↔ json ПО СХЕМЕ ТИПА (MaterialParamsSpec) ──
+// ── params материала ↔ json ПО СХЕМЕ ТИПА (ParamsSpec) ──
 // Тип называет себя строкой (params_type = имя в реестре), поля пишутся ПО ИМЕНАМ: скаляр —
 // числом/булем, вектор/цвет — массивом лейнов. Раскладку блоба знает схема, а не этот файл,
 // поэтому тип, зарегистрированный кодом игры, сериализуется здесь без единой правки движка.
@@ -137,42 +137,42 @@ static bool JsonNum(yyjson_val* v, double& out) {
 	return false;
 }
 static void WriteMaterialParams(yyjson_mut_doc* doc, yyjson_mut_val* obj,
-                                const MaterialParamsSpec& s, const std::vector<uint8_t>& blob)
+                                const ParamsSpec& s, const std::vector<uint8_t>& blob)
 {
-	for (const MatFieldSpec& f : s.fields) {
-		const void* p = MatFieldPtr(blob, f);
+	for (const ParamsFieldSpec& f : s.fields) {
+		const void* p = ParamsFieldPtr(blob, f);
 		if (!p) continue;                       // блоб короче схемы — поле пропускаем
-		const uint32_t lanes = MatFieldLanes(f.kind);
+		const uint32_t lanes = ParamsFieldLanes(f.kind);
 		if (lanes > 1) {
 			yyjson_mut_val* arr = yyjson_mut_obj_add_arr(doc, obj, f.key);
 			const float* v = static_cast<const float*>(p);
 			for (uint32_t i = 0; i < lanes; ++i) yyjson_mut_arr_add_real(doc, arr, v[i]);
 		}
-		else if (f.kind == MatFieldKind::Bool)
+		else if (f.kind == ParamsFieldKind::Bool)
 			yyjson_mut_obj_add_bool(doc, obj, f.key, *static_cast<const uint32_t*>(p) != 0);
-		else if (f.kind == MatFieldKind::U32)
+		else if (f.kind == ParamsFieldKind::U32)
 			yyjson_mut_obj_add_uint(doc, obj, f.key, *static_cast<const uint32_t*>(p));
 		else
 			yyjson_mut_obj_add_real(doc, obj, f.key, *static_cast<const float*>(p));
 	}
 }
 // Блоб приходит уже заполненным дефолтами типа (s.defaults) — здесь только перекрываем найденное.
-static void ReadMaterialParams(yyjson_val* obj, const MaterialParamsSpec& s, std::vector<uint8_t>& blob)
+static void ReadMaterialParams(yyjson_val* obj, const ParamsSpec& s, std::vector<uint8_t>& blob)
 {
 	if (!obj) return;
-	for (const MatFieldSpec& f : s.fields) {
+	for (const ParamsFieldSpec& f : s.fields) {
 		yyjson_val* v = yyjson_obj_get(obj, f.key);
 		if (!v) continue;                       // ключа нет → остаётся дефолт
-		void* p = MatFieldPtr(blob, f);
+		void* p = ParamsFieldPtr(blob, f);
 		if (!p) continue;
 		auto put = [&](uint32_t lane, double d) {
 			if (f.clamp_on_load && f.lo < f.hi) d = d < f.lo ? f.lo : (d > f.hi ? f.hi : d);
-			if (f.kind == MatFieldKind::Bool || f.kind == MatFieldKind::U32)
+			if (f.kind == ParamsFieldKind::Bool || f.kind == ParamsFieldKind::U32)
 				static_cast<uint32_t*>(p)[lane] = (uint32_t)(d < 0 ? 0 : d);
 			else
 				static_cast<float*>(p)[lane] = (float)d;
 		};
-		const uint32_t lanes = MatFieldLanes(f.kind);
+		const uint32_t lanes = ParamsFieldLanes(f.kind);
 		if (lanes > 1) {
 			size_t i, max; yyjson_val* e;
 			yyjson_arr_foreach(v, i, max, e) {
@@ -406,7 +406,7 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 			// Тип params назван строкой из реестра; поля пишет его схема. Незарегистрированный
 			// тип сохранить нечем (раскладка неизвестна) — громко говорим об этом, а не пишем
 			// молча битую запись: материал загрузится без params.
-			if (const MaterialParamsSpec* ps = MaterialParamsSpecRegistry::Get().ByName(m->params_type)) {
+			if (const ParamsSpec* ps = ParamsSpecRegistry::Materials().ByName(m->params_type)) {
 				yyjson_mut_obj_add_strcpy(doc, e, "params_type", m->params_type.c_str());
 				WriteMaterialParams(doc, yyjson_mut_obj_add_obj(doc, e, "params"), *ps, m->params);
 			}
@@ -706,7 +706,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 				// поля из файла по именам. Тип не зарегистрирован → params нет: раскладки нет,
 				// а гадать про байты нельзя (сообщаем, чтобы это не выглядело как «поля потерялись»).
 				me.params_type = JsonStr(e, "params_type");
-				if (const MaterialParamsSpec* ps = MaterialParamsSpecRegistry::Get().ByName(me.params_type)) {
+				if (const ParamsSpec* ps = ParamsSpecRegistry::Materials().ByName(me.params_type)) {
 					me.params = ps->defaults;
 					ReadMaterialParams(yyjson_obj_get(e, "params"), *ps, me.params);
 				}

@@ -1,4 +1,4 @@
-// Bloom prefilter — НУЛЕВОЙ уровень пирамиды. Собирает источник свечения из ДВУХ текстур:
+﻿// Bloom prefilter — НУЛЕВОЙ уровень пирамиды. Собирает источник свечения из ДВУХ текстур:
 //   bright = softKnee(scene_hdr) + scene_emission
 // scene_hdr даёт физически яркое (HDR-спекуляр, пересвет, свет в камеру) ВЫШЕ порога; эмиссия
 // подмешивается всегда (художник пометил объект светящимся независимо от яркости). Дальше — тот же
@@ -21,11 +21,10 @@ SamplerState        u_emissionS: register(s1, space0);
 RWTexture2D<float4> u_dst : register(u0, space1);
 
 cbuffer BloomParams : register(b0, space2) {
-    uint  useKaris;    // не используется (prefilter всегда Karis), для общей раскладки
+    uint  useKaris;    // 1 — Karis-average (гасит firefly'и), 0 — обычные веса Jimenez
     float intensity;   // здесь = масштаб вклада СЦЕНЫ (блик/пересвет); эмиссию НЕ трогает
     float threshold;   // порог яркости сцены
     float knee;        // ширина мягкого колена
-    uint  srcLod;      // не используется (prefilter пишет mip0, читает scene_* на lod0)
 };
 
 // Одностороннее колено: НИЖЕ threshold — строго ноль (обычный диффуз ≤1 не блумит вообще),
@@ -76,18 +75,30 @@ void main(uint3 tid : SV_DispatchThreadID)
     float3 l = B(uv + t * float2(-1,  1));
     float3 m = B(uv + t * float2( 1,  1));
 
-    // Karis-average (пять групп 2×2, тусклые группы — больше веса).
-    float3 g0 = (j + k + l + m) * 0.25;   // центр
-    float3 g1 = (a + b + d + e) * 0.25;
-    float3 g2 = (b + c + e + f) * 0.25;
-    float3 g3 = (d + e + g + h) * 0.25;
-    float3 g4 = (e + f + h + i) * 0.25;
-    float w0 = karis(g0) * 0.5;
-    float w1 = karis(g1) * 0.125;
-    float w2 = karis(g2) * 0.125;
-    float w3 = karis(g3) * 0.125;
-    float w4 = karis(g4) * 0.125;
-    float3 result = (g0 * w0 + g1 * w1 + g2 * w2 + g3 * w3 + g4 * w4) / max(w0 + w1 + w2 + w3 + w4, 1e-5);
+    float3 result;
+    if (useKaris != 0)
+    {
+        // Karis-average (пять групп 2×2, тусклые группы — больше веса).
+        float3 g0 = (j + k + l + m) * 0.25;   // центр
+        float3 g1 = (a + b + d + e) * 0.25;
+        float3 g2 = (b + c + e + f) * 0.25;
+        float3 g3 = (d + e + g + h) * 0.25;
+        float3 g4 = (e + f + h + i) * 0.25;
+        float w0 = karis(g0) * 0.5;
+        float w1 = karis(g1) * 0.125;
+        float w2 = karis(g2) * 0.125;
+        float w3 = karis(g3) * 0.125;
+        float w4 = karis(g4) * 0.125;
+        result = (g0 * w0 + g1 * w1 + g2 * w2 + g3 * w3 + g4 * w4) / max(w0 + w1 + w2 + w3 + w4, 1e-5);
+    }
+    else
+    {
+        // Обычные веса Jimenez — те же, что в bloom_down: без гашения firefly'ев.
+        result  = e * 0.125;
+        result += (a + c + g + i) * 0.03125;
+        result += (b + d + f + h) * 0.0625;
+        result += (j + k + l + m) * 0.125;
+    }
 
     u_dst[tid.xy] = float4(result, 1.0);
 }

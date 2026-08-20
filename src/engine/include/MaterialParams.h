@@ -1,6 +1,6 @@
 #pragma once
 // Встроенные раскладки MaterialBlock. Схемы полей (имена в файле, диапазоны, подписи) —
-// не здесь, а в RegisterBuiltinMaterialParamsSpecs (MaterialParamsSpec.cpp): структура знает
+// не здесь, а в RegisterBuiltinMaterialParamsSpecs (ParamsSpec.cpp): структура знает
 // только раскладку и ДЕФОЛТЫ (member-инициализаторы ниже — единственный их источник).
 
 

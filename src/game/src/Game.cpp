@@ -23,8 +23,8 @@
 #include "UI_Yoga.h"
 #include "Engine.h"
 // Свой тип params регистрируется отсюда же одной записью, движок для этого не правится:
-//   MaterialParamsSpecRegistry::Get().Register(MakeMaterialParamsSpec<MyParams>("MyType", {...}));
-// см. MaterialParamsSpec.h
+//   ParamsSpecRegistry::Materials().Register(MakeParamsSpec<MyParams>("MyType", {...}));
+// см. ParamsSpec.h
 #include "GameComponents.h"   // игровые компоненты: объявление + своя регистрация в реестре
 #include "Colliders.h"
 #include "ContactSystem.h"

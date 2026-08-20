@@ -5,7 +5,7 @@
 #include <functional>
 #include <typeindex>
 #include <unordered_map>
-#include "BaseComponents.h"
+#include "ComponentStorage.h"   // нужен Archetype/Entity, а не конкретные компоненты
 
 struct SceneData {
     std::unordered_map<Entity, Archetype*> entity_to_archetype;

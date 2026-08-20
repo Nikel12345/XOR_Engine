@@ -9,6 +9,7 @@
 #include "EngineContext.h"
 #include "TextureLoader.h"
 #include "LightDataModule.h"
+#include "ParamsSpec.h"
 
 namespace DefaultRenderPassNamespace
 {
@@ -105,17 +106,21 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
         uint32_t num_cams = safe_u32(cams.size());
         if (num_cams > max_layers) num_cams = max_layers;
 
+        // Состояние прохода — в самом шаге, а не локальной структурой: тело переписывает его поля
+        // в каждом витке (они целиком покадровые, схемы у прохода поэтому нет).
+        ShadowPushData* st = rp.State<ShadowPushData>();
+        if (!st) { SDL_Log("SHADOW_PASS: pass state is not initialized"); return; }
+
         for (uint32_t camera_index = 0; camera_index < num_cams; ++camera_index) {
             const RenderSnap::ShadowCam& cam = cams[camera_index];
             if (!cam.needs_render) continue;
 
-            ShadowPushData push_data{};
-            push_data.camera_index = camera_index;
-            push_data.max_range = cam.max_range;         // spot/sphere: max distance, direct: per-cascade far
-            push_data.is_ortho = cam.is_ortho;           // 1 → линейная осевая глубина (directional)
-            push_data.num_instances = num_instances;
-            SDL_PushGPUVertexUniformData(cb, 0, &push_data, sizeof(ShadowPushData));
-            pm->RenderPassStandardBody(cb, &rp, bm, (1u + camera_index) * num_commands * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), &push_data);
+            st->camera_index = camera_index;
+            st->max_range = cam.max_range;         // spot/sphere: max distance, direct: per-cascade far
+            st->is_ortho = cam.is_ortho;           // 1 → линейная осевая глубина (directional)
+            st->num_instances = num_instances;
+            SDL_PushGPUVertexUniformData(cb, 0, st, sizeof(ShadowPushData));
+            pm->RenderPassStandardBody(cb, &rp, bm, (1u + camera_index) * num_commands * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), st);
 
             auto cp = SDL_BeginGPUCopyPass(cb);
             SDL_GPUTextureLocation src = {
@@ -134,6 +139,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
         10
     );
     shadowPass->renderPassTexsData.SetDepthTexture(shadow_temp);
+    SetPassState(shadowPass, ShadowPushData{});   // хранилище: все поля покадровые, схемы нет
 
     shadow_pass_inited = true;
 }
@@ -286,12 +292,19 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
         if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
         // Цвет рамок прокидываем как push_data_raw — его читает push_func дебаг-шейдера
         // (fragment slot 0). Другие программы к этому пассу не привязаны.
-        DebugColliderPushData color{};
-        pm->RenderPassStandardBody(cb, &rp, bm, 0, &color);
+        pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
     },
         std::move(debug_rptd),
         25
     );
+    // Единственное поле — цвет рамок, и тело его НЕ переписывает: значит это настройка, и у
+    // прохода есть схема.
+    {
+        ParamsSpecRegistry::Passes().Register(MakeParamsSpec<DebugColliderPushData>(DEBUG_COLLIDER_STATE, {
+            ParamsFieldSpec::Num(PARAMS_FIELD(DebugColliderPushData, color), ParamsFieldKind::Color4).Label("Wire Color"),
+        }));
+        SetPassState(debugPass, DEBUG_COLLIDER_STATE, DebugColliderPushData{});
+    }
 
     // Цвет — общий HDR-таргет сцены (привязан в setup, не per-frame).
     debugPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr, 0);
@@ -404,19 +417,35 @@ void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
         SDL_Log("SetDefaultBloomPass: common resources must be initialized first.");
         return;
     }
+    // Схема состояния прохода. Живёт рядом с проходом, которому состояние принадлежит, — как
+    // код-байндинг живёт рядом с созданием программы. Регистрация идемпотентна по имени.
+    {
+        using K = ParamsFieldKind;
+        ParamsSpecRegistry::Passes().Register(MakeParamsSpec<BloomState>(BLOOM_STATE, {
+            ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, threshold),          K::F32, 0, 8, 0.01f).Label("Threshold"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, knee),               K::F32, 0, 4, 0.01f).Label("Knee"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, scene_contribution), K::F32, 0, 2, 0.01f).Label("Scene Contribution"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, glow_intensity),     K::F32, 0, 2, 0.01f).Label("Glow Intensity"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, karis_prefilter),    K::Bool).Label("Karis: prefilter"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, karis_down),         K::Bool).Label("Karis: pyramid"),
+        }));
+    }
+
     PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
-    pm->CreateComputePass(
+    ComputePassStep* bloom = pm->CreateComputePass(
         BLOOM_PASS,
         [bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)
     {
-        BloomParams      push{};
         DummyDispatchData dd{};
-        pm->ComputePassStandardBody(cb, &cp, bm, &push, &dd, pass_frame);
+        // Состояние берётся из самого шага, а не собирается локально: тело ничего не
+        // пересчитывает покадрово, а редактор правит те же байты (см. ComputePassStep::state).
+        pm->ComputePassStandardBody(cb, &cp, bm, cp.state.data(), &dd, pass_frame);
     },
         26
     );
+    SetPassState(bloom, BLOOM_STATE, BloomState{});
 }
 
 void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ctx, LightDataModule* ldm)
@@ -452,11 +481,18 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
         Uint32 num_cams = safe_u32(cams.size());
         if (num_cams > flat_array->layers) num_cams = flat_array->layers;
 
+        // Состояние — в шаге (см. PCF-вариант). Вниз уходит ShadowPushData, а не голый Uint32:
+        // push_func программы ShadowCaster кастует push_data_raw именно к нему, и передача
+        // 4-байтового camera_index читалась бы за пределами объекта.
+        ShadowPushData* st = rp.State<ShadowPushData>();
+        if (!st) { SDL_Log("SHADOW_PASS (VSM): pass state is not initialized"); return; }
+
         for (Uint32 camera_index = 0; camera_index < num_cams; ++camera_index) {
             if (!cams[camera_index].needs_render) continue;
+            st->camera_index = camera_index;
             SDL_PushGPUVertexUniformData(cb, 0, &camera_index, sizeof(Uint32));
             rp.renderPassTexsData.SetColorTargetInfoLayer(camera_index, 0);
-            pm->RenderPassStandardBody(cb, &rp, bm, 0, &camera_index);
+            pm->RenderPassStandardBody(cb, &rp, bm, 0, st);
         }
     },
         std::move(shadow_rptd),
@@ -464,6 +500,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
     );
     shadowPass->renderPassTexsData.SetColorTexture(shadow_moments_array);
     shadowPass->renderPassTexsData.SetDepthTexture(shadow_depth_tex);
+    SetPassState(shadowPass, ShadowPushData{});   // см. PCF-вариант
 
     shadow_pass_inited = true;
 }
@@ -473,16 +510,18 @@ void DefaultRenderPassNamespace::SetDefaultShadowBlurPass(EngineContext* ctx)
     PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
-    pm->CreateComputePass(
+    ComputePassStep* blur = pm->CreateComputePass(
         SHADOW_BLUR_PASS,
         [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)
     {
-        ShadowBlurUniform push_data = {};
         DummyDispatchData dispatch_data = {};
-        pm->ComputePassStandardBody(cb, &cp, bm, &push_data, &dispatch_data, pass_frame);
+        pm->ComputePassStandardBody(cb, &cp, bm, cp.state.data(), &dispatch_data, pass_frame);
     },
         11
     );
+    // Хранилище без схемы: слой блюра задаёт не проход, а сама программа (по программе на слой,
+    // номер захвачен в её push-функции) — настраивать здесь нечего.
+    SetPassState(blur, ShadowBlurUniform{});
 }
 
 void DefaultRenderPassNamespace::SetDefaultCullingPass(EngineContext* ctx)
@@ -494,15 +533,17 @@ void DefaultRenderPassNamespace::SetDefaultCullingPass(EngineContext* ctx)
     // ПЕРЕД рендером. Так out_pib и per-camera indirect гарантированно дописаны до чтения их
     // draw'ами (SDL_GPU не барьерит compute-write -> indirect-read в одном cb; на 1М scatter
     // медленный от atomic-контеншена, и draw читал недозаполненный индирект → мерцание).
-    pm->CreateComputePrepass(
+    ComputePassStep* culling = pm->CreateComputePrepass(
         CULLING_PASS,
         [bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)
     {
-        CullingPibUniform push{};
         DummyDispatchData dd{};
-        pm->ComputePassStandardBody(cb, &cp, bm, &push, &dd, pass_frame);
+        pm->ComputePassStandardBody(cb, &cp, bm, cp.state.data(), &dd, pass_frame);
     },
         5
     );
+    // Хранилище без схемы: диапазоны и страйды каждая программа каллинга считает у себя из
+    // слепка раскладки (bb->AskLayout(slot)) — покадровые величины, не настройки.
+    SetPassState(culling, CullingPibUniform{});
 }
 

@@ -1,4 +1,4 @@
-// Bloom upsample — 3×3 tent-фильтр, аддитивно поверх более крупного уровня (Jimenez / COD).
+﻿// Bloom upsample — 3×3 tent-фильтр, аддитивно поверх более крупного уровня (Jimenez / COD).
 // Пирамида — ОТДЕЛЬНАЯ текстура на уровень: src = уровень i+1 (мельче, sampled), dst = уровень i
 // (крупнее, storage). ПРИБАВЛЯЕТ к dst через RMW — чтение+запись ОДНОГО уровня в одном диспатче,
 // поэтому текстурам уровней нужен флаг SIMULTANEOUS (см. TexturesPresets::BloomLevel).
@@ -18,7 +18,6 @@ cbuffer BloomParams : register(b0, space2) {
     float intensity;
     float threshold;
     float knee;
-    uint  srcLod;      // не используется (уровни пирамиды — отдельные текстуры, читаем lod 0)
 };
 
 [numthreads(16, 16, 1)]

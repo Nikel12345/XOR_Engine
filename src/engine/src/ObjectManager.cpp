@@ -1,5 +1,6 @@
 ﻿#include "PCH.h"
 #include "ObjectManager.h"
+#include "BaseComponents.h"   // ParentComponent/GeneratedComponent — иерархия и отбор при сохранении
 #include "TextureData.h"
 #include "ModelData.h"
 #include "ComponentSerializer.h"

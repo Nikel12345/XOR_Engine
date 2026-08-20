@@ -1,4 +1,5 @@
 ﻿#include "PCH.h"
+#include "BaseComponents.h"
 #include "MyGame.h"
 // Engine.h теперь только forward-декларации — полные типы тянет этот TU.
 #include "EngineContext.h"

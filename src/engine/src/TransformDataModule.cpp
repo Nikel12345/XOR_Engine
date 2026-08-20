@@ -1,5 +1,6 @@
 ﻿#include "PCH.h"
 #include "TransformDataModule.h"
+#include "BaseComponents.h"
 #include "BufferManager.h"
 #include "ObjectManager.h"
 #include <glm/gtc/type_ptr.hpp>

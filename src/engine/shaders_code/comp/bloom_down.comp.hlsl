@@ -1,4 +1,4 @@
-// Bloom downsample — 13-тап фильтр (Jimenez / Call of Duty: Advanced Warfare, SIGGRAPH 2014).
+﻿// Bloom downsample — 13-тап фильтр (Jimenez / Call of Duty: Advanced Warfare, SIGGRAPH 2014).
 // Читает src (вдвое больший уровень) через combinedImageSampler с LINEAR-фильтром, пишет dst
 // (текущий уровень) через storage. Размеры берём из самих текстур → шейдер не зависит от уровня.
 // На ПЕРВОМ downsample (useKaris=1) включается Karis-average — гасит firefly от одиночных
@@ -19,7 +19,6 @@ cbuffer BloomParams : register(b0, space2) {
     float intensity;   // не используется здесь
     float threshold;
     float knee;
-    uint  srcLod;      // не используется (уровни пирамиды — отдельные текстуры, читаем lod 0)
 };
 
 // Пирамида — ОТДЕЛЬНАЯ текстура на уровень: src = уровень i-1 (вдвое крупнее, sampled),

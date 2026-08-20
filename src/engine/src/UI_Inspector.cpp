@@ -1,4 +1,5 @@
-#include "PCH.h"
+﻿#include "PCH.h"
+#include "BaseComponents.h"
 #include "UI_ImGui.h"
 #include "UI_Internal.h"
 #include "UI_Widgets.h"
@@ -15,7 +16,7 @@
 #include "ModelManager.h"
 #include "ShaderManager.h"
 #include "BatchBuilder.h"
-#include "MaterialParamsSpec.h"
+#include "ParamsSpec.h"
 #include "ComponentSerializer.h"
 #include "UI_ComponentEditor.h"
 #include "RenderManager.h"
@@ -192,8 +193,8 @@ namespace {
         // RenderManager читает params->data()/size() живо, а ключ батча — адрес вектора).
         // Список типов — весь реестр: и движковые, и зарегистрированные кодом игры.
         ImGui::SeparatorText("Params");
-        const auto& specs = MaterialParamsSpecRegistry::Get().All();
-        const MaterialParamsSpec* cur = MaterialParamsSpecRegistry::Get().ByName(mat->params_type);
+        const auto& specs = ParamsSpecRegistry::Materials().All();
+        const ParamsSpec* cur = ParamsSpecRegistry::Materials().ByName(mat->params_type);
         // Тип назван, но не зарегистрирован (сцена от сборки, где он был) — не молчим: блоб
         // рисовать нечем, а SaveScene его не сохранит.
         const bool unknown_type = !mat->params_type.empty() && !cur;
@@ -201,7 +202,7 @@ namespace {
                                           : (unknown_type ? mat->params_type.c_str() : "(none)"))) {
             if (ImGui::Selectable("(none)", mat->params_type.empty()) && !mat->params_type.empty())
                 ClearMaterialParams(mat);
-            for (const MaterialParamsSpec& s : specs) {
+            for (const ParamsSpec& s : specs) {
                 const bool is_cur = (&s == cur);
                 if (ImGui::Selectable(s.name.c_str(), is_cur) && !is_cur) ApplyMaterialParamsSpec(mat, s);
                 if (is_cur) ImGui::SetItemDefaultFocus();
@@ -214,7 +215,7 @@ namespace {
         if (mat->params.empty())      ImGui::TextDisabled("(no params)");
         else if (!cur)                ImGui::TextDisabled("(%zu bytes, unknown layout)", mat->params.size());
         else if (cur->custom_edit)    cur->custom_edit(mat->params.data());   // escape hatch типа
-        else                          DrawMaterialParamsFields(*cur, mat->params);
+        else                          DrawParamsFields(*cur, mat->params);
 
         // Материал = набор sp (проходов). Слоты диктует required_slots КАЖДОГО sp, но текстура берётся
         // из ОБЩЕЙ material->textures[role] (роль шарится между sp): правка под одним sp видна под другим.
@@ -588,6 +589,50 @@ namespace {
     // пустое имя выбора (плитка «+») → sp == nullptr, кнопка «Create»; иначе правка ПЕРЕСОЗДАНИЕМ
     // (delete+create). vs/fs/буферы/слоты/проход/spd копятся в буферах, коммит — одной кнопкой.
     // Push/dispatch в UI НЕ идут (это код) — у sp, созданной из UI, push-констант нет.
+    // Состояние прохода: тот же generic-рендерер схемы, что и у params материала. Схему ищем ПО
+    // ИМЕНИ из самого шага (state_type) — в реестре ПРОХОДОВ, не материалов (см. ParamsSpec.h).
+    // Правка мутирует байты на месте: тело прохода отдаёт вниз указатель на этот же блоб, а
+    // UI-поток и есть рендер-поток (UI рисуется внутри RenderFunc) — команда не нужна.
+    void DrawPassState(std::vector<uint8_t>& state, const std::string& state_type)
+    {
+        if (state_type.empty()) {
+            ImGui::TextDisabled("(no editable state; push/dispatch are code)");
+            return;
+        }
+        const ParamsSpec* spec = ParamsSpecRegistry::Passes().ByName(state_type);
+        if (!spec) {
+            ImGui::TextDisabled("state type '%s' is not registered", state_type.c_str());
+            return;
+        }
+        ImGui::SeparatorText(state_type.c_str());
+        DrawParamsFields(*spec, state);
+    }
+
+    // Шаг кадра по имени-ключу реестра. Пространство имён у пассов и препассов общее
+    // (CreateComputePass отказывает на занятое имя), поэтому порядок проверок однозначен.
+    void InspectPass(EngineContext* ctx, const std::string& name)
+    {
+        PassManager* pmgr = ctx->GetPassManager();
+        ImGui::Text("Pass: %s", name.c_str());
+
+        if (auto it = pmgr->GetRenderPasses().find(name); it != pmgr->GetRenderPasses().end()) {
+            ImGui::TextDisabled("render pass, index %d", it->second->pass_index);
+            DrawPassState(it->second->state, it->second->state_type);
+            return;
+        }
+        if (auto it = pmgr->GetComputePasses().find(name); it != pmgr->GetComputePasses().end()) {
+            ImGui::TextDisabled("compute pass, index %d", it->second->pass_index);
+            DrawPassState(it->second->state, it->second->state_type);
+            return;
+        }
+        if (auto it = pmgr->GetComputePrepasses().find(name); it != pmgr->GetComputePrepasses().end()) {
+            ImGui::TextDisabled("compute prepass, index %d", it->second->pass_index);
+            DrawPassState(it->second->state, it->second->state_type);
+            return;
+        }
+        ImGui::TextDisabled("(pass not found)");
+    }
+
     void ShaderInspector(EngineContext* ctx, const std::string& spName)
     {
         // Пустое имя (плитка «+») = создание: НЕ зовём GetShaderProgram (он логирует промах каждый кадр).
@@ -1083,6 +1128,10 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
     case SelKind::Compute:
         ImGui::Text("Compute: %s", g_sel.name.c_str());
         ImGui::TextDisabled("(no editable pipeline state; push/dispatch are code)");
+        break;
+
+    case SelKind::Pass:
+        InspectPass(ctx, g_sel.name);
         break;
 
     case SelKind::Vsd: VsdEditor(ctx); break;

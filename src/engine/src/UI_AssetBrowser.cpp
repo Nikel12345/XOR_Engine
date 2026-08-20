@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "UI_ImGui.h"
 #include "UI_Internal.h"
 #include "UI_Widgets.h"
@@ -9,8 +9,9 @@
 #include "ModelManager.h"
 #include "ShaderManager.h"
 #include "InputManager.h"
+#include "RenderManager.h"
 #include "InputCommands.h"
-#include "MaterialParamsSpec.h"
+#include "ParamsSpec.h"
 #include <functional>
 
 using namespace ui;
@@ -42,6 +43,7 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
             case SelKind::Vsd:      return AssetIcon::Vsd;
             case SelKind::Fsd:      return AssetIcon::Fsd;
             case SelKind::Csd:      return AssetIcon::Csd;
+            case SelKind::Pass:     return AssetIcon::Compute;   // отдельной иконки у прохода нет
             default:                return AssetIcon::Generic;
             }
         };
@@ -78,10 +80,10 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
                 // Тинт берём из ПЕРВОГО цветового поля схемы типа params (у Opaque это baseColor,
                 // у типа из кода игры — его собственный цвет). Нет цветовых полей / тип не
                 // зарегистрирован → превью без тинта. Раскладку тут не знаем и знать не должны.
-                if (const MaterialParamsSpec* s = MaterialParamsSpecRegistry::Get().ByName(m->params_type))
-                    for (const MatFieldSpec& f : s->fields) {
-                        if (f.kind != MatFieldKind::Color3 && f.kind != MatFieldKind::Color4) continue;
-                        if (const void* fp = MatFieldPtr(m->params, f)) {
+                if (const ParamsSpec* s = ParamsSpecRegistry::Materials().ByName(m->params_type))
+                    for (const ParamsFieldSpec& f : s->fields) {
+                        if (f.kind != ParamsFieldKind::Color3 && f.kind != ParamsFieldKind::Color4) continue;
+                        if (const void* fp = ParamsFieldPtr(m->params, f)) {
                             const float* c = static_cast<const float*>(fp);
                             pv.tint = ImVec4(c[0], c[1], c[2], 1.0f);
                         }
@@ -94,8 +96,11 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
 
         // Общая раскладка плиток: переносим ряд, когда следующая не влезает по ширине.
         // preview_of (опционально) — резолвер картинки-превью по имени; пустой tex → затычка.
+        // hide_internal — параметром, а не по виду: у проходов имена служебные ВСЕ
+        // («_DefaultBloomPass»), и общий фильтр спрятал бы вкладку целиком.
         auto tiles = [&](SelKind kind, bool withNew, auto&& onNew, auto&& for_each_name,
-                         std::function<TilePreview(const std::string&)> preview_of = {})
+                         std::function<TilePreview(const std::string&)> preview_of = {},
+                         bool hide_internal = true)
         {
             const AssetIcon icon = icon_of(kind);
             float avail = ImGui::GetContentRegionAvail().x;
@@ -111,7 +116,7 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
 
             for_each_name([&](const std::string& name)
             {
-                if (!g_show_internal && IsInternalName(name)) return;   // фильтр служебных
+                if (hide_internal && !g_show_internal && IsInternalName(name)) return;   // фильтр служебных
                 bool selected = (g_sel.kind == kind && g_sel.name == name);
                 TilePreview pv{};
                 if (preview_of) pv = preview_of(name);
@@ -159,6 +164,23 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
         if (ImGui::BeginTabItem("Compute")) {                                        // compute sp
             tiles(SelKind::Compute, false, []{},
                 [&](auto&& emit) { for (auto& slot : ctx->GetShaderManager()->GetComputeShaderPrograms()) emit(slot.name); });
+            ImGui::EndTabItem();
+        }
+        // Шаги кадра в порядке исполнения. Редактируется их state (см. ComputePassStep::state)
+        // тем же generic-рендерером схемы, что и params материала. Блит-шаги не показываем: у них
+        // нет ни шейдера, ни пуша — состоянию неоткуда взяться.
+        // Имя — КЛЮЧ РЕЕСТРА (обход отдаёт пару), а не debug_name шага.
+        if (ImGui::BeginTabItem("Passes")) {
+            PassManager* pmgr = ctx->GetPassManager();
+            std::vector<std::pair<int, const std::string*>> ordered;   // pass_index → имя
+            for (const auto& [n, st] : pmgr->GetComputePrepasses()) ordered.push_back({ st->pass_index, &n });
+            for (const auto& [n, st] : pmgr->GetRenderPasses())     ordered.push_back({ st->pass_index, &n });
+            for (const auto& [n, st] : pmgr->GetComputePasses())    ordered.push_back({ st->pass_index, &n });
+            std::sort(ordered.begin(), ordered.end(),
+                [](const auto& a, const auto& b) { return a.first < b.first; });
+            tiles(SelKind::Pass, false, []{},
+                [&](auto&& emit) { for (const auto& [idx, name] : ordered) emit(*name); },
+                {}, /*hide_internal=*/false);
             ImGui::EndTabItem();
         }
         // Именованные шейдер-данные (vs/fs/cs) — только список; редактирование (пути) появится позже.

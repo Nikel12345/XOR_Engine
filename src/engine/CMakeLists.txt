@@ -206,13 +206,13 @@ set(ENGINE_MANAGERS_HDR
 )
 set(ENGINE_STRUCTS_SRC
     src/CameraStruct.cpp
-    src/MaterialParamsSpec.cpp
+    src/ParamsSpec.cpp
 )
 set(ENGINE_STRUCTS_HDR
     include/CameraStruct.h
     include/MaterialData.h
     include/MaterialParams.h
-    include/MaterialParamsSpec.h
+    include/ParamsSpec.h
     include/ModelData.h
     include/PositionStructure.h
     include/LightStruct.h

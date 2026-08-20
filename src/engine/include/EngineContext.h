@@ -1,4 +1,9 @@
 #pragma once
+#include "ComponentStorage.h"
+// Только по имени: CreateEntity сравнивает типы через contains_type_v, полные
+// определения нужны вызывающему, а не этому заголовку.
+struct DrawComponent;
+struct ModelComponent;
 #include <SDL3/SDL_gpu.h>
 #include <functional>
 #include <vector>
@@ -9,7 +14,7 @@
 #include "ObjectManager.h"
 #include "BatchBuilder.h"
 #include "ShaderTypes.h"
-#include "MaterialParamsSpec.h"
+#include "ParamsSpec.h"
 #include "TextureData.h"
 #include "ModelData.h"
 #include "GeometryPool.h"   // StreamDesc в сигнатуре CreateGeometryPool — нужен полный тип
@@ -64,7 +69,7 @@ public:
 
 	// Тип-безопасная упаковка per-material факторов (T = раскладка cbuffer MaterialBlock) в
 	// Material::params. Реализация одна на всех — свободный ::SetMaterialParams из
-	// MaterialParamsSpec.h (он же проставляет имя типа из реестра); фасад лишь пробрасывает,
+	// ParamsSpec.h (он же проставляет имя типа из реестра); фасад лишь пробрасывает,
 	// не завися от MaterialManager.h ради одного шаблона.
 	template<class T>
 	void SetMaterialParams(Material* m, const T& p) { ::SetMaterialParams(m, p); }

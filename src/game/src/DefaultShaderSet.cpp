@@ -10,6 +10,7 @@ using namespace ShaderBase;   // POSITION/UV/... в раскладках вер�
 #include "BufferManager.h"
 #include "ShaderData.h"
 #include "ShaderManager.h"
+#include "ParamsSpec.h"
 #include "RenderManager.h"
 #include "BatchBuilder.h"
 #include "RenderSnapshot.h"
@@ -219,10 +220,14 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
         {},
         { std::string("scene_hdr"), std::string("scene_emission") },   // sampler t0/s0, t1/s1
         BLOOM_PASS, /*dont_save=*/true);
-    sm->CreateComputePushFunc<BloomParams>("bloom_down_0",[](const PushConstantBinder& b, BloomParams d) {
-        d.threshold = 1.2f;   // ПОЛ: диффуз ≤1 не блумит вообще; ярче — только глинт/пересвет
-        d.knee      = 0.9f;   // ширина гладкого разгона ВВЕРХ от порога
-        d.intensity = 0.1f;   // сила вклада сцены (блик/пересвет); эмиссия идёт в полную силу
+    // Значения больше не литералы здесь: программа СОБИРАЕТ свой cbuffer из состояния прохода
+    // (BloomState), которое лежит в шаге и правится редактором.
+    sm->CreateComputePushFunc<BloomState>("bloom_down_0",[](const PushConstantBinder& b, BloomState st) {
+        BloomParams d{};
+        d.threshold = st.threshold;
+        d.knee      = st.knee;
+        d.intensity = st.scene_contribution;   // у prefilter intensity = вклад СЦЕНЫ
+        d.useKaris  = st.karis_prefilter;
         b.Push(0, d);
     });
     {
@@ -242,8 +247,9 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             {},
             { L(i - 1) },         // combined sampler: предыдущий (вдвое крупнее) уровень
             BLOOM_PASS, /*dont_save=*/true);
-        sm->CreateComputePushFunc<BloomParams>(down_name,[](const PushConstantBinder& b, BloomParams d) {
-            d.useKaris = 0u; b.Push(0, d);
+        // Из состояния берёт только выключатель Karis: остальное bloom_down не читает.
+        sm->CreateComputePushFunc<BloomState>(down_name,[](const PushConstantBinder& b, BloomState st) {
+            BloomParams d{}; d.useKaris = st.karis_down; b.Push(0, d);
         });
         TextureAtlas* dst = ctx->GetTextureAtlas(L(i));
         sm->CreateDispatchFunc<DummyDispatchData>(down_name,[dst](DispatchSizeBinder& b, DummyDispatchData) {
@@ -263,8 +269,9 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             {},
             { L((uint32_t)i + 1) },         // combined sampler: следующий (вдвое мельче) уровень
             BLOOM_PASS, /*dont_save=*/true);
-        sm->CreateComputePushFunc<BloomParams>(up_name,[](const PushConstantBinder& b, BloomParams d) {
-            b.Push(0, d);
+        // bloom_up не читает из cbuffer'а ничего, но слот пушить обязан.
+        sm->CreateComputePushFunc<BloomState>(up_name,[](const PushConstantBinder& b, BloomState) {
+            b.Push(0, BloomParams{});
         });
         TextureAtlas* dst = ctx->GetTextureAtlas(L((uint32_t)i));
         sm->CreateDispatchFunc<DummyDispatchData>(up_name,[dst](DispatchSizeBinder& b, DummyDispatchData) {
@@ -282,8 +289,10 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             {},
             { L(0) },                                 // combined sampler: bloom_L0
             BLOOM_PASS, /*dont_save=*/true);
-        sm->CreateComputePushFunc<BloomParams>("bloom_composite",[](const PushConstantBinder& b, BloomParams d) {
-            d.intensity = 0.5f; b.Push(0, d);   // сила свечения — главная ручка
+        sm->CreateComputePushFunc<BloomState>("bloom_composite",[](const PushConstantBinder& b, BloomState st) {
+            BloomParams d{};
+            d.intensity = st.glow_intensity;   // у composite intensity = сила свечения
+            b.Push(0, d);
         });
         sm->CreateDispatchFunc<DummyDispatchData>("bloom_composite",[dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };

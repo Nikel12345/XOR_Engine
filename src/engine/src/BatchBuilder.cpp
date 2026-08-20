@@ -1,5 +1,6 @@
 ﻿#include "PCH.h"
 #include "BatchBuilder.h"
+#include "BaseComponents.h"
 #include "RenderCommandData.h"
 #include "RenderSnapshot.h"
 #include "ObjectManager.h"

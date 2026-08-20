@@ -9,7 +9,7 @@
 // <p>_x,_y,_z и x,y,z → DragFloat3. Правка пишет напрямую в колонки архетипа и дёргает
 // spec.after_edit; ui_readonly-поля показываются задизейбленными.
 #include "ComponentSerializer.h"
-#include "MaterialParamsSpec.h"
+#include "ParamsSpec.h"
 
 class EngineContext;
 
@@ -41,5 +41,5 @@ namespace ui {
     // Тот же generic-редактор, но по схеме ТИПА params материала: поля адресуются смещением
     // в блобе (он плоский POD), правка идёт in-place — адрес вектора не меняется, значит ключ
     // texture-батча цел и пересборка дерева не нужна. true — что-то изменено в этом кадре.
-    bool DrawMaterialParamsFields(const MaterialParamsSpec& spec, std::vector<uint8_t>& blob);
+    bool DrawParamsFields(const ParamsSpec& spec, std::vector<uint8_t>& blob);
 }

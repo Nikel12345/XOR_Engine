@@ -5,9 +5,13 @@
 #include <memory>
 #include <type_traits>
 #include <unordered_map>
-#include "BaseComponents.h"
+#include "ComponentStorage.h"
 #include "SceneData.h"
 #include "Aliases.h"
+
+// Только по имени: CreateEntity различает его через is_same_v, а поле parent читает
+// уже в контексте вызывающего — тот полный тип, конечно, включает.
+struct ParentComponent;
 
 class PassManager;
 class BufferManager;

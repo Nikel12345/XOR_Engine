@@ -1,5 +1,6 @@
 ﻿#include "PCH.h"
 #include "UI_ComponentEditor.h"
+#include "BaseComponents.h"
 #include "UI_Internal.h"
 #include "UI_Widgets.h"
 #include "EngineContext.h"
@@ -163,16 +164,16 @@ bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec
     return edited || sent;
 }
 
-bool ui::DrawMaterialParamsFields(const MaterialParamsSpec& spec, std::vector<uint8_t>& blob)
+bool ui::DrawParamsFields(const ParamsSpec& spec, std::vector<uint8_t>& blob)
 {
     ImGui::PushID(spec.name.c_str());
     bool edited = false;
 
-    for (const MatFieldSpec& f : spec.fields) {
+    for (const ParamsFieldSpec& f : spec.fields) {
         // Поле не влезает в блоб — блоб старше/младше схемы. Молча не рисуем: писать по этому
         // смещению значило бы портить чужую память (реестр такие поля отбраковывает на
         // регистрации, сюда доходит только рассинхрон размера самого блоба).
-        void* p = MatFieldPtr(blob, f);
+        void* p = ParamsFieldPtr(blob, f);
         if (!p) continue;
 
         const bool  ranged = f.lo < f.hi;
@@ -180,27 +181,27 @@ bool ui::DrawMaterialParamsFields(const MaterialParamsSpec& spec, std::vector<ui
         const char* label  = f.UiLabel();
         ImGui::BeginDisabled(f.ui_readonly);
         switch (f.kind) {
-        case MatFieldKind::Color3:
+        case ParamsFieldKind::Color3:
             edited |= ImGui::ColorEdit3(label, static_cast<float*>(p));
             break;
-        case MatFieldKind::Color4:
+        case ParamsFieldKind::Color4:
             edited |= ImGui::ColorEdit4(label, static_cast<float*>(p));
             break;
-        case MatFieldKind::Vec2:
+        case ParamsFieldKind::Vec2:
             edited |= ImGui::DragFloat2(label, static_cast<float*>(p), f.speed, f.lo, f.hi, "%.3f", flags);
             break;
-        case MatFieldKind::Vec3:
+        case ParamsFieldKind::Vec3:
             edited |= ImGui::DragFloat3(label, static_cast<float*>(p), f.speed, f.lo, f.hi, "%.3f", flags);
             break;
-        case MatFieldKind::Vec4:
+        case ParamsFieldKind::Vec4:
             edited |= ImGui::DragFloat4(label, static_cast<float*>(p), f.speed, f.lo, f.hi, "%.3f", flags);
             break;
-        case MatFieldKind::Angle: {   // радианы в блобе, слайдер в градусах (lo/hi схемы — градусы)
+        case ParamsFieldKind::Angle: {   // радианы в блобе, слайдер в градусах (lo/hi схемы — градусы)
             edited |= ImGui::SliderAngle(label, static_cast<float*>(p),
                                          ranged ? f.lo : -360.0f, ranged ? f.hi : 360.0f);
             break;
         }
-        case MatFieldKind::U32: {
+        case ParamsFieldKind::U32: {
             auto* u = static_cast<uint32_t*>(p);
             int v = static_cast<int>(*u);
             if (ImGui::DragInt(label, &v, f.speed < 1.0f ? 1.0f : f.speed, (int)f.lo, (int)f.hi, "%d", flags)) {
@@ -209,7 +210,7 @@ bool ui::DrawMaterialParamsFields(const MaterialParamsSpec& spec, std::vector<ui
             }
             break;
         }
-        case MatFieldKind::Bool: {   // в cbuffer bool — 4 байта, на CPU держим uint32_t
+        case ParamsFieldKind::Bool: {   // в cbuffer bool — 4 байта, на CPU держим uint32_t
             auto* u = static_cast<uint32_t*>(p);
             bool v = (*u != 0);
             if (ImGui::Checkbox(label, &v)) { *u = v ? 1u : 0u; edited = true; }

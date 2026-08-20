@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL.h>
 #include <string_view>
@@ -64,6 +64,13 @@ public:
 	ComputePassStep* GetComputePassStep(const ComputePassName& name);
 	ComputePassStep* GetComputePrepassStep(const ComputePrepassName& name);
 	BlitPassStep* GetBlitPassStep(const BlitPassName& name);
+
+	// Обход отдаёт пару «имя + шаг»: имя прохода — это КЛЮЧ РЕЕСТРА, а не поле шага (debug_name
+	// в логике не участвует — см. CLAUDE.md). Нужен редактору: он и перечисляет проходы, и
+	// резолвит выбранный обратно. Порядок исполнения берут из pass_index самого шага.
+	const std::unordered_map<RenderPassName, std::unique_ptr<RenderPassStep>>& GetRenderPasses() const { return render_steps; }
+	const std::unordered_map<ComputePassName, std::unique_ptr<ComputePassStep>>& GetComputePasses() const { return compute_steps; }
+	const std::unordered_map<ComputePrepassName, std::unique_ptr<ComputePassStep>>& GetComputePrepasses() const { return compute_prepass_steps; }
 
 	const std::vector<RenderPassStep*>& GetOrderedRenderPasses() { return ordered_passes; }
 	const std::vector<ComputePassStep*>& GetOrderedComputePasses() { return ordered_compute_steps; }

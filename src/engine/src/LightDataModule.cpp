@@ -1,5 +1,6 @@
 ﻿#include "PCH.h"
 #include "LightDataModule.h"
+#include "BaseComponents.h"
 #include "Utils.h"
 #include "BufferManager.h"
 #include "CameraStruct.h"

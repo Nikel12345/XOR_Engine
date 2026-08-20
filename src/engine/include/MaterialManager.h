@@ -4,7 +4,7 @@
 #include <cstring>
 #include <string>
 #include "MaterialData.h"
-#include "MaterialParamsSpec.h"
+#include "ParamsSpec.h"
 
 class TextureManager;   // только в сигнатуре CollectSamplerUsage — передаётся на вызове
 
@@ -14,7 +14,7 @@ struct SceneMaterialEntry {
 	std::string name;
 	std::vector<std::pair<TextureSlotRole, TextureName>> textures;
 	std::vector<ShaderName> shaders;
-	std::string             params_type;   // имя типа в MaterialParamsSpecRegistry; пусто = без params
+	std::string             params_type;   // имя типа в ParamsSpecRegistry; пусто = без params
 	std::vector<uint8_t>    params;
 };
 
@@ -63,7 +63,7 @@ public:
 
 	// Тип-безопасная упаковка per-material факторов в Material::params (непрозрачный блоб).
 	// T должен совпадать по размеру/раскладке с cbuffer MaterialBlock в шейдере И быть
-	// зарегистрирован в MaterialParamsSpecRegistry (оттуда берётся имя типа для тега).
+	// зарегистрирован в ParamsSpecRegistry (оттуда берётся имя типа для тега).
 	template<class T>
 	void SetMaterialParams(Material* m, const T& p) { ::SetMaterialParams(m, p); }
 

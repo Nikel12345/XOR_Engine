@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "BaseComponents.h"
 #include "BoundSphereDataModule.h"
 #include "BufferManager.h"
 #include "ObjectManager.h"

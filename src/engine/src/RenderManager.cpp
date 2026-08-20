@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "RenderManager.h"
 #include "BufferManager.h"
 #include "RenderSnapshot.h"

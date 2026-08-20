@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 #include <string>
-#include "BaseComponents.h"
+#include "ComponentStorage.h"
 
 // Разделяемое между панелями редактора состояние. Панели живут в разных TU
 // (UI_Hierarchy / UI_AssetBrowser / UI_Inspector), но общаются через один выбор
@@ -14,6 +14,7 @@ namespace ui {
 // (2 типа, отдельные вкладки-фильтры).
 enum class SelKind { None, Entity, Camera, Material, Texture, Model, Shader, Compute,
                      Vsd, Fsd, Csd,     // именованные шейдер-данные (список; своё окно редактирования — позже)
+                     Pass,              // шаг кадра (render/compute/blit) — редактируется его state
                      UINode };          // узел дерева UI_Yoga (UI-вкладка; двигается гизмо, см. UI_Yoga.h)
 
 struct Selection {

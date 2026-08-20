@@ -13,7 +13,7 @@
 #include <map>
 #include <typeindex>
 #include <unordered_map>
-#include "BaseComponents.h"
+#include "ComponentStorage.h"
 #include "CommandId.h"   // FieldSpec::cmd — чем уходит правка поля; сам InputManager сюда не тянется
 #include "yyjson.h"
 

@@ -1,4 +1,4 @@
-// Bloom composite + tonemap. Завершает кадр: подмешивает размытую пирамиду (bloom_0) в HDR-сцену
+﻿// Bloom composite + tonemap. Завершает кадр: подмешивает размытую пирамиду (bloom_0) в HDR-сцену
 // и сжимает HDR→LDR (Reinhard). Читает scene_hdr через storage (point, тот же размер), bloom_0 —
 // через LINEAR-сэмплер (мельче, апскейл). Пишет результат обратно в scene_hdr (RMW). scene_hdr
 // здесь только storage, bloom_0 только sampler → нет одновременного sampler+storage на одной текстуре.
@@ -19,7 +19,6 @@ cbuffer BloomParams : register(b0, space2) {
     float intensity;   // доля подмешивания bloom (~0.05)
     float threshold;   // не используется
     float knee;        // не используется
-    uint  srcLod;      // не используется (composite читает bloom mip0)
 };
 
 [numthreads(16, 16, 1)]

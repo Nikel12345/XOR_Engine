@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "BaseComponents.h"
 #include "EngineContext.h"
 #include "Engine.h"
 #include "TextureLoader.h"

@@ -31,7 +31,7 @@
 #include "DefaultRenderPassSet.h"
 #include "TexturesPresets.h"
 #include "ComponentSerializer.h"
-#include "MaterialParamsSpec.h"
+#include "ParamsSpec.h"
 #include "PositionStructure.h"
 #include "DefaultCommandSet.h"
 #include "imgui.h"
