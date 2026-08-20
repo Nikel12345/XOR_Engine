@@ -142,7 +142,7 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 		slot_controller->PushUploadFence(slot, upload_cb.SubmitAndAcquireFence());
 	}
 
-	{
+	if (texture_manager->IsDirty()) {
 		PROF_SCOPE(Sim, "  tex_upload (upload+mips+preview)");
 		RenderCommandBuffer tex_cb = queue_manager->GetRenderQueue().AcquireCommandBuffer();
 		TextureCopyPass tex_cp = tex_cb.BeginTextureCopyPass();

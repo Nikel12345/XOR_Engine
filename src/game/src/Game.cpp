@@ -238,7 +238,7 @@ SDL_AppResult Game::MainInit()
     {
         MaterialManager* mm = ctx->GetMaterialManager();
     }
-	ctx->ExecuteGenerators();   // CreateDebugColliders
+	//ctx->ExecuteGenerators();   // CreateDebugColliders
     ChangeState(GameState::MAIN_MENU);
     return SDL_APP_CONTINUE;
 }
@@ -419,17 +419,22 @@ void Game::MainMenu_Update()
     }
 }
 
-// Гравитация одного центрального объекта в (0,0) плоскости XZ + движение.
-// kGravGM ДОЛЖЕН равняться GRAVITY_CONST * CENTRAL_MASS из scripts/scene_gen/scene_gen.py
-// (сейчас 1 * 50 = 50): скорость круговой орбиты sqrt(GM/r) считает генератор — при другом GM
-// орбиты станут эллиптичными/раскрутятся. Форму орбиты задаёт ТОЛЬКО GM.
+// Гравитация центров, ЗАДАННЫХ СЦЕНОЙ: притягивает не безымянная константа, а сущность с
+// GravityComponent — центр там, где её Transform, сила = её gm (см. BaseComponents.h). Центров
+// может быть несколько, ускорения складываются; ни одного — кубы летят по инерции.
+// gm ОБЯЗАН равняться GRAVITY_CONST * CENTRAL_MASS из scripts/scene_gen/scene_gen.py
+// (сейчас 1 * 5000 = 5000): скорость круговой орбиты sqrt(GM/r) считает генератор — при другом gm
+// орбиты станут эллиптичными/раскрутятся. Форму орбиты задаёт ТОЛЬКО gm.
 // kSimDt — «скорость времени»: не влияет на форму орбиты, только на темп. У движка нет
 // delta-time (камера/свет — тоже по кадрам), поэтому шаг фиксированный. При радиусах 50..350
 // орбиты долгие — увеличивай kSimDt (или уменьшай радиусы диска в scene_gen.py), чтобы вращение
 // было заметным; слишком большой шаг добавит прецессию/дрожание орбиты.
-// Гравитация ПЛОСКАЯ: ускорение к центру считается по XZ-радиусу и меняет только vx/vz — так y
-// (толщина диска) и vy остаются нулевыми/постоянными, диск не «распухает».
-static constexpr float kGravGM   = 5000.0f;
+// Гравитация ОБЪЁМНАЯ: ускорение считается по полному радиусу |(x,y,z)| и меняет все три
+// компоненты скорости. Раньше она была плоской (XZ-радиус, только vx/vz) — под секции с
+// заметной высотой это не годится: генератор ставит кубу скорость круговой орбиты по ПОЛНОМУ
+// радиусу, её плоскость наклонена, и без y-составляющей ускорения куб просто улетал бы по
+// прямой вверх/вниз от своего кольца. Плата — диск с ненулевой высотой живёт своей жизнью:
+// кубы качаются через y == 0, как и положено наклонным орбитам.
 static constexpr float kSimDt    = 0.05f;
 static constexpr float kGravSoft = 1e-3f;   // защита от деления на ~0 у самого центра
 
@@ -438,26 +443,45 @@ void Game::SimulateGravity()
     SceneData* scene = objectManager->GetActiveScene();
     if (!scene) return;
 
-    // Обходим только сущности с Transform И Velocity (кубы). Когда ВСЕ компоненты — SoA,
-    // ForEach отдаёт целые массивы один раз на архетип (не поэлементно) — цикл по строкам сами.
+    // Проход 1 — центры. Их единицы, и снимаем мы их ОДИН раз: иначе обход миллиона кубов
+    // пришлось бы делать по разу на центр. Сам центр симуляция не двигает — он стоит там, куда
+    // его поставила сцена (или редактор).
+    gravity_sources.clear();
+    objectManager->ForEach<Positions, GravityComponent>(scene,
+        [this](SoAElement<Positions> pos_el, GravityComponent& G)
+    {
+        Positions& P = pos_el.container();
+        const size_t i = pos_el.i();
+        gravity_sources.push_back({ P.w[i], P.d[i], P.h[i], G.gm });
+    });
+
+    // Проход 2 — притягиваемые. Обходим только сущности с Transform И Velocity (кубы). Когда ВСЕ
+    // компоненты — SoA, ForEach отдаёт целые массивы один раз на архетип (не поэлементно).
     // Позиция — трансляция матрицы: w = x, d = y, h = z (row-major, индексы 3/7/11).
+    const std::vector<GravitySource>& sources = gravity_sources;
     objectManager->ForEach<Positions, Velocities>(scene,
-        [](Positions& P, Velocities& V)
+        [&sources](Positions& P, Velocities& V)
     {
         const size_t n = P.w.size();
         for (size_t i = 0; i < n; ++i) {
             const float x = P.w[i];   // трансляция X
+            const float y = P.d[i];   // трансляция Y
             const float z = P.h[i];   // трансляция Z
-            const float r2 = x * x + z * z;
-            const float r  = std::sqrt(r2);
 
-            // Полу-неявный Эйлер: сначала скорость (ускорение к центру a = GM/r^2, направление
-            // -(x,z)/r), затем позиция — так орбита устойчивее.
-            if (r > kGravSoft) {
-                const float a = kGravGM / r2;
-                V.x[i] -= (x / r) * a * kSimDt;
-                V.z[i] -= (z / r) * a * kSimDt;
+            // Полу-неявный Эйлер: сначала скорость (ускорение к центру a = gm/r^2, направление
+            // (центр - позиция)/r), затем позиция — так орбита устойчивее.
+            float ax = 0.0f, ay = 0.0f, az = 0.0f;
+            for (const GravitySource& s : sources) {
+                const float dx = s.x - x, dy = s.y - y, dz = s.z - z;
+                const float r2 = dx * dx + dy * dy + dz * dz;
+                const float r  = std::sqrt(r2);
+                if (r <= kGravSoft) continue;
+                const float k = s.gm / (r2 * r);   // gm/r^2, делённое на r — нормировка направления
+                ax += dx * k; ay += dy * k; az += dz * k;
             }
+            V.x[i] += ax * kSimDt;
+            V.y[i] += ay * kSimDt;
+            V.z[i] += az * kSimDt;
 
             // Обновляем координаты позиции (wdh) скоростями (xyz).
             P.w[i] += V.x[i] * kSimDt;

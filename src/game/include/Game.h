@@ -47,8 +47,13 @@ private:
 	void MainMenu_Event(SDL_Event* event);
 	void MainMenu_Quit();
 
-	// Гравитация центрального объекта (0,0) в плоскости XZ + интеграция позиций скоростями.
+	// Гравитация к центрам-сущностям (GravityComponent) + интеграция позиций скоростями.
 	void SimulateGravity();
+
+	// Снимок центров тяжести на тик: сначала собираем их (их единицы), потом один проход по
+	// притягиваемым. Член, а не локальная переменная, — чтобы не аллоцировать каждый тик.
+	struct GravitySource { float x, y, z, gm; };
+	std::vector<GravitySource> gravity_sources;
 
 	float width;
 	float height;

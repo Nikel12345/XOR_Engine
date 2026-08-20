@@ -136,6 +136,20 @@ public:
     void NotifyShutdown();
     bool IsShuttingDown() const { return shutting_down_.load(std::memory_order_acquire); }
 
+    // Чем рендер занял свои кадры: свежим COMPUTED (сразу или после SOFT_WAIT) или пере-рендером
+    // last_rendering_slot. Разница FPS и UPS — это РОВНО fallback: рендеру новый кадр не нужен,
+    // он переиспользует слот, а sim в это же время может голодать по слотам (см. WARNINGS.md,
+    // «Пустой сабмит на графическую очередь»). Из-за этого «FPS выше UPS» само по себе ничего не
+    // доказывает — доказывает вот эта тройка.
+    //
+    // fresh_after_wait отдельно от fresh намеренно: он показывает, окупается ли SOFT_WAIT — то
+    // есть как часто двухмиллисекундное ожидание реально спасло кадр от дубля.
+    //
+    // Здесь ТОЛЬКО счётчики. Контроллер их не печатает и никуда не отдаёт: вывод — дело того,
+    // кто спросил (профайлер, оверлей редактора). Счётчики монотонные, за окно считать разностью.
+    struct RenderChoiceStats { uint64_t fresh = 0, fresh_after_wait = 0, fallback = 0; };
+    RenderChoiceStats GetRenderChoiceStats() const;
+
     void DebugDump(const char* tag = nullptr);
 
 private:
@@ -153,6 +167,12 @@ private:
     uint64_t required_epoch_ = 0;
 
     std::atomic<uint64_t> render_fences_done_{ 0 };   // см. NotifyRenderFenceDone
+
+    // Пишутся под mutex_ (все три точки выбора — в WaitRenderableSlot), читаются откуда угодно:
+    // атомик нужен ради чтения, не ради инкремента. relaxed — счётчик ничего не упорядочивает.
+    std::atomic<uint64_t> stat_fresh_{ 0 };
+    std::atomic<uint64_t> stat_fresh_after_wait_{ 0 };
+    std::atomic<uint64_t> stat_fallback_{ 0 };
     std::atomic<bool>     shutting_down_{ false };    // см. NotifyShutdown
 
     std::mutex mutex_;

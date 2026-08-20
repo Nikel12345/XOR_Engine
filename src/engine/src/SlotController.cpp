@@ -239,6 +239,7 @@ uint8_t SlotController::WaitRenderableSlot(bool latest_wins)
         uint8_t slot = GetReadySlotUnsafe(latest_wins);
         if (slot != INVALID_SLOT) {
             MarkRenderingUnsafe(slot);
+            stat_fresh_.fetch_add(1, std::memory_order_relaxed);
             return slot;
         }
 
@@ -250,16 +251,25 @@ uint8_t SlotController::WaitRenderableSlot(bool latest_wins)
             slot = GetReadySlotUnsafe(latest_wins);
             if (slot != INVALID_SLOT) {
                 MarkRenderingUnsafe(slot);
+                stat_fresh_after_wait_.fetch_add(1, std::memory_order_relaxed);
                 return slot;
             }
 
             MarkRenderingUnsafe(fb);
+            stat_fallback_.fetch_add(1, std::memory_order_relaxed);
             return fb;
         }
 
         // 3. Ни нового кадра, ни fallback (самый первый кадр) — ждём пробуждения.
         cv_renderable_.wait(lock);
     }
+}
+
+SlotController::RenderChoiceStats SlotController::GetRenderChoiceStats() const
+{
+    return { stat_fresh_.load(std::memory_order_relaxed),
+             stat_fresh_after_wait_.load(std::memory_order_relaxed),
+             stat_fallback_.load(std::memory_order_relaxed) };
 }
 
 bool SlotController::IsUploadingSlot(uint8_t slot)

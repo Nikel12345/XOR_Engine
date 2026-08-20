@@ -68,9 +68,69 @@ bool TryGetNum(yyjson_val* v, double& out)
 
 } // namespace
 
-void ComponentSpec::Save(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp) const
+//  ScenePool: словарь имён ассетов в шапке scene.json (см. ComponentSerializer.h)
+
+uint32_t ScenePool::List::Intern(const std::string& name)
 {
-    if (custom_save) { custom_save(arch, count, doc, comp); return; }
+    auto [it, inserted] = index.emplace(name, (uint32_t)names.size());
+    if (inserted) names.push_back(name);
+    return it->second;
+}
+
+ScenePool::List* ScenePool::Find(const std::string& list_name)
+{
+    auto it = lists_.find(list_name);
+    return it != lists_.end() ? &it->second : nullptr;
+}
+
+const char* ScenePool::Cell(const List* list, yyjson_val* v)
+{
+    // Строка — всегда ИМЯ, число — всегда индекс. Тип json их и разводит: модель по имени "42"
+    // приезжает как "42" даже когда в словаре есть запись под индексом 42 (проверено зондом).
+    if (const char* s = yyjson_get_str(v)) return s;
+    if (yyjson_is_uint(v)) {
+        const uint64_t i = yyjson_get_uint(v);
+        if (list && i < list->names.size()) return list->names[(size_t)i].c_str();
+    }
+    ++misses_;   // индекс мимо словаря ЛИБО ячейка не строка и не индекс (real/отрицательное/null)
+    return nullptr;
+}
+
+void ScenePool::Write(yyjson_mut_doc* doc, yyjson_mut_val* root) const
+{
+    for (const auto& [list_name, list] : lists_) {
+        if (list.names.empty()) continue;
+        yyjson_mut_val* arr = yyjson_mut_arr(doc);
+        yyjson_mut_obj_add(root, yyjson_mut_strcpy(doc, list_name.c_str()), arr);   // ключ динамический
+        for (const std::string& n : list.names) yyjson_mut_arr_add_strcpy(doc, arr, n.c_str());
+    }
+}
+
+void ScenePool::Read(yyjson_val* root)
+{
+    // Списки словаря — массивы в корне файла; архетипы — объекты. Разбор архетипов массивы
+    // пропускает своим гвардом (yyjson_is_obj), здесь берём ровно обратное.
+    size_t k, m; yyjson_val *key, *val;
+    yyjson_obj_foreach(root, k, m, key, val) {
+        if (!yyjson_is_arr(val)) continue;
+        const char* list_name = yyjson_get_str(key);
+        if (!list_name) continue;
+        List& list = lists_[list_name];
+        size_t i, n; yyjson_val* s;
+        yyjson_arr_foreach(val, i, n, s) {
+            // Запись словаря — ИМЯ, то есть строка. Не строка (частая правка руками: id записали
+            // числом) — кладём пустышку, а НЕ пропускаем: пропуск сдвинул бы все последующие
+            // индексы на единицу, и колонка молча поехала бы на соседний ассет.
+            const char* str = yyjson_get_str(s);
+            if (!str) { ++misses_; str = ""; }
+            list.names.emplace_back(str);
+        }
+    }
+}
+
+void ComponentSpec::Save(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp, ScenePool* pool) const
+{
+    if (custom_save) { custom_save(arch, count, doc, comp, pool); return; }
     for (const FieldSpec& f : fields) {
         if (!f.set_num && !f.set_str) continue;   // вычисляемое: колонки нет, Load её не примет
         yyjson_mut_val* col = yyjson_mut_obj_add_arr(doc, comp, f.key);
@@ -85,16 +145,23 @@ void ComponentSpec::Save(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyj
         case FieldKind::Bool:
             for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_bool(doc, col, f.get_num(arch, i) != 0.0);
             break;
-        default:   // Str / Asset*
-            for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_strcpy(doc, col, f.get_str(arch, i).c_str());
+        default: {  // Str / Asset*
+            const char* list_name = FieldPoolName(f.kind);
+            // Список берём один раз на колонку: ссылка переживает появление соседних списков.
+            ScenePool::List* list = (pool && list_name) ? &(*pool)[list_name] : nullptr;
+            if (list)
+                for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_uint(doc, col, list->Intern(f.get_str(arch, i)));
+            else
+                for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_strcpy(doc, col, f.get_str(arch, i).c_str());
             break;
+        }
         }
     }
 }
 
-void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count) const
+void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count, ScenePool* pool) const
 {
-    if (custom_load) { custom_load(arch, comp, count); return; }
+    if (custom_load) { custom_load(arch, comp, count, pool); return; }
     for (size_t i = 0; i < count; ++i) add_default(arch);     // дефолты = member-инициализаторы T{}
     if (!comp) return;                                        // компонент без данных (тег) / форма создания
     const size_t base = arch.entities.size() - count;         // строки дописаны в хвост (инвариант в .h)
@@ -104,9 +171,13 @@ void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count) const
         if (!col) continue;                                   // нет колонки → дефолт
         size_t idx, max; yyjson_val* v;
         if (f.set_str) {
+            const char* list_name = FieldPoolName(f.kind);
+            ScenePool::List* list = (pool && list_name) ? pool->Find(list_name) : nullptr;
             yyjson_arr_foreach(col, idx, max, v) {
                 if (idx >= count) break;                      // count-гвард: длиннее → усечь
-                if (const char* s = yyjson_get_str(v)) f.set_str(arch, base + idx, s);
+                // Ячейка = имя ЛИБО индекс в словаре шапки (см. ScenePool).
+                if (const char* s = pool ? pool->Cell(list, v) : yyjson_get_str(v))
+                    f.set_str(arch, base + idx, s);
             }
         }
         else {
@@ -180,26 +251,36 @@ std::string FormatCascades(const DirectLightComponent::DirectLightData& d)
 
 namespace {
 
-void SaveMaterial(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp)
+void SaveMaterial(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp, ScenePool* pool)
 {
     auto& arr = *arch.get_array<MaterialComponent>();
+    // Материалы — свой список словаря: схемой поле не выражается, поэтому имя списка здесь
+    // литералом, а не через FieldPoolName (у Material нет FieldSpec, из которого его взять).
+    ScenePool::List* list = pool ? &(*pool)["materials"] : nullptr;
     yyjson_mut_val* col = yyjson_mut_obj_add_arr(doc, comp, "names");
     for (size_t i = 0; i < count; ++i) {
         yyjson_mut_val* row = yyjson_mut_arr_add_arr(doc, col);
-        for (const auto& nm : arr[i].names) yyjson_mut_arr_add_strcpy(doc, row, nm.c_str());
+        for (const auto& nm : arr[i].names) {
+            if (list) yyjson_mut_arr_add_uint(doc, row, list->Intern(nm));
+            else      yyjson_mut_arr_add_strcpy(doc, row, nm.c_str());
+        }
     }
 }
-void LoadMaterial(Archetype& arch, yyjson_val* comp, size_t count)
+void LoadMaterial(Archetype& arch, yyjson_val* comp, size_t count, ScenePool* pool)
 {
     arch.ensure_component<MaterialComponent>();
     std::vector<MaterialComponent> rows(count);
+    ScenePool::List* list = pool ? pool->Find("materials") : nullptr;
     yyjson_val* col = comp ? yyjson_obj_get(comp, "names") : nullptr;
     if (col) {
         size_t idx, max; yyjson_val* row;
         yyjson_arr_foreach(col, idx, max, row) {
             if (idx >= count) break;
             size_t j, jm; yyjson_val* s;
-            yyjson_arr_foreach(row, j, jm, s) { const char* str = yyjson_get_str(s); if (str) rows[idx].names.emplace_back(str); }
+            yyjson_arr_foreach(row, j, jm, s) {
+                const char* str = pool ? pool->Cell(list, s) : yyjson_get_str(s);
+                if (str) rows[idx].names.emplace_back(str);
+            }
         }
     }
     auto* a = arch.get_array<MaterialComponent>();
@@ -341,6 +422,11 @@ void RegisterBuiltinComponentSpecs()
     reg.Register({ .name = "Mass", .sig_type = typeid(MassComponent),
         .add_default = AddDefaultAoS<MassComponent>,
         .fields = { FieldSpec::Num("mass", F32, AOS_NUM(MassComponent, mass), 0, FLT_MAX) } });
+
+    // ---- Gravity: центр притяжения; ЕГО позиция (Transform той же сущности) и есть центр ----
+    reg.Register({ .name = "Gravity", .sig_type = typeid(GravityComponent),
+        .add_default = AddDefaultAoS<GravityComponent>,
+        .fields = { FieldSpec::Num("gm", F32, AOS_NUM(GravityComponent, gm), 0, FLT_MAX, 1.0f) } });
 
     // ---- EditorHidden (тег: скрыт из списка UI; персистится как авторское состояние) ----
     reg.Register({ .name = "EditorHidden", .sig_type = typeid(EditorHiddenComponent),

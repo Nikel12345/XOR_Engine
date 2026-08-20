@@ -106,6 +106,17 @@ public:
 
 	void RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci);
 
+	// Есть ли для GPU незаписанная работа: заливки, мипы, блиты превью. Этим гейтится САБМИТ
+	// текстурного cb, а не запись в него. Текстурный cb уходит на ГРАФИЧЕСКУЮ очередь (порядок
+	// «залили → нарисовали» держит она, а не барьеры), и даже пустой он встаёт в неё ЗА кадром:
+	// его фенс отстреливает только когда кадр дорисован. Стадия заливки ждёт оба своих фенса,
+	// поэтому пустой сабмит удлиняет оборот слота на пол-кадра и тормозит НЕ рендер, а sim.
+	// Три слагаемых, а не одно: превью публикуются независимо от заливок, а мипы могут остаться
+	// от заливки, записанной другим cb (Engine_Frame — не единственная реализация кадра).
+	bool IsDirty() const {
+		return !texture_upload_tasks.empty() || !mip_tasks.empty() || preview.HasPendingBlits();
+	}
+
 	void BlitPendingPreviews(SDL_GPUCommandBuffer* cb) { preview.Blit(cb); }
 	SDL_GPUTexture* GetPreviewAtlasTexture() const { return preview.Texture(); }
 	PreviewPacker::UV GetPreviewUV(const std::string& name) const { return preview.GetUV(name); }

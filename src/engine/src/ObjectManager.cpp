@@ -125,8 +125,8 @@ SceneData* ObjectManager::GetScene(const SceneName& name)
 	}
 }
 
-// Пост-обработка pretty-вывода yyjson: массив БЕЗ вложенных массивов/объектов схлопывается в
-// одну строку ("x": [1.0, 2.0, 3.0]). Своего флага для этого у yyjson нет (см. YYJSON_WRITE_*),
+// Пост-обработка pretty-вывода yyjson: массив БЕЗ объектов внутри схлопывается в одну строку
+// ("x": [1.0, 2.0, 3.0] и зубчатое "names": [[0], [3], [0]]). Своего флага у yyjson нет (см. YYJSON_WRITE_*),
 // а колонка поля — ровно такой массив: в столбик scene.json раздувается до строки на ЗНАЧЕНИЕ
 // (архетип из N сущностей × M полей). Структура файла при этом не меняется — только раскладка.
 // Проход строкоосознанный: '[' и ']' внутри json-строки не считаются скобками (перевод строки
@@ -147,9 +147,12 @@ static std::string InlineScalarArrays(const std::string& s)
         if (c == '"') { in_str = true; out += c; continue; }
         if (c != '[')  { out += c; continue; }
 
-        // Парная ']' + заодно проверка на вложенные структуры внутри.
+        // Парная ']' + заодно проверка, что внутри нет объектов и вложенность не глубже
+        // ОДНОГО уровня массивов. Один уровень пускаем ради зубчатой колонки Material: иначе на
+        // КАЖДУЮ сущность уходит отдельная строка "[0]," с полным отступом.
         size_t j = i + 1;
-        bool nested = false, closed = false, str = false;
+        int  depth = 1;                                // глубина относительно текущей '['
+        bool bad = false, closed = false, str = false;
         for (; j < s.size(); ++j) {
             const char d = s[j];
             if (str) {
@@ -158,14 +161,13 @@ static std::string InlineScalarArrays(const std::string& s)
                 continue;
             }
             if (d == '"') { str = true; continue; }
-            if (d == '[' || d == '{') { nested = true; break; }
-            if (d == ']') { closed = true; break; }
+            if (d == '{') { bad = true; break; }       // объект — структура, ему нужен pretty
+            if (d == '[') { if (++depth > 2) { bad = true; break; } continue; }
+            if (d == ']') { if (--depth == 0) { closed = true; break; } }
         }
-        // Есть вложенность (напр. зубчатый массив имён у Material) — отдаём внешний уровень
-        // pretty-выводу как есть, а вложенные скалярные массивы схлопнутся сами на своей итерации.
-        if (nested || !closed) { out += c; continue; }
+        if (bad || !closed) { out += c; continue; }
 
-        str = false;                                   // скалярный массив → без переносов и отступов
+        str = false;                                   // плоский массив → без переносов и отступов
         for (size_t k = i; k <= j; ++k) {
             const char d = s[k];
             if (str) {
@@ -195,6 +197,11 @@ std::string ObjectManager::SaveScene(SceneData* scene)
     yyjson_mut_val* root = yyjson_mut_obj(doc);
     yyjson_mut_doc_set_root(doc, root);
 
+    // Блоки архетипов копим и добавляем в корень ПОСЛЕ словаря: заполняется он по ходу их
+    // записи, а в файле обязан стоять первым — иначе его не прочесть, не разобрав всю сцену.
+    ScenePool pool;
+    std::vector<std::pair<std::string, yyjson_mut_val*>> blocks;   // ключ-архетип → блок
+
     for (auto& [sig, arch] : scene->archetypes) {
         // Сгенерированные кодом (debug-рамки и т.п.) в файл не идут — пересоздаст генератор.
         if (arch.components.count(std::type_index(typeid(GeneratedComponent)))) continue;
@@ -202,19 +209,21 @@ std::string ObjectManager::SaveScene(SceneData* scene)
         if (count == 0) continue;
 
         std::vector<const ComponentSpec*> hs;
-        std::vector<std::string> names;
-        for (auto& [tindex, arr] : arch.components) {
-            const ComponentSpec* h = reg.ByType(tindex);
-            if (h) { hs.push_back(h); names.push_back(h->name); }
-        }
+        for (auto& [tindex, arr] : arch.components)
+            if (const ComponentSpec* h = reg.ByType(tindex)) hs.push_back(h);
         if (hs.empty()) continue;
 
-        std::sort(names.begin(), names.end());   // порядконезависимый ключ архетипа
+        // Сортировка по имени — не только ради порядконезависимого ключа архетипа: в ЭТОМ же
+        // порядке ниже пишутся блоки компонентов. Обход arch.components — обход unordered_map,
+        // его порядок разъезжается между сценами с ОДИНАКОВЫМ составом, и без сортировки
+        // пересохранение той же сцены тасовало бы блоки в файле (диффы на ровном месте).
+        std::sort(hs.begin(), hs.end(),
+                  [](const ComponentSpec* a, const ComponentSpec* b) { return a->name < b->name; });
         std::string key;
-        for (size_t i = 0; i < names.size(); ++i) { if (i) key += ','; key += names[i]; }
+        for (size_t i = 0; i < hs.size(); ++i) { if (i) key += ','; key += hs[i]->name; }
 
         yyjson_mut_val* block = yyjson_mut_obj(doc);
-        yyjson_mut_obj_add(root, yyjson_mut_strcpy(doc, key.c_str()), block);   // ключ динамический → strcpy
+        blocks.emplace_back(key, block);
         yyjson_mut_obj_add_uint(doc, block, "count", count);
 
         // entities — файл-локальные id, всегда (нужны для ремапа Parent на загрузке).
@@ -224,11 +233,24 @@ std::string ObjectManager::SaveScene(SceneData* scene)
         for (const ComponentSpec* h : hs) {
             yyjson_mut_val* comp = yyjson_mut_obj(doc);
             yyjson_mut_obj_add(block, yyjson_mut_strcpy(doc, h->name.c_str()), comp);
-            h->Save(arch, count, doc, comp);   // колонки по полям (генератор схемы или custom)
+            h->Save(arch, count, doc, comp, &pool);   // колонки по полям (генератор схемы или custom)
         }
     }
 
-    char* js = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, nullptr);
+    pool.Write(doc, root);
+
+    // Блоки — по ключу архетипа. Обход scene->archetypes идёт по unordered_map, и у двух сцен
+    // с одинаковым составом его порядок разный; без сортировки пересохранение переставляет
+    // блоки, а вместе с ними и файл-локальные id — их раздаёт загрузка ПО ПОРЯДКУ блоков.
+    std::sort(blocks.begin(), blocks.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    for (auto& [key, block] : blocks)
+        yyjson_mut_obj_add(root, yyjson_mut_strcpy(doc, key.c_str()), block);   // ключ динамический → strcpy
+
+    // FP_TO_FLOAT: числовые поля схемы объявлены F32, а double — лишь общий канал доступа к ним.
+    // Двойная точность на письме — это ~7 лишних байт на КАЖДОЕ число (на 1M сущностей треть
+    // файла), причём на чтении они всё равно сужаются обратно до float. Потери здесь нет.
+    char* js = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY | YYJSON_WRITE_FP_TO_FLOAT, nullptr);
     std::string out = js ? InlineScalarArrays(js) : std::string{};   // колонки — в строчку
     if (js) free(js);
     yyjson_mut_doc_free(doc);
@@ -250,6 +272,10 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
     if (!doc) { SDL_Log("LoadScene: scene.json parse failed"); return created; }
     yyjson_val* root = yyjson_doc_get_root(doc);
     if (!root || !yyjson_is_obj(root)) { SDL_Log("LoadScene: scene.json root is not object"); yyjson_doc_free(doc); return created; }
+
+    // Словарь имён — ДО архетипов: их колонки ассетов ссылаются в него индексами.
+    ScenePool pool;
+    pool.Read(root);
 
     // Оценка числа сущностей (сумма count по архетипам) — reserve, чтобы вставки не ре-хэшили.
     size_t est = 0;
@@ -302,7 +328,7 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
 
             for (const ComponentSpec* h : hs) {
                 yyjson_val* comp = yyjson_obj_get(block, h->name.c_str());
-                h->Load(arch, comp, count);   // ensure_component<T> + ровно count add
+                h->Load(arch, comp, count, &pool);   // ensure_component<T> + ровно count add
             }
         }
     }
@@ -330,6 +356,10 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
 
     SDL_Log("  ObjectManager::LoadScene: pass1(parse+build)=%.1f  pass2(parent remap)=%.1f ms  [%zu ent, %zu archetypes]",
         pass1_ms, pass2_ms, created.size(), scene->archetypes.size());
+    // Индекс, которому нет имени в шапке: файл рассогласован (правили словарь мимо колонок).
+    // Копили счётчик, а не логировали на месте — иначе на миллионе сущностей это миллион строк.
+    if (pool.Misses())
+        SDL_Log("LoadScene: %u asset cells reference a missing dictionary entry - names dropped", pool.Misses());
 
     dirty_entity = true;
     return created;
@@ -350,7 +380,7 @@ Entity ObjectManager::CreateEntityFromSpecs(SceneData* scene, const std::vector<
     scene->entity_to_archetype[e] = &arch;
     scene->entity_to_index[e] = arch.entities.size() - 1;
 
-    for (const ComponentSpec* s : specs) s->Load(arch, nullptr, 1);   // дефолтный ряд каждого
+    for (const ComponentSpec* s : specs) s->Load(arch, nullptr, 1, nullptr);   // дефолтный ряд каждого
 
     return e;
 }

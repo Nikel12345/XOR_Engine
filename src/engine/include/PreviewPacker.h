@@ -53,8 +53,12 @@ public:
     // Звать ПОСЛЕ всех Request кадра (см. TextureManager::PackAtlases).
     void Publish();
 
-    // Записать накопленные блиты в cb и очистить их. Зовётся каждый кадр без проверок снаружи.
+    // Записать накопленные блиты в cb и очистить их. Пустая очередь — no-op.
     void Blit(SDL_GPUCommandBuffer* cb);
+
+    // Есть ли вызревшие блиты. Нужен вызывающему, который решает, сабмитить ли cb вообще
+    // (см. TextureManager::IsDirty) — сама запись пустой очереди безвредна, сабмит нет.
+    bool HasPendingBlits() const { return !blits_.empty(); }
 
     UV              GetUV(const std::string& name) const;
     SDL_GPUTexture* Texture() const { return atlas_; }
