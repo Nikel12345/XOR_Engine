@@ -227,6 +227,7 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
         d.threshold = st.threshold;
         d.knee      = st.knee;
         d.intensity = st.scene_contribution;   // у prefilter intensity = вклад СЦЕНЫ
+        d.clampMax  = st.halo_clamp;
         d.useKaris  = st.karis_prefilter;
         b.Push(0, d);
     });

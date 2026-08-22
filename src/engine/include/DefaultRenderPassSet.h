@@ -76,6 +76,9 @@ namespace DefaultRenderPassNamespace
         float    intensity = 0.0f;
         float    threshold = 0.0f;  // prefilter: порог яркости, ниже которого сцена не блумит
         float    knee      = 0.0f;  // prefilter: ширина мягкого колена вокруг порога
+        // prefilter: потолок вклада СЦЕНЫ в пирамиду (в единицах яркости сцены, как threshold).
+        // Эмиссию не ограничивает. 0 = сценовый bloom выключен.
+        float    clampMax  = 0.0f;
     };
 
     // СОСТОЯНИЕ прохода bloom (ComputePassStep::state). Не cbuffer: раскладку под шейдер каждая
@@ -88,7 +91,11 @@ namespace DefaultRenderPassNamespace
     struct alignas(16) BloomState {
         float threshold = 1.2f;            // ПОЛ яркости сцены: ниже него не блумит ничего (диффуз ≤1)
         float knee = 0.9f;                 // ширина гладкого разгона ВВЕРХ от порога
-        float scene_contribution = 0.1f;   // prefilter: доля вклада сцены; эмиссия идёт в полную силу
+        float scene_contribution = 0.135f;   // prefilter: доля вклада сцены; эмиссия идёт в полную силу
+        // Потолок яркости, с которой сцена входит в пирамиду: сильнее этого гало не бывает.
+        // Единственная нелинейность, выравнивающая режимы power 3 и power 50: threshold задаёт,
+        // ГДЕ гало появляется, clamp — верх; scene_contribution после него — общая сила.
+        float halo_clamp = 4.0f;
         float glow_intensity = 0.5f;       // composite: сила подмешивания bloom в scene_hdr
         // Karis-average: свёртка 13 тапов с весом 1/(1+L) вместо весов Jimenez. Гасит firefly'и
         // от одиночных сверхъярких пикселей ценой энергии ярких точек. Ниже — ДВА независимых

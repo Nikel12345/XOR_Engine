@@ -422,9 +422,10 @@ void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
     {
         using K = ParamsFieldKind;
         ParamsSpecRegistry::Passes().Register(MakeParamsSpec<BloomState>(BLOOM_STATE, {
-            ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, threshold),          K::F32, 0, 8, 0.01f).Label("Threshold"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, threshold),          K::F32, 0, 50, 0.01f).Label("Threshold"),
             ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, knee),               K::F32, 0, 4, 0.01f).Label("Knee"),
-            ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, scene_contribution), K::F32, 0, 2, 0.01f).Label("Scene Contribution"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, halo_clamp),         K::F32, 0, 8, 0.01f).Label("Halo Clamp"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, scene_contribution), K::F32, 0, 0.2f, 0.001f).Label("Scene Contribution"),
             ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, glow_intensity),     K::F32, 0, 2, 0.01f).Label("Glow Intensity"),
             ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, karis_prefilter),    K::Bool).Label("Karis: prefilter"),
             ParamsFieldSpec::Num(PARAMS_FIELD(BloomState, karis_down),         K::Bool).Label("Karis: pyramid"),

@@ -19,6 +19,7 @@ cbuffer BloomParams : register(b0, space2) {
     float intensity;   // не используется здесь
     float threshold;
     float knee;
+    float clampMax;   // потолок вклада сцены (prefilter); в down/up/composite не используется
 };
 
 // Пирамида — ОТДЕЛЬНАЯ текстура на уровень: src = уровень i-1 (вдвое крупнее, sampled),

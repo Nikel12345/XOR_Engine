@@ -2,7 +2,7 @@
 //   bright = softKnee(scene_hdr) + scene_emission
 // scene_hdr даёт физически яркое (HDR-спекуляр, пересвет, свет в камеру) ВЫШЕ порога; эмиссия
 // подмешивается всегда (художник пометил объект светящимся независимо от яркости). Дальше — тот же
-// 13-тап даунсемпл с Karis-average, что и в bloom_down (level 0, useKaris всегда), гасящий fireflies
+// 13-тап даунсемпл, что и в bloom_down (Karis-average — по настройке прохода), гасящий fireflies
 // от одиночных сверхъярких текселей острого глинта. Читает обе текстуры LINEAR-сэмплером (апскейл-фри:
 // scene_* полного размера → bloom_0 половинного), пишет bloom_0 через storage.
 
@@ -25,6 +25,7 @@ cbuffer BloomParams : register(b0, space2) {
     float intensity;   // здесь = масштаб вклада СЦЕНЫ (блик/пересвет); эмиссию НЕ трогает
     float threshold;   // порог яркости сцены
     float knee;        // ширина мягкого колена
+    float clampMax;   // потолок вклада сцены (prefilter); в down/up/composite не используется
 };
 
 // Одностороннее колено: НИЖЕ threshold — строго ноль (обычный диффуз ≤1 не блумит вообще),
@@ -43,9 +44,17 @@ float3 B(float2 uv)
 {
     float3 hdr = u_scene.SampleLevel(u_sceneS, uv, 0).rgb;
     float3 emi = u_emission.SampleLevel(u_emissionS, uv, 0).rgb;
+    float3 gated = softKnee(hdr);
+    // Потолок вклада СЦЕНЫ: ворота выше порога пропускают ПОЛНУЮ яркость, и гало росло бы
+    // линейно с ней без предела (power 50 → кирпич-фонарь). Кламп давит верх диапазона —
+    // threshold задаёт, где гало появляется, clampMax — сильнее какого не бывает. Скаляром по
+    // max-каналу (хью сохраняется, как в softKnee и composite). Эмиссию НЕ ограничивает:
+    // её гало и должно расти с яркостью. clampMax = 0 → сценовый bloom выключен.
+    float m = max(gated.r, max(gated.g, gated.b));
+    if (m > clampMax) gated *= clampMax / m;
     // Вклад сцены масштабируем (блик металла очень концентрированный → даёт широкое яркое гало).
     // Меньше энергии в пирамиде → и тусклее, и компактнее гало. Эмиссия идёт в полную силу.
-    return softKnee(hdr) * intensity + emi;
+    return gated * intensity + emi;
 }
 
 float karis(float3 c) { float l = dot(c, float3(0.2126, 0.7152, 0.0722)); return 1.0 / (1.0 + l); }

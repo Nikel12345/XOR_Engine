@@ -18,6 +18,7 @@ cbuffer BloomParams : register(b0, space2) {
     float intensity;
     float threshold;
     float knee;
+    float clampMax;   // потолок вклада сцены (prefilter); в down/up/composite не используется
 };
 
 [numthreads(16, 16, 1)]
