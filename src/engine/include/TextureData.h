@@ -15,12 +15,15 @@ enum class ChannelConvention {
 	DepthInAlpha,        // A = depth/cavity (яркое = ГЛУБЖЕ, напр. wood_normal_h) → инвертируется в height (A = 255 - A)
 };
 
+// CPU-запись о РАЗМЕЩЕНИИ текстуры в атласе. На GPU не уезжает: туда идёт UVL_Block, который
+// собирает владелец буфера. Раздельно, потому что четвёртое слово GPU-блока уже занято смыслом
+// владельца (advance у глифа), и «свободного места» под CPU-поля размещения в нём нет.
 struct TextureData {
 	uint32_t uv_packed_offset;  // unorm16 × 2: offset_x в low, offset_y в high
 	uint32_t uv_packed_scale;   // unorm16 × 2: scale_x в low, scale_y в high
 	uint32_t layer;
-	uint32_t _pad;
 };
+
 
 struct TextureAtlas{
 	// НЕвладеющий список размещений текстур в атласе. Держим именно TextureData (а не TextureHandle):

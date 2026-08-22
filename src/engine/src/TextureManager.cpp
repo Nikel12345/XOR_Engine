@@ -368,7 +368,6 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     td.uv_packed_offset = PackUnorm16x2(ox, oy);
     td.uv_packed_scale  = PackUnorm16x2(sx, sy);
     td.layer = placed_layer;
-    td._pad  = 0;
 
     // Превью-заявка ПО ИМЕНИ: внутренний регион (без gutter'а) в пикселях — то, что видит материал.
     // UVL уже записан, размещение фиксировано (task.placed ниже), так что регион больше не сдвинется.

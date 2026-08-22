@@ -21,6 +21,18 @@ struct GlyphInfo {
 	int            advance   = 0;         // сдвиг пера после глифа, px (для пропорциональной раскладки)
 };
 
+// GPU-раскладка одной записи UI_FONT_UVL_BUFFER (в шейдере — uint4, см. ui/glyph_text.hlsli).
+// Своя, а не общая с UVL_Block батча: четвёртое слово здесь ЗНАЧИМО — advance, нормированный на
+// line_height, — и имя обязано это говорить. Общего у них только 12 байт UVL, и те приходят из
+// TextureData; сводить их в один тип значит снова завести слово с двумя хозяевами.
+struct alignas(16) GlyphUVL {
+	uint32_t uv_packed_offset = 0;
+	uint32_t uv_packed_scale  = 0;
+	uint32_t layer            = 0;
+	uint32_t advance_bits     = 0;   // биты float: advance / line_height
+};
+static_assert(sizeof(GlyphUVL) == 16, "GlyphUVL using in shader as uint4");
+
 // Растеризованный шрифт: глиф-атлас + метрики + карта codepoint→glyph_index + GlyphUVL.
 // Топ-левел (не вложен в FontManager) — чтобы EngineContext возвращал FontData* форвардом,
 // как TextureHandle*/Material* (заголовок фасада не тянет FontManager.h).

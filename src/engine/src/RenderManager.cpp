@@ -427,7 +427,7 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 				if (!texture_batch.texture_uvl.empty()) {
 					SDL_PushGPUFragmentUniformData(cb, uvl_slot,
 						texture_batch.texture_uvl.data(),
-						safe_u32(texture_batch.texture_uvl.size() * sizeof(TextureData)));
+						safe_u32(texture_batch.texture_uvl.size() * sizeof(UVL_Block)));
 				}
 
 				if (texture_batch.params && !texture_batch.params->empty()

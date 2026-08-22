@@ -22,6 +22,21 @@ struct ModelBatchData {
     SubMeshData* submesh = nullptr;
 };
 
+
+// UVL батча — то, что пушится fragment-uniform'ом материала (в шейдере это uint4, см.
+// material_api.hlsl). Отдельно от TextureData: та — CPU-запись о размещении в атласе и на GPU
+// не едет, поэтому её поля (число слоёв и прочая бухгалтерия упаковщика) сюда не просачиваются.
+// У глиф-буфера своя раскладка со своим смыслом четвёртого слова — см. GlyphUVL в FontManager.h.
+struct alignas(16) UVL_Block {
+    uint32_t uv_packed_offset = 0;
+    uint32_t uv_packed_scale = 0;
+    uint32_t layer = 0;
+};
+
+inline UVL_Block MakeUVL(const TextureData& td) {
+    return { td.uv_packed_offset, td.uv_packed_scale, td.layer };
+}
+
 struct TextureBatchData {
     std::unordered_map<BatchKeys::ModelBatchKey, ModelBatchData> model_batches;
 	// UVL хранится ЗНАЧЕНИЯМИ (не указателями): непрерывный блок → прямой пуш в Execute
@@ -29,7 +44,7 @@ struct TextureBatchData {
 	// сборке батча, поэтому смена UVL ЖИВОЙ текстуры (репак/компактизация атласа) ОБЯЗАНА
 	// триггерить BuildRenderBatches. Добавление/удаление текстур этого не нарушают: чужие
 	// UVL не двигаются, а батч удаляемой текстуры и так пересобирается.
-	std::vector<TextureData> texture_uvl;
+	std::vector<UVL_Block> texture_uvl;
     uint32_t indirect_command_index = 0;
     const std::vector<uint8_t>* params = nullptr;   // → &Material::params (невладеющий; адрес стабилен; alpha и пр. факторы внутри)
 };

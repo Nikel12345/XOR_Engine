@@ -4,9 +4,9 @@
 #include <memory>
 #include <functional>
 #include <SDL3/SDL_gpu.h>
-#include "TextureData.h"
 
 struct BufferData;
+struct UVL_Block;
 struct PushConstantBinder;
 
 // Пер-слотовые CPU-слепки «что рисуем», которые sim готовит для рендер-потока ВМЕСТЕ с
@@ -35,7 +35,7 @@ namespace RenderSnap {
     // команды слота ровно по той раскладке, по которой prepare залил его индирект.
 
     struct TextureDraw {
-        std::vector<TextureData> texture_uvl;           // копия для пуша uniform'а UVL
+        std::vector<UVL_Block> texture_uvl;             // копия для пуша uniform'а UVL
         // Невладеющий указатель на живой Material::params (адрес стабилен — как в дереве).
         // Содержимое UI может править на лету; это осознанно (мгновенный отклик слайдеров).
         const std::vector<uint8_t>* params = nullptr;

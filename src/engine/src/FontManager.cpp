@@ -138,21 +138,22 @@ std::vector<uint32_t> FontManager::ShapeString(const FontData* font, const std::
 
 uint32_t FontManager::GlyphUvlBytes(const FontData* font) const
 {
-	return font ? safe_u32(font->glyphs.size() * sizeof(TextureData)) : 0u;
+	return font ? safe_u32(font->glyphs.size() * sizeof(GlyphUVL)) : 0u;
 }
 
 void FontManager::StoreGlyphUVL(FontData* font, BufferManager* bm, UploadTask* task)
 {
 	if (!font || font->glyphs.empty()) return;
 
-	// UVL прямо из хэндлов (валидно после PackAtlases). В неиспользуемый _pad (.w) кладём advance,
-	// НОРМИРОВАННЫЙ на line_height (биты float) — FS суммирует их и получает пропорции ШРИФТА
-	// (ширина строки в единицах её высоты), чтобы un-squish'ить текст под форму ректа без пикселей.
+	// UVL прямо из хэндлов (валидно после PackAtlases). advance НОРМИРУЕМ на line_height (биты
+	// float) — FS суммирует их и получает пропорции ШРИФТА (ширина строки в единицах её высоты),
+	// чтобы un-squish'ить текст под форму ректа без пикселей.
 	// Пустой глиф (пробел): UVL нулевой, но advance есть → корректный пробел.
 	const float inv_lh = font->line_height > 0 ? 1.0f / static_cast<float>(font->line_height) : 0.0f;
 	for (const GlyphInfo& g : font->glyphs) {
-		TextureData td = g.handle ? g.handle->texture_data : TextureData{};
-		td._pad = std::bit_cast<uint32_t>(static_cast<float>(g.advance) * inv_lh);
-		bm->UploadToTransferBuffer(task, sizeof(TextureData), &td);
+		const TextureData td = g.handle ? g.handle->texture_data : TextureData{};
+		GlyphUVL entry{ td.uv_packed_offset, td.uv_packed_scale, td.layer,
+		                std::bit_cast<uint32_t>(static_cast<float>(g.advance) * inv_lh) };
+		bm->UploadToTransferBuffer(task, sizeof(GlyphUVL), &entry);
 	}
 }

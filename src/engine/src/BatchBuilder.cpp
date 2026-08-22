@@ -318,7 +318,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
                         texture_handle = dummy;   // dummy по имени (см. выше); тоже нет → пропуск sp
                     }
                     if (!texture_handle) { bindable = false; break; }
-                    new_texb.texture_uvl.push_back(texture_handle->texture_data);   // КОПИЯ значения (см. инвариант в TextureBatchData)
+                    new_texb.texture_uvl.push_back(MakeUVL(texture_handle->texture_data));   // КОПИЯ значения (см. инвариант в TextureBatchData)
                 }
                 if (!bindable) {
                     SDL_Log("BuildBatches:: dummy texture missing too - sp draw skipped for this material");
