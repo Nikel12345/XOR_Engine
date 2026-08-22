@@ -444,6 +444,18 @@ namespace TexturePresets {
         return info;
     }
 
+    // То же, что EnvCube, но num_cubes кубов в ОДНОЙ GPU-текстуре: куб c занимает слои c·6…c·6+5.
+    // Ровно так их и раскладывает упаковщик (база многослойной записи кратна её span), поэтому
+    // индекс куба для шейдера = layer/6. Смысл — один биндинг вместо N, когда куб выбирается
+    // индексом (пробы отражений); шейдер тогда объявляет TextureCubeArray и сэмплит float4(dir, c).
+    // Все кубы массива обязаны совпадать по размеру, формату и числу мипов — отсюда общий faceSize.
+    inline SDL_GPUTextureCreateInfo EnvCubeArray(uint32_t faceSize, uint32_t num_cubes) {
+        SDL_GPUTextureCreateInfo info = EnvCube(faceSize);
+        info.type = SDL_GPU_TEXTURETYPE_CUBE_ARRAY;
+        info.layer_count_or_depth = num_cubes * 6;
+        return info;
+    }
+
     // HDR-таргет сцены (location 0 main-прохода): линейный цвет ДО тонмаппинга, эмиссия и блики
     // уходят за 1.0. SAMPLER — чтобы финальный blit/постпроцесс мог читать. На экран выводится
     // отдельным present-проходом (формат свопчейна 8-бит, поэтому прямой рендер сюда невозможен).

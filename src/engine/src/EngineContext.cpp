@@ -137,7 +137,10 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 
 	// Компатибилити-проверка — задача дирижёра: куб грузим только в cube-атлас, и он обязан
 	// быть квадратным (требование GPU-кубмапа, иначе faceSize=width≠height даст битые грани).
-	if (atlas->texture_type != SDL_GPU_TEXTURETYPE_CUBE) {
+	// CUBE_ARRAY годится наравне с CUBE: куб там занимает шестёрку слоёв со своей базой, а какую
+	// именно — решает упаковщик (база кратна 6 = слоту массива), здесь это знать не нужно.
+	if (atlas->texture_type != SDL_GPU_TEXTURETYPE_CUBE
+	 && atlas->texture_type != SDL_GPU_TEXTURETYPE_CUBE_ARRAY) {
 		SDL_Log("EngineContext::CreateCubeMapTexture: atlas '%s' is not a cube map (texture_type=%d)", atlas_name.c_str(), (int)atlas->texture_type);
 		return nullptr;
 	}
@@ -145,25 +148,23 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 		SDL_Log("EngineContext::CreateCubeMapTexture: cube atlas '%s' must be square (%ux%u)", atlas_name.c_str(), atlas->width, atlas->height);
 		return nullptr;
 	}
+	if (atlas->layers < 6) {
+		SDL_Log("EngineContext::CreateCubeMapTexture: cube atlas '%s' has %u layers, a cube needs 6", atlas_name.c_str(), atlas->layers);
+		return nullptr;
+	}
 
-	// Loader отдаёт ГОЛЫЕ пиксели 6 граней (размер грани диктует tci атласа); превращение в
-	// GPU-текстуры — задача TM: по разу на грань (имена name+"_f0".."_f5"), порядок = слои куба,
-	// поэтому _BuildUploadTasks кладёт f-ю грань на слой f.
-	DecodedCubeFaces cube = texture_loader->LoadCubeMapFromFile(path, atlas->width, PixelFormatForGpuFormat(atlas->format));
+	// Loader отдаёт ГОЛЫЕ пиксели 6 граней стопкой (размер грани диктует tci атласа) — ровно ту
+	// раскладку, которую ждёт многослойная заливка. Про кубы знает только этот метод: TM получает
+	// «текстура на 6 подряд идущих слоёв», и грань f оказывается на слое base+f по построению.
+	DecodedCubeMap cube = texture_loader->LoadCubeMapFromFile(path, atlas->width, PixelFormatForGpuFormat(atlas->format));
 	if (!cube.ok()) {
 		SDL_Log("EngineContext::CreateCubeMapTexture: failed to decode cube faces from '%s'", path);
 		return nullptr;
 	}
 
-	TextureHandle* first = nullptr;
-	for (int f = 0; f < 6; ++f) {
-		TextureHandle* h = texture_manager->CreateTexture(name + "_f" + std::to_string(f), atlas, cube.faceSize, cube.faceSize, std::move(cube.faces[f]));
-		if (f == 0) first = h;
-	}
-	// Самоописание — на f0-грани: одна запись манифеста ("cube": true) на весь куб, имя — логическое
-	// (без "_f0"). Остальные грани без source_path — сами по себе в textures.json не попадают.
-	if (first) { first->atlas_name = atlas_name; first->source_path = path; first->cube_name = name; }
-	return first;
+	TextureHandle* h = texture_manager->CreateTexture(name, atlas, cube.faceSize, cube.faceSize, std::move(cube.pixels), 6);
+	if (h) { h->atlas_name = atlas_name; h->source_path = path; }   // самоописание для редактора/сериализации
+	return h;
 }
 
 Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders, bool dont_save)

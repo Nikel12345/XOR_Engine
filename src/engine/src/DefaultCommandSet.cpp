@@ -271,7 +271,11 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 				ctx->GetTextureManager()->DeleteTextureHandle(c->name);           // replace под новым именем (no-op, если нет)
 				// ReleasePreview(name) НЕ зовём: это replace того же имени, слот превью должен пережить
 				// пересоздание (иначе плитка мигнёт затычкой до нового блита).
-				ctx->CreateTextureFromFile(c->name, c->atlas, c->path.c_str(), static_cast<ChannelConvention>(c->conv));
+				// Куб — это ОДИН хэндл на 6 слоёв, поэтому и снятие выше, и превью, и переименование
+				// работают для него теми же строками, что и для обычной текстуры: различие ровно в
+				// том, каким методом читается файл.
+				if (c->cube) ctx->CreateCubeMapTexture(c->name, c->atlas, c->path.c_str());
+				else         ctx->CreateTextureFromFile(c->name, c->atlas, c->path.c_str(), static_cast<ChannelConvention>(c->conv));
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 			delete c;

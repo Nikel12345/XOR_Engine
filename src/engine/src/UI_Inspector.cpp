@@ -424,6 +424,13 @@ namespace {
         }
     }
 
+    // Куб отличает ТИП АТЛАСА — тот же признак, по которому его пишет SaveScene и грузит LoadScene.
+    // Своего «я куб» у хэндла нет и не нужно: куб — обычная текстура на 6 слоях cube-атласа.
+    bool IsCubeAtlas(const TextureAtlas* a) {
+        return a && (a->texture_type == SDL_GPU_TEXTURETYPE_CUBE
+                  || a->texture_type == SDL_GPU_TEXTURETYPE_CUBE_ARRAY);
+    }
+
     // Форма создания/редактирования текстуры (одна и та же — см. upsert delete+create). Ничего не
     // происходит по-символьно: правки копятся в буферах, действие только по кнопке.
     void TextureEditor(EngineContext* ctx)
@@ -432,6 +439,7 @@ namespace {
         static char        pathBuf[512] = "";
         static std::string atlasSel;
         static ChannelConvention convSel = ChannelConvention::AsIs;
+        static bool        cubeSel = false;   // исходник — крест 4×3, а не плоская картинка
         static std::string syncedFor = "\x01";   // сентинел ≠ любому имени → синк на первый заход
 
         // Имя подтягиваем из выбора (клик по плитке = редактировать её; "New" = пустое имя).
@@ -445,6 +453,7 @@ namespace {
                     atlasSel = h->atlas_name;
                     std::snprintf(pathBuf, sizeof pathBuf, "%s", h->source_path.c_str());
                     convSel = h->conv;
+                    cubeSel = IsCubeAtlas(h->atlas);
                 }
             }
             else pathBuf[0] = '\0';   // "New" — путь чистим (атлас оставляем для серии)
@@ -460,10 +469,21 @@ namespace {
         ImGui::TextDisabled("Texture (create / edit)");
         ImGui::InputText("Name", nameBuf, sizeof nameBuf);
 
-        // Атлас — дропдаун существующих (общий фильтр служебных с браузером).
+        // Вид исходника. Cube = горизонтальный крест 4×3 одним файлом: режется на 6 граней и ложится
+        // слоями cube-атласа (EngineContext::CreateCubeMapTexture). Плоские и cube-атласы не
+        // взаимозаменяемы, поэтому переключение вида сбрасывает выбор атласа, а не оставляет
+        // заведомо негодный.
+        int kind = cubeSel ? 1 : 0;
+        ImGui::RadioButton("Flat", &kind, 0);
+        ImGui::SameLine();
+        ImGui::RadioButton("Cube (cross 4x3)", &kind, 1);
+        if ((kind == 1) != cubeSel) { cubeSel = (kind == 1); atlasSel.clear(); }
+
+        // Атлас — дропдаун существующих (общий фильтр служебных с браузером), отфильтрованный по виду.
         if (ImGui::BeginCombo("Atlas", atlasSel.empty() ? "(select)" : atlasSel.c_str())) {
             for (auto& [an, a] : ctx->GetTextureManager()->GetAtlases()) {
                 if (!g_show_internal && IsInternalName(an)) continue;
+                if (IsCubeAtlas(a.get()) != cubeSel) continue;
                 bool sel = (an == atlasSel);
                 if (ImGui::Selectable(an.c_str(), sel)) atlasSel = an;
                 if (sel) ImGui::SetItemDefaultFocus();
@@ -480,11 +500,12 @@ namespace {
             OpenFileDialog(PickTarget::TexPath, filters, 2);
         }
 
-        // Конвенция каналов исходника (enum → switch, см. ConvName).
+        // Конвенция каналов исходника (enum → switch, см. ConvName). К кубу не применяется —
+        // нормализуют каналы только материальные карты, поэтому для него поля нет вовсе.
         static const ChannelConvention kConvs[] = {
             ChannelConvention::AsIs, ChannelConvention::SmoothnessInGreen, ChannelConvention::DepthInAlpha
         };
-        if (ImGui::BeginCombo("Channels", ConvName(convSel))) {
+        if (!cubeSel && ImGui::BeginCombo("Channels", ConvName(convSel))) {
             for (ChannelConvention c : kConvs) {
                 bool sel = (c == convSel);
                 if (ImGui::Selectable(ConvName(c), sel)) convSel = c;
@@ -498,7 +519,9 @@ namespace {
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
             // old_name = выбранная текстура: если имя изменили — переименование (старую снять в команде).
             ctx->GetInputManager()->PushCommand(CommandId::UpsertTexture,
-                new UpsertTextureCmd{ nameBuf, atlasSel, pathBuf, static_cast<uint32_t>(convSel), g_sel.name });
+                new UpsertTextureCmd{ nameBuf, atlasSel, pathBuf,
+                                      cubeSel ? 0u : static_cast<uint32_t>(convSel),   // у куба конвенции нет
+                                      g_sel.name, cubeSel });
             g_sel = Selection{}; g_sel.kind = SelKind::Texture; g_sel.name = nameBuf;   // выбор следует за именем
         }
         ImGui::EndDisabled();

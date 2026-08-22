@@ -22,6 +22,11 @@ struct UploadTaskTexture {
 	Uint32 offset = 0;
 	Uint32 size = 0;
 	Uint32 width = 0, height = 0, pitch = 0;
+	// Сколько ПОДРЯД идущих слоёв заливает задача (dst.layer — первый). pixels держит их стопкой:
+	// width×height — размер ОДНОГО слоя, поэтому pixels_per_row/rows_per_layer остаются пер-слойными,
+	// а слои развёрстываются шагом size/layer_span. Больше одного слоя за копию SDL не умеет
+	// (imageSubresource.layerCount жёстко 1) — заливка идёт циклом, размещение остаётся одним.
+	Uint32 layer_span = 1;
 	bool placed = false;
 };
 
@@ -51,8 +56,9 @@ struct SceneTextureEntry {
 	std::string atlas;
 	std::string path;
 	ChannelConvention conv = ChannelConvention::AsIs;
-	// Кубмапа-крест: name — логическое имя куба, пересоздание идёт через CreateCubeMapTexture
-	// (6 граней name+"_f0".."_f5" в cube-атлас), conv не применяется.
+	// Кубмапа-крест 4×3: пересоздание идёт через CreateCubeMapTexture (один хэндл на 6 слоёв
+	// cube-атласа), conv не применяется. Для словарной семантики TM ничем не отличается от
+	// обычной записи — имя одно.
 	bool cube = false;
 };
 
@@ -65,8 +71,11 @@ public:
 	// Create TextureAtlas from an already existing TextureAtlas
 	TextureAtlas* CreateTextureAtlas(const std::string& name, TextureAtlas* existing_atlas, SDL_GPUSampler* sampler);
 	// Загрузку с диска делает TextureLoader; оркестрация — в EngineContext.
-	TextureHandle* CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels);
-	TextureHandle* CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels);
+	// layer_span > 1 — одна текстура на НЕСКОЛЬКИХ подряд идущих слоях (грани кубмапы): w/h тогда
+	// обязаны совпасть с размером слоя, а pixels держать слои стопкой. Про кубы TM не знает
+	// намеренно — знание про них живёт в EngineContext::CreateCubeMapTexture, здесь только слои.
+	TextureHandle* CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span = 1);
+	TextureHandle* CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span = 1);
 
 	SDL_GPUTexture* CreateGPU_Texture(SDL_GPUTextureCreateInfo tci);
 
@@ -150,7 +159,7 @@ public:
 		}
 	};
 private:
-	void CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name);
+	void CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name, uint32_t layer_span);
 
 	void _ReleasePendingRegions();
 	void _BuildUploadTasks();

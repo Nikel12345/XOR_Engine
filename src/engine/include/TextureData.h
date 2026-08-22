@@ -19,9 +19,14 @@ enum class ChannelConvention {
 // собирает владелец буфера. Раздельно, потому что четвёртое слово GPU-блока уже занято смыслом
 // владельца (advance у глифа), и «свободного места» под CPU-поля размещения в нём нет.
 struct TextureData {
-	uint32_t uv_packed_offset;  // unorm16 × 2: offset_x в low, offset_y в high
-	uint32_t uv_packed_scale;   // unorm16 × 2: scale_x в low, scale_y в high
-	uint32_t layer;
+	uint32_t uv_packed_offset = 0;  // unorm16 × 2: offset_x в low, offset_y в high
+	uint32_t uv_packed_scale  = 0;  // unorm16 × 2: scale_x в low, scale_y в high
+	uint32_t layer            = 0;
+	// Сколько ПОДРЯД идущих слоёв от layer занимает запись: 1 у обычной текстуры, 6 у кубмапы,
+	// чьи грани и есть слои. Лежит здесь, а не в хэндле, потому что освобождение места идёт по
+	// atlas->textures — списку TextureData*, из которого до хэндла не дотянуться. Не путать с
+	// TextureAtlas::layers (ЁМКОСТЬ атласа) и tci.layer_count_or_depth (параметр создания).
+	uint32_t layer_span       = 1;
 };
 
 
@@ -93,10 +98,6 @@ struct TextureHandle : std::enable_shared_from_this<TextureHandle> {
 	std::string       atlas_name;
 	std::string       source_path;
 	ChannelConvention conv = ChannelConvention::AsIs;
-	// Непусто ТОЛЬКО у f0-грани кубмапы: логическое имя куба (без суффикса "_f0") для сериализации.
-	// SaveScene пишет одну запись с этим именем и "cube": true; LoadScene пересоздаёт все 6 граней
-	// через CreateCubeMapTexture. Грани f1..f5 остаются без source_path — сами по себе не сохраняются.
-	std::string       cube_name;
 	// Не писать в файл сцены при SaveScene. Движковые дефолты (_NoTextureDummy, default_*)
 	// ставят true — они гарантированно пересоздаются кодом до всякой загрузки, файл ими не
 	// раздуваем. UI-пересоздание идёт через create-API с дефолтом false → «тронул = сохраняемый».

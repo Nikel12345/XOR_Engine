@@ -71,8 +71,6 @@ SDL_AppResult Game::MainInit()
 	TextureAtlas* orm_atlas      = ctx->CreateTextureAtlas("orm_atlas",      TexturePresets::ORMAtlas(2048, 2), DefaultSamplersNames::DEFAULT_SAMPLER);
 	TextureAtlas* emissive_atlas = ctx->CreateTextureAtlas("emissive_atlas", TexturePresets::EmissiveAtlas(1024, 1), DefaultSamplersNames::DEFAULT_SAMPLER);
 
-	// Текстуры (хендлы) грузятся из сцены (textures.json) — атласы выше остаются кодовыми (инфра,
-	// не сериализуются; текстуры садятся в них при загрузке). default_* — движковые (InitDefaultResources).
 
 	// --- Шрифт: растеризуется в общий __TextAtlas (CWD=src/game → путь fonts/…). ---
 	ctx->CreateFont("default", "fonts/cuyabra-Regular.otf", 48.0f);

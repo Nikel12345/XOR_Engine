@@ -13,6 +13,15 @@ struct AtlasPacker {
             free_spaces.push_back(rectpack2D::rect_xywh(0, 0, w, h));
         }
 
+        // Слой свободен ЦЕЛИКОМ — единственный свободный прямоугольник во всю площадь. Надёжно
+        // именно так: _ReleasePendingRegions пересобирает слой начисто (reset + carve выживших),
+        // поэтому «пустой, но раздробленный на куски» слой невозможен. Нужно многослойной записи,
+        // которая берёт слои целиком и не может сесть в остаток.
+        bool empty(int w, int h) const {
+            return free_spaces.size() == 1 && free_spaces[0].x == 0 && free_spaces[0].y == 0
+                && free_spaces[0].w == w && free_spaces[0].h == h;
+        }
+
 
         std::optional<rectpack2D::rect_xywh> insert(int w, int h) {
             using namespace rectpack2D;
@@ -174,7 +183,7 @@ void TextureManager::BakePending()
     std::erase_if(pending_atlas_bakes, [](TextureAtlas* a) { return !a || a->texture_binding.texture; });
 }
 
-TextureHandle* TextureManager::CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels)
+TextureHandle* TextureManager::CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span)
 {
 	auto atlas_it = atlases_data.find(atlas_name);
     if (atlas_it == atlases_data.end()) {
@@ -182,17 +191,18 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, const std:
         return nullptr;
 	}
 	TextureAtlas* atlas = atlas_it->second.get();
-	TextureHandle* th = CreateTexture(name, atlas, w, h, std::move(pixels));
+	TextureHandle* th = CreateTexture(name, atlas, w, h, std::move(pixels), layer_span);
 	if (th) th->atlas_name = atlas_name;   // самоописание: имя атласа для редактора/сериализации
 	return th;
 }
 
-TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels)
+TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span)
 {
 	if (!atlas) {
         SDL_Log("Invalid atlas provided for texture '%s'", name.c_str());
         return nullptr;
 	}
+	if (layer_span == 0) layer_span = 1;
 
 	auto it = handles_data.find(name);
     if (it != handles_data.end()) {
@@ -206,11 +216,12 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtl
     TextureHandle* ptr = texture_handle.get();
     ptr->width = w;
     ptr->height = h;
+    ptr->texture_data.layer_span = layer_span;   // свойство ЗАПРОСА, известно до укладки
     handles_data[name] = std::move(texture_handle);
 	atlas->textures.push_back(&ptr->texture_data); 
 
 
-	CreateUploadTask(ptr, w, h, std::move(pixels), name);
+	CreateUploadTask(ptr, w, h, std::move(pixels), name, layer_span);
 
 	return ptr;
 }
@@ -290,7 +301,7 @@ static uint32_t PackUnorm16x2(float x, float y) {
     return static_cast<uint32_t>(lx) | (static_cast<uint32_t>(ly) << 16);
 }
 
-void TextureManager::CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name)
+void TextureManager::CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name, uint32_t layer_span)
 {
     UploadTaskTexture task;
     task.name = name;
@@ -298,6 +309,7 @@ void TextureManager::CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_
     task.target_handle = handle;
     task.width = w;
     task.height = h;
+    task.layer_span = layer_span;
     task.size = (uint32_t)task.pixels.size();
     texture_upload_tasks.push_back(std::move(task));
 }
@@ -314,6 +326,81 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
 
     const uint32_t w = task.width, h = task.height;   // нативный размер (до gutter'а)
     if (w == 0 || h == 0) { task.placed = true; return true; }  // пустышка — задачу не грузим
+
+    // Слой cube-атласа — это ГРАНЬ, поэтому одиночный тайл в нём означает картинку, вклеенную
+    // внутрь грани: куб портится молча, а виноватой выглядит кубмапа. Отказываем здесь, в
+    // единственной точке размещения, — форма редактора фильтрует атласы по виду, но запись сцены
+    // без "cube": true сюда доедет.
+    if ((atlas->texture_type == SDL_GPU_TEXTURETYPE_CUBE
+      || atlas->texture_type == SDL_GPU_TEXTURETYPE_CUBE_ARRAY) && task.layer_span == 1) {
+        SDL_Log("Task '%s': single-layer texture rejected from cube atlas '%s' - its layers are cube "
+                "FACES; load the file as a cubemap (scene entry needs \"cube\": true)",
+                task.name.c_str(), atlas->debug_name.c_str());
+        return false;
+    }
+
+    // Многослойная запись: единица размещения — СЛОЙ, а не прямоугольник в нём. Прямоугольный
+    // упаковщик здесь не при чём (и gutter тоже: тайл полнослойный, padX/padY были бы 0).
+    if (task.layer_span > 1) {
+        const uint32_t span = task.layer_span;
+        // Полнослойность — инвариант, а не пожелание: сядь запись в остаток слоя, соседний тайл
+        // делил бы с ней слой, а освобождение всей записи вернуло бы упаковщику чужое место.
+        if (w != atlas->width || h != atlas->height) {
+            SDL_Log("Task '%s': %u-layer upload must be full-layer sized (%ux%u, atlas layer %ux%u)",
+                    task.name.c_str(), span, w, h, atlas->width, atlas->height);
+            return false;
+        }
+
+        // База кратна span: у cube-array слой куба = base/6, и выравнивание держит грани одного
+        // куба в одном слоте массива. Сначала ищем среди УЖЕ заведённых слоёв (перезагрузка сцены
+        // — это delete+create, освобождённые слои обязаны переиспользоваться), потом хвост.
+        uint32_t base = UINT32_MAX;
+        for (uint32_t L = 0; L + span <= packer.layers.size(); L += span) {
+            bool all_free = true;
+            for (uint32_t i = 0; i < span && all_free; ++i)
+                all_free = packer.layers[L + i].empty((int)atlas->width, (int)atlas->height);
+            if (all_free) { base = L; break; }
+        }
+        if (base == UINT32_MAX) {
+            const uint32_t start = safe_u32((packer.layers.size() + span - 1) / span) * span;
+            if (start + span <= atlas->layers) {
+                while (packer.layers.size() < start + span) {   // пропуск до выравнивания — обычные слои
+                    AtlasPacker::Layer lp;
+                    lp.reset((int)atlas->width, (int)atlas->height);
+                    packer.layers.push_back(std::move(lp));
+                }
+                base = start;
+            }
+        }
+        if (base == UINT32_MAX) {
+            SDL_Log("Failed to pack task '%s' (%u layers) - atlas '%s' full", task.name.c_str(), span, atlas->debug_name.c_str());
+            return false;
+        }
+        for (uint32_t i = 0; i < span; ++i)
+            packer.layers[base + i].free_spaces.clear();   // слой занят целиком — соседей не будет
+
+        TextureData& td = task.target_handle->texture_data;
+        td.uv_packed_offset = PackUnorm16x2(0.0f, 0.0f);
+        td.uv_packed_scale  = PackUnorm16x2(1.0f, 1.0f);   // != 0 → запись считается размещённой
+        td.layer = base;
+
+        // Превью — БАЗОВЫЙ слой: какой из слоёв «лицо» записи, знает только её создатель, а TM
+        // про кубы (и про то, что база — это +X) не знает намеренно.
+        preview.Request(task.name, atlas, 0, 0, w, h, base);
+
+        task.dst.texture   = atlas->texture_binding.texture;
+        task.dst.x         = 0;
+        task.dst.y         = 0;
+        task.dst.z         = 0;
+        task.dst.layer     = base;
+        task.dst.mip_level = 0;
+        task.dst.w         = w;
+        task.dst.h         = h;
+        task.dst.d         = 1;
+
+        task.placed = true;
+        return true;
+    }
 
     // Рамка (gutter) — ПО-ОСЕВАЯ и завязана на ОДНУ переменную atlas->padding (P): та же P задаёт
     // величину сжатия текстуры в CreateTextureFromFile, поэтому рассинхрона рамки и сжатия нет
@@ -458,8 +545,11 @@ void TextureManager::_ReleasePendingRegions() {
         // не двигаются — их регионы точно восстанавливаются из UVL (см. _DecodeOuterRect).
         auto& lp = layers[layer];
         lp.reset((int)atlas->width, (int)atlas->height);
+        // Диапазон, а не равенство: многослойная запись значится ТОЛЬКО на своём базовом слое,
+        // и по равенству она не нашлась бы на остальных — те стали бы «свободны» под живыми
+        // пикселями. Её UVL полнослойный, поэтому carve съедает слой целиком.
         for (TextureData* s : atlas->textures)
-            if (s->layer == layer) {
+            if (layer >= s->layer && layer < s->layer + s->layer_span) {
                 rectpack2D::rect_xywh o = _DecodeOuterRect(*s, atlas);
                 if (o.w > 0 && o.h > 0) lp.carve(o);   // ещё не размещённые дают нулевой прямоугольник
             }
@@ -485,10 +575,12 @@ void TextureManager::_BuildUploadTasks() {
     for (auto& t : texture_upload_tasks) {
         const TextureAtlas* a = t.atlas;
         if (!a) continue;
-        const uint32_t expect = SDL_CalculateGPUTextureFormatSize(a->format, t.width, t.height, 1);
+        // Последний аргумент — depth_or_layer_count: у многослойной задачи пиксели держат span
+        // слоёв стопкой, поэтому и ждём в span раз больше.
+        const uint32_t expect = SDL_CalculateGPUTextureFormatSize(a->format, t.width, t.height, t.layer_span);
         if (t.size != expect)
-            SDL_Log("Upload '%s': %u байт, а формат атласа '%s' ждёт %u (%ux%u)",
-                t.name.c_str(), t.size, a->debug_name.c_str(), expect, t.width, t.height);
+            SDL_Log("Upload '%s': %u байт, а формат атласа '%s' ждёт %u (%ux%u, %u слоёв)",
+                t.name.c_str(), t.size, a->debug_name.c_str(), expect, t.width, t.height, t.layer_span);
     }
 }
 
@@ -542,13 +634,23 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
         SDL_GPUTextureTransferInfo src{};
         src.transfer_buffer = tbd->tb;
         src.offset = task.offset;
-        src.pixels_per_row = task.width;
-        src.rows_per_layer = task.height;
+        src.pixels_per_row = task.width;    // размер ОДНОГО слоя: у многослойной задачи слои
+        src.rows_per_layer = task.height;   // лежат стопкой и адресуются шагом layer_bytes
 
         std::byte* base = static_cast<std::byte*>(tbd->mapped);
-        SDL_memcpy(base + task.offset, task.pixels.data(), task.size);
+        SDL_memcpy(base + task.offset, task.pixels.data(), task.size);   // вся стопка разом
 
-        SDL_UploadToGPUTexture(cp, &src, &task.dst, false);
+        // Копия — ПО СЛОЮ: SDL кладёт в imageSubresource.layerCount жёсткую 1 (SDL_gpu_vulkan.c),
+        // многослойного копирования в API нет вовсе. Размещение при этом одно на всю запись.
+        const uint32_t span = task.layer_span ? task.layer_span : 1;
+        const uint32_t layer_bytes = task.size / span;
+        for (uint32_t i = 0; i < span; ++i) {
+            SDL_GPUTextureTransferInfo layer_src = src;
+            layer_src.offset = task.offset + i * layer_bytes;
+            SDL_GPUTextureRegion layer_dst = task.dst;
+            layer_dst.layer = task.dst.layer + i;
+            SDL_UploadToGPUTexture(cp, &layer_src, &layer_dst, false);
+        }
 
         // Заявка на мипы — здесь, где известно, что пиксели этого атласа реально поехали.
         const TextureAtlas* a = task.atlas;
@@ -618,8 +720,9 @@ void TextureManager::DeleteTextureHandle(const std::string& name)
         // пачку удалений _ReleasePendingRegions (см. pending_region_release_).
         // uv_packed_scale == 0 — текстура ещё не размещалась (создана после прошлого PackAtlases),
         // места в слое не занимает, освобождать нечего.
-        if (td->uv_packed_scale != 0) {
-            const std::pair<TextureAtlas*, uint32_t> key{ atlas, td->layer };
+        // Все слои записи, а не только базовый: у многослойной пересобрать надо каждый.
+        for (uint32_t i = 0; td->uv_packed_scale != 0 && i < td->layer_span; ++i) {
+            const std::pair<TextureAtlas*, uint32_t> key{ atlas, td->layer + i };
             if (std::find(pending_region_release_.begin(), pending_region_release_.end(), key)
                 == pending_region_release_.end())
                 pending_region_release_.push_back(key);
@@ -652,15 +755,9 @@ size_t TextureManager::LoadSceneTextures(const std::vector<SceneTextureEntry>& e
             SDL_Log("LoadSceneTextures: incomplete entry ('%s') - skipped", e.name.c_str());
             continue;
         }
-        if (e.cube) {
-            // Хэндлы куба — грани name+"_f0".."_f5" (логического имени в реестре нет): сносим их,
-            // иначе CreateTexture вернул бы существующие грани без новой заливки (тихий stale).
-            for (int f = 0; f < 6; ++f) {
-                const std::string face = e.name + "_f" + std::to_string(f);
-                if (handles_data.count(face)) DeleteTextureHandle(face);
-            }
-        }
-        else if (handles_data.count(e.name))
+        // Куб снимается ровно как всё остальное — он ОДИН хэндл под своим именем. Без снятия
+        // CreateTexture вернул бы существующий и заливки бы не было (тихий stale).
+        if (handles_data.count(e.name))
             DeleteTextureHandle(e.name);   // replace под тем же именем (материалы перепривяжутся по имени)
         if (create_from_file(e)) ++created;
         else SDL_Log("LoadSceneTextures: failed to create '%s' from '%s'", e.name.c_str(), e.path.c_str());

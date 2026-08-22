@@ -240,10 +240,12 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 		for (auto& [name, h] : texture_manager->GetTextureHandles()) {
 			if (!h || h->dont_save || h->source_path.empty()) continue;
 			yyjson_mut_val* t = yyjson_mut_arr_add_obj(doc, arr);
-			// Кубмапа самоописана f0-гранью: запись одна на куб, имя — логическое (cube_name),
-			// флаг "cube" ведёт загрузку через CreateCubeMapTexture (см. LoadScene ниже).
-			const bool cube = !h->cube_name.empty();
-			yyjson_mut_obj_add_strcpy(doc, t, "name",  cube ? h->cube_name.c_str() : name.c_str());
+			// Кубмапа — обычный хэндл на 6 слоёв, отличает её ТИП АТЛАСА: он же определяет путь
+			// загрузки (крест 4×3 через CreateCubeMapTexture, см. LoadScene ниже). Спрашиваем
+			// атлас, а не хэндл: у хэндла своего признака «я куб» нет и заводить его незачем.
+			const bool cube = h->atlas && (h->atlas->texture_type == SDL_GPU_TEXTURETYPE_CUBE
+			                            || h->atlas->texture_type == SDL_GPU_TEXTURETYPE_CUBE_ARRAY);
+			yyjson_mut_obj_add_strcpy(doc, t, "name",  name.c_str());
 			yyjson_mut_obj_add_strcpy(doc, t, "atlas", h->atlas_name.c_str());
 			yyjson_mut_obj_add_strcpy(doc, t, "path",  h->source_path.c_str());
 			yyjson_mut_obj_add_str   (doc, t, "conv",  ConvToStr(h->conv));   // статический литерал — без копии
