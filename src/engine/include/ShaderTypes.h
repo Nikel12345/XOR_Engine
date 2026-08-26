@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <initializer_list>
 #include <SDL3/SDL_gpu.h>
 #include <glm/glm.hpp>
 
@@ -39,6 +40,18 @@ namespace ShaderBase {
 // using namespace ShaderBase из заголовка УБРАН намеренно: директива в хедере сливала
 // POSITION/UV/VertexFormat в глобал каждому включившему. Заголовки квалифицируют
 // ShaderBase:: явно; cpp при желании пишет using namespace ShaderBase; у себя.
+
+// Дефайн препроцессора HLSL, подкидываемый компилятору на сборке (DXC -D NAME=VALUE):
+// шейдер объявляет константу через #ifndef/#define, а вызов Create*Shader её переопределяет.
+// value == nullptr — дефайн без значения (под #ifdef).
+// Строки НЕ копируются: они должны пережить вызов Create*Shader (на практике — литералы).
+// Имя и значение входят в ключ кэша .spv (ShaderManager::LoadOrCompileSPIRV) — без этого два
+// варианта одного .hlsl делили бы один файл кэша, и второй молча получил бы чужой байткод.
+struct ShaderDefine {
+    const char* name;
+    const char* value = nullptr;
+};
+using ShaderDefines = std::initializer_list<ShaderDefine>;
 
 struct PushConstantBinder {
     SDL_GPUCommandBuffer* cb;

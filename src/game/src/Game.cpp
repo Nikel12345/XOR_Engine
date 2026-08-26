@@ -226,7 +226,7 @@ SDL_AppResult Game::MainInit()
 
         // Панель у нижнего края: колонка, внутренний отступ + зазор между строками, по центру.
         UIStyle panelS; panelS.dir = UIDir::Column; panelS.align = UIAlign::Center;
-        panelS.padding = 16.0f; panelS.gap = 8.0f; panelS.margin = 40.0f;
+        panelS.padding = 1.0f; panelS.gap = 8.0f; panelS.margin = 40.0f;
         UI_Yoga::Node panel = ui->Box(root, panelS, uimat, quad);
 
         // Две текстовые строки (intrinsic-размер из метрик шрифта).

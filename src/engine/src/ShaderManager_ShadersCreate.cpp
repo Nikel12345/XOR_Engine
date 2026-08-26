@@ -98,7 +98,8 @@ void ShaderManager::ReadVertexAttributes(
 
 Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     SDL_ShaderCross_ShaderStage stage,
-    size_t& out_size)
+    size_t& out_size,
+    ShaderDefines defines)
 {
     size_t src_size = 0;
     char* src = (char*)SDL_LoadFile(hlsl_path, &src_size);
@@ -117,6 +118,18 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     {
         std::unordered_set<std::string> visited;
         HashIncludesRecursive(hash, hlsl_path, include_dir, visited);
+    }
+
+    // Дефайны — часть исходника с точки зрения компилятора, значит и часть ключа кэша: без них
+    // два варианта одного .hlsl (MAX_LIGHTS=4 и =8) дали бы ОДНО имя файла кэша, и второй молча
+    // получил бы чужой байткод. Разделители обязательны — иначе {"AB",""} и {"A","B"} дают один
+    // поток байт. Порядок дефайнов на компиляцию не влияет, а на хэш влияет: цена перестановки —
+    // лишняя перекомпиляция, а не ошибка.
+    for (const ShaderDefine& d : defines) {
+        if (d.name) FnvMix(hash, (const uint8_t*)d.name, SDL_strlen(d.name));
+        FnvMix(hash, (const uint8_t*)"=", 1);
+        if (d.value) FnvMix(hash, (const uint8_t*)d.value, SDL_strlen(d.value));
+        FnvMix(hash, (const uint8_t*)"\n", 1);
     }
 
     // GPU-формат (DXIL / MSL / SPIRV) — чтобы при смене видеокарты/ОС кэш пересобрался.
@@ -172,7 +185,16 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     hlsl_info.entrypoint = "main";
     hlsl_info.shader_stage = stage;
     hlsl_info.include_dir = include_dir;
-    hlsl_info.defines = nullptr;
+    // API требует массив, ЗАВЕРШЁННЫЙ полностью нулевой записью (SDL_shadercross.h:129).
+    // const_cast — поля структуры объявлены char*, хотя shadercross их только читает.
+    std::vector<SDL_ShaderCross_HLSL_Define> hlsl_defines;
+    if (defines.size()) {
+        hlsl_defines.reserve(defines.size() + 1);
+        for (const ShaderDefine& d : defines)
+            hlsl_defines.push_back({ const_cast<char*>(d.name), const_cast<char*>(d.value) });
+        hlsl_defines.push_back({ nullptr, nullptr });
+    }
+    hlsl_info.defines = hlsl_defines.empty() ? nullptr : hlsl_defines.data();
     hlsl_info.props = 0;
 
     size_t compiled_size = 0;
@@ -197,7 +219,8 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
 }
 
 void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl_path,
-    const GeometryPool* pool, const std::vector<VertexSemantic>& pull, BufferManager* bm)
+    const GeometryPool* pool, const std::vector<VertexSemantic>& pull, BufferManager* bm,
+    ShaderDefines defines)
 {
     if (!pool) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -230,7 +253,7 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
     }
 
     size_t n = 0;
-    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_VERTEX, n);
+    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_VERTEX, n, defines);
     if (!spv) return;
     VertexShaderData vs = BuildVertexShader(spv, n, hlsl_path, bindings);   // в реестр по имени
     SDL_free(spv);
@@ -253,19 +276,19 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
     vertex_shaders[name] = std::move(vs);
 }
 
-void ShaderManager::CreateFragmentShader(const std::string& name, const char* hlsl_path)
+void ShaderManager::CreateFragmentShader(const std::string& name, const char* hlsl_path, ShaderDefines defines)
 {
     size_t n = 0;
-    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT, n);
+    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT, n, defines);
     if (!spv) return;
     fragment_shaders[name] = BuildFragmentShader(spv, n, hlsl_path);   // в реестр по имени
     SDL_free(spv);
 }
 
-void ShaderManager::CreateComputeShader(const std::string& name, const char* hlsl_path)
+void ShaderManager::CreateComputeShader(const std::string& name, const char* hlsl_path, ShaderDefines defines)
 {
     size_t n = 0;
-    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_COMPUTE, n);
+    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_COMPUTE, n, defines);
     if (!spv) return;
     // Реестр владеет сырым spv_code — при перезаписи имени старый освобождаем (иначе течёт).
     auto it = compute_shaders.find(name);

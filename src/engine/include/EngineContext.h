@@ -161,17 +161,17 @@ public:
 	// Create*Shader регистрируют шейдер-данные по имени в ShaderManager; CreateShaderProgram
 	// ссылается на них по имени (vs_name/fs_name/cs_name). dont_save=true — движковый дефолт
 	// (весь набор Engine::InitDefaultShaders), в shaders.json не пишется (см. *ShaderData::dont_save).
-	void CreateFragmentShader(const std::string& name, const char* hlsl_path, bool dont_save = false);
+	void CreateFragmentShader(const std::string& name, const char* hlsl_path, bool dont_save = false, ShaderDefines defines = {});
 	// Вершинник называет ПУЛ (по имени, как модели) и потребляемые СЕМАНТИКИ; набор и порядок
 	// слотов выводит сам пул. Пустое имя пула = дефолтный.
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,
-		std::initializer_list<ShaderBase::VertexSemantic> pull, bool dont_save = false);
+		std::initializer_list<ShaderBase::VertexSemantic> pull, bool dont_save = false, ShaderDefines defines = {});
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 		const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 		const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
 		std::initializer_list<TextureSlotRole> texture_slots, bool dont_save = false);
 
-	void CreateComputeShader(const std::string& name, const char* hlsl_path, bool dont_save = false);
+	void CreateComputeShader(const std::string& name, const char* hlsl_path, bool dont_save = false, ShaderDefines defines = {});
 	ComputeShaderProgram* CreateComputeShaderProgram(const std::string& name,
 		const std::string& cs_name,
 		std::initializer_list<BufferDataName> rw_storage_buffers,

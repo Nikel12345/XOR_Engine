@@ -356,16 +356,16 @@ void EngineContext::CreateComputePipelines()
 // dont_save ставим тут через реестр (не тащим флаг в gpu_ctx/sm-сигнатуры): Create* создаёт SD в
 // реестре, затем помечаем его. Get*Shader на промахе не логирует (см. ShaderManager) — компиляция
 // могла не пройти, тогда просто некому ставить флаг.
-void EngineContext::CreateFragmentShader(const std::string& name, const char* path, bool dont_save) {
-	gpu_ctx->CreateFragmentShader(name, path);
+void EngineContext::CreateFragmentShader(const std::string& name, const char* path, bool dont_save, ShaderDefines defines) {
+	gpu_ctx->CreateFragmentShader(name, path, defines);
 	if (auto* d = shader_manager->GetFragmentShader(name)) d->dont_save = dont_save;
 }
 
 void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,
-	std::initializer_list<ShaderBase::VertexSemantic> pull, bool dont_save) {
+	std::initializer_list<ShaderBase::VertexSemantic> pull, bool dont_save, ShaderDefines defines) {
 	// Резолв пула — здесь: его реестр в ModelManager, а gpu_ctx о нём не знает (там только GPU-менеджеры).
 	gpu_ctx->CreateVertexShader(name, hlsl_path, model_manager->GetPool(pool_name),
-		std::vector<ShaderBase::VertexSemantic>(pull));
+		std::vector<ShaderBase::VertexSemantic>(pull), defines);
 	if (auto* d = shader_manager->GetVertexShader(name)) d->dont_save = dont_save;
 }
 
@@ -378,8 +378,8 @@ ShaderProgram* EngineContext::CreateShaderProgram(const std::string& name, const
 	return sp;
 }
 
-void EngineContext::CreateComputeShader(const std::string& name, const char* hlsl_path, bool dont_save) {
-	gpu_ctx->CreateComputeShader(name, hlsl_path);
+void EngineContext::CreateComputeShader(const std::string& name, const char* hlsl_path, bool dont_save, ShaderDefines defines) {
+	gpu_ctx->CreateComputeShader(name, hlsl_path, defines);
 	if (auto* d = shader_manager->GetComputeShader(name)) d->dont_save = dont_save;
 }
 

@@ -19,6 +19,8 @@ public:
 	// Create*Shader компилируют и КЛАДУТ результат в именованный реестр (vertex_shaders/
 	// fragment_shaders/compute_shaders); sp/csp ссылаются на них по ИМЕНИ. Повтор с тем же именем
 	// перезаписывает запись.
+	// Хвостовой defines — дефайны препроцессора HLSL, подкидываемые компилятору на сборке
+	// (ShaderDefine в ShaderTypes.h). Они же входят в ключ кэша .spv, см. LoadOrCompileSPIRV.
 	//
 	// Вершинник объявляет ПУЛ явно, а потребляемые стримы — СЕМАНТИКАМИ (pull): тем же языком
 	// говорят манифест сцены и форма редактора, так что путь один на всех. Обратный вывод пула из
@@ -28,8 +30,8 @@ public:
 	// bm — на вызове (не полем): каждому выбранному стриму декларируется VERTEX, индексному
 	// буферу пула — INDEX (см. BufferData::usage).
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const GeometryPool* pool,
-	                        const std::vector<ShaderBase::VertexSemantic>& pull, BufferManager* bm);
-	void CreateFragmentShader(const std::string& name, const char* path);
+	                        const std::vector<ShaderBase::VertexSemantic>& pull, BufferManager* bm, ShaderDefines defines = {});
+	void CreateFragmentShader(const std::string& name, const char* path, ShaderDefines defines = {});
 
 	// bm передаётся НА ВЫЗОВЕ (не хранится полем): sp ссылается на буферы по имени, а usage-флаг
 	// (GRAPHICS_STORAGE_READ) надо записать в саму обёртку BufferData. Владельцем связки менеджеров
@@ -40,7 +42,7 @@ public:
 		const std::string& fs_name, std::vector<BufferDataName> fragment_shader_buffer_names,
 		const std::vector<TextureSlotRole>& texture_slots, BufferManager* bm);
 
-	void CreateComputeShader(const std::string& name, const char* path);
+	void CreateComputeShader(const std::string& name, const char* path, ShaderDefines defines = {});
 	// ПОРЯДОК СОЗДАНИЯ ЗНАЧИМ: BuildComputeBatches обходит compute_shader_programs по порядку и
 	// складывает батчи в проход push_back'ом, а RenderManager исполняет их прямым обходом, без
 	// сортировки. Т.е. csp, созданная раньше, и исполняется раньше внутри своего прохода — на этом
@@ -184,7 +186,8 @@ private:
 	std::string BuildCachePath(const char* source_path, uint64_t hash) const;
 	void ReadVertexAttributes(const std::vector<ShaderBase::VertexBufferBinding>& bindings, VertexShaderData& vs);
 
-	Uint8* LoadOrCompileSPIRV(const char* hlsl_path, SDL_ShaderCross_ShaderStage stage, size_t& out_size);
+	Uint8* LoadOrCompileSPIRV(const char* hlsl_path, SDL_ShaderCross_ShaderStage stage, size_t& out_size,
+	                          ShaderDefines defines);
 
 	// Дедуп GPU-шейдеров по хэшу SPIR-V: одинаковый байткод → один SDL_GPUShader на всех
 	// владельцев (ShaderData держит shared_ptr; здесь — неимущий weak-индекс для поиска).

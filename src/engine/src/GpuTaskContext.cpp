@@ -12,14 +12,14 @@ GpuTaskContext::GpuTaskContext(BufferManager* bm, ShaderManager* sm, PassManager
 {
 }
 
-void GpuTaskContext::CreateFragmentShader(const std::string& name, const char* path) {
-	shader_manager->CreateFragmentShader(name, path);
+void GpuTaskContext::CreateFragmentShader(const std::string& name, const char* path, ShaderDefines defines) {
+	shader_manager->CreateFragmentShader(name, path, defines);
 }
 
 void GpuTaskContext::CreateVertexShader(const std::string& name, const char* hlsl_path, const GeometryPool* pool,
-	const std::vector<ShaderBase::VertexSemantic>& pull) {
+	const std::vector<ShaderBase::VertexSemantic>& pull, ShaderDefines defines) {
 	// buffer_manager — сбор usage-флагов (VERTEX выбранным стримам, INDEX индексному буферу пула).
-	shader_manager->CreateVertexShader(name, hlsl_path, pool, pull, buffer_manager);
+	shader_manager->CreateVertexShader(name, hlsl_path, pool, pull, buffer_manager, defines);
 }
 
 ShaderProgram* GpuTaskContext::CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
@@ -37,8 +37,8 @@ ShaderProgram* GpuTaskContext::CreateShaderProgram(const std::string& name, cons
 	return shader_manager->CreateShaderProgram(name, spd, associated_pass_name, vs_name, std::move(vertex_buffer_names), fs_name, std::move(fragment_buffer_names), texture_slots, buffer_manager);
 }
 
-void GpuTaskContext::CreateComputeShader(const std::string& name, const char* hlsl_path) {
-	shader_manager->CreateComputeShader(name, hlsl_path);
+void GpuTaskContext::CreateComputeShader(const std::string& name, const char* hlsl_path, ShaderDefines defines) {
+	shader_manager->CreateComputeShader(name, hlsl_path, defines);
 }
 
 ComputeShaderProgram* GpuTaskContext::CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
