@@ -204,7 +204,7 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			std::vector<std::pair<TextureSlotRole, TextureName>> texs;
 			if (sp) for (TextureSlotRole role : sp->required_slots) texs.emplace_back(role, DefaultTextureForRole(role));
 			Material* m = ctx->GetMaterialManager()->CreateMaterial(c->name, std::move(texs), std::vector<ShaderName>{ "Lit" });
-			if (m) ctx->SetMaterialParams(m, OpaqueMaterialParams{});   // sp несёт MaterialBlock → нужен блоб
+			if (m) ctx->SetMaterialParams(m, "Lit", OpaqueMaterialParams{});   // блоб адресован Lit: её MaterialBlock
 			ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->name);
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
@@ -218,9 +218,11 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			const MaterialShaderCmd* c = static_cast<const MaterialShaderCmd*>(data);
 			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
 				bool present = false;
-				for (auto& s : m->shader_programs) if (s == c->shader) { present = true; break; }
+				for (auto& b : m->shader_programs) if (b.sp == c->shader) { present = true; break; }
 				if (!present) {
-					m->shader_programs.push_back(c->shader);
+					// Ячейка без params: чем их наполнить, знает только автор шейдера — тип выбирается
+					// в инспекторе (движок раскладку cbuffer не выводит и не угадывает).
+					m->shader_programs.push_back(SpBinding{ c->shader, nullptr, {} });
 					if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader))
 						for (TextureSlotRole role : sp->required_slots)
 							if (!m->textures.count(role)) m->textures[role] = DefaultTextureForRole(role);
@@ -238,7 +240,13 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			const MaterialShaderCmd* c = static_cast<const MaterialShaderCmd*>(data);
 			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
 				auto& sps = m->shader_programs;
-				for (size_t i = 0; i < sps.size(); ++i) if (sps[i] == c->shader) { sps.erase(sps.begin() + i); break; }
+				for (size_t i = 0; i < sps.size(); ++i) if (sps[i].sp == c->shader) {
+					// Блоб НЕ освобождаем: на его адрес ещё смотрит слепок рендера (живёт несколько
+					// кадров после этой правки) — переселяем на кладбище материала, см. retired_params.
+					if (sps[i].params) m->retired_params.push_back(std::move(sps[i].params));
+					sps.erase(sps.begin() + i);
+					break;
+				}
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 			delete c;

@@ -65,18 +65,39 @@ const std::string& MaterialParamsTypeName(std::type_index t)
     return kNone;
 }
 
-void ApplyMaterialParamsSpec(Material* m, const ParamsSpec& s)
+void SetMaterialParamsBlob(Material* m, const ShaderName& sp_name,
+                           const void* data, size_t size, const std::string& type_name)
 {
-    if (!m) return;
-    m->params      = s.defaults;   // дефолты = member-инициализаторы структуры типа
-    m->params_type = s.name;
+    if (!m || !data) return;
+    SpBinding* b = m->FindBinding(sp_name);
+    if (!b) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "SetMaterialParams: material has no shader program '%s' - params have no addressee "
+            "(add the sp to the material first)", sp_name.c_str());
+        return;
+    }
+    if (!b->params) b->params = std::make_unique<std::vector<uint8_t>>();
+    b->params->resize(size);
+    std::memcpy(b->params->data(), data, size);
+    b->params_type = type_name;
 }
 
-void ClearMaterialParams(Material* m)
+void ApplyMaterialParamsSpec(SpBinding* b, const ParamsSpec& s)
 {
-    if (!m) return;
-    m->params.clear();
-    m->params_type.clear();
+    if (!b) return;
+    if (!b->params) b->params = std::make_unique<std::vector<uint8_t>>();
+    *b->params     = s.defaults;   // дефолты = member-инициализаторы структуры типа
+    b->params_type = s.name;
+}
+
+void ClearMaterialParams(SpBinding* b)
+{
+    if (!b) return;
+    // Байты гасим, САМ БЛОБ ОСТАВЛЯЕМ ЖИТЬ: на его адрес смотрят дерево батчей и слепок
+    // рендера (см. SpBinding::params) — free под рендер-потоком недопустим. Пустой блоб
+    // и есть «параметров нет»: и пуш, и ключ батча гейтятся размером.
+    if (b->params) b->params->clear();
+    b->params_type.clear();
 }
 
 //  Встроенные типы: вся правда о типе — одна запись (как у компонентов).

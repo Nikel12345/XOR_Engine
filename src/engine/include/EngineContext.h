@@ -67,12 +67,12 @@ public:
 	// dont_save=true — кодовая инфраструктура (напр. debug_collider), в materials.json не пишется.
 	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders, bool dont_save = false);
 
-	// Тип-безопасная упаковка per-material факторов (T = раскладка cbuffer MaterialBlock) в
-	// Material::params. Реализация одна на всех — свободный ::SetMaterialParams из
-	// ParamsSpec.h (он же проставляет имя типа из реестра); фасад лишь пробрасывает,
-	// не завися от MaterialManager.h ради одного шаблона.
+	// Тип-безопасная упаковка per-sp факторов (T = раскладка cbuffer MaterialBlock ЭТОЙ sp).
+	// Адресат данных — программа: у материала на каждую sp своя ячейка (см. SpBinding).
+	// Реализация одна на всех — свободный ::SetMaterialParams из ParamsSpec.h (он же
+	// проставляет имя типа из реестра); фасад лишь пробрасывает, не завися от MaterialManager.h.
 	template<class T>
-	void SetMaterialParams(Material* m, const T& p) { ::SetMaterialParams(m, p); }
+	void SetMaterialParams(Material* m, const ShaderName& sp_name, const T& p) { ::SetMaterialParams(m, sp_name, p); }
 
 	// Кроссменеджерская операция: растеризовать шрифт. Живёт на контексте (менеджеры не владеют
 	// друг другом — см. CLAUDE.md), передаёт TextureManager/BufferManager параметрами в FontManager.

@@ -3,8 +3,31 @@
         {
             "name": "ground",
             "shaders": [
-                "Lit",
-                "ShadowCaster"
+                {
+                    "name": "Lit",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 1.0,
+                        "metallic": 0.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                },
+                {
+                    "name": "ShadowCaster"
+                }
             ],
             "textures": [
                 {
@@ -23,46 +46,54 @@
                     "role": "Emissive",
                     "texture": "default_emissive"
                 }
-            ],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0
-                ],
-                "emissive": [
-                    0.0,
-                    0.0,
-                    0.0
-                ],
-                "emissiveStrength": 1.0,
-                "metallic": 0.0,
-                "roughness": 1.0,
-                "heightScale": 0.0,
-                "pomBias": 0.0
-            }
+            ]
         },
         {
             "name": "_skybox",
             "shaders": [
-                "Skybox"
+                {
+                    "name": "Skybox"
+                }
             ],
             "textures": []
         },
         {
             "name": "debug_collider",
             "shaders": [
-                "Wireframe"
+                {
+                    "name": "Wireframe"
+                }
             ],
             "textures": []
         },
         {
             "name": "car2",
             "shaders": [
-                "Lit",
-                "ShadowCaster"
+                {
+                    "name": "Lit",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 1.0,
+                        "metallic": 0.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                },
+                {
+                    "name": "ShadowCaster"
+                }
             ],
             "textures": [
                 {
@@ -81,31 +112,33 @@
                     "role": "Emissive",
                     "texture": "default_emissive"
                 }
-            ],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0
-                ],
-                "emissive": [
-                    0.0,
-                    0.0,
-                    0.0
-                ],
-                "emissiveStrength": 1.0,
-                "metallic": 0.0,
-                "roughness": 1.0,
-                "heightScale": 0.0,
-                "pomBias": 0.0
-            }
+            ]
         },
         {
             "name": "material_sun",
             "shaders": [
-                "Lit"
+                {
+                    "name": "Lit",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.9900000095367432,
+                            0.8500000238418579,
+                            0.44999998807907104
+                        ],
+                        "emissiveStrength": 0.0,
+                        "metallic": 0.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                }
             ],
             "textures": [
                 {
@@ -124,31 +157,18 @@
                     "role": "Emissive",
                     "texture": "default_emissive"
                 }
-            ],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0
-                ],
-                "emissive": [
-                    0.9900000095367432,
-                    0.8500000238418579,
-                    0.44999998807907104
-                ],
-                "emissiveStrength": 0.0,
-                "metallic": 0.0,
-                "roughness": 1.0,
-                "heightScale": 0.0,
-                "pomBias": 0.0
-            }
+            ]
         },
         {
             "name": "transparent",
             "shaders": [
-                "LitTransparent"
+                {
+                    "name": "LitTransparent",
+                    "params_type": "Transparent",
+                    "params": {
+                        "alpha": 0.3499999940395355
+                    }
+                }
             ],
             "textures": [
                 {
@@ -159,17 +179,36 @@
                     "role": "Normal",
                     "texture": "norm"
                 }
-            ],
-            "params_type": "Transparent",
-            "params": {
-                "alpha": 0.3499999940395355
-            }
+            ]
         },
         {
             "name": "car",
             "shaders": [
-                "Lit",
-                "ShadowCaster"
+                {
+                    "name": "Lit",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 1.0,
+                        "metallic": 0.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                },
+                {
+                    "name": "ShadowCaster"
+                }
             ],
             "textures": [
                 {
@@ -188,112 +227,126 @@
                     "role": "Emissive",
                     "texture": "default_emissive"
                 }
-            ],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0
-                ],
-                "emissive": [
-                    0.0,
-                    0.0,
-                    0.0
-                ],
-                "emissiveStrength": 1.0,
-                "metallic": 0.0,
-                "roughness": 1.0,
-                "heightScale": 0.0,
-                "pomBias": 0.0
-            }
+            ]
         },
         {
             "name": "ship",
             "shaders": [
-                "LitColor"
+                {
+                    "name": "LitColor",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            0.550000011920929,
+                            0.6000000238418579,
+                            0.699999988079071,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 1.0,
+                        "metallic": 0.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                }
             ],
-            "textures": [],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    0.550000011920929,
-                    0.6000000238418579,
-                    0.699999988079071,
-                    1.0
-                ],
-                "emissive": [
-                    0.0,
-                    0.0,
-                    0.0
-                ],
-                "emissiveStrength": 1.0,
-                "metallic": 0.0,
-                "roughness": 1.0,
-                "heightScale": 0.0,
-                "pomBias": 0.0
-            }
+            "textures": []
         },
         {
             "name": "m_orange",
             "shaders": [
-                "LitColor",
-                "ShadowCaster"
+                {
+                    "name": "LitColor",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            0.44999998807907104,
+                            0.10000000149011612,
+                            1.0
+                        ],
+                        "emissive": [
+                            1.0,
+                            0.8549020290374756,
+                            0.0
+                        ],
+                        "emissiveStrength": 0.0,
+                        "metallic": 0.22599999606609344,
+                        "roughness": 0.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                },
+                {
+                    "name": "ShadowCaster"
+                }
             ],
-            "textures": [],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    1.0,
-                    0.44999998807907104,
-                    0.10000000149011612,
-                    1.0
-                ],
-                "emissive": [
-                    1.0,
-                    0.8549020290374756,
-                    0.0
-                ],
-                "emissiveStrength": 0.0,
-                "metallic": 0.22599999606609344,
-                "roughness": 0.0,
-                "heightScale": 0.0,
-                "pomBias": 0.0
-            }
+            "textures": []
         },
         {
             "name": "m_gray",
             "shaders": [
-                "LitColor",
-                "ShadowCaster"
+                {
+                    "name": "LitColor",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.5529410243034363,
+                            0.5529410243034363,
+                            0.5529410243034363
+                        ],
+                        "emissiveStrength": 0.0,
+                        "metallic": 0.6589999794960022,
+                        "roughness": 0.3190000057220459,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                },
+                {
+                    "name": "ShadowCaster"
+                }
             ],
-            "textures": [],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0
-                ],
-                "emissive": [
-                    0.5529410243034363,
-                    0.5529410243034363,
-                    0.5529410243034363
-                ],
-                "emissiveStrength": 0.0,
-                "metallic": 0.6589999794960022,
-                "roughness": 0.3190000057220459,
-                "heightScale": 0.0,
-                "pomBias": 0.0
-            }
+            "textures": []
         },
         {
             "name": "brick",
             "shaders": [
-                "Lit",
-                "ShadowCaster"
+                {
+                    "name": "Lit",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            0.8039219975471497,
+                            0.8039219975471497,
+                            0.8039219975471497,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 1.0,
+                        "metallic": 1.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.07999999821186066,
+                        "pomBias": 2.5
+                    }
+                },
+                {
+                    "name": "ShadowCaster"
+                }
             ],
             "textures": [
                 {
@@ -312,112 +365,126 @@
                     "role": "Emissive",
                     "texture": "default_emissive"
                 }
-            ],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    0.8039219975471497,
-                    0.8039219975471497,
-                    0.8039219975471497,
-                    1.0
-                ],
-                "emissive": [
-                    0.0,
-                    0.0,
-                    0.0
-                ],
-                "emissiveStrength": 1.0,
-                "metallic": 1.0,
-                "roughness": 1.0,
-                "heightScale": 0.07999999821186066,
-                "pomBias": 2.5
-            }
+            ]
         },
         {
             "name": "metal1",
             "shaders": [
-                "LitColor",
-                "ShadowCaster"
+                {
+                    "name": "LitColor",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            0.24509799480438232,
+                            0.24509799480438232,
+                            1.0
+                        ],
+                        "emissive": [
+                            1.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 0.0,
+                        "metallic": 0.8650000095367432,
+                        "roughness": 0.08900000154972076,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                },
+                {
+                    "name": "ShadowCaster"
+                }
             ],
-            "textures": [],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    1.0,
-                    0.24509799480438232,
-                    0.24509799480438232,
-                    1.0
-                ],
-                "emissive": [
-                    1.0,
-                    0.0,
-                    0.0
-                ],
-                "emissiveStrength": 0.0,
-                "metallic": 0.8650000095367432,
-                "roughness": 0.08900000154972076,
-                "heightScale": 0.0,
-                "pomBias": 0.0
-            }
+            "textures": []
         },
         {
             "name": "metal2",
             "shaders": [
-                "LitColor",
-                "ShadowCaster"
+                {
+                    "name": "LitColor",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 0.0,
+                        "metallic": 0.9340000152587891,
+                        "roughness": 0.2199999988079071,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                },
+                {
+                    "name": "ShadowCaster"
+                }
             ],
-            "textures": [],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0
-                ],
-                "emissive": [
-                    0.0,
-                    0.0,
-                    0.0
-                ],
-                "emissiveStrength": 0.0,
-                "metallic": 0.9340000152587891,
-                "roughness": 0.2199999988079071,
-                "heightScale": 0.0,
-                "pomBias": 0.0
-            }
+            "textures": []
         },
         {
             "name": "emission",
             "shaders": [
-                "LitColor",
-                "ShadowCaster"
+                {
+                    "name": "LitColor",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            0.0,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.34117600321769714,
+                            0.34117600321769714,
+                            0.6470590233802795
+                        ],
+                        "emissiveStrength": 1.7000000476837158,
+                        "metallic": 0.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                },
+                {
+                    "name": "ShadowCaster"
+                }
             ],
-            "textures": [],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    0.0,
-                    0.0,
-                    0.0,
-                    1.0
-                ],
-                "emissive": [
-                    0.34117600321769714,
-                    0.34117600321769714,
-                    0.6470590233802795
-                ],
-                "emissiveStrength": 1.7000000476837158,
-                "metallic": 0.0,
-                "roughness": 1.0,
-                "heightScale": 0.0,
-                "pomBias": 0.0
-            }
+            "textures": []
         },
         {
             "name": "iron_block",
             "shaders": [
-                "Lit"
+                {
+                    "name": "Lit",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 1.0,
+                        "metallic": 0.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                }
             ],
             "textures": [
                 {
@@ -436,32 +503,36 @@
                     "role": "Emissive",
                     "texture": "default_emissive"
                 }
-            ],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0
-                ],
-                "emissive": [
-                    0.0,
-                    0.0,
-                    0.0
-                ],
-                "emissiveStrength": 1.0,
-                "metallic": 0.0,
-                "roughness": 1.0,
-                "heightScale": 0.0,
-                "pomBias": 0.0
-            }
+            ]
         },
         {
             "name": "wood",
             "shaders": [
-                "Lit",
-                "ShadowCaster"
+                {
+                    "name": "Lit",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            0.5,
+                            0.5,
+                            0.5,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 1.0,
+                        "metallic": 1.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.07999999821186066,
+                        "pomBias": 2.5
+                    }
+                },
+                {
+                    "name": "ShadowCaster"
+                }
             ],
             "textures": [
                 {
@@ -480,26 +551,7 @@
                     "role": "Emissive",
                     "texture": "default_emissive"
                 }
-            ],
-            "params_type": "Opaque",
-            "params": {
-                "baseColor": [
-                    0.5,
-                    0.5,
-                    0.5,
-                    1.0
-                ],
-                "emissive": [
-                    0.0,
-                    0.0,
-                    0.0
-                ],
-                "emissiveStrength": 1.0,
-                "metallic": 1.0,
-                "roughness": 1.0,
-                "heightScale": 0.07999999821186066,
-                "pomBias": 2.5
-            }
+            ]
         }
     ]
 }

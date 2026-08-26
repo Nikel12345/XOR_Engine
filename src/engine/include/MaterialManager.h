@@ -9,13 +9,17 @@
 class TextureManager;   // только в сигнатуре CollectSamplerUsage — передаётся на вызове
 
 // Запись манифеста материалов сцены (materials.json): всё для пересоздания. params — блоб,
-// уже собранный по схеме типа params_type (разбор json ↔ поля — в Engine_Scene).
+// уже собранный по схеме типа params_type (разбор json ↔ поля — в Engine_Scene), и он
+// СВОЙ У КАЖДОЙ sp: адресат данных — программа, а не материал (см. SpBinding).
+struct SceneShaderEntry {
+	ShaderName           name;
+	std::string          params_type;   // имя типа в ParamsSpecRegistry; пусто = без params
+	std::vector<uint8_t> params;
+};
 struct SceneMaterialEntry {
 	std::string name;
 	std::vector<std::pair<TextureSlotRole, TextureName>> textures;
-	std::vector<ShaderName> shaders;
-	std::string             params_type;   // имя типа в ParamsSpecRegistry; пусто = без params
-	std::vector<uint8_t>    params;
+	std::vector<SceneShaderEntry> shaders;
 };
 
 class MaterialManager {
@@ -61,11 +65,11 @@ public:
 		return true;
 	}
 
-	// Тип-безопасная упаковка per-material факторов в Material::params (непрозрачный блоб).
-	// T должен совпадать по размеру/раскладке с cbuffer MaterialBlock в шейдере И быть
+	// Тип-безопасная упаковка per-sp факторов в блоб ячейки (непрозрачные байты для рендера).
+	// T должен совпадать по размеру/раскладке с cbuffer MaterialBlock ИМЕННО ЭТОЙ sp И быть
 	// зарегистрирован в ParamsSpecRegistry (оттуда берётся имя типа для тега).
 	template<class T>
-	void SetMaterialParams(Material* m, const T& p) { ::SetMaterialParams(m, p); }
+	void SetMaterialParams(Material* m, const ShaderName& sp_name, const T& p) { ::SetMaterialParams(m, sp_name, p); }
 
 	~MaterialManager();
 private:

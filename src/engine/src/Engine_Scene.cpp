@@ -397,25 +397,30 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 			if (!m || m->dont_save) continue;
 			yyjson_mut_val* e = yyjson_mut_arr_add_obj(doc, arr);
 			yyjson_mut_obj_add_strcpy(doc, e, "name", name.c_str());
+			// sp — объектами: у каждой свои params (адресат данных — программа, см. SpBinding).
+			// Тип назван строкой из реестра; поля пишет его схема. Незарегистрированный тип
+			// сохранить нечем (раскладка неизвестна) — громко говорим об этом, а не пишем молча
+			// битую запись: sp загрузится без params.
 			yyjson_mut_val* sh = yyjson_mut_obj_add_arr(doc, e, "shaders");
-			for (auto& s : m->shader_programs) yyjson_mut_arr_add_strcpy(doc, sh, s.c_str());
+			for (const SpBinding& b : m->shader_programs) {
+				yyjson_mut_val* so = yyjson_mut_arr_add_obj(doc, sh);
+				yyjson_mut_obj_add_strcpy(doc, so, "name", b.sp.c_str());
+				if (!b.params || b.params->empty()) continue;
+				if (const ParamsSpec* ps = ParamsSpecRegistry::Materials().ByName(b.params_type)) {
+					yyjson_mut_obj_add_strcpy(doc, so, "params_type", b.params_type.c_str());
+					WriteMaterialParams(doc, yyjson_mut_obj_add_obj(doc, so, "params"), *ps, *b.params);
+				}
+				else
+					SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+						"SaveScene: material '%s' sp '%s' has params of unregistered type '%s' (%zu bytes) - NOT saved",
+						name.c_str(), b.sp.c_str(), b.params_type.c_str(), b.params->size());
+			}
 			yyjson_mut_val* tex = yyjson_mut_obj_add_arr(doc, e, "textures");
 			for (auto& [role, tn] : m->textures) {
 				yyjson_mut_val* t = yyjson_mut_arr_add_obj(doc, tex);
 				yyjson_mut_obj_add_str   (doc, t, "role",    RoleToStr(role));
 				yyjson_mut_obj_add_strcpy(doc, t, "texture", tn.c_str());
 			}
-			// Тип params назван строкой из реестра; поля пишет его схема. Незарегистрированный
-			// тип сохранить нечем (раскладка неизвестна) — громко говорим об этом, а не пишем
-			// молча битую запись: материал загрузится без params.
-			if (const ParamsSpec* ps = ParamsSpecRegistry::Materials().ByName(m->params_type)) {
-				yyjson_mut_obj_add_strcpy(doc, e, "params_type", m->params_type.c_str());
-				WriteMaterialParams(doc, yyjson_mut_obj_add_obj(doc, e, "params"), *ps, m->params);
-			}
-			else if (!m->params_type.empty() || !m->params.empty())
-				SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-					"SaveScene: material '%s' has params of unregistered type '%s' (%zu bytes) - NOT saved",
-					name.c_str(), m->params_type.c_str(), m->params.size());
 			++saved;
 		}
 		yyjson_write_err werr;
@@ -694,30 +699,36 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 			yyjson_arr_foreach(arr, idx, max, e) {
 				SceneMaterialEntry me;
 				me.name = JsonStr(e, "name");
+				// sp — объекты {name, params_type?, params?}: блоб адресован ИМЕННО этой программе.
+				// params: стартуем с ДЕФОЛТОВ типа (member-инициализаторы структуры) и накатываем поля
+				// из файла по именам. Тип не зарегистрирован → params нет: раскладки нет, а гадать про
+				// байты нельзя (сообщаем, чтобы это не выглядело как «поля потерялись»).
 				if (yyjson_val* sh = yyjson_obj_get(e, "shaders")) {
 					size_t i, m2; yyjson_val* s;
-					yyjson_arr_foreach(sh, i, m2, s) if (const char* n = yyjson_get_str(s)) me.shaders.push_back(n);
+					yyjson_arr_foreach(sh, i, m2, s) {
+						SceneShaderEntry se;
+						se.name = JsonStr(s, "name");
+						if (se.name.empty()) continue;
+						se.params_type = JsonStr(s, "params_type");
+						if (const ParamsSpec* ps = ParamsSpecRegistry::Materials().ByName(se.params_type)) {
+							se.params = ps->defaults;
+							ReadMaterialParams(yyjson_obj_get(s, "params"), *ps, se.params);
+						}
+						else if (!se.params_type.empty()) {
+							SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+								"LoadScene: material '%s' sp '%s' wants params type '%s' - not registered "
+								"(register it before LoadScene); loaded without params",
+								me.name.c_str(), se.name.c_str(), se.params_type.c_str());
+							se.params_type.clear();
+						}
+						me.shaders.push_back(std::move(se));
+					}
 				}
 				if (yyjson_val* tex = yyjson_obj_get(e, "textures")) {
 					size_t i, m2; yyjson_val* t; TextureSlotRole role;
 					yyjson_arr_foreach(tex, i, m2, t)
 						if (RoleFromStr(JsonStr(t, "role"), role))
 							me.textures.emplace_back(role, TextureName(JsonStr(t, "texture")));
-				}
-				// params: стартуем с ДЕФОЛТОВ типа (member-инициализаторы структуры) и накатываем
-				// поля из файла по именам. Тип не зарегистрирован → params нет: раскладки нет,
-				// а гадать про байты нельзя (сообщаем, чтобы это не выглядело как «поля потерялись»).
-				me.params_type = JsonStr(e, "params_type");
-				if (const ParamsSpec* ps = ParamsSpecRegistry::Materials().ByName(me.params_type)) {
-					me.params = ps->defaults;
-					ReadMaterialParams(yyjson_obj_get(e, "params"), *ps, me.params);
-				}
-				else if (!me.params_type.empty()) {
-					SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-						"LoadScene: material '%s' wants params type '%s' - not registered "
-						"(register it before LoadScene); loaded without params",
-						me.name.c_str(), me.params_type.c_str());
-					me.params_type.clear();
 				}
 				entries.push_back(std::move(me));
 			}

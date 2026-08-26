@@ -18,7 +18,9 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 	// Материал держит только имена; резолв в указатели и проверку required_slots уже сделал
 	// EngineContext::CreateMaterial. Здесь — чистое хранение (см. правило name-based ссылок).
 	auto data = std::make_unique<Material>();
-	data->shader_programs = std::move(shaders);
+	// Ячейка на каждую sp; данных у неё пока нет (их кладёт SetMaterialParams по имени sp).
+	data->shader_programs.reserve(shaders.size());
+	for (ShaderName& sp_name : shaders) data->shader_programs.push_back(SpBinding{ std::move(sp_name), nullptr, {} });
 	for (auto& [role, tex_name] : textures) {
 		data->textures[role] = std::move(tex_name);
 	}
@@ -39,9 +41,19 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 		if (!m) continue;
 		m->textures.clear();
 		for (auto& [role, tex] : e.textures) m->textures[role] = tex;
-		m->shader_programs = e.shaders;
-		m->params = e.params;
-		m->params_type = e.params_type;
+		// Ячейки пересобираем целиком: блобы прежних sp уходят на кладбище материала, а не в free —
+		// на их адреса может смотреть слепок рендера (см. Material::retired_params).
+		for (SpBinding& old : m->shader_programs)
+			if (old.params) m->retired_params.push_back(std::move(old.params));
+		m->shader_programs.clear();
+		m->shader_programs.reserve(e.shaders.size());
+		for (const SceneShaderEntry& se : e.shaders) {
+			SpBinding b;
+			b.sp = se.name;
+			b.params_type = se.params_type;
+			if (!se.params.empty()) b.params = std::make_unique<std::vector<uint8_t>>(se.params);
+			m->shader_programs.push_back(std::move(b));
+		}
 		m->dont_save = false;   // пришёл из файла — сохраняемый
 		++n;
 	}

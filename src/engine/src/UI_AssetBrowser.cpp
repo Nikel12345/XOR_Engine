@@ -80,15 +80,24 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
                 // Тинт берём из ПЕРВОГО цветового поля схемы типа params (у Opaque это baseColor,
                 // у типа из кода игры — его собственный цвет). Нет цветовых полей / тип не
                 // зарегистрирован → превью без тинта. Раскладку тут не знаем и знать не должны.
-                if (const ParamsSpec* s = ParamsSpecRegistry::Materials().ByName(m->params_type))
+                // Params теперь у каждой sp свои — берём ПЕРВУЮ ячейку с цветовым полем
+                // (обычно единственная «цветная» sp материала: Lit/LitColor).
+                for (const SpBinding& b : m->shader_programs) {
+                    if (!b.params || b.params->empty()) continue;
+                    const ParamsSpec* s = ParamsSpecRegistry::Materials().ByName(b.params_type);
+                    if (!s) continue;
+                    bool tinted = false;
                     for (const ParamsFieldSpec& f : s->fields) {
                         if (f.kind != ParamsFieldKind::Color3 && f.kind != ParamsFieldKind::Color4) continue;
-                        if (const void* fp = ParamsFieldPtr(m->params, f)) {
+                        if (const void* fp = ParamsFieldPtr(*b.params, f)) {
                             const float* c = static_cast<const float*>(fp);
                             pv.tint = ImVec4(c[0], c[1], c[2], 1.0f);
+                            tinted = true;
                         }
                         break;
                     }
+                    if (tinted) break;
+                }
             }
             else pv = texture_preview("_NoTextureDummy");           // битая ссылка → dummy, БЕЗ тинта
             return pv;

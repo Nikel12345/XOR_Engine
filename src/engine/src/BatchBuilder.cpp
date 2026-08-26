@@ -39,23 +39,43 @@ ModelBatchKey HashModelBatchKey(SubMeshData* submash) {
     return key;
 }
 
-// Ключ texture-батча = ИДЕНТИЧНОСТЬ материала через &Material::params (стабильный адрес
-// под unique_ptr). Так материалы с одинаковыми текстурами, но разными params не
-// схлопываются в один батч (как раньше молча терялась alpha), а мутация params на месте
-// НЕ меняет ключ → фактор-твики в рантайме не вызывают перестройку дерева батчей.
-TextureBatchKey HashTextureBatchKey(const Material* mat) {
-    if (!mat) {
-        SDL_Log("HashTextureBatchKey: material is nullptr!");
+// Ключ texture-батча = РЕСУРСЫ, которые потребляет ИМЕННО ЭТА sp, и ничего сверх того:
+//   • текстуры её required_slots (хэндлы: тот же атлас, но другой UVL — уже другой узел);
+//   • адрес блоба params ЭТОЙ sp (идентичность, не содержимое).
+// Материал целиком в ключ не входит: sp, которая от материала не берёт ничего (ShadowCaster,
+// Wireframe), не различает материалы вовсе — все они дают ей один узел, один draw и одну
+// команду индиректа. Раньше ключом был адрес материала, и теневой проход дробился по нему же.
+//
+// Почему params по АДРЕСУ, а не по содержимому: правка байт в инспекторе (ползунок цвета) не
+// должна менять ключ, иначе дерево батчей пересобиралось бы покадрово. Адрес блоба стабилен —
+// он в куче и переживает реаллокацию ячеек (см. SpBinding::params).
+// Пустой блоб = «параметров нет» → в ключ не вносится (ClearMaterialParams гасит байты,
+// не освобождая память).
+TextureBatchKey HashTextureBatchKey(const Material* mat, const ShaderProgram* sp,
+                                    TextureManager* tm, const std::vector<uint8_t>* params) {
+    if (!mat || !sp) {
+        SDL_Log("HashTextureBatchKey: material or shader program is nullptr!");
         return 0xFFFFFFFFFFFFFFFFull;
     }
-    TextureBatchKey key = reinterpret_cast<TextureBatchKey>(mat);
+    TextureBatchKey key = 0;
+    for (TextureSlotRole slot : sp->required_slots) {
+        const TextureHandle* h = nullptr;
+        auto it = mat->textures.find(slot);
+        if (it != mat->textures.end() && tm) h = tm->GetTextureHandle(it->second);
+        // Слот входит в ключ ВСЕГДА, в т.ч. промахом (как в HashAtlasBatchKey): батч соберёт
+        // сюда dummy, и «нет текстуры» — такое же состояние, как конкретный хэндл.
+        key += static_cast<TextureBatchKey>(slot) + 0x9e3779b97f4a7c15ull;
+        key ^= reinterpret_cast<TextureBatchKey>(h);
+        key *= 0xff51afd7ed558ccd;
+        key ^= key >> 29;
+    }
+    if (params && !params->empty()) key ^= reinterpret_cast<TextureBatchKey>(params);
     key ^= key >> 33;
     key *= 0xff51afd7ed558ccd;
     key ^= key >> 33;
     key *= 0xc4ceb9fe1a85ec53;
     key ^= key >> 33;
     return key;
-
 }
 
 AtlasBatchKey HashAtlasBatchKey(const Material* mat, const ShaderProgram* sp, TextureManager* tm) {
@@ -209,8 +229,12 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             continue;
         }
 
-        for (const ShaderName& sp_name : material->shader_programs)
+        for (const SpBinding& binding : material->shader_programs)
         {
+            const ShaderName& sp_name = binding.sp;
+            // Блоб этой sp: пустой (или отсутствующий) = она params не читает — ни пуша, ни ключа.
+            const std::vector<uint8_t>* sp_params =
+                (binding.params && !binding.params->empty()) ? binding.params.get() : nullptr;
             // name-based ссылка: имя sp → указатель на сборке батча. Промах (sp удалена) → fallback-sp
             // (аналог textureless), а если и его нет — пропуск.
             ShaderProgram* sp = sm ? sm->GetShaderProgram(sp_name) : nullptr;
@@ -299,18 +323,16 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
             AtlasBatchData& atlas_batch = atlas_map[atlas_key];
 
-            // Ключуем по идентичности материала ВСЕГДА (даже без текстур): материал = свой
-            // батч, чтобы его params/alpha не делились с другим материалом того же шейдера.
-            TextureBatchKey tex_key = HashTextureBatchKey(material);
+            TextureBatchKey tex_key = HashTextureBatchKey(material, sp, tm, sp_params);
 
             auto& tex_map = atlas_batch.texture_batches;
             auto texb_it = tex_map.find(tex_key);
             if (texb_it == tex_map.end()) {
                 TextureBatchData new_texb{};
-                // Указатель ставим всегда; РЕШЕНИЕ пушить — в RenderManager по числу fragment-
-                // uniform’ов шейдера (объявлен ли слот MaterialBlock). Так shadow/depth (без
-                // MaterialBlock) params не получат автоматически, без флагов и прокси по текстурам.
-                new_texb.params = &material->params;
+                // Данные ЭТОЙ sp — и только они: узел, собранный для sp без params, никаких
+                // чужих байт не носит. Само РЕШЕНИЕ пушить остаётся за RenderManager (по числу
+                // fragment-uniform'ов шейдера), здесь — адресат.
+                new_texb.params = sp_params;
                 new_texb.texture_uvl.reserve(material->textures.size());
                 bool bindable = true;
                 for (const auto& role : sp->required_slots) {

@@ -88,7 +88,7 @@ SDL_AppResult Game::MainInit()
 			{ { TextureSlotRole::Albedo, "default_albedo" } }, { "UI" }, /*dont_save=*/true);
 		// Посадку/размер теперь считает Yoga (rect узла), поэтому text_height/anchor нейтральны
 		// (1,0) — шейдер просто заливает узел текстом. Цвета: тёмный фон + золотой текст.
-		ctx->SetMaterialParams(ui_mat, UIMaterialParams{ { 0.10f, 0.10f, 0.15f, 1.0f }, { 1.0f, 0.85f, 0.2f, 1.0f }, 1.0f, 0.0f });
+		ctx->SetMaterialParams(ui_mat, "UI", UIMaterialParams{ { 0.10f, 0.10f, 0.15f, 1.0f }, { 1.0f, 0.85f, 0.2f, 1.0f }, 1.0f, 0.0f });
 	}
 
     ModelData* sphere = (*ctx->GetModelManager())["sphere"];

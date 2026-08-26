@@ -165,36 +165,42 @@ inline const void* ParamsFieldPtr(const std::vector<uint8_t>& blob, const Params
     return (f.offset + f.Bytes() <= blob.size()) ? static_cast<const void*>(blob.data() + f.offset) : nullptr;
 }
 
-// Тип-безопасная упаковка per-material факторов (T = раскладка cbuffer MaterialBlock) в
-// Material::params. Имя типа берётся из реестра — тег и блоб не могут разойтись.
-// Мутация байт на месте НЕ трогает адрес вектора → ключ texture-батча цел (правка без ребилда).
+// Запись блоба в ячейку sp: адресат — ИМЕННО эта sp материала, а не «материал вообще».
+// Нет такой sp у материала → блобу некому ехать, поэтому это ошибка, а не тихий no-op.
+// Не шаблон, чтобы заголовок не тянул SDL ради одного лога.
+void SetMaterialParamsBlob(Material* m, const ShaderName& sp_name,
+                           const void* data, size_t size, const std::string& type_name);
+
+// Тип-безопасная упаковка per-sp факторов (T = раскладка cbuffer MaterialBlock этой sp).
+// Имя типа берётся из реестра — тег и блоб не могут разойтись.
+// Мутация байт на месте НЕ трогает адрес блоба → ключ texture-батча цел (правка без ребилда).
 template<class T>
-void SetMaterialParams(Material* m, const T& p)
+void SetMaterialParams(Material* m, const ShaderName& sp_name, const T& p)
 {
-    if (!m) return;
-    m->params.resize(sizeof(T));
-    std::memcpy(m->params.data(), &p, sizeof(T));
-    m->params_type = MaterialParamsTypeName(std::type_index(typeid(T)));
+    SetMaterialParamsBlob(m, sp_name, &p, sizeof(T), MaterialParamsTypeName(std::type_index(typeid(T))));
 }
 
-// Типизированное чтение блоба: nullptr, если тип материала другой/не зарегистрирован/блоб короче.
+// Типизированное чтение блоба sp: nullptr, если sp нет у материала, тип другой/не зарегистрирован
+// или блоб короче.
 template<class T>
-const T* MaterialParamsAs(const Material& m)
+const T* MaterialParamsAs(const Material& m, const ShaderName& sp_name)
 {
+    const SpBinding* b = m.FindBinding(sp_name);
+    if (!b || !b->params) return nullptr;
     const ParamsSpec* s = ParamsSpecRegistry::Materials().ByType(std::type_index(typeid(T)));
-    if (!s || s->name != m.params_type || m.params.size() < sizeof(T)) return nullptr;
-    return reinterpret_cast<const T*>(m.params.data());
+    if (!s || s->name != b->params_type || b->params->size() < sizeof(T)) return nullptr;
+    return reinterpret_cast<const T*>(b->params->data());
 }
 template<class T>
-T* MaterialParamsAs(Material& m)
+T* MaterialParamsAs(Material& m, const ShaderName& sp_name)
 {
-    return const_cast<T*>(MaterialParamsAs<T>(static_cast<const Material&>(m)));
+    return const_cast<T*>(MaterialParamsAs<T>(static_cast<const Material&>(m), sp_name));
 }
 
-// Поставить материалу дефолтный блоб типа (смена типа в дропдауне инспектора).
-void ApplyMaterialParamsSpec(Material* m, const ParamsSpec& s);
-// Снять params вовсе (пункт «(none)» — материалу без MaterialBlock в шейдере).
-void ClearMaterialParams(Material* m);
+// Поставить ячейке дефолтный блоб типа (смена типа в дропдауне инспектора).
+void ApplyMaterialParamsSpec(SpBinding* b, const ParamsSpec& s);
+// Снять params вовсе (пункт «(none)» — sp без MaterialBlock в шейдере).
+void ClearMaterialParams(SpBinding* b);
 
 // ── Состояние прохода ((Render|Compute)PassStep::state) ──
 // Второй домен блоба. То, что раньше было ЛОКАЛЬНОЙ структурой в теле прохода: часть полей

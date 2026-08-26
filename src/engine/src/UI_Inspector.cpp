@@ -189,37 +189,11 @@ namespace {
             }
         }
 
-        // Смена ТИПА params = дефолтный блоб типа из реестра (IN-PLACE, без ребилда дерева:
-        // RenderManager читает params->data()/size() живо, а ключ батча — адрес вектора).
-        // Список типов — весь реестр: и движковые, и зарегистрированные кодом игры.
-        ImGui::SeparatorText("Params");
-        const auto& specs = ParamsSpecRegistry::Materials().All();
-        const ParamsSpec* cur = ParamsSpecRegistry::Materials().ByName(mat->params_type);
-        // Тип назван, но не зарегистрирован (сцена от сборки, где он был) — не молчим: блоб
-        // рисовать нечем, а SaveScene его не сохранит.
-        const bool unknown_type = !mat->params_type.empty() && !cur;
-        if (ImGui::BeginCombo("Type", cur ? cur->name.c_str()
-                                          : (unknown_type ? mat->params_type.c_str() : "(none)"))) {
-            if (ImGui::Selectable("(none)", mat->params_type.empty()) && !mat->params_type.empty())
-                ClearMaterialParams(mat);
-            for (const ParamsSpec& s : specs) {
-                const bool is_cur = (&s == cur);
-                if (ImGui::Selectable(s.name.c_str(), is_cur) && !is_cur) ApplyMaterialParamsSpec(mat, s);
-                if (is_cur) ImGui::SetItemDefaultFocus();
-            }
-            ImGui::EndCombo();
-        }
-        if (unknown_type)
-            MissingRefMark("params type is not registered — fields cannot be edited and will NOT be saved");
-
-        if (mat->params.empty())      ImGui::TextDisabled("(no params)");
-        else if (!cur)                ImGui::TextDisabled("(%zu bytes, unknown layout)", mat->params.size());
-        else if (cur->custom_edit)    cur->custom_edit(mat->params.data());   // escape hatch типа
-        else                          DrawParamsFields(*cur, mat->params);
-
-        // Материал = набор sp (проходов). Слоты диктует required_slots КАЖДОГО sp, но текстура берётся
-        // из ОБЩЕЙ material->textures[role] (роль шарится между sp): правка под одним sp видна под другим.
+        // Материал = набор sp (проходов), и у КАЖДОЙ свои данные: слоты диктует её required_slots,
+        // params — её собственный блоб (SpBinding). Текстуры при этом ОБЩИЕ и ключуются ролью:
+        // правка под одним sp видна под другим. Params — нет: они адресованы конкретной программе.
         ImGui::SeparatorText("Shaders");
+        const auto& specs = ParamsSpecRegistry::Materials().All();
 
         std::vector<std::string> texNames;                   // значения комбобокса текстур — по алфавиту
         for (auto& [n, h] : ctx->GetTextureManager()->GetTextureHandles())
@@ -227,7 +201,8 @@ namespace {
         std::sort(texNames.begin(), texNames.end());
 
         for (size_t si = 0; si < mat->shader_programs.size(); ++si) {
-            const std::string spName = mat->shader_programs[si];
+            SpBinding& binding = mat->shader_programs[si];
+            const std::string spName = binding.sp;
             ImGui::PushID(static_cast<int>(si));
 
             if (ImGui::SmallButton("x"))                       // убрать этот sp
@@ -261,6 +236,39 @@ namespace {
                         MissingRefMark("texture not found — dummy is used");
                     ImGui::PopID();
                 }
+
+            // -- params ЭТОЙ sp -- Смена ТИПА = дефолтный блоб типа из реестра. Правка ПОЛЕЙ идёт
+            // in-place и дерево не трогает (ключ узла — адрес блоба, а не байты), но смена типа
+            // адрес заводит или убирает, то есть меняет сам ключ -> батчи пересобрать.
+            // Список типов — весь реестр: и движковые, и зарегистрированные кодом игры.
+            const ParamsSpec* cur = ParamsSpecRegistry::Materials().ByName(binding.params_type);
+            // Тип назван, но не зарегистрирован (сцена от сборки, где он был) — не молчим: блоб
+            // рисовать нечем, а SaveScene его не сохранит.
+            const bool unknown_type = !binding.params_type.empty() && !cur;
+            if (ImGui::BeginCombo("Params", cur ? cur->name.c_str()
+                                                : (unknown_type ? binding.params_type.c_str() : "(none)"))) {
+                if (ImGui::Selectable("(none)", binding.params_type.empty()) && !binding.params_type.empty()) {
+                    ClearMaterialParams(&binding);
+                    ctx->GetBatchBuilder()->SetDirtyBatches(true);
+                }
+                for (const ParamsSpec& s : specs) {
+                    const bool is_cur = (&s == cur);
+                    if (ImGui::Selectable(s.name.c_str(), is_cur) && !is_cur) {
+                        ApplyMaterialParamsSpec(&binding, s);
+                        ctx->GetBatchBuilder()->SetDirtyBatches(true);
+                    }
+                    if (is_cur) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            if (unknown_type)
+                MissingRefMark("params type is not registered — fields cannot be edited and will NOT be saved");
+
+            if (!binding.params || binding.params->empty()) ImGui::TextDisabled("(no params)");
+            else if (!cur)             ImGui::TextDisabled("(%zu bytes, unknown layout)", binding.params->size());
+            else if (cur->custom_edit) cur->custom_edit(binding.params->data());   // escape hatch типа
+            else                       DrawParamsFields(*cur, *binding.params);
+
             ImGui::PopID();
             ImGui::Separator();
         }
@@ -269,7 +277,7 @@ namespace {
         if (ImGui::BeginCombo("+ Shader", "(add)")) {
             for (auto& [spn, spp] : sm->GetShaderPrograms()) {
                 bool present = false;
-                for (auto& s : mat->shader_programs) if (s == spn) { present = true; break; }
+                for (auto& b : mat->shader_programs) if (b.sp == spn) { present = true; break; }
                 if (present) continue;
                 if (ImGui::Selectable(spn.c_str()))
                     im->PushCommand(CommandId::AddMaterialShader, new MaterialShaderCmd{ matName, spn });
