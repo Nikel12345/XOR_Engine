@@ -284,6 +284,7 @@ bool Engine::RenderFunc(uint8_t slot)
 
 	pass_manager->SetSwapchain(tex, w, h);
 	pass_manager->SetRenderFrame(slot, batch_builder->AskLayout(slot));
+	pass_manager->ResolveAllTextureTargets();
 	{
 		PROF_SCOPE(Render, " execute_passes (запись команд)");
 		pass_manager->ExecutePassesSteps(cb.Raw(), slot);

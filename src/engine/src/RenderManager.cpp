@@ -131,6 +131,13 @@ void PassManager::SetSwapchain(SDL_GPUTexture* tex, uint32_t w, uint32_t h)
 	swapchain_atlas.height = h;
 }
 
+void PassManager::ResolveAllTextureTargets()
+{
+	for (int i = 0; i < ordered_passes.size(); i++) {
+		ordered_passes[i]->renderPassTexsData.ResolveTargets();
+	}
+}
+
 void PassManager::FillRenderPasses()
 {
 	if (passes_filled) {
@@ -250,7 +257,6 @@ void PassManager::RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassSte
 {
 	auto& tex_data = render_pass_step->renderPassTexsData;
 	// Атласы/shared-depth → актуальные текстуры (создаёт бейк, подменяет ресайз).
-	tex_data.ResolveTargets();
 
 	SDL_GPURenderPass* rp = nullptr;
 	rp = SDL_BeginGPURenderPass(cb,

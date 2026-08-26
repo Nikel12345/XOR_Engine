@@ -40,6 +40,7 @@ public:
 	// Появится второй рендер-поток — это место придётся пересмотреть.
 	void SetSwapchain(SDL_GPUTexture* tex, uint32_t w, uint32_t h);
 	TextureAtlas* GetSwapchainAtlas() { return &swapchain_atlas; }
+	void ResolveAllTextureTargets();
 
 	void FillRenderPasses();
 	void ExecutePassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_frame);
@@ -47,7 +48,6 @@ public:
 	// Начинает и завершает SDL_GPURenderPass
 	// Starts and end SDL_GPURenderPass
 	void RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass, BufferManager* bm, uint32_t additional_offset, const void* push_data_raw);
-	void WaitComputePrepass(SDL_GPUDevice* dev);
 	// Начинает и завершает SDL_GPUComputePass
 	// Starts and end SDL_GPUComputePass
 	void ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassStep* compute_pass, BufferManager* bm, const void* push_data_raw, const void* dispatch_data_raw, uint8_t pass_frame);

@@ -106,7 +106,7 @@ public:
 	FragmentShaderData CreateFragmentShaderFromSPV(const char* spv_path);
 	ComputeShaderData CreateComputeShaderFromSPV(const char* spv_path);
 
-	ShaderProgram* GetShaderProgram(const std::string& name);
+	ShaderProgram* GetShaderProgram(const ShaderName& name);
 	// Удаление sp: erase из словаря разрушает ShaderProgram → отпускает его ShaderData
 	// (shared_ptr<SDL_GPUShader>). Шейдеры релизятся ПО REFCOUNT: неиспользуемые — освобождаются,
 	// переиспользуемые (общий vs) — живут. Пайплайн sp освобождает вызывающий (PipeManager,

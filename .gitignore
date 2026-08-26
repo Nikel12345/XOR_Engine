@@ -12,3 +12,4 @@ osd
 osd/
 src/game/saved_scene/scene_1M.json
 src/game/saved_scene/scene1M.json
+imgui.ini

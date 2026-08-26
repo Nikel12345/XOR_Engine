@@ -52,7 +52,11 @@ void RenderPassStep::SetGlobalTextures(std::vector<TextureAtlas*> atlases)
 // Держать копию SDL_GPUTexture* в проходе поэтому нельзя — протухнет.
 void RenderPassTexturesInfo::ResolveTargets()
 {
-	const size_t n = color_atlases.size() < colorTargetInfos.size() ? color_atlases.size() : colorTargetInfos.size();
+	const size_t n = color_atlases.size();
+	if (n != colorTargetInfos.size()) {
+		SDL_Log("color atlases and colorTargetInfos sizes missmatch %zu %zu", n, colorTargetInfos.size());
+		assert(n == colorTargetInfos.size());
+	}
 	for (size_t i = 0; i < n; ++i) {
 		if (color_atlases[i])
 			colorTargetInfos[i].texture = color_atlases[i]->texture_binding.texture;
