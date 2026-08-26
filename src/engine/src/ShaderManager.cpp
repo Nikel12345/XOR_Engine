@@ -241,7 +241,7 @@ void ShaderManager::ClearSavableComputeShaderPrograms()
     }
 }
 
-ShaderProgram* ShaderManager::GetShaderProgram(const std::string& name)
+ShaderProgram* ShaderManager::GetShaderProgram(const ShaderName& name)
 {
     auto it = shader_programs.find(name);
     if (it != shader_programs.end())

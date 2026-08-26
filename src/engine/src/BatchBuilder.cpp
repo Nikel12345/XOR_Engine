@@ -48,7 +48,7 @@ TextureBatchKey HashTextureBatchKey(const Material* mat) {
         SDL_Log("HashTextureBatchKey: material is nullptr!");
         return 0xFFFFFFFFFFFFFFFFull;
     }
-    TextureBatchKey key = reinterpret_cast<TextureBatchKey>(&mat->params);
+    TextureBatchKey key = reinterpret_cast<TextureBatchKey>(mat);
     key ^= key >> 33;
     key *= 0xff51afd7ed558ccd;
     key ^= key >> 33;
@@ -58,25 +58,29 @@ TextureBatchKey HashTextureBatchKey(const Material* mat) {
 
 }
 
-AtlasBatchKey HashAtlasBatchKey(const Material* mat, TextureManager* tm) {
-    if (!mat) {
-        SDL_Log("HashAtlasBatchKey: material is nullptr!");
+AtlasBatchKey HashAtlasBatchKey(const Material* mat, const ShaderProgram* sp, TextureManager* tm) {
+    if (!mat || !sp) {
+        SDL_Log("HashAtlasBatchKey: material or shader program is nullptr!");
         return 0xFFFFFFFFFFFFFFFFull;
     }
     AtlasBatchKey key = 0;
-    for (const auto& [slot, tex_name] : mat->textures) {
-        // имя → хэндл (name-based ссылка); промах/удалённая → в ключ не входит (в батче будет dummy)
-        TextureHandle* h = tm ? tm->GetTextureHandle(tex_name) : nullptr;
-        if (h && h->atlas) {
-            key ^= reinterpret_cast<AtlasBatchKey>(h->atlas) * (2654435761ull + static_cast<uint64_t>(slot));
+    for (TextureSlotRole slot : sp->required_slots) {
+        const TextureAtlas* atlas = nullptr;
+        auto it = mat->textures.find(slot);
+        if (it != mat->textures.end() && tm) {
+            if (TextureHandle* h = tm->GetTextureHandle(it->second))
+                atlas = h->atlas;
         }
+        // Слот входит в ключ ВСЕГДА, в т.ч. промахом: батч соберёт сюда dummy, и
+        // "нет текстуры" — такое же состояние биндинга, как конкретный атлас.
+        key += static_cast<AtlasBatchKey>(slot) + 0x9e3779b97f4a7c15ull;
+        key ^= reinterpret_cast<AtlasBatchKey>(atlas);
+        key *= 0xff51afd7ed558ccd;
+        key ^= key >> 29;
     }
-    key ^= key >> 33;
-    key *= 0xff51afd7ed558ccd;
     key ^= key >> 33;
     key *= 0xc4ceb9fe1a85ec53;
     key ^= key >> 33;
-
     return key;
 }
 
@@ -256,7 +260,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
             ShaderBatchData& sb = shader_map[sp_key];
 
-            AtlasBatchKey atlas_key = sp->required_slots.empty() ? 0 : HashAtlasBatchKey(material, tm);
+            AtlasBatchKey atlas_key = sp->required_slots.empty() ? 0 : HashAtlasBatchKey(material, sp, tm);
 
             // Dummy — ПО ИМЕНИ (как fallback-sp): резолв здесь, через карту (без лог-спама Get*).
             // Нет и dummy (удалён) → битые слоты не забиндить → sp у этого материала пропускается
