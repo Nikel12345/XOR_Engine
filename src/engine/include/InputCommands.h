@@ -59,9 +59,12 @@ struct SetShaderPassCmd {
 // oldName != name → удалить старую запись. Пайплайны ссылающихся sp/csp инвалидируются в хендлере.
 // У вершинника — имя ПУЛА и набор семантик (pull). Порядок pull не значим: слоты задаёт таблица
 // стримов пула. Пустой pool = дефолтный.
-struct UpsertVertexShaderCmd   { std::string name, path, oldName, pool; std::vector<ShaderBase::VertexSemantic> pull; };
-struct UpsertFragmentShaderCmd { std::string name, path, oldName; };
-struct UpsertComputeShaderCmd  { std::string name, path, oldName; };
+// defines едут вместе с путём и раскладкой: Upsert ПЕРЕСОЗДАЁТ шейдер-данные из формы, и
+// набор, не доехавший до команды, был бы стёрт правкой имени или пути — шейдер молча
+// пересобрался бы на дефолтах #ifndef (см. ShaderData.h: defines — часть рецепта).
+struct UpsertVertexShaderCmd   { std::string name, path, oldName, pool; std::vector<ShaderBase::VertexSemantic> pull; ShaderDefines defines; };
+struct UpsertFragmentShaderCmd { std::string name, path, oldName; ShaderDefines defines; };
+struct UpsertComputeShaderCmd  { std::string name, path, oldName; ShaderDefines defines; };
 struct ShaderDataNameCmd       { std::string name; };   // удаление vs/fs/cs (тип — по CommandId)
 
 // Создание/замена модели из файла (аналог UpsertTexture). Существующую перезагружает В ТОТ ЖЕ

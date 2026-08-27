@@ -2,7 +2,6 @@
 #include <vector>
 #include <string>
 #include <cstdint>
-#include <initializer_list>
 #include <SDL3/SDL_gpu.h>
 #include <glm/glm.hpp>
 
@@ -43,15 +42,18 @@ namespace ShaderBase {
 
 // Дефайн препроцессора HLSL, подкидываемый компилятору на сборке (DXC -D NAME=VALUE):
 // шейдер объявляет константу через #ifndef/#define, а вызов Create*Shader её переопределяет.
-// value == nullptr — дефайн без значения (под #ifdef).
-// Строки НЕ копируются: они должны пережить вызов Create*Shader (на практике — литералы).
+// Пустое value — дефайн без значения (компилятор считает его равным 1).
+// Строки ВЛАДЕЮЩИЕ: набор переживает вызов, потому что он часть рецепта пересборки шейдера —
+// лежит в *ShaderData рядом с source_path, едет в shaders.json и в команды редактора.
 // Имя и значение входят в ключ кэша .spv (ShaderManager::LoadOrCompileSPIRV) — без этого два
 // варианта одного .hlsl делили бы один файл кэша, и второй молча получил бы чужой байткод.
+// vector, а не initializer_list: список строится в РАНТАЙМЕ (загрузка сцены, форма редактора),
+// а фигурные скобки на вызове он принимает так же.
 struct ShaderDefine {
-    const char* name;
-    const char* value = nullptr;
+    std::string name;
+    std::string value;
 };
-using ShaderDefines = std::initializer_list<ShaderDefine>;
+using ShaderDefines = std::vector<ShaderDefine>;
 
 struct PushConstantBinder {
     SDL_GPUCommandBuffer* cb;

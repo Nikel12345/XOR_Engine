@@ -50,12 +50,18 @@ struct VertexShaderData {
     // читает готовое поле и потому не зависит от ModelManager, где живёт реестр пулов.
     std::string    pool_name;
     BufferDataName index_buffer = nullptr;
+    // Дефайны компиляции — часть того же рецепта, что source_path/bindings/pool_name:
+    // без них перекомпиляция из редактора или загрузка сцены собрала бы ДРУГОЙ шейдер
+    // (сработали бы дефолты #ifndef), молча и без ошибки. Порядок канонизирован сортировкой
+    // по имени в Create*Shader — от него зависит ключ кэша .spv.
+    std::vector<ShaderDefine> defines;
     bool dont_save = false;   // движковый дефолт (_fallback_vs) — в shaders.json не пишется
 };
 
 struct FragmentShaderData {
     ShaderBase::ShaderData shader_data;
     std::string source_path;   // исходник fs (для перекомпиляции из редактора; см. VertexShaderData)
+    std::vector<ShaderDefine> defines;   // см. VertexShaderData::defines
     bool dont_save = false;    // см. VertexShaderData::dont_save
 };
 
@@ -63,6 +69,7 @@ struct ComputeShaderData {
 	Uint8* spv_code = nullptr;
 	size_t spv_size = 0;
     std::string source_path;   // исходник cs (для перекомпиляции/сериализации; см. VertexShaderData)
+    std::vector<ShaderDefine> defines;   // см. VertexShaderData::defines
     Uint32 threadcount_x = 1;
     Uint32 threadcount_y = 1;
     Uint32 threadcount_z = 1;

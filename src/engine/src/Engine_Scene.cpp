@@ -109,6 +109,30 @@ static bool RoleFromStr(const char* s, TextureSlotRole& out) {
 
 // spd ↔ json-объект. spd-подэнумы (cull/fill/primitive) — числа (SDL_GPU*-энумы, стабильны и
 // малоинформативны строкой); тумблеры/биас — bool/real.
+// Дефайны компиляции шейдера — объектом NAME: VALUE. Объект, а не массив пар: имя тут ключ
+// (повтор бессмысленен), и читается такой манифест глазами лучше. Пустая строка = дефайн без
+// значения. Пустой набор поле не пишет — старые сцены и большинство шейдеров без дефайнов.
+static void WriteDefines(yyjson_mut_doc* doc, yyjson_mut_val* obj, const std::vector<ShaderDefine>& defs) {
+	if (defs.empty()) return;
+	yyjson_mut_val* d = yyjson_mut_obj_add_obj(doc, obj, "defines");
+	for (const ShaderDefine& def : defs)
+		yyjson_mut_obj_add_strcpy(doc, d, def.name.c_str(), def.value.c_str());
+}
+
+// Порядок чтения не важен: Create*Shader канонизирует набор сортировкой (NormalizeDefines).
+static std::vector<ShaderDefine> ReadDefines(yyjson_val* obj) {
+	std::vector<ShaderDefine> out;
+	yyjson_val* d = yyjson_obj_get(obj, "defines");
+	if (!d || !yyjson_is_obj(d)) return out;
+	yyjson_obj_iter it; yyjson_obj_iter_init(d, &it);
+	while (yyjson_val* k = yyjson_obj_iter_next(&it)) {
+		const char* kn = yyjson_get_str(k);
+		const char* vv = yyjson_get_str(yyjson_obj_iter_get_val(k));
+		if (kn) out.push_back({ kn, vv ? vv : "" });
+	}
+	return out;
+}
+
 static void WriteSpd(yyjson_mut_doc* doc, yyjson_mut_val* obj, const ShaderProgramDescription& d) {
 	yyjson_mut_obj_add_int (doc, obj, "cull_mode",      (int)d.cull_mode);
 	yyjson_mut_obj_add_int (doc, obj, "fill_mode",      (int)d.fill_mode);
@@ -311,6 +335,7 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 			for (const auto& b : d.bindings)
 				for (VertexSemantic s : b.pull)
 					yyjson_mut_arr_add_str(doc, pull, SemToStr(s));
+			WriteDefines(doc, e, d.defines);
 		}
 		// -- FSD / CSD: имя + путь --
 		yyjson_mut_val* fsa = yyjson_mut_obj_add_arr(doc, root, "fragment_shaders");
@@ -319,6 +344,7 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 			yyjson_mut_val* e = yyjson_mut_arr_add_obj(doc, fsa);
 			yyjson_mut_obj_add_strcpy(doc, e, "name", name.c_str());
 			yyjson_mut_obj_add_strcpy(doc, e, "path", d.source_path.c_str());
+			WriteDefines(doc, e, d.defines);
 		}
 		yyjson_mut_val* csa = yyjson_mut_obj_add_arr(doc, root, "compute_shaders");
 		for (auto& [name, d] : sm->GetComputeShaders()) {
@@ -326,6 +352,7 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 			yyjson_mut_val* e = yyjson_mut_arr_add_obj(doc, csa);
 			yyjson_mut_obj_add_strcpy(doc, e, "name", name.c_str());
 			yyjson_mut_obj_add_strcpy(doc, e, "path", d.source_path.c_str());
+			WriteDefines(doc, e, d.defines);
 		}
 		// -- SP: сгруппированы ПО ТИПУ (как SD): render_shader_programs / compute_shader_programs,
 		//    без поля "kind" внутри записи. Compute — заготовка (пустой массив): compute-sp держит
@@ -552,7 +579,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 					// (нет поля "pool" → дефолтный). Резолв семантик в стримы и порядок слотов —
 					// дело пула: shadow_vs [POSITION] получит один Pos-стрим, 12 байт/вершину.
 					sm->CreateVertexShader(name, path.c_str(), model_manager->GetPool(JsonStr(e, "pool")),
-						pull, buffer_manager);
+						pull, buffer_manager, ReadDefines(e));
 					invalidate_vs(name);
 				}
 			}
@@ -560,7 +587,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 				yyjson_arr_foreach(arr, idx, max, e) {
 					const std::string name = JsonStr(e, "name"), path = JsonStr(e, "path");
 					if (name.empty() || path.empty()) continue;
-					sm->CreateFragmentShader(name, path.c_str());
+					sm->CreateFragmentShader(name, path.c_str(), ReadDefines(e));
 					invalidate_fs(name);
 				}
 			}
@@ -568,7 +595,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 				yyjson_arr_foreach(arr, idx, max, e) {
 					const std::string name = JsonStr(e, "name"), path = JsonStr(e, "path");
 					if (name.empty() || path.empty()) continue;
-					sm->CreateComputeShader(name, path.c_str());
+					sm->CreateComputeShader(name, path.c_str(), ReadDefines(e));
 					// compute-пайплайны/батчи пересоберём флагами ниже (программы держат имя cs)
 				}
 			}

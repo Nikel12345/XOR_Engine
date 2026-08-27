@@ -20,6 +20,23 @@ static inline void FnvMix(uint64_t& hash, const uint8_t* data, size_t size) {
     for (size_t i = 0; i < size; ++i) { hash ^= data[i]; hash *= 1099511628211ULL; }
 }
 
+// Канонизация набора дефайнов: сортировка по имени + отсев безымянных. Порядок задаёт КЛЮЧ
+// КЭША, поэтому канон обязателен — иначе перестановка двух дефайнов на вызове (или порядок
+// полей в shaders.json) давала бы другой .spv-файл при том же результате компиляции. Дубли
+// имён не схлопываем: препроцессор сам возьмёт последний, а лишний .spv — не ошибка.
+static std::vector<ShaderDefine> NormalizeDefines(const ShaderDefines& in)
+{
+    std::vector<ShaderDefine> out;
+    out.reserve(in.size());
+    for (const ShaderDefine& d : in) {
+        if (d.name.empty()) { SDL_Log("ShaderManager: define with empty name - skipped"); continue; }
+        out.push_back(d);
+    }
+    std::sort(out.begin(), out.end(),
+        [](const ShaderDefine& a, const ShaderDefine& b) { return a.name < b.name; });
+    return out;
+}
+
 // Рекурсивно домешивает в hash содержимое файла и всех его #include "..." . Инклуды движка
 // пишутся root-relative и резолвятся от include_dir (как делает сам SDL_ShaderCross при
 // компиляции). visited защищает от циклов (наш сканер не видит include-guard'ы) и от
@@ -99,7 +116,7 @@ void ShaderManager::ReadVertexAttributes(
 Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     SDL_ShaderCross_ShaderStage stage,
     size_t& out_size,
-    ShaderDefines defines)
+    const ShaderDefines& defines)
 {
     size_t src_size = 0;
     char* src = (char*)SDL_LoadFile(hlsl_path, &src_size);
@@ -123,12 +140,12 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     // Дефайны — часть исходника с точки зрения компилятора, значит и часть ключа кэша: без них
     // два варианта одного .hlsl (MAX_LIGHTS=4 и =8) дали бы ОДНО имя файла кэша, и второй молча
     // получил бы чужой байткод. Разделители обязательны — иначе {"AB",""} и {"A","B"} дают один
-    // поток байт. Порядок дефайнов на компиляцию не влияет, а на хэш влияет: цена перестановки —
-    // лишняя перекомпиляция, а не ошибка.
+    // поток байт. Набор приходит УЖЕ канонизированным (NormalizeDefines), поэтому перестановка
+    // на вызове хэш не меняет.
     for (const ShaderDefine& d : defines) {
-        if (d.name) FnvMix(hash, (const uint8_t*)d.name, SDL_strlen(d.name));
+        FnvMix(hash, (const uint8_t*)d.name.data(), d.name.size());
         FnvMix(hash, (const uint8_t*)"=", 1);
-        if (d.value) FnvMix(hash, (const uint8_t*)d.value, SDL_strlen(d.value));
+        FnvMix(hash, (const uint8_t*)d.value.data(), d.value.size());
         FnvMix(hash, (const uint8_t*)"\n", 1);
     }
 
@@ -187,11 +204,14 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     hlsl_info.include_dir = include_dir;
     // API требует массив, ЗАВЕРШЁННЫЙ полностью нулевой записью (SDL_shadercross.h:129).
     // const_cast — поля структуры объявлены char*, хотя shadercross их только читает.
+    // Пустое значение отдаём как NULL, а не как "": это разные вещи для компилятора
+    // (-D NAME даёт 1, -D NAME= даёт пустую подстановку).
     std::vector<SDL_ShaderCross_HLSL_Define> hlsl_defines;
-    if (defines.size()) {
+    if (!defines.empty()) {
         hlsl_defines.reserve(defines.size() + 1);
         for (const ShaderDefine& d : defines)
-            hlsl_defines.push_back({ const_cast<char*>(d.name), const_cast<char*>(d.value) });
+            hlsl_defines.push_back({ const_cast<char*>(d.name.c_str()),
+                                     d.value.empty() ? nullptr : const_cast<char*>(d.value.c_str()) });
         hlsl_defines.push_back({ nullptr, nullptr });
     }
     hlsl_info.defines = hlsl_defines.empty() ? nullptr : hlsl_defines.data();
@@ -220,7 +240,7 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
 
 void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl_path,
     const GeometryPool* pool, const std::vector<VertexSemantic>& pull, BufferManager* bm,
-    ShaderDefines defines)
+    const ShaderDefines& defines)
 {
     if (!pool) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -252,11 +272,16 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
         canonical_names.push_back(stream->buffer_name);   // строка живёт в пуле — ключ реестра валиден
     }
 
+    // Компилируем ТЕМ ЖЕ набором, что ляжет в рецепт: иначе ключ кэша и сохранённый шейдер
+    // разошлись бы, и следующая загрузка сцены собрала бы другой .spv.
+    std::vector<ShaderDefine> norm = NormalizeDefines(defines);
+
     size_t n = 0;
-    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_VERTEX, n, defines);
+    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_VERTEX, n, norm);
     if (!spv) return;
     VertexShaderData vs = BuildVertexShader(spv, n, hlsl_path, bindings);   // в реестр по имени
     SDL_free(spv);
+    vs.defines = std::move(norm);
 
     vs.vertex_buffer_names = std::move(canonical_names);
     vs.pool_name = pool->Name();
@@ -276,24 +301,30 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
     vertex_shaders[name] = std::move(vs);
 }
 
-void ShaderManager::CreateFragmentShader(const std::string& name, const char* hlsl_path, ShaderDefines defines)
+void ShaderManager::CreateFragmentShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines)
 {
+    std::vector<ShaderDefine> norm = NormalizeDefines(defines);   // см. CreateVertexShader
     size_t n = 0;
-    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT, n, defines);
+    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT, n, norm);
     if (!spv) return;
-    fragment_shaders[name] = BuildFragmentShader(spv, n, hlsl_path);   // в реестр по имени
+    FragmentShaderData fs = BuildFragmentShader(spv, n, hlsl_path);
     SDL_free(spv);
+    fs.defines = std::move(norm);
+    fragment_shaders[name] = std::move(fs);   // в реестр по имени
 }
 
-void ShaderManager::CreateComputeShader(const std::string& name, const char* hlsl_path, ShaderDefines defines)
+void ShaderManager::CreateComputeShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines)
 {
+    std::vector<ShaderDefine> norm = NormalizeDefines(defines);   // см. CreateVertexShader
     size_t n = 0;
-    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_COMPUTE, n, defines);
+    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_COMPUTE, n, norm);
     if (!spv) return;
     // Реестр владеет сырым spv_code — при перезаписи имени старый освобождаем (иначе течёт).
     auto it = compute_shaders.find(name);
     if (it != compute_shaders.end() && it->second.spv_code) SDL_free(it->second.spv_code);
-    compute_shaders[name] = BuildComputeShader(spv, n, hlsl_path);   // владение spv уходит в реестр
+    ComputeShaderData cs = BuildComputeShader(spv, n, hlsl_path);   // владение spv уходит в реестр
+    cs.defines = std::move(norm);
+    compute_shaders[name] = std::move(cs);
 }
 
 std::shared_ptr<SDL_GPUShader> ShaderManager::LookupGpuShader(uint64_t key) const

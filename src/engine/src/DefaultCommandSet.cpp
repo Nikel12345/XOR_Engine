@@ -421,7 +421,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 				if (!c->oldName.empty() && c->oldName != c->name) sm->DeleteVertexShader(c->oldName);
 				// UI говорит пулом + семантиками — тем же языком, что манифест; стримы резолвит пул.
 				sm->CreateVertexShader(c->name, c->path.c_str(), ctx->GetModelManager()->GetPool(c->pool),
-					c->pull, ctx->GetBufferManager());
+					c->pull, ctx->GetBufferManager(), c->defines);
 				for (auto& [sn, spp] : sm->GetShaderPrograms())   // пересобрать пайплайны sp на этом vs
 					if (spp->vs_name == c->name || spp->vs_name == c->oldName)
 						ctx->GetPipeManager()->InvalidatePipeline(spp.get(), ctx->GetBatchBuilder()->RebuildEpoch());
@@ -438,7 +438,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
 				if (!c->oldName.empty() && c->oldName != c->name) sm->DeleteFragmentShader(c->oldName);
-				sm->CreateFragmentShader(c->name, c->path.c_str());
+				sm->CreateFragmentShader(c->name, c->path.c_str(), c->defines);
 				for (auto& [sn, spp] : sm->GetShaderPrograms())
 					if (spp->fs_name == c->name || spp->fs_name == c->oldName)
 						ctx->GetPipeManager()->InvalidatePipeline(spp.get(), ctx->GetBatchBuilder()->RebuildEpoch());
@@ -455,7 +455,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
 				if (!c->oldName.empty() && c->oldName != c->name) sm->DeleteComputeShader(c->oldName);
-				sm->CreateComputeShader(c->name, c->path.c_str());
+				sm->CreateComputeShader(c->name, c->path.c_str(), c->defines);
 				for (auto& slot : sm->GetComputeShaderPrograms())
 					if (slot.program && (slot.program->cs_name == c->name || slot.program->cs_name == c->oldName))
 						ctx->GetPipeManager()->InvalidateComputePipeline(slot.program.get(), ctx->GetBatchBuilder()->ComputeRebuildEpoch());

@@ -905,16 +905,55 @@ namespace {
 
     static const SDL_DialogFileFilter kHlslFilters[] = { { "HLSL", "hlsl" }, { "All files", "*" } };
 
+    // Дефайны компиляции правятся ОДНОЙ строкой "NAME=VALUE NAME2" через пробел: набор редкий и
+    // короткий, а построчный редактор потребовал бы char-буфер на строку (ImGui пишет в char[]).
+    // Пробелов внутри препроцессорной константы не бывает, поэтому разбор по пробелу безопасен.
+    std::string DefinesToStr(const std::vector<ShaderDefine>& defs)
+    {
+        std::string s;
+        for (const ShaderDefine& d : defs) {
+            if (!s.empty()) s += ' ';
+            s += d.name;
+            if (!d.value.empty()) { s += '='; s += d.value; }
+        }
+        return s;
+    }
+
+    ShaderDefines DefinesFromStr(const char* s)
+    {
+        ShaderDefines out;
+        for (const char* p = s; *p; ) {
+            while (*p == ' ' || *p == '	') ++p;
+            const char* b = p;
+            while (*p && *p != ' ' && *p != '	') ++p;
+            if (p == b) continue;
+            const std::string tok(b, p - b);
+            const size_t eq = tok.find('=');
+            if (eq == std::string::npos) out.push_back({ tok, {} });   // без значения = 1
+            else                         out.push_back({ tok.substr(0, eq), tok.substr(eq + 1) });
+        }
+        return out;
+    }
+
+    // Поле дефайнов для всех трёх форм SD.
+    void DefinesField(char* buf, size_t n)
+    {
+        ImGui::InputText("Defines", buf, n);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("NAME=VALUE, space separated. Without =VALUE the define equals 1.");
+    }
+
     // Форма фрагментного шейдера (create/edit = Upsert по имени, как текстура/модель).
     void FsdEditor(EngineContext* ctx)
     {
-        static char nameBuf[128] = "", pathBuf[512] = "";
+        static char nameBuf[128] = "", pathBuf[512] = "", defsBuf[512] = "";
         static std::string syncedFor = "\x01";
         if (g_sel.name != syncedFor) {
             syncedFor = g_sel.name;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
             FragmentShaderData* d = ctx->GetShaderManager()->GetFragmentShader(g_sel.name);
             std::snprintf(pathBuf, sizeof pathBuf, "%s", d ? d->source_path.c_str() : "");
+            std::snprintf(defsBuf, sizeof defsBuf, "%s", d ? DefinesToStr(d->defines).c_str() : "");
         }
         TakePickedPath(PickTarget::ShaderFrag, pathBuf, sizeof pathBuf);
 
@@ -923,12 +962,13 @@ namespace {
         ImGui::InputText("Path", pathBuf, sizeof pathBuf);
         ImGui::SameLine();
         if (ImGui::Button("Browse...##fsd")) OpenFileDialog(PickTarget::ShaderFrag, kHlslFilters, 2);
+        DefinesField(defsBuf, sizeof defsBuf);
 
         const bool ready = nameBuf[0] && pathBuf[0];
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
             ctx->GetInputManager()->PushCommand(CommandId::UpsertFragmentShader,
-                new UpsertFragmentShaderCmd{ nameBuf, pathBuf, g_sel.name });
+                new UpsertFragmentShaderCmd{ nameBuf, pathBuf, g_sel.name, DefinesFromStr(defsBuf) });
             g_sel = Selection{}; g_sel.kind = SelKind::Fsd; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
@@ -948,13 +988,14 @@ namespace {
     // Форма compute-шейдера (аналогично FSD; source_path у CSD не храним).
     void CsdEditor(EngineContext* ctx)
     {
-        static char nameBuf[128] = "", pathBuf[512] = "";
+        static char nameBuf[128] = "", pathBuf[512] = "", defsBuf[512] = "";
         static std::string syncedFor = "\x01";
         if (g_sel.name != syncedFor) {
             syncedFor = g_sel.name;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
             ComputeShaderData* d = ctx->GetShaderManager()->GetComputeShader(g_sel.name);   // путь теперь хранится (см. CSD)
             std::snprintf(pathBuf, sizeof pathBuf, "%s", d ? d->source_path.c_str() : "");
+            std::snprintf(defsBuf, sizeof defsBuf, "%s", d ? DefinesToStr(d->defines).c_str() : "");
         }
         TakePickedPath(PickTarget::ShaderComp, pathBuf, sizeof pathBuf);
 
@@ -963,12 +1004,13 @@ namespace {
         ImGui::InputText("Path", pathBuf, sizeof pathBuf);
         ImGui::SameLine();
         if (ImGui::Button("Browse...##csd")) OpenFileDialog(PickTarget::ShaderComp, kHlslFilters, 2);
+        DefinesField(defsBuf, sizeof defsBuf);
 
         const bool ready = nameBuf[0] && pathBuf[0];
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
             ctx->GetInputManager()->PushCommand(CommandId::UpsertComputeShader,
-                new UpsertComputeShaderCmd{ nameBuf, pathBuf, g_sel.name });
+                new UpsertComputeShaderCmd{ nameBuf, pathBuf, g_sel.name, DefinesFromStr(defsBuf) });
             g_sel = Selection{}; g_sel.kind = SelKind::Csd; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
@@ -989,7 +1031,7 @@ namespace {
     // предлагает сам пул — фиксированной четвёрки POSITION/UV/NORMAL/TANGENT больше нет.
     void VsdEditor(EngineContext* ctx)
     {
-        static char nameBuf[128] = "", pathBuf[512] = "";
+        static char nameBuf[128] = "", pathBuf[512] = "", defsBuf[512] = "";
         static std::vector<VertexSemantic> pull;
         static std::string poolSel;
         static std::string syncedFor = "\x01";
@@ -998,6 +1040,7 @@ namespace {
             std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
             VertexShaderData* d = ctx->GetShaderManager()->GetVertexShader(g_sel.name);
             std::snprintf(pathBuf, sizeof pathBuf, "%s", d ? d->source_path.c_str() : "");
+            std::snprintf(defsBuf, sizeof defsBuf, "%s", d ? DefinesToStr(d->defines).c_str() : "");
             poolSel = d ? d->pool_name : std::string();
             pull.clear();
             // Все слоты (со стримами пула биндингов несколько — Pos/UV/NormTan): pull формы =
@@ -1013,6 +1056,7 @@ namespace {
         ImGui::InputText("Path", pathBuf, sizeof pathBuf);
         ImGui::SameLine();
         if (ImGui::Button("Browse...##vsd")) OpenFileDialog(PickTarget::ShaderVert, kHlslFilters, 2);
+        DefinesField(defsBuf, sizeof defsBuf);
 
         // Пул выбирается ЯВНО: он задаёт и набор доступных семантик, и порядок слотов. У новой
         // формы — дефолтный, чтобы обычный случай был на клик короче.
@@ -1066,7 +1110,7 @@ namespace {
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
             ctx->GetInputManager()->PushCommand(CommandId::UpsertVertexShader,
-                new UpsertVertexShaderCmd{ nameBuf, pathBuf, g_sel.name, poolSel, pull });
+                new UpsertVertexShaderCmd{ nameBuf, pathBuf, g_sel.name, poolSel, pull, DefinesFromStr(defsBuf) });
             g_sel = Selection{}; g_sel.kind = SelKind::Vsd; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
