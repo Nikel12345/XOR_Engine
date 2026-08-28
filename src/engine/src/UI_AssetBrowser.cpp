@@ -74,8 +74,8 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
             if (mit == ctx->GetMaterialManager()->GetMaterials().end() || !mit->second) return pv;
             const Material* m = mit->second.get();
             auto tit = m->textures.find(TextureSlotRole::Albedo);
-            if (tit == m->textures.end()) return pv;                // безальбедный → затычка
-            pv = texture_preview(tit->second);
+            if (tit == m->textures.end() || tit->second.empty()) return pv;   // безальбедный → затычка
+            pv = texture_preview(tit->second[0]);                   // дефолт слота: варианты плитка не показывает
             if (pv.tex) {                                           // настоящий albedo → тинт цветом материала
                 // Тинт берём из ПЕРВОГО цветового поля схемы типа params (у Opaque это baseColor,
                 // у типа из кода игры — его собственный цвет). Нет цветовых полей / тип не

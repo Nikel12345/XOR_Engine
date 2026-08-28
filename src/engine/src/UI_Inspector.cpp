@@ -218,8 +218,11 @@ namespace {
             // Слоты этого sp; значение — из общей карты по роли (правка отражается во всех sp с этой ролью).
             if (sp)
                 for (TextureSlotRole role : sp->required_slots) {
+                    // Показывается ДЕФОЛТ слота (вариант 0); список вариантов редактор пока не
+                    // правит — это блок 9 плана (форма с +/x вместо комбобокса).
                     auto it = mat->textures.find(role);
-                    const std::string current = (it != mat->textures.end()) ? it->second : std::string();
+                    const std::string current = (it != mat->textures.end() && !it->second.empty())
+                        ? it->second[0] : std::string();
                     ImGui::PushID(static_cast<int>(role));
                     if (ImGui::BeginCombo(RoleName(role), current.c_str())) {   // RoleName: enum слота → строка
                         for (const std::string& tn : texNames) {

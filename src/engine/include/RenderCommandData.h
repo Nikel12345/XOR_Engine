@@ -37,6 +37,23 @@ inline UVL_Block MakeUVL(const TextureData& td) {
     return { td.uv_packed_offset, td.uv_packed_scale, td.layer };
 }
 
+// Как адресовать таблицу texture_uvl: по слову на текстурный слот шейдера + номер материала.
+// Пушится fragment-uniform'ом рядом с самой таблицей, поэтому ЦЕЛИКОМ входит в ключ
+// texture-батча (после 3e47d7b ключ не содержит идентичности материала — разные материалы
+// схлопываются в один узел и получили бы чужой пуш).
+struct VariantLayout {
+    // (base << 16) | (cell << 8) | count на слот:
+    //   base  — индекс ПЕРВОГО блока слота в texture_uvl (таблица сгруппирована по слотам,
+    //           внутри группы [0] — дефолт). Индекс блока слота s НЕ равен s — только через base;
+    //   cell  — ячейка секции состояний под этот слот (осмысленна только при count > 1);
+    //   count — сколько у слота вариантов (1 = слот невариативен, состояние не читается).
+    // Порядок слотов = ShaderProgram::required_slots — тот же, по которому собран texture_uvl.
+    uint32_t slot[MAX_SLOTS] = {};
+    // Каким по счёту этот материал идёт у сущности (= submesh.material_index): смещение секции
+    // в элементе считается как material_index * MAX_VARIATIVE_SLOTS.
+    uint32_t material_index = 0;
+};
+
 struct TextureBatchData {
     std::unordered_map<BatchKeys::ModelBatchKey, ModelBatchData> model_batches;
 	// UVL хранится ЗНАЧЕНИЯМИ (не указателями): непрерывный блок → прямой пуш в Execute
@@ -45,8 +62,31 @@ struct TextureBatchData {
 	// триггерить BuildRenderBatches. Добавление/удаление текстур этого не нарушают: чужие
 	// UVL не двигаются, а батч удаляемой текстуры и так пересобирается.
 	std::vector<UVL_Block> texture_uvl;
+    VariantLayout variant_layout;   // как адресовать texture_uvl (см. выше)
     uint32_t indirect_command_index = 0;
     const std::vector<uint8_t>* params = nullptr;   // → &Material::params (невладеющий; адрес стабилен; alpha и пр. факторы внутри)
+};
+
+// ПЕР-МАТЕРИАЛЬНАЯ половина texture/atlas-батча: всё, что батч берёт из пары (материал, sp) и
+// что от сущности не зависит ВОВСЕ. Считается предпроходом BatchBuilder::BuildMaterialLayouts —
+// один раз на пару вместо четырёх обходов required_slots с резолвом имён НА КАЖДУЮ сущность.
+// От сущности зависит ровно одно — material_index, и он домешивается в ключ на месте.
+struct MatSpLayout {
+    std::vector<UVL_Block>                    uvl;              // таблица целиком (слоты подряд, внутри слота дефолт первым)
+    std::vector<SDL_GPUTextureSamplerBinding> texture_binding;  // атласы слотов, порядок = required_slots
+    uint32_t                slot[MAX_SLOTS] = {};               // слова VariantLayout::slot
+    BatchKeys::MatSpKey     res_key = 0;                        // ресурсный вклад в ключ texture-батча
+    BatchKeys::AtlasBatchKey atlas_key = 0;                     // от material_index не зависит — берётся как есть
+    // false = слот не собрать (нет текстуры и нет dummy) → sp у этого материала не рисуется.
+    // Логируется ЗДЕСЬ, один раз на материал, а не миллион раз на сущностях.
+    bool                    bindable = false;
+    // Есть ли у ЭТОЙ sp хоть один слот с вариантами (count > 1). Если нет — гард count > 1 в
+    // шейдере не пускает ни одно чтение состояния, значит material_index в этом узле не читается
+    // ВООБЩЕ, и вносить его в ключ незачем. Разница не косметическая: без этого гейта узел, в
+    // котором все материалы схлопнулись (ShadowCaster — ни params, ни различий по текстурам),
+    // дробился бы по номеру сабмеша, и теневой проход давал бы 6 draw'ов вместо одного.
+    // Сцена без вариантов при этом остаётся байт-в-байт прежним деревом.
+    bool                    variative = false;
 };
 
 struct AtlasBatchData {

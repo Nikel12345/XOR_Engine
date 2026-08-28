@@ -253,11 +253,11 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
             auto mit = models.find((*mdl_arr)[row].name);
             if (mit != models.end()) sub_count = mit->second->submeshes.size();
         }
-        if (mats.names.size() != sub_count) mats.names.resize(sub_count);
+        if (mats.materials.size() != sub_count) mats.materials.resize(sub_count);
     }
 
-    for (size_t k = 0; k < mats.names.size(); ++k) {
-        const std::string sel = mats.names[k];   // копия: правка живой энтити идёт командой
+    for (size_t k = 0; k < mats.materials.size(); ++k) {
+        const std::string sel = mats.materials[k].name;   // копия: правка живой энтити идёт командой
         char label[32];
         snprintf(label, sizeof(label), "submesh %zu", k);
 
@@ -269,7 +269,7 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
                 t.ctx->GetInputManager()->PushCommand(CommandId::SetEntityMaterial,
                     new FieldEditCmd{ t.entity, "Material", "names", (double)k, nm });
             else
-                mats.names[k] = nm;
+                mats.materials[k] = MaterialRef{ nm, {} };   // черновик: смена материала сбрасывает состояния (как в SetEntityMaterial)
         }
         ImGui::EndCombo();
     }

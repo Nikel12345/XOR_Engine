@@ -70,8 +70,8 @@ namespace {
                     else if (f.get_str && f.set_str) f.set_str(*na, nrow, f.get_str(*oa, orow));
                 }
                 if (s->name == "Material")   // custom-компонент: схемных полей нет, тип известен UI
-                    (*na->get_array<MaterialComponent>())[nrow].names =
-                        (*oa->get_array<MaterialComponent>())[orow].names;
+                    (*na->get_array<MaterialComponent>())[nrow].materials =
+                        (*oa->get_array<MaterialComponent>())[orow].materials;
             }
             om->DeleteEntity(stg, old_e);
         }

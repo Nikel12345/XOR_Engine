@@ -18,7 +18,8 @@ struct SceneShaderEntry {
 };
 struct SceneMaterialEntry {
 	std::string name;
-	std::vector<std::pair<TextureSlotRole, TextureName>> textures;
+	// Слот = СПИСОК имён ([0] — дефолт, дальше варианты), как в Material::textures.
+	std::vector<std::pair<TextureSlotRole, std::vector<TextureName>>> textures;
 	std::vector<SceneShaderEntry> shaders;
 };
 
@@ -28,14 +29,17 @@ public:
 	// Материал хранит ссылки ПО ИМЕНИ (текстуры по роли, sp). Резолв и валидация required_slots —
 	// у вызывающего (EngineContext::CreateMaterial): сюда приходят уже готовые имена, менеджер их
 	// просто складывает. Пустой/несуществующий на данный момент — допустим (резолвится на сборке батча).
-	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, TextureName>> textures, std::vector<ShaderName> shaders);
+	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::vector<ShaderName> shaders);
 
 	// Merge-upsert материалов из манифеста (см. SceneMaterialEntry). Существующий обновляется
 	// В МЕСТЕ, новый создаётся. params/params_type проставляются напрямую. Материалы вне
 	// манифеста не трогаются. Возвращает число обработанных.
 	size_t LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries);
 
-	// Сбор usage-флагов. Слот материала — это ФРАГМЕНТНЫЙ СЭМПЛЕР по определению (TextureSlotRole →
+	// Сбор usage-флагов. Обходит ВСЕ варианты слота, а не только дефолт: пропущенный вариант
+	// сломается не здесь, а на первом кадре, где его включили (атлас уже создан без SAMPLER —
+	// см. WARNINGS.md про поздний usage-флаг).
+	// Слот материала — это ФРАГМЕНТНЫЙ СЭМПЛЕР по определению (TextureSlotRole →
 	// SDL_BindGPUFragmentSamplers, см. ShaderTypes.h), поэтому атлас каждой текстуры материала
 	// обязан иметь SAMPLER. Резолв имени в атлас — через TextureManager, переданный НА ВЫЗОВЕ
 	// (менеджер не хранит указателей на другие менеджеры; связку держит EngineContext).
@@ -55,7 +59,7 @@ public:
 
 	// Переименование = ре-кей узла словаря (сам Material сохраняется; путь «delete+create» на уровне
 	// ключа). false, если имена совпали / новое занято / старого нет. Ссылки по СТАРОМУ имени
-	// (MaterialComponent.names) после этого не резолвятся — переименовывай до назначения материала.
+	// (MaterialComponent::materials) после этого не резолвятся — переименовывай до назначения материала.
 	bool RenameMaterial(const std::string& oldName, const std::string& newName) {
 		if (oldName == newName || materials.count(newName)) return false;
 		auto node = materials.extract(oldName);

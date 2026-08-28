@@ -267,14 +267,14 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
                 e = ctx->CreateEntity(scene_name,
                         DrawComponent{ true, 1.0f, 0 },
                         ModelComponent{ r.quad },
-                        MaterialComponent{ { r.material } },
+                        MaterialComponent{ { MaterialRef{ r.material } } },
                         m, UIComponent{}, GeneratedComponent{},
                         UITextComponent{ r.glyphs, r.font });
             else
                 e = ctx->CreateEntity(scene_name,
                         DrawComponent{ true, 1.0f, 0 },
                         ModelComponent{ r.quad },
-                        MaterialComponent{ { r.material } },
+                        MaterialComponent{ { MaterialRef{ r.material } } },
                         m, UIComponent{}, GeneratedComponent{});
             r.entity = e;  r.has_entity = true;
             impl->created.push_back(e);

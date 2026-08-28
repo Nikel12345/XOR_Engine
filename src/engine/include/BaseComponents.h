@@ -171,10 +171,31 @@ struct ModelComponent {
     std::string name;
 };
 
+// Роль текстурного слота объявлена НЕПРОЗРАЧНО, а не через ShaderTypes.h: scoped enum и без
+// определения — полный тип (подлежащий int), а тянуть сюда ShaderTypes.h нельзя — он приводит
+// за собой glm и SDL_gpu, которых у EngineEcs нет в PUBLIC (эту цель линкует и модуль физики).
+// ECS хранит номер роли как непрозрачный тег: сравнивать и сохранять его умеет, разыменовывать
+// в конкретный слот — дело потребителя (BatchBuilder, инспектор).
+enum class TextureSlotRole;
+
+// Ссылка сущности на материал + ЕЁ СОБСТВЕННОЕ состояние вариантов. Имя — как было (name-based
+// ссылка, резолв на сборке батча). Ячейка, а не две параллельные коллекции, — тот же приём, что
+// SpBinding в MaterialData.h: у списка и данных один владелец, разъехаться им негде.
+//
+// states РАЗРЕЖЕННЫЕ и ПО РОЛИ, а не по номеру ячейки: номер зависит от набора вариативных ролей
+// материала и сдвигается при его правке, роль — нет. Пусто = все слоты показывают дефолт.
+// Состояние живёт ЗДЕСЬ, а не в материале: материал у объектов общий, а выбор — per-object
+// (два куба с одним материалом показывают разные варианты и остаются в одном инстанс-батче).
+// Имя MaterialData занято (MaterialData.h → struct Material), отсюда MaterialRef.
+struct MaterialRef {
+    std::string                                       name;
+    std::vector<std::pair<TextureSlotRole, uint32_t>> states;   // роль -> номер варианта
+};
+
 // Порядок расположения материалов должен соответствовать порядку сабмешей в модели, поскольку индекс материала в сабмеше используется для доступа к материалу
 // Order of materials must correspond to the order of submeshes in the model, as the material index in the submesh is used to access the material
 struct MaterialComponent {
-    std::vector<std::string> names;
+    std::vector<MaterialRef> materials;
 };
 
 enum class LightTypes {   // scoped: SPOT/SPHERE/DIRECT слишком общие для глобала

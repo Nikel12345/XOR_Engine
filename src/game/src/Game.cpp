@@ -85,7 +85,7 @@ SDL_AppResult Game::MainInit()
 	// (InitDefaultShaders) — к MainInit она уже есть.
 	{
 		Material* ui_mat = ctx->CreateMaterial("ui_mat",
-			{ { TextureSlotRole::Albedo, "default_albedo" } }, { "UI" }, /*dont_save=*/true);
+			{ { TextureSlotRole::Albedo, { "default_albedo" } } }, { "UI" }, /*dont_save=*/true);
 		// Посадку/размер теперь считает Yoga (rect узла), поэтому text_height/anchor нейтральны
 		// (1,0) — шейдер просто заливает узел текстом. Цвета: тёмный фон + золотой текст.
 		ctx->SetMaterialParams(ui_mat, "UI", UIMaterialParams{ { 0.10f, 0.10f, 0.15f, 1.0f }, { 1.0f, 0.85f, 0.2f, 1.0f }, 1.0f, 0.0f });
@@ -308,7 +308,7 @@ void Game::CreateDebugColliders()
         LocalMatrixProxy16 lm{};   // SoA-локаль: в CreateEntity едет как прокси (как PositionProxy16)
         for (int i = 0; i < 16; ++i) lm.m[i] = s.local[i];
         ctx->CreateEntity("main_menu",
-            MaterialComponent{ { "debug_collider" } },
+            MaterialComponent{ { MaterialRef{ "debug_collider" } } },
             ModelComponent{ model_name },
             PositionProxy16{},          // перезапишется композицией parent × local
             ParentComponent{ s.owner },

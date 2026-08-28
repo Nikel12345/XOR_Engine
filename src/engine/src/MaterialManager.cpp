@@ -7,7 +7,7 @@ MaterialManager::MaterialManager()
 {
 }
 
-Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, TextureName>> textures, std::vector<ShaderName> shaders)
+Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::vector<ShaderName> shaders)
 {
 	auto it = materials.find(name);
 	if (it != materials.end()) {
@@ -21,8 +21,8 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 	// Ячейка на каждую sp; данных у неё пока нет (их кладёт SetMaterialParams по имени sp).
 	data->shader_programs.reserve(shaders.size());
 	for (ShaderName& sp_name : shaders) data->shader_programs.push_back(SpBinding{ std::move(sp_name), nullptr, {} });
-	for (auto& [role, tex_name] : textures) {
-		data->textures[role] = std::move(tex_name);
+	for (auto& [role, tex_names] : textures) {
+		data->textures[role] = std::move(tex_names);
 	}
 	materials[name] = std::move(data);
 	return materials[name].get();
@@ -40,7 +40,7 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 		            : CreateMaterial(e.name, {}, {});   // пустой под этим именем
 		if (!m) continue;
 		m->textures.clear();
-		for (auto& [role, tex] : e.textures) m->textures[role] = tex;
+		for (auto& [role, tex] : e.textures) m->textures[role] = tex;   // список вариантов целиком
 		// Ячейки пересобираем целиком: блобы прежних sp уходят на кладбище материала, а не в free —
 		// на их адреса может смотреть слепок рендера (см. Material::retired_params).
 		for (SpBinding& old : m->shader_programs)
@@ -64,7 +64,9 @@ void MaterialManager::CollectSamplerUsage(const Material* m, TextureManager* tm,
 {
 	if (!m || !tm) return;
 	const auto& handles = tm->GetTextureHandles();
-	for (const auto& [role, tex_name] : m->textures) {
+	// ВСЕ варианты слота, а не только [0]: переключить можно любой, значит сэмплиться будет любой.
+	for (const auto& [role, tex_names] : m->textures)
+	for (const TextureName& tex_name : tex_names) {
 		auto it = handles.find(tex_name);   // не GetTextureHandle: тот шумит логом на промах
 		if (it == handles.end() || !it->second) continue;   // имя ещё не создано — атлас неизвестен
 		TextureAtlas* atlas = it->second->atlas;

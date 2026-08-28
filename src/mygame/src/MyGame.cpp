@@ -112,7 +112,7 @@ SDL_AppResult MyGame::MainInit()
         FractalUpdateSet::FractalPos root_pos;
         root_pos.local = glm::dvec3(3.0, 0.0, 0.0);
         ctx->CreateEntity(scene_name,
-            MaterialComponent{ { kAnchorMaterial } },
+            MaterialComponent{ { MaterialRef{ kAnchorMaterial } } },
             ModelComponent{ kAnchorModel },
             PositionProxy16{ 0,0,0,0,  0,0,0,0,  0,0,0,0,  0,0,0,1 },
             DrawComponent{},
@@ -200,7 +200,7 @@ SDL_AppResult MyGame::MainIterate()
                     p.local += glm::dvec3(camera->GetForward()) * (1.5 * cam.sigma);
                     p.sigma  = 0.5 * cam.sigma;
                     ctx->CreateEntity("scene_fractal",
-                        MaterialComponent{ { kAnchorMaterial } },
+                        MaterialComponent{ { MaterialRef{ kAnchorMaterial } } },
                         ModelComponent{ kAnchorModel },
                         PositionProxy16{ 0,0,0,0,  0,0,0,0,  0,0,0,0,  0,0,0,1 },
                         DrawComponent{},

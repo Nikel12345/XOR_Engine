@@ -65,7 +65,9 @@ public:
 	TextureAtlas* GetTextureAtlas(const AtlasName& name) const;
 
 	// dont_save=true — кодовая инфраструктура (напр. debug_collider), в materials.json не пишется.
-	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders, bool dont_save = false);
+	// Слот — СПИСОК имён: { { TextureSlotRole::Albedo, { "wood", "wood_cracked" } }, ... }.
+	// [0] рисуется по умолчанию, остальные — варианты, переключаемые состоянием на сущности.
+	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::initializer_list<ShaderName> shaders, bool dont_save = false);
 
 	// Тип-безопасная упаковка per-sp факторов (T = раскладка cbuffer MaterialBlock ЭТОЙ sp).
 	// Адресат данных — программа: у материала на каждую sp своя ячейка (см. SpBinding).

@@ -7,6 +7,8 @@
 #include <string>
 #include <cstdint>
 #include "config.h"
+#include "Aliases.h"
+#include "RenderCommandData.h"   // MatSpLayout — значение памятки предпрохода (полный тип обязателен)
 
 namespace RenderSnap { struct BatchLayout; }
 
@@ -106,6 +108,20 @@ private:
 		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
 		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
 	void FinalizeOffsets(PassManager* pass_manager, BufferManager* bm);
+
+	// Предпроход: пер-материальная половина батча на каждую пару (материал, sp) — таблица UVL,
+	// её адресация, бинды атласов, обе половины ключей. Всё это ЧИСТЫЕ функции пары, от сущности
+	// не зависящие ничем, поэтому считаются один раз на материал, а не на каждую сущность
+	// (AddEntityToBatches прогоняла обход required_slots с резолвом имён ЧЕТЫРЕЖДЫ на объект).
+	//
+	// Таблица живёт до конца текущего UpdateRenderBatches и между вызовами НЕ валидна — та же
+	// дисциплина, что у PIB_DataModule::row_of. Инвалидации по событиям нет НАМЕРЕННО: протухнуть
+	// она может от правки списка вариантов, переименования/удаления текстуры, правки sp у материала
+	// и репака атласа (UVL живых текстур едут — см. инвариант в TextureBatchData). Точка
+	// инвалидации в движке одна — пересборка дерева; вторая система рядом с ней обязательно
+	// разойдётся.
+	void BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, MaterialManager* mtm);
+	std::unordered_map<BatchKeys::MatSpKey, MatSpLayout> mat_sp_layouts;
 
 	// Find-or-create the batch nodes for a single entity and record its slots.
 	// Shared by full rebuild and incremental add.

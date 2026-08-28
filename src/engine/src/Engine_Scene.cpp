@@ -443,10 +443,13 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 						name.c_str(), b.sp.c_str(), b.params_type.c_str(), b.params->size());
 			}
 			yyjson_mut_val* tex = yyjson_mut_obj_add_arr(doc, e, "textures");
-			for (auto& [role, tn] : m->textures) {
+			for (auto& [role, tns] : m->textures) {
 				yyjson_mut_val* t = yyjson_mut_arr_add_obj(doc, tex);
-				yyjson_mut_obj_add_str   (doc, t, "role",    RoleToStr(role));
-				yyjson_mut_obj_add_strcpy(doc, t, "texture", tn.c_str());
+				yyjson_mut_obj_add_str(doc, t, "role", RoleToStr(role));
+				// Массив "textures" ([0] — дефолт, дальше варианты). Скалярное "texture" из старых
+				// сцен читается на загрузке, но больше не пишется — формат один.
+				yyjson_mut_val* vs = yyjson_mut_obj_add_arr(doc, t, "textures");
+				for (const TextureName& tn : tns) yyjson_mut_arr_add_strcpy(doc, vs, tn.c_str());
 			}
 			++saved;
 		}
@@ -753,9 +756,19 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 				}
 				if (yyjson_val* tex = yyjson_obj_get(e, "textures")) {
 					size_t i, m2; yyjson_val* t; TextureSlotRole role;
-					yyjson_arr_foreach(tex, i, m2, t)
-						if (RoleFromStr(JsonStr(t, "role"), role))
-							me.textures.emplace_back(role, TextureName(JsonStr(t, "texture")));
+					yyjson_arr_foreach(tex, i, m2, t) {
+						if (!RoleFromStr(JsonStr(t, "role"), role)) continue;
+						std::vector<TextureName> names;
+						if (yyjson_val* arr = yyjson_obj_get(t, "textures")) {
+							size_t j, jm; yyjson_val* s;
+							yyjson_arr_foreach(arr, j, jm, s)
+								if (const char* str = yyjson_get_str(s)) names.emplace_back(str);
+						}
+						// Старый формат: "texture" скаляром = единственный вариант. Читается, чтобы
+						// существующие сцены не переписывались; SaveScene пишет уже массивом.
+						else names.emplace_back(JsonStr(t, "texture"));
+						me.textures.emplace_back(role, std::move(names));
+					}
 				}
 				entries.push_back(std::move(me));
 			}

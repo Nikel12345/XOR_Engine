@@ -39,37 +39,8 @@ ModelBatchKey HashModelBatchKey(SubMeshData* submash) {
     return key;
 }
 
-// Ключ texture-батча = РЕСУРСЫ, которые потребляет ИМЕННО ЭТА sp, и ничего сверх того:
-//   • текстуры её required_slots (хэндлы: тот же атлас, но другой UVL — уже другой узел);
-//   • адрес блоба params ЭТОЙ sp (идентичность, не содержимое).
-// Материал целиком в ключ не входит: sp, которая от материала не берёт ничего (ShadowCaster,
-// Wireframe), не различает материалы вовсе — все они дают ей один узел, один draw и одну
-// команду индиректа. Раньше ключом был адрес материала, и теневой проход дробился по нему же.
-//
-// Почему params по АДРЕСУ, а не по содержимому: правка байт в инспекторе (ползунок цвета) не
-// должна менять ключ, иначе дерево батчей пересобиралось бы покадрово. Адрес блоба стабилен —
-// он в куче и переживает реаллокацию ячеек (см. SpBinding::params).
-// Пустой блоб = «параметров нет» → в ключ не вносится (ClearMaterialParams гасит байты,
-// не освобождая память).
-TextureBatchKey HashTextureBatchKey(const Material* mat, const ShaderProgram* sp,
-                                    TextureManager* tm, const std::vector<uint8_t>* params) {
-    if (!mat || !sp) {
-        SDL_Log("HashTextureBatchKey: material or shader program is nullptr!");
-        return 0xFFFFFFFFFFFFFFFFull;
-    }
-    TextureBatchKey key = 0;
-    for (TextureSlotRole slot : sp->required_slots) {
-        const TextureHandle* h = nullptr;
-        auto it = mat->textures.find(slot);
-        if (it != mat->textures.end() && tm) h = tm->GetTextureHandle(it->second);
-        // Слот входит в ключ ВСЕГДА, в т.ч. промахом (как в HashAtlasBatchKey): батч соберёт
-        // сюда dummy, и «нет текстуры» — такое же состояние, как конкретный хэндл.
-        key += static_cast<TextureBatchKey>(slot) + 0x9e3779b97f4a7c15ull;
-        key ^= reinterpret_cast<TextureBatchKey>(h);
-        key *= 0xff51afd7ed558ccd;
-        key ^= key >> 29;
-    }
-    if (params && !params->empty()) key ^= reinterpret_cast<TextureBatchKey>(params);
+// Финальное перемешивание (murmur3 fmix64) — общий хвост всех ключей ниже.
+static inline uint64_t MixKey(uint64_t key) {
     key ^= key >> 33;
     key *= 0xff51afd7ed558ccd;
     key ^= key >> 33;
@@ -78,30 +49,97 @@ TextureBatchKey HashTextureBatchKey(const Material* mat, const ShaderProgram* sp
     return key;
 }
 
-AtlasBatchKey HashAtlasBatchKey(const Material* mat, const ShaderProgram* sp, TextureManager* tm) {
-    if (!mat || !sp) {
-        SDL_Log("HashAtlasBatchKey: material or shader program is nullptr!");
+// Ключ ПАМЯТКИ предпрохода: идентичность пары (материал, sp) плюс блоб ЭТОЙ sp. Блоб в ключе,
+// потому что две ячейки одного материала могут отрезолвиться в ОДНУ sp (обе упали на fallback),
+// а данные у них разные — памятка обязана их различать, иначе вторая получила бы пуш первой.
+// Это НЕ ключ батча: узлы дерева ключуются ресурсами (HashMatSpResources), а не адресами.
+MatSpKey HashMatSpMemo(const Material* mat, const ShaderProgram* sp,
+                       const std::vector<uint8_t>* params) {
+    MatSpKey key = reinterpret_cast<MatSpKey>(mat);
+    key = MixKey(key ^ reinterpret_cast<MatSpKey>(sp));
+    return MixKey(key ^ reinterpret_cast<MatSpKey>(params));
+}
+
+// Ключ texture-батча = РЕСУРСЫ, которые потребляет ИМЕННО ЭТА sp, и ничего сверх того:
+//   • ВСЕ текстуры её required_slots — не только дефолт слота, но и его варианты (хэндлы:
+//     тот же атлас, но другой UVL — уже другой узел);
+//   • адресация этой таблицы (слова slot_layout: base/cell/count);
+//   • адрес блоба params ЭТОЙ sp (идентичность, не содержимое).
+// Материал целиком в ключ не входит: sp, которая от материала не берёт ничего (ShadowCaster,
+// Wireframe), не различает материалы вовсе — все они дают ей один узел, один draw и одну
+// команду индиректа. Раньше ключом был адрес материала, и теневой проход дробился по нему же.
+//
+// ПРАВИЛО: всё, что уходит в ПУШ, обязано входить сюда. Ключ не содержит идентичности материала,
+// поэтому два разных материала схлопываются в один узел — и если их таблицы или адресация
+// различаются, второй получит пуш первого (нормалка сэмплится как альбедо, без строки в логе).
+// Отсюда и варианты, и слова адресации в ключе.
+//
+// Хэндлы приходят СПИСКОМ, а не резолвятся заново по именам: ключ обязан совпадать с таблицей
+// поблочно, а правила подстановки (промах варианта — выкинуть, промах дефолта — dummy) живут в
+// сборке таблицы. Повторить их здесь = завести вторую копию правила, которая разойдётся.
+// Порядок блоков в списке = порядок блоков в uvl.
+//
+// Почему params по АДРЕСУ, а не по содержимому: правка байт в инспекторе (ползунок цвета) не
+// должна менять ключ, иначе дерево батчей пересобиралось бы покадрово. Адрес блоба стабилен —
+// он в куче и переживает реаллокацию ячеек (см. SpBinding::params).
+// Пустой блоб = «параметров нет» → в ключ не вносится (ClearMaterialParams гасит байты,
+// не освобождая память).
+MatSpKey HashMatSpResources(const ShaderProgram* sp, const std::vector<uint8_t>* params,
+                            const uint32_t* slot_words,
+                            const std::vector<const TextureHandle*>& block_handles) {
+    if (!sp) {
+        SDL_Log("HashMatSpResources: shader program is nullptr!");
+        return 0xFFFFFFFFFFFFFFFFull;
+    }
+    MatSpKey key = 0;
+    const size_t slot_count = std::min<size_t>(sp->required_slots.size(), MAX_SLOTS);
+    for (size_t s = 0; s < slot_count; ++s) {
+        // Роль и её адресация — в ключ ВСЕГДА, в т.ч. когда текстуры нет: «нет текстуры» —
+        // такое же состояние узла, как конкретный хэндл (батч соберёт сюда dummy).
+        key += static_cast<MatSpKey>(sp->required_slots[s]) + 0x9e3779b97f4a7c15ull;
+        key ^= static_cast<MatSpKey>(slot_words[s]);
+        key *= 0xff51afd7ed558ccd;
+        key ^= key >> 29;
+    }
+    for (const TextureHandle* h : block_handles) {
+        key ^= reinterpret_cast<MatSpKey>(h);
+        key *= 0xff51afd7ed558ccd;
+        key ^= key >> 29;
+    }
+    if (params && !params->empty()) key ^= reinterpret_cast<MatSpKey>(params);
+    return MixKey(key);
+}
+
+// Вторая половина ключа texture-батча — единственное, что зависит от СУЩНОСТИ: каким по счёту
+// материалом этот батч идёт у неё. Номер уходит в пуш (смещение секции состояний считается как
+// material_index * MAX_VARIATIVE_SLOTS), значит по правилу выше обязан быть в ключе.
+// Дробление ограничено максимальным числом сабмешей у модели, а не числом материалов в сцене.
+TextureBatchKey HashTextureBatchKey(MatSpKey res_key, uint32_t material_index) {
+    return MixKey(res_key ^ (static_cast<TextureBatchKey>(material_index) + 0x9e3779b97f4a7c15ull));
+}
+
+// Ключ atlas-батча = АТЛАСЫ слотов, то есть ровно то, что биндится сэмплерами. Атласы ВСЕХ
+// блоков, а не только дефолтов: инвариант «все варианты слота в одном атласе» — варнинг, а не
+// отказ (см. EngineContext::CreateMaterial), и при его нарушении вариант ≥1 иначе молча
+// сэмплился бы из чужого атласа. От material_index не зависит вовсе.
+AtlasBatchKey HashAtlasBatchKey(const ShaderProgram* sp,
+                                const std::vector<const TextureHandle*>& block_handles) {
+    if (!sp) {
+        SDL_Log("HashAtlasBatchKey: shader program is nullptr!");
         return 0xFFFFFFFFFFFFFFFFull;
     }
     AtlasBatchKey key = 0;
     for (TextureSlotRole slot : sp->required_slots) {
-        const TextureAtlas* atlas = nullptr;
-        auto it = mat->textures.find(slot);
-        if (it != mat->textures.end() && tm) {
-            if (TextureHandle* h = tm->GetTextureHandle(it->second))
-                atlas = h->atlas;
-        }
-        // Слот входит в ключ ВСЕГДА, в т.ч. промахом: батч соберёт сюда dummy, и
-        // "нет текстуры" — такое же состояние биндинга, как конкретный атлас.
         key += static_cast<AtlasBatchKey>(slot) + 0x9e3779b97f4a7c15ull;
-        key ^= reinterpret_cast<AtlasBatchKey>(atlas);
         key *= 0xff51afd7ed558ccd;
         key ^= key >> 29;
     }
-    key ^= key >> 33;
-    key *= 0xc4ceb9fe1a85ec53;
-    key ^= key >> 33;
-    return key;
+    for (const TextureHandle* h : block_handles) {
+        key ^= reinterpret_cast<AtlasBatchKey>(h ? h->atlas : nullptr);
+        key *= 0xff51afd7ed558ccd;
+        key ^= key >> 29;
+    }
+    return MixKey(key);
 }
 
 ShaderBatchKey HashShaderBatchKey(ShaderProgram* sp) {
@@ -182,6 +220,150 @@ void BatchBuilder::QueueUpdate(Entity entity)
     entities_to_update.push_back(entity);
 }
 
+void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, MaterialManager* mtm)
+{
+    mat_sp_layouts.clear();
+    if (!mtm || !sm) return;
+
+    // Dummy и fallback-sp — ПО ИМЕНИ, через карту (Get* логировал бы промах). Резолвим один раз
+    // на весь предпроход: это те же подстановки, что раньше делались на каждой сущности.
+    TextureHandle* dummy = nullptr;
+    if (tm && !dummy_texture_name.empty()) {
+        auto dit = tm->GetTextureHandles().find(dummy_texture_name);
+        if (dit != tm->GetTextureHandles().end()) dummy = dit->second.get();
+    }
+    if (dummy && !dummy->atlas) dummy = nullptr;   // без атласа он ничего не заменяет
+    ShaderProgram* fallback = fallback_shader_name.empty() ? nullptr : sm->GetShaderProgram(fallback_shader_name);
+
+    // Ячейки секции состояний этого материала и хэндлы блоков этой таблицы — переиспользуемые
+    // буферы, чтобы предпроход не аллоцировал на каждую пару.
+    std::vector<std::pair<TextureSlotRole, uint32_t>> cells;
+    std::vector<const TextureHandle*> block_handles;
+
+    for (const auto& [mat_name, mat_owner] : mtm->GetMaterials()) {
+        Material* material = mat_owner.get();
+        if (!material) continue;
+
+        // ── Нумерация ячеек секции ──
+        // ВАРИАТИВНАЯ роль = роль с >1 текстурой; порядок — обход Material::textures (std::map,
+        // по возрастанию TextureSlotRole). Ровно ту же нумерацию независимо повторяет модуль
+        // заливки состояний: расходиться им нельзя — объекты молча покажут чужие варианты.
+        // Нумерация НЕ зависит от того, резолвятся ли имена вариантов: иначе битая текстура
+        // сдвинула бы ячейки только на одной из двух сторон.
+        cells.clear();
+        for (const auto& [role, names] : material->textures) {
+            if (names.size() <= 1) continue;   // невариативная — ячейки нет
+            if (cells.size() >= MAX_VARIATIVE_SLOTS) {
+                SDL_Log("BuildMaterialLayouts: material '%s' has more variative slots than "
+                        "MAX_VARIATIVE_SLOTS (%u) - the rest show their default only (raise the constant)",
+                    mat_name.c_str(), MAX_VARIATIVE_SLOTS);
+                break;
+            }
+            cells.emplace_back(role, safe_u32(cells.size()));
+        }
+
+        for (const SpBinding& binding : material->shader_programs) {
+            const std::vector<uint8_t>* sp_params =
+                (binding.params && !binding.params->empty()) ? binding.params.get() : nullptr;
+            // Промах имени sp → fallback, как в AddEntityToBatches (там же и лог о промахе).
+            ShaderProgram* sp = sm->GetShaderProgram(binding.sp);
+            if (!sp) sp = fallback;
+            if (!sp) continue;
+
+            const MatSpKey memo = HashMatSpMemo(material, sp, sp_params);
+            if (mat_sp_layouts.count(memo)) continue;   // две ячейки упали на одну sp с одним блобом
+
+            if (sp->required_slots.size() > MAX_SLOTS)
+                SDL_Log("BuildMaterialLayouts: sp '%s' declares %zu texture slots, MAX_SLOTS is %u - "
+                        "slots beyond it get no layout word and cannot be addressed (raise the constant)",
+                    sp->debug_name.c_str(), sp->required_slots.size(), MAX_SLOTS);
+
+            MatSpLayout lay{};
+            lay.bindable = true;
+            block_handles.clear();
+            lay.uvl.reserve(sp->required_slots.size());
+            lay.texture_binding.reserve(sp->required_slots.size());
+
+            for (size_t s = 0; s < sp->required_slots.size(); ++s) {
+                const TextureSlotRole role = sp->required_slots[s];
+                auto it = material->textures.find(role);
+                const std::vector<TextureName>* names =
+                    (it != material->textures.end()) ? &it->second : nullptr;
+
+                const uint32_t base = safe_u32(lay.uvl.size());   // таблица сгруппирована по слотам
+
+                // ── Дефолт слота (вариант 0) ── Место в таблице сохраняет ВСЕГДА: на нём стоит
+                // base следующих слотов. Промах имени подменяется dummy; нет и его — sp у этого
+                // материала не рисуется вовсе (пустой рендер вместо мёртвого хэндла).
+                TextureHandle* def = (names && !names->empty() && tm)
+                    ? tm->GetTextureHandle((*names)[0]) : nullptr;
+                if (!def || !def->atlas) {
+                    SDL_Log("BuildMaterialLayouts: material '%s' has no resolvable texture for slot %d "
+                            "of sp '%s' - dummy is used", mat_name.c_str(), static_cast<int>(role),
+                        sp->debug_name.c_str());
+                    def = dummy;
+                }
+                if (!def) { lay.bindable = false; break; }
+
+                lay.uvl.push_back(MakeUVL(def->texture_data));   // КОПИЯ значения (см. инвариант в TextureBatchData)
+                block_handles.push_back(def);
+                // Бинд слота — атлас его ДЕФОЛТА: варианты обязаны лежать там же (варнинг на
+                // создании материала), поэтому один Texture2DArray на слот покрывает их все.
+                lay.texture_binding.push_back(def->atlas->texture_binding);
+
+                // ── Варианты (1..N) ── Неразрешимое имя в таблицу НЕ попадает и count не растёт:
+                // иначе base всех последующих слотов разъехался бы с реальной таблицей.
+                uint32_t count = 1;
+                uint32_t cell = 0;
+                // Ячейка есть только у роли, попавшей в нумерацию выше; гард MAX_VARIATIVE_SLOTS
+                // мог её срезать — тогда слот остаётся невариативным и показывает дефолт.
+                // has_cell ⇒ names непуст и в нём больше одного имени: cells строились из него же.
+                bool has_cell = false;
+                for (const auto& [r, c] : cells) if (r == role) { cell = c; has_cell = true; break; }
+
+                if (has_cell) {
+                    if (lay.uvl.size() + names->size() - 1 > MAX_UVL_BLOCKS) {
+                        SDL_Log("BuildMaterialLayouts: material '%s' + sp '%s': UVL table would exceed "
+                                "MAX_UVL_BLOCKS (%u) - slot %d shows its default only (raise the constant)",
+                            mat_name.c_str(), sp->debug_name.c_str(), MAX_UVL_BLOCKS, static_cast<int>(role));
+                    }
+                    else for (size_t v = 1; v < names->size(); ++v) {
+                        TextureHandle* h = tm ? tm->GetTextureHandle((*names)[v]) : nullptr;
+                        if (!h || !h->atlas) continue;   // GetTextureHandle уже назвал промах в логе
+                        lay.uvl.push_back(MakeUVL(h->texture_data));
+                        block_handles.push_back(h);
+                        ++count;
+                    }
+                }
+                if (count == 1) cell = 0;   // невариативный слот ячейку не занимает
+                else            lay.variative = true;   // узел реально читает состояние (см. MatSpLayout::variative)
+
+                // Материал БЕЗ вариантов обязан давать сегодняшнюю таблицу байт-в-байт: один
+                // блок на слот, base[s] == s. Вырождение в прежнее поведение — главное свойство
+                // раскладки, и ловится оно тут одной строкой (в Release её нет).
+                assert((!cells.empty() || (count == 1 && base == safe_u32(s)))
+                    && "BuildMaterialLayouts: material without variants must yield the legacy UVL table");
+
+                if (s < MAX_SLOTS)
+                    lay.slot[s] = (base << 16) | (cell << 8) | count;
+            }
+
+            if (!lay.bindable) {
+                SDL_Log("BuildMaterialLayouts: material '%s' + sp '%s': a required slot has neither a "
+                        "texture nor a dummy - this sp draw is skipped for the material",
+                    mat_name.c_str(), sp->debug_name.c_str());
+                lay.uvl.clear();
+                lay.texture_binding.clear();
+            }
+            else {
+                lay.res_key   = HashMatSpResources(sp, sp_params, lay.slot, block_handles);
+                lay.atlas_key = sp->required_slots.empty() ? 0 : HashAtlasBatchKey(sp, block_handles);
+            }
+            mat_sp_layouts.emplace(memo, std::move(lay));
+        }
+    }
+}
+
 void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManager* pass_manager, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
     ModelManager* mdm, MaterialManager* mtm,
     const MaterialComponent& material_component, const ModelComponent& model_component) {
@@ -208,15 +390,15 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
     for (SubMeshData& submesh : model->submeshes)
     {
-        if (material_component.names.size() != model->submeshes.size()) {
+        if (material_component.materials.size() != model->submeshes.size()) {
             SDL_Log("BulidBatches:: Submash and material sizes mismatch");
         }
         // Границы + промах имени материала (та же природа, что у модели выше).
-        if (submesh.material_index >= material_component.names.size()) {
+        if (submesh.material_index >= material_component.materials.size()) {
             SDL_Log("BatchBuilder: entity %u material_index out of range - skipped", entity);
             continue;
         }
-        const std::string& material_name = material_component.names[submesh.material_index];
+        const std::string& material_name = material_component.materials[submesh.material_index].name;
         Material* material = nullptr;
         if (mtm && !material_name.empty()) {
             const auto& materials = mtm->GetMaterials();
@@ -284,46 +466,32 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
             ShaderBatchData& sb = shader_map[sp_key];
 
-            AtlasBatchKey atlas_key = sp->required_slots.empty() ? 0 : HashAtlasBatchKey(material, sp, tm);
-
-            // Dummy — ПО ИМЕНИ (как fallback-sp): резолв здесь, через карту (без лог-спама Get*).
-            // Нет и dummy (удалён) → битые слоты не забиндить → sp у этого материала пропускается
-            // (пустой рендер вместо разыменования мёртвого хэндла).
-            TextureHandle* dummy = nullptr;
-            if (tm && !dummy_texture_name.empty()) {
-                auto dit = tm->GetTextureHandles().find(dummy_texture_name);
-                if (dit != tm->GetTextureHandles().end()) dummy = dit->second.get();
-            }
+            // Пер-материальная половина батча — из памятки предпрохода (BuildMaterialLayouts):
+            // таблица UVL, её адресация, бинды атласов и обе половины ключей уже посчитаны, и
+            // резолвить имена текстур на каждую сущность больше не нужно. Промах = материал/sp
+            // появились после предпрохода (тот идёт в начале того же UpdateRenderBatches) —
+            // такого быть не должно, но узел без раскладки собирать нечем.
+            auto lay_it = mat_sp_layouts.find(HashMatSpMemo(material, sp, sp_params));
+            if (lay_it == mat_sp_layouts.end()) continue;
+            const MatSpLayout& lay = lay_it->second;
+            if (!lay.bindable) continue;   // причину назвал предпроход, по строке на материал
 
             auto& atlas_map = sb.atlases_batches;
-            auto atlas_it = atlas_map.find(atlas_key);
+            auto atlas_it = atlas_map.find(lay.atlas_key);
             if (atlas_it == atlas_map.end())
             {
                 AtlasBatchData new_tex{};
-                bool bindable = true;
-
-                for (const auto& role : sp->required_slots) {
-                    auto it = material->textures.find(role);
-                    TextureHandle* h = (it != material->textures.end() && tm)
-                        ? tm->GetTextureHandle(it->second) : nullptr;
-                    if (!h || !h->atlas) {   // нет слота / имя не резолвится (удалена/переименована) / нет атласа
-                        SDL_Log("BuildBatches:: Material is missing required atlas for shader slot");
-                        h = (dummy && dummy->atlas) ? dummy : nullptr;
-                    }
-                    if (!h) { bindable = false; break; }   // и dummy нет → слот не собрать
-                    new_tex.texture_binding.push_back(h->atlas->texture_binding);
-                }
-                if (!bindable) {
-                    SDL_Log("BuildBatches:: dummy texture missing too - sp draw skipped for this material");
-                    continue;   // следующий sp материала: пустой рендер, без краша
-                }
-
-                atlas_map[atlas_key] = std::move(new_tex);
+                new_tex.texture_binding = lay.texture_binding;
+                atlas_map[lay.atlas_key] = std::move(new_tex);
             }
 
-            AtlasBatchData& atlas_batch = atlas_map[atlas_key];
+            AtlasBatchData& atlas_batch = atlas_map[lay.atlas_key];
 
-            TextureBatchKey tex_key = HashTextureBatchKey(material, sp, tm, sp_params);
+            // Единственное, что зависит от сущности: каким по счёту материалом идёт этот батч.
+            // Невариативному узлу он не нужен — гард count > 1 не пустит чтение состояния, —
+            // поэтому там он равен нулю и в ключ ничего не вносит: узел не дробится по сабмешам.
+            const uint32_t material_index = lay.variative ? submesh.material_index : 0u;
+            TextureBatchKey tex_key = HashTextureBatchKey(lay.res_key, material_index);
 
             auto& tex_map = atlas_batch.texture_batches;
             auto texb_it = tex_map.find(tex_key);
@@ -333,23 +501,9 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
                 // чужих байт не носит. Само РЕШЕНИЕ пушить остаётся за RenderManager (по числу
                 // fragment-uniform'ов шейдера), здесь — адресат.
                 new_texb.params = sp_params;
-                new_texb.texture_uvl.reserve(material->textures.size());
-                bool bindable = true;
-                for (const auto& role : sp->required_slots) {
-                    auto it = material->textures.find(role);
-                    TextureHandle* texture_handle = (it != material->textures.end() && tm)
-                        ? tm->GetTextureHandle(it->second) : nullptr;
-                    if (!texture_handle) {   // нет слота / имя не резолвится (удалена/переименована)
-                        SDL_Log("BuildBatches:: Material is missing required texture_data for shader slot");
-                        texture_handle = dummy;   // dummy по имени (см. выше); тоже нет → пропуск sp
-                    }
-                    if (!texture_handle) { bindable = false; break; }
-                    new_texb.texture_uvl.push_back(MakeUVL(texture_handle->texture_data));   // КОПИЯ значения (см. инвариант в TextureBatchData)
-                }
-                if (!bindable) {
-                    SDL_Log("BuildBatches:: dummy texture missing too - sp draw skipped for this material");
-                    continue;   // пустой рендер, без краша
-                }
+                new_texb.texture_uvl = lay.uvl;
+                std::copy(std::begin(lay.slot), std::end(lay.slot), std::begin(new_texb.variant_layout.slot));
+                new_texb.variant_layout.material_index = material_index;
 
                 tex_map[tex_key] = std::move(new_texb);
             }
@@ -420,6 +574,12 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
     // both. exchange(false) consumes the rebuild request atomically.
     // Замок дерева больше не нужен: рендер живое дерево не читает (рисует по слепку
     // раскладки слота — см. FinalizeOffsets/AskLayout), дерево приватно для sim.
+    // Предпроход — ДО развилки: AddEntityToBatches общая для полной пересборки и инкремента,
+    // и обе стороны читают памятку. Материалов десятки, поэтому полный обход дешевле ветки
+    // «есть ли уже в памятке» в цикле на миллион сущностей; на инкрементальном пути таблица
+    // соберётся и умрёт вместе с вызовом — бесполезно, но и бесплатно.
+    BuildMaterialLayouts(tm, sm, mtm);
+
     bool changed = false;
     if (dirty_batches.exchange(false)) {
         BuildRenderBatches(pm, pass_manager, om, tm, sm, bm, mdm, mtm, scene);
@@ -573,6 +733,12 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
         pass_list.first_instance = offset;
         pass_list.shaders.reserve(rp->shader_batches.size());
 
+        // Счётчик формы дерева: draw = texture-батч (одна SDL_DrawGPUIndexedPrimitivesIndirect),
+        // cmd = model-батч (одна команда мультидроу внутри неё). Печатается ТОЛЬКО отсюда,
+        // то есть на изменение дерева, а не покадрово. Нужен, чтобы правка ключей была видна
+        // числом: лишний хэш в ключе дробит узлы, и это единственный симптом — картинка та же.
+        uint32_t pass_draws = 0, pass_cmds = 0;
+
         // Глобальные сэмплеры прохода (тень/env): резолвим СТАБИЛЬНЫЕ атласы в актуальные
         // SDL-биндинги ЗДЕСЬ, значениями в слепок — как это делает compute на диспатче. В цикле
         // отрисовки резолвить нечего: по шейдер-батчам прохода значение постоянно. Атлас без
@@ -610,6 +776,7 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
 
                     RenderSnap::TextureDraw td;
                     td.texture_uvl = texture_batch.texture_uvl;
+                    td.variant_layout = texture_batch.variant_layout;
                     td.params = texture_batch.params;   // невладеющий, адрес стабилен (см. RenderSnapshot.h)
                     td.indirect_command_index = command_index;
                     td.draw_count = safe_u32(texture_batch.model_batches.size());
@@ -620,12 +787,18 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
                         offset += model_batch.instanceCount;
                         command_index++;
                     }
+                    ++pass_draws;
+                    pass_cmds += td.draw_count;
                     ag.draws.push_back(std::move(td));
                 }
                 sg.atlases.push_back(std::move(ag));
             }
             pass_list.shaders.push_back(std::move(sg));
         }
+        SDL_Log("[batch] pass '%s': draws=%u cmds=%u shaders=%zu instances=%u",
+            rp->debug_name.c_str(), pass_draws, pass_cmds,
+            rp->shader_batches.size(), offset - pass_list.first_instance);
+
         // Сумма инстансов прохода: у SHADOW_PASS (первый по pass_index) это shadow_pib —
         // граница PIB между теневыми [0, sp) и остальными [sp, N) записями для каллинга.
         pass_list.num_instances = offset - pass_list.first_instance;

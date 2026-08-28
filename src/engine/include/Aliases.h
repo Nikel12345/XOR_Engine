@@ -19,4 +19,8 @@ namespace BatchKeys {
 	using TextureBatchKey = uint64_t;
 	using AtlasBatchKey = uint64_t;
 	using ShaderBatchKey = uint64_t;
+	// Пара (материал, sp) — единица ПЕР-МАТЕРИАЛЬНОЙ половины батча (MatSpLayout): всё, что
+	// texture-батч берёт из материала и не зависит от сущности. Ключ памятки предпрохода И
+	// ресурсный вклад в TextureBatchKey (см. BatchBuilder: HashMatSpMemo/HashMatSpResources).
+	using MatSpKey = uint64_t;
 };

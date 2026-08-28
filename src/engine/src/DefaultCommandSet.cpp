@@ -64,7 +64,7 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 				if (om->Has<MaterialComponent>(scene, c->entity)) {
 					const auto& models = ctx->GetModelManager()->GetModels();
 					auto it = models.find(c->str);   // через карту: Get* логировал бы промах
-					om->GetComponent<MaterialComponent>(scene, c->entity).names.resize(
+					om->GetComponent<MaterialComponent>(scene, c->entity).materials.resize(
 						it != models.end() ? it->second->submeshes.size() : 0);
 				}
 				ctx->GetBatchBuilder()->QueueUpdate(c->entity);
@@ -72,7 +72,7 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 			delete c;
 		});
 
-	// Один слот Material.names живой энтити (num = индекс сабмеша). Материал определяет sp и
+	// Один слот Material.materials живой энтити (num = индекс сабмеша). Материал определяет sp и
 	// атлас, то есть ключи шейдерного и текстурного батчей — энтити переезжает в дереве.
 	im.RegisterCommand(CommandId::SetEntityMaterial,
 		[](EngineContext* ctx, const void* data)
@@ -81,10 +81,14 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 			ObjectManager* om = ctx->GetObjectManager();
 			SceneData* scene = om->GetActiveScene();
 			if (scene && om->Has<MaterialComponent>(scene, c->entity)) {
-				auto& names = om->GetComponent<MaterialComponent>(scene, c->entity).names;
+				auto& mats = om->GetComponent<MaterialComponent>(scene, c->entity).materials;
 				const size_t k = static_cast<size_t>(c->num);
-				if (k < names.size()) {
-					names[k] = c->str;
+				if (k < mats.size()) {
+					mats[k].name = c->str;
+					// Состояния адресованы РОЛЯМИ прежнего материала — у нового набор ролей свой,
+					// и сохранённый номер варианта означал бы уже другую текстуру. Сбрасываем:
+					// смена материала = его дефолтный вид.
+					mats[k].states.clear();
 					ctx->GetBatchBuilder()->QueueUpdate(c->entity);
 				}
 			}
@@ -186,7 +190,11 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 		{
 			const SetMaterialTextureCmd* c = static_cast<const SetMaterialTextureCmd*>(data);
 			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
-				m->textures[static_cast<TextureSlotRole>(c->role)] = c->texture;
+				// Правится ДЕФОЛТ слота (вариант 0) — команда номера варианта пока не носит:
+				// список вариантов редактируется отдельными командами (блок 9 плана, ещё не сделан).
+				std::vector<TextureName>& variants = m->textures[static_cast<TextureSlotRole>(c->role)];
+				if (variants.empty()) variants.emplace_back(c->texture);
+				else                  variants[0] = c->texture;
 				// Новый слот → его атлас сэмплится (сбор usage-флагов + проверка намерения).
 				ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->material);
 			}
@@ -201,8 +209,9 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 		{
 			const CreateMaterialCmd* c = static_cast<const CreateMaterialCmd*>(data);
 			ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram("Lit");
-			std::vector<std::pair<TextureSlotRole, TextureName>> texs;
-			if (sp) for (TextureSlotRole role : sp->required_slots) texs.emplace_back(role, DefaultTextureForRole(role));
+			std::vector<std::pair<TextureSlotRole, std::vector<TextureName>>> texs;
+			if (sp) for (TextureSlotRole role : sp->required_slots)
+				texs.emplace_back(role, std::vector<TextureName>{ DefaultTextureForRole(role) });
 			Material* m = ctx->GetMaterialManager()->CreateMaterial(c->name, std::move(texs), std::vector<ShaderName>{ "Lit" });
 			if (m) ctx->SetMaterialParams(m, "Lit", OpaqueMaterialParams{});   // блоб адресован Lit: её MaterialBlock
 			ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->name);
@@ -225,7 +234,7 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 					m->shader_programs.push_back(SpBinding{ c->shader, nullptr, {} });
 					if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader))
 						for (TextureSlotRole role : sp->required_slots)
-							if (!m->textures.count(role)) m->textures[role] = DefaultTextureForRole(role);
+							if (!m->textures.count(role)) m->textures[role] = { DefaultTextureForRole(role) };
 					ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->material);
 					ctx->GetBatchBuilder()->SetDirtyBatches(true);
 				}

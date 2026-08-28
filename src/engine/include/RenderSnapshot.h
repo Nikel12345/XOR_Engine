@@ -4,9 +4,10 @@
 #include <memory>
 #include <functional>
 #include <SDL3/SDL_gpu.h>
+// UVL_Block/VariantLayout лежат в слепке ЗНАЧЕНИЯМИ (рендер копирует их в пуш) — нужен полный тип.
+#include "RenderCommandData.h"
 
 struct BufferData;
-struct UVL_Block;
 struct PushConstantBinder;
 
 // Пер-слотовые CPU-слепки «что рисуем», которые sim готовит для рендер-потока ВМЕСТЕ с
@@ -36,6 +37,8 @@ namespace RenderSnap {
 
     struct TextureDraw {
         std::vector<UVL_Block> texture_uvl;             // копия для пуша uniform'а UVL
+        // Адресация той же таблицы (значением, как и она сама): рендер читает только слепок.
+        VariantLayout variant_layout;
         // Невладеющий указатель на живой Material::params (адрес стабилен — как в дереве).
         // Содержимое UI может править на лету; это осознанно (мгновенный отклик слайдеров).
         const std::vector<uint8_t>* params = nullptr;

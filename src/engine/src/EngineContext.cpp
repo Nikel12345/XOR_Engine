@@ -167,13 +167,30 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 	return h;
 }
 
-Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, TextureName>> textures, std::initializer_list<ShaderName> shaders, bool dont_save)
+Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::initializer_list<ShaderName> shaders, bool dont_save)
 {
 	// Материал хранит ИМЕНА (name-based ссылки, резолв отложен на сборку батча). Здесь sp резолвим
 	// лишь для авторской валидации: у каждого required_slot шейдера должна быть текстура в материале.
 	// Проверка best-effort (варнинг, не отказ): текстуру могут добавить/создать позже.
-	std::vector<std::pair<TextureSlotRole, TextureName>> texture_names(textures.begin(), textures.end());
+	std::vector<std::pair<TextureSlotRole, std::vector<TextureName>>> texture_names(textures.begin(), textures.end());
 	std::vector<ShaderName> shader_names(shaders.begin(), shaders.end());
+
+	// ВСЕ варианты одного слота обязаны лежать в ОДНОМ атласе: на слот биндится один
+	// Texture2DArray, а UVL адресует слой внутри него — вариант из чужого атласа переключить
+	// нечем (он молча сэмплился бы из соседнего). Варнинг, а не отказ: имя могут создать позже,
+	// и тогда проверять тут нечего — она best-effort, как и проверка required_slots ниже.
+	for (const auto& [role, names] : texture_names) {
+		const TextureAtlas* first = nullptr;
+		for (const TextureName& tn : names) {
+			TextureHandle* h = texture_manager ? texture_manager->GetTextureHandle(tn) : nullptr;
+			if (!h || !h->atlas) continue;
+			if (!first) { first = h->atlas; continue; }
+			if (h->atlas != first)
+				SDL_Log("Material '%s': slot %d variant '%s' lives in another atlas than the default "
+				        "- it cannot be switched to (one Texture2DArray is bound per slot)",
+					name.c_str(), static_cast<int>(role), tn.c_str());
+		}
+	}
 
 	for (const auto& shader_name : shader_names) {
 		ShaderProgram* sp = shader_manager->GetShaderProgram(shader_name);
