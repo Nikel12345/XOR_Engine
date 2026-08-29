@@ -4,7 +4,7 @@
 #include "Utils.h"
 #include "BufferManager.h"
 #include "ObjectManager.h"
-#include <bit>
+#include "SparseRankChannel.h"
 
 UI_DataModule::UI_DataModule() {}
 
@@ -16,28 +16,23 @@ void UI_DataModule::BuildStaging(ObjectManager* om)
 	// Пересобираем КАЖДЫЙ кадр: канал индексируется row'ом трансформа, а строки сдвигаются при
 	// create/delete/hide ЛЮБОГО drawable (не только UI). Гейт по одному флагу это не ловит — стейл
 	// row → текст «пропадает». Дёшево: не-UI архетипы пропускаются, битовая часть O(N/32).
-	bits_.clear();
-	wordbase_.clear();
+	hit_rows_.clear();
 	index_.clear();
 	text_.clear();
-	bits_size_ = wordbase_size_ = index_size_ = text_size_ = 0;   // на случай ранних выходов ниже
+	rows_ = 0;
+	rank_size_ = index_size_ = text_size_ = 0;   // на случай ранних выходов ниже
 
 	// 1) N = число строк ТОЛЬКО архетипов Positions+DrawComponent — это ровно ROW-пространство.
 	//    Безпозиционные рисуемые (скайбокс, фрактал-квад) СЮДА НЕ ВХОДЯТ намеренно: у них нет
 	//    трансформ-строки (RecalculateInstanceOffsets им base не даёт, PIB пишет им -1, вершинник
 	//    гардит row<0). Считать их = раздуть N и разъехаться с row. Тот же фильтр, что у
 	//    TransformDataModule/InstanceDataModule/BoundSphereDataModule. Битовая маска покрывает row.
-	uint32_t N = 0;
 	om->ForEachArchetype<Positions, DrawComponent>(scene,
 		[&](ComponentArray<Positions, void>* posArr, ComponentArray<DrawComponent, void>*)
 		{
-			N += safe_u32(posArr->size());
+			rows_ += safe_u32(posArr->size());
 		});
-	if (N == 0) return;
-
-	const uint32_t words = (N + 31u) / 32u;
-	bits_.assign(words, 0u);
-	wordbase_.assign(words, 0u);
+	if (rows_ == 0) return;
 
 	// 2) UI-текст в ROW-порядке. ForEach идёт по архетипам в map-порядке (= порядок
 	//    render_instance_base) и по локальному индексу внутри — значит по возрастанию row,
@@ -50,9 +45,8 @@ void UI_DataModule::BuildStaging(ObjectManager* om)
 		[&](Entity e, DrawComponent&, UIComponent&, UITextComponent& txt)
 		{
 			if (!om->Has<Positions>(scene, e)) return;
-			const uint32_t row = scene->entity_to_archetype[e]->render_instance_base
-			                   + safe_u32(scene->entity_to_index[e]);
-			bits_[row >> 5] |= (1u << (row & 31u));
+			hit_rows_.push_back(scene->entity_to_archetype[e]->render_instance_base
+			                    + safe_u32(scene->entity_to_index[e]));
 
 			const uint32_t offset = safe_u32(text_.size());
 			const uint32_t count  = safe_u32(txt.glyphs.size());
@@ -61,35 +55,20 @@ void UI_DataModule::BuildStaging(ObjectManager* om)
 			index_.push_back(count);
 		});
 
-	// 3) wordbase = пословный префикс-popcount: rank(row) = wordbase[w] + popcount(биты ниже b).
-	uint32_t acc = 0;
-	for (uint32_t w = 0; w < words; ++w) {
-		wordbase_[w] = acc;
-		acc += static_cast<uint32_t>(std::popcount(bits_[w]));
-	}
-
-	// 4) Кэш байтовых размеров — умножение раз на сборку, Calc*Size их просто отдают.
-	bits_size_     = safe_u32(bits_.size()     * sizeof(uint32_t));
-	wordbase_size_ = safe_u32(wordbase_.size() * sizeof(uint32_t));
-	index_size_    = safe_u32(index_.size()    * sizeof(uint32_t));
-	text_size_     = safe_u32(text_.size()     * sizeof(uint32_t));
+	// 3) Кэш байтовых размеров — умножение раз на сборку, Calc*Size их просто отдают. Слова канала
+	//    не собираются здесь вовсе: их раскладывает StoreSparseRank прямо в трансфер.
+	rank_size_  = SparseRankBytes(rows_);
+	index_size_ = safe_u32(index_.size() * sizeof(uint32_t));
+	text_size_  = safe_u32(text_.size()  * sizeof(uint32_t));
 }
 
-uint32_t UI_DataModule::CalcBitsSize()     const { return bits_size_; }
-uint32_t UI_DataModule::CalcWordBaseSize() const { return wordbase_size_; }
-uint32_t UI_DataModule::CalcIndexSize()    const { return index_size_; }
-uint32_t UI_DataModule::CalcTextSize()     const { return text_size_; }
+uint32_t UI_DataModule::CalcRankSize()  const { return rank_size_; }
+uint32_t UI_DataModule::CalcIndexSize() const { return index_size_; }
+uint32_t UI_DataModule::CalcTextSize()  const { return text_size_; }
 
-void UI_DataModule::StoreBits(BufferManager* bm, UploadTask* task)
+void UI_DataModule::StoreRank(BufferManager* bm, UploadTask* task)
 {
-	if (bits_.empty()) return;
-	bm->UploadToTransferBuffer(task, CalcBitsSize(), bits_.data());
-}
-
-void UI_DataModule::StoreWordBase(BufferManager* bm, UploadTask* task)
-{
-	if (wordbase_.empty()) return;
-	bm->UploadToTransferBuffer(task, CalcWordBaseSize(), wordbase_.data());
+	StoreSparseRank(bm, task, rows_, hit_rows_);
 }
 
 void UI_DataModule::StoreIndex(BufferManager* bm, UploadTask* task)

@@ -107,23 +107,21 @@ cbuffer VariantLayoutBlock : register(b2, space3) {
 // binding». Без дефайна шейдер работает как раньше и показывает ДЕФОЛТ слота: адресация через
 // base остаётся (она в пуше, буферов не требует), пропадает только выбор варианта.
 #ifdef TEXTURE_VARIANTS
-// Разреженный канал состояний (механизм — sparse_rank.hlsli). Все три буфера ФРАГМЕНТНЫЕ:
-// вершинник общий с чужими sp, и буфер в ЕГО списке пришлось бы биндить всем им без разбора.
+// Разреженный канал состояний: адресацию даёт SPARSE_CHANNEL (sparse_rank.hlsli), данные —
+// TexStateIndex/TexState. Все три буфера ФРАГМЕНТНЫЕ: вершинник общий с чужими sp, и буфер в ЕГО
+// списке пришлось бы биндить всем им без разбора.
 // 6 сэмплеров + LightBlock t6 + ShadowCameras t7 + Camera t8 → rank t9, index t10, состояния t11.
 #include "sparse_rank.hlsli"
-StructuredBuffer<uint2> TexStateRank  : register(t9, space2);    // x = биты, y = носителей до слова
-StructuredBuffer<uint>  TexStateIndex : register(t10, space2);   // смещение ячеек носителя
-StructuredBuffer<uint>  TexState      : register(t11, space2);
+SPARSE_CHANNEL(TexState, t9, space2)                             // → TexStateWords, TexStateRank(row)
+StructuredBuffer<uint> TexStateIndex : register(t10, space2);    // смещение ячеек носителя
+StructuredBuffer<uint> TexState      : register(t11, space2);
 
-// -1 = у строки элемента нет. Не-носитель отвечает ОДНОЙ загрузкой (слово rank), и таких строк
-// подавляющее большинство — вторая загрузка достаётся только переключающимся.
+// -1 = переключать нечего: либо строки нет вовсе (transformless, PIB = -1), либо она не носитель.
+// Дальше по коду важен только знак.
 int TexStateOfs(int row)
 {
-    if (row < 0) return -1;
-    const uint  b  = uint(row) & 31u;
-    const uint2 rw = TexStateRank[uint(row) >> 5u];
-    if (!SparseHasBit(rw.x, b)) return -1;
-    return int(TexStateIndex[SparseRank(rw.x, rw.y, b)]);
+    const int r = TexStateRank(row);
+    return (r < 0) ? -1 : int(TexStateIndex[r]);
 }
 
 // Инициализируются базой ОДИН раз за пиксель (BEGIN_MATERIAL_API), чтобы не менять сигнатуры

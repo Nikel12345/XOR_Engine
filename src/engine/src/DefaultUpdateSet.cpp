@@ -343,15 +343,11 @@ void DefaultUpdateSet::SetUITextUpdaters(EngineContext& ctx, UI_DataModule* uidm
     auto* bm = ctx.GetBufferManager();
     auto* om = ctx.GetObjectManager();
 
-    // BITS — ПЕРВЫЙ: его size-фаза строит staging (BuildStaging по активной сцене), остальные три
+    // RANK — ПЕРВЫЙ: его size-фаза строит staging (BuildStaging по активной сцене), остальные два
     // текстовых буфера лишь читают уже готовый staging (тот же контракт, что LIGHT_CAMERA_BUFFER).
-    bm->CreateUpdateInstruction(UI_TEXT_BITS_BUFFER,
-        [uidm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { uidm->StoreBits(bm, &task); },
-        [uidm, om]() -> uint32_t { uidm->BuildStaging(om); return uidm->CalcBitsSize(); });
-
-    bm->CreateUpdateInstruction(UI_TEXT_WORDBASE_BUFFER,
-        [uidm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { uidm->StoreWordBase(bm, &task); },
-        [uidm]() -> uint32_t { return uidm->CalcWordBaseSize(); });
+    bm->CreateUpdateInstruction(UI_TEXT_RANK_BUFFER,
+        [uidm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { uidm->StoreRank(bm, &task); },
+        [uidm, om]() -> uint32_t { uidm->BuildStaging(om); return uidm->CalcRankSize(); });
 
     bm->CreateUpdateInstruction(UI_TEXT_INDEX_BUFFER,
         [uidm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { uidm->StoreIndex(bm, &task); },

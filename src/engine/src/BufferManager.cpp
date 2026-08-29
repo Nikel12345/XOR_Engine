@@ -39,8 +39,7 @@ BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_ma
     // пропускает usage==0 и НЕ выкидывает из очереди, так что поздняя декларация его оживит.
     // ОБРАТНОЕ НЕВЕРНО: уже созданный буфер из очереди удаляется, и usage, добавленный после
     // этого, не применится молча — см. WARNINGS.md.
-    CreateBufferData(UI_TEXT_BITS_BUFFER,     sizeof(uint32_t) * 64,      BufferDataType::Dynamic);
-    CreateBufferData(UI_TEXT_WORDBASE_BUFFER, sizeof(uint32_t) * 64,      BufferDataType::Dynamic);
+    CreateBufferData(UI_TEXT_RANK_BUFFER,     sizeof(uint32_t) * 2 * 64,  BufferDataType::Dynamic);
     CreateBufferData(UI_TEXT_INDEX_BUFFER,    sizeof(uint32_t) * 2 * 256, BufferDataType::Dynamic);
     CreateBufferData(UI_TEXT_BUFFER,          sizeof(uint32_t) * 4096,    BufferDataType::Dynamic);
 

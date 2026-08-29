@@ -5,6 +5,7 @@
 #include "ObjectManager.h"
 #include "MaterialManager.h"
 #include "MaterialData.h"
+#include "SparseRankChannel.h"
 
 // Число ячеек, которое сущность занимает в буфере состояний. Секция есть у КАЖДОГО материала,
 // включая тот, у которого вариативных ролей нет вовсе: смещение секции шейдер считает как
@@ -14,17 +15,6 @@ static inline uint32_t ElementCells(const MaterialComponent& mc)
 {
 	return safe_u32(mc.materials.size()) * MAX_VARIATIVE_SLOTS;
 }
-
-// Слово rank-буфера: биты присутствия + число носителей до этого слова. Пара уходит на GPU как
-// StructuredBuffer<uint2>, поэтому раскладка обязана совпадать — отсюда static_assert.
-struct RankWord { uint32_t bits; uint32_t base; };
-static_assert(sizeof(RankWord) == 2 * sizeof(uint32_t), "rank word must match StructuredBuffer<uint2>");
-
-// Сколько слов копится в локальном буфере до сброса в трансфер. Вызов заливки несёт проверки
-// таска и границ буфера-назначения, и платить их поэлементно дорого (ЗАМЕРЕНО на 800k, Release:
-// поэлементно 14.0 мс против 1.3 мс пачками). Буфер ОГРАНИЧЕННЫЙ и локальный — это не
-// CPU-отражение буфера.
-static constexpr size_t RANK_FLUSH_WORDS = 4096;
 
 TextureStateDataModule::TextureStateDataModule()
 {
@@ -81,34 +71,12 @@ uint32_t TextureStateDataModule::CalculateRankSize(ObjectManager* om, SceneData*
 		running += ElementCells(mc);
 	});
 
-	return RankWords() * safe_u32(sizeof(RankWord));
+	return SparseRankBytes(rows_);
 }
 
 void TextureStateDataModule::StoreRank(BufferManager* bm, UploadTask* task)
 {
-	// chunk держится нулевым: слово без носителей — это ровно {bits = 0, base = сколько было},
-	// поэтому переписывается только base, а биты ставятся лишь у слов с попаданиями.
-	const uint32_t words = RankWords();
-	std::vector<RankWord> chunk(RANK_FLUSH_WORDS);
-	size_t h = 0;
-	uint32_t base = 0;
-
-	for (uint32_t w0 = 0; w0 < words; w0 += RANK_FLUSH_WORDS) {
-		const uint32_t n = (words - w0 < RANK_FLUSH_WORDS) ? words - w0
-		                                                   : safe_u32(RANK_FLUSH_WORDS);
-		for (uint32_t i = 0; i < n; ++i) {
-			// base — состояние ДО слова, поэтому пишется раньше, чем поглощаются его носители.
-			chunk[i].base = base;
-			uint32_t bits = 0;
-			const uint32_t row_end = (w0 + i + 1u) * 32u;
-			while (h < hit_rows_.size() && hit_rows_[h] < row_end) {
-				bits |= 1u << (hit_rows_[h] & 31u);
-				++h; ++base;
-			}
-			chunk[i].bits = bits;
-		}
-		bm->UploadToTransferBuffer(task, safe_u32(size_t(n) * sizeof(RankWord)), chunk.data());
-	}
+	StoreSparseRank(bm, task, rows_, hit_rows_);
 }
 
 // Смещения носителей уже лежат подряд и в нужном порядке — заливаются как есть, одним блобом.

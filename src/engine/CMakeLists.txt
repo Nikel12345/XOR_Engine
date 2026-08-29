@@ -114,6 +114,7 @@ set(ENGINEGPU_SRC
     src/RenderManager.cpp
     src/RenderCommandData.cpp
     src/GpuTaskContext.cpp
+    src/SparseRankChannel.cpp
     src/EngineProfiler.cpp
 )
 set(ENGINEGPU_HDR
@@ -132,6 +133,7 @@ set(ENGINEGPU_HDR
     include/RenderManager.h
     include/RenderCommandData.h
     include/GpuTaskContext.h
+    include/SparseRankChannel.h
     include/EngineProfiler.h
 )
 list(TRANSFORM ENGINEGPU_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)

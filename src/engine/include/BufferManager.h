@@ -50,8 +50,7 @@ namespace DefaultBuffersNames {
 	// не держим полноразмерный массив на КАЖДЫЙ row трансформа, а раскладываем на 4 буфера
 	// (см. UI_DataModule). Вершинник по row из OutPib проверяет бит присутствия, при попадании
 	// считает rank (по WordBase) и читает INDEX[rank] → срез TEXT-буфера.
-	inline constexpr const char* UI_TEXT_BITS_BUFFER     = "UITextBits";       // 1 бит присутствия на row (по 32 в uint)
-	inline constexpr const char* UI_TEXT_WORDBASE_BUFFER = "UITextWordBase";   // пословный префикс-popcount (rank за O(1))
+	inline constexpr const char* UI_TEXT_RANK_BUFFER     = "UITextRank";       // слова канала: биты присутствия + префикс-popcount (SparseRankChannel.h)
 	inline constexpr const char* UI_TEXT_INDEX_BUFFER    = "UITextIndex";      // {offset,count} на текст-элемент (компактно, индекс = rank)
 	inline constexpr const char* UI_TEXT_BUFFER          = "UITextBuffer";     // коды глифов всех строк подряд
 

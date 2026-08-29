@@ -21,11 +21,10 @@ struct PSInput
 [[vk::combinedImageSampler]] SamplerState   u_albedoSampler : register(s1, space2);
 
 // ── Storage-буферы (нумеруются ПОСЛЕ сэмплеров: 2 сэмплера → t2..). Разреженный текст-канал. ──
-StructuredBuffer<uint>  TextBits     : register(t2, space2);   // presence, бит/row
-StructuredBuffer<uint>  TextWordBase : register(t3, space2);   // пословный префикс-popcount
-StructuredBuffer<uint2> TextIndex    : register(t4, space2);   // {offset,count} на текст-элемент (индекс = rank)
-StructuredBuffer<uint>  TextPool     : register(t5, space2);   // коды глифов подряд
-StructuredBuffer<uint4> GlyphUVL     : register(t6, space2);   // code → UVL глифа (.w = advance-биты)
+SPARSE_CHANNEL(Text, t2, space2)                               // → TextWords, TextRank(row)
+StructuredBuffer<uint2> TextIndex : register(t3, space2);      // {offset,count} на текст-элемент (индекс = rank)
+StructuredBuffer<uint>  TextPool  : register(t4, space2);      // коды глифов подряд
+StructuredBuffer<uint4> GlyphUVL  : register(t5, space2);      // code → UVL глифа (.w = advance-биты)
 
 // ── Потолки раскладки вариантов ──
 // Приходят ДЕФАЙНАМИ (Engine::InitDefaultShaders, они же в ключе кэша .spv). Дефолты держат
@@ -58,20 +57,18 @@ cbuffer VariantLayoutBlock : register(b2, space3) {
 // шейдер собирается без обоих буферов и показывает ДЕФОЛТ слота: адресация через base остаётся
 // (она в пуше), пропадает только выбор. Симметрично прологу main-пасса.
 #ifdef TEXTURE_VARIANTS
-// 2 сэмплера + 5 текст-буферов (t2..t6) → префикс t7, состояния t8. Строку трансформа
-// вершинник уже отдаёт (v_row — он же адресует разреженный текст-канал), новых полей не нужно.
-#include "sparse_rank.hlsli"
-StructuredBuffer<uint2> TexStateRank  : register(t7, space2);   // x = биты, y = носителей до слова
-StructuredBuffer<uint>  TexStateIndex : register(t8, space2);   // смещение ячеек носителя
-StructuredBuffer<uint>  TexState      : register(t9, space2);
+// 2 сэмплера + 4 текст-буфера (t2..t5) → канал состояний t6..t8. Тот же механизм, что у текста
+// строкой выше. Строку трансформа вершинник уже отдаёт (v_row — он же адресует текст-канал),
+// новых полей не нужно.
+SPARSE_CHANNEL(TexState, t6, space2)                            // → TexStateWords, TexStateRank(row)
+StructuredBuffer<uint> TexStateIndex : register(t7, space2);    // смещение ячеек носителя
+StructuredBuffer<uint> TexState      : register(t8, space2);
 
-// -1 = у строки элемента нет. Не-носитель отвечает ОДНОЙ загрузкой (слово rank).
-int TexStateOfs(uint row)
+// -1 = переключать нечего (строка не носитель). Дальше по коду важен только знак.
+int TexStateOfs(int row)
 {
-    const uint  b  = row & 31u;
-    const uint2 rw = TexStateRank[row >> 5u];
-    if (!SparseHasBit(rw.x, b)) return -1;
-    return int(TexStateIndex[SparseRank(rw.x, rw.y, b)]);
+    const int r = TexStateRank(row);
+    return (r < 0) ? -1 : int(TexStateIndex[r]);
 }
 #endif
 
@@ -91,7 +88,7 @@ uint TexIndex(uint s, int state_ofs)
     return (L >> 16) + v;
 }
 
-float4 sampleAlbedo(float2 uv, uint row)
+float4 sampleAlbedo(float2 uv, int row)
 {
     // Префикс читаем здесь, а не в вершиннике: буфер в ВЕРШИННОМ списке обязана была бы биндить
     // каждая sp с этим вершинником. row у нас уже есть — им же адресуется текст-канал.
@@ -110,18 +107,15 @@ float4 sampleAlbedo(float2 uv, uint row)
 float4 main(PSInput input) : SV_Target0
 {
     // Фон: albedo × тинт.
-    float4 bg = sampleAlbedo(input.v_uv, input.v_row) * bg_color;
+    float4 bg = sampleAlbedo(input.v_uv, int(input.v_row)) * bg_color;
     bg.a *= input.v_alpha;
 
     // Текст: покрытие глифа из разреженного канала по row.
     float coverage = 0.0;
-    uint row = input.v_row;
-    uint w = row >> 5u, b = row & 31u;
-    uint word = TextBits[w];
+    const int text_rank = TextRank(int(input.v_row));
 
-    if (UIHasText(word, b)) {
-        uint rank  = UITextRank(word, TextWordBase[w], b);
-        uint2 span = TextIndex[rank];        // x=offset, y=count
+    if (text_rank >= 0) {
+        uint2 span = TextIndex[text_rank];   // x=offset, y=count
         uint count = span.y;
         if (count > 0u) {
             // Раскладка/посадку/форму узла считает Yoga (UI_Yoga) — rect УЖЕ правильной формы, поэтому

@@ -462,9 +462,9 @@ void Engine::InitDefaultShaders()
 		spd.BehavesAsUIOverlay();
 		engine_context->CreateShaderProgram("UI", spd, RP::UI_PASS,
 			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_INSTANCE_BUFFER },
-			// Буферы вариантов — в ХВОСТ фрагментного списка (t7/t8 после GlyphUVL t6). Вершинный
+			// Буферы вариантов — в ХВОСТ фрагментного списка (t6..t8 после GlyphUVL t5). Вершинный
 			// не трогаем: ui_vs и так отдаёт row, а буфер в его списке пришлось бы биндить всем.
-			"ui_fs", { UI_TEXT_BITS_BUFFER, UI_TEXT_WORDBASE_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER,
+			"ui_fs", { UI_TEXT_RANK_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER,
 			           DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo }, /*dont_save=*/true);
 	}
