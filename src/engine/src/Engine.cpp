@@ -456,13 +456,16 @@ void Engine::InitDefaultShaders()
 		// которому BakePending эти буферы и создаёт. Слот Albedo = фон узла.
 		engine_context->CreateVertexShader("ui_vs", "../engine/shaders_code/ui/ui.vert.hlsl",
 			POS_UV_NORM_POOL, { POSITION, UV }, /*dont_save=*/true);
-		engine_context->CreateFragmentShader("ui_fs", "../engine/shaders_code/ui/ui.frag.hlsl", /*dont_save=*/true);
+		engine_context->CreateFragmentShader("ui_fs", "../engine/shaders_code/ui/ui.frag.hlsl", /*dont_save=*/true, kVariantDefines);
 
 		ShaderProgramDescription spd;
 		spd.BehavesAsUIOverlay();
 		engine_context->CreateShaderProgram("UI", spd, RP::UI_PASS,
 			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_INSTANCE_BUFFER },
-			"ui_fs", { UI_TEXT_BITS_BUFFER, UI_TEXT_WORDBASE_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER },
+			// Буферы вариантов — в ХВОСТ фрагментного списка (t7/t8 после GlyphUVL t6). Вершинный
+			// не трогаем: ui_vs и так отдаёт row, а буфер в его списке пришлось бы биндить всем.
+			"ui_fs", { UI_TEXT_BITS_BUFFER, UI_TEXT_WORDBASE_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER,
+			           DEFAULT_TEX_STATE_PREFIX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo }, /*dont_save=*/true);
 	}
 

@@ -76,6 +76,14 @@ public:
 	template<class T>
 	void SetMaterialParams(Material* m, const ShaderName& sp_name, const T& p) { ::SetMaterialParams(m, sp_name, p); }
 
+	// Какой вариант слот-роли показывает сущность (MaterialRef::states). Правка поля НА МЕСТЕ:
+	// архетип не меняется, дерево батчей не трогается вовсе — в этом вся идея переключаемых
+	// текстур. variant == 0 УБИРАЕТ запись (states разреженные, и сущность уходит из буфера
+	// состояний целиком), поэтому «сбросить в дефолт» и «нет записи» — одно и то же.
+	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА. С UI-потока — командой SetEntityTextureVariant, её обработчик
+	// зовёт этот же метод (одна логика на оба входа).
+	void SetEntityTextureVariant(Entity e, uint32_t mat_index, TextureSlotRole role, uint32_t variant);
+
 	// Кроссменеджерская операция: растеризовать шрифт. Живёт на контексте (менеджеры не владеют
 	// друг другом — см. CLAUDE.md), передаёт TextureManager/BufferManager параметрами в FontManager.
 	FontData* CreateFont(const std::string& name, const char* path, float px, bool sdf = false);

@@ -226,13 +226,22 @@ SDL_AppResult Game::MainInit()
 
         // Панель у нижнего края: колонка, внутренний отступ + зазор между строками, по центру.
         UIStyle panelS; panelS.dir = UIDir::Column; panelS.align = UIAlign::Center;
-        panelS.padding = 1.0f; panelS.gap = 8.0f; panelS.margin = 40.0f;
+        panelS.padding = 1.0f; panelS.gap = 8.0f; panelS.margin = 160.0f;
         UI_Yoga::Node panel = ui->Box(root, panelS, uimat, quad);
 
         // Две текстовые строки (intrinsic-размер из метрик шрифта).
-        UIStyle textS;
-        ui->Text(panel, textS, "Hello U Hello U Hello U Hello\n U Hello U Hello U Hello UI",    uimat, quad, uifont, fm);
-        ui->Text(panel, textS, "Yoga layout", uimat, quad, uifont, fm);
+        //UIStyle textS;
+        //ui->Text(panel, textS, "Hello U Hello U Hello U Hello\n U Hello U Hello U Hello UI",    uimat, quad, uifont, fm);
+        //ui->Text(panel, textS, "Yoga layout", uimat, quad, uifont, fm);
+
+        // Кнопка на материале с ДВУМЯ albedo-вариантами (m_hover из манифеста сцены).
+        // Переключения пока нет: узел показывает дефолт (вариант 0). Смысл узла — проверка,
+        // что вариативный материал в UI-проходе рисуется как обычный.
+        // Размер задан в px явно: у Box нет интринсика (в отличие от Text), при Auto он схлопнется.
+        UIStyle btnS;
+        btnS.wmode = UISize::Points; btnS.w = 256.0f;
+        btnS.hmode = UISize::Points; btnS.h = 74.0f;
+        ui->Box(panel, btnS, "m_hover", quad);
     }
 
     {
@@ -243,8 +252,55 @@ SDL_AppResult Game::MainInit()
     return SDL_APP_CONTINUE;
 }
 
+// Наведение на UI. Дерево Yoga раскладывает узлы в NDC и кладёт рект прямо в Positions
+// (юнит-квад [0,1]² разложен матрицей: диагональ = масштаб, 4-й столбец = сдвиг, см. UI_Yoga::Emit),
+// поэтому проверка попадания — это сравнение курсора с [w, w+x] x [d, d+b], без обратной
+// математики и без обращения к раскладке.
+//
+// Курсор нормируем ОКНОМ, а не render-разрешением: рект узла уже в NDC (Emit поделил на своё),
+// а картинка растягивается на окно — NDC у них общий, и расхождение render/window сюда не течёт.
+//
+// Состояния переписываются КАЖДЫЙ кадр, и это не расточительство: буфер состояний и так
+// заливается целиком каждый кадр, а запись нуля стирает запись — не-наведённые узлы из буфера
+// уходят сами. Зовётся с sim-потока, поэтому пишем через EngineContext напрямую, без команды
+// (команда — это вход для UI-потока, у неё аллокация и кадр задержки).
+void Game::UpdateUIHover()
+{
+    SceneData* scene = objectManager->GetActiveScene();
+    if (!scene) return;
+    const float ww = engine->GetWindowWidth(), wh = engine->GetWindowHeight();
+    if (ww <= 0.0f || wh <= 0.0f) return;
+
+    const float nx = 2.0f * input->MouseX() / ww - 1.0f;
+    const float ny = 1.0f - 2.0f * input->MouseY() / wh;   // y вниз в окне → вверх в NDC
+
+    MaterialManager* mm = ctx->GetMaterialManager();
+    objectManager->ForEach<Positions, UIComponent, MaterialComponent>(scene,
+        [&](Entity e, SoAElement<Positions> pos, UIComponent&, MaterialComponent& mc)
+    {
+        Positions& P = pos.container();
+        const size_t i = pos.i();
+        const float x0 = P.w[i], x1 = x0 + P.x[i];
+        const float y0 = P.d[i], y1 = y0 + P.b[i];
+        const bool hit = (nx >= x0 && nx <= x1 && ny >= y0 && ny <= y1);
+
+        for (uint32_t k = 0; k < mc.materials.size(); ++k) {
+            // Узлы на невариативном материале (текст, фон панели) пропускаем: писать им состояние
+            // значило бы затащить их в буфер состояний ради значения, которое шейдер всё равно
+            // сожмёт клампом в дефолт.
+            auto mit = mm->GetMaterials().find(mc.materials[k].name);
+            if (mit == mm->GetMaterials().end()) continue;
+            auto tit = mit->second->textures.find(TextureSlotRole::Albedo);
+            if (tit == mit->second->textures.end() || tit->second.size() < 2) continue;
+
+            ctx->SetEntityTextureVariant(e, k, TextureSlotRole::Albedo, hit ? 1u : 0u);
+        }
+    });
+}
+
 SDL_AppResult Game::MainIterate()
 {
+    UpdateUIHover();
     input->DrainKeyEvents(key_events_scratch);
     for (const InputManager::KeyEvent& e : key_events_scratch) {
         if (!e.down) continue;

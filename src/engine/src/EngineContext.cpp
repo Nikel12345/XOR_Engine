@@ -214,6 +214,22 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 	return m;
 }
 
+void EngineContext::SetEntityTextureVariant(Entity e, uint32_t mat_index, TextureSlotRole role, uint32_t variant)
+{
+	SceneData* scene = object_manager ? object_manager->GetActiveScene() : nullptr;
+	if (!scene || !object_manager->Has<MaterialComponent>(scene, e)) return;
+	auto& mats = object_manager->GetComponent<MaterialComponent>(scene, e).materials;
+	if (mat_index >= mats.size()) return;
+
+	auto& st = mats[mat_index].states;
+	auto it = std::find_if(st.begin(), st.end(), [role](const auto& p) { return p.first == role; });
+	// Ноль — это «как у всех», а не «выбран вариант 0»: запись удаляем, чтобы states остались
+	// разреженными и гейт HasAnyTextureState снова стал ложным.
+	if (variant == 0) { if (it != st.end()) st.erase(it); }
+	else if (it != st.end()) it->second = variant;
+	else st.emplace_back(role, variant);
+}
+
 FontData* EngineContext::CreateFont(const std::string& name, const char* path, float px, bool sdf)
 {
 	if (!font_manager) { SDL_Log("EngineContext::CreateFont: font_manager not set"); return nullptr; }

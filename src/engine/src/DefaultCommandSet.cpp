@@ -304,23 +304,10 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 		[](EngineContext* ctx, const void* data)
 		{
 			const EntityTextureVariantCmd* c = static_cast<const EntityTextureVariantCmd*>(data);
-			ObjectManager* om = ctx->GetObjectManager();
-			SceneData* scene = om->GetActiveScene();
-			if (scene && om->Has<MaterialComponent>(scene, c->entity)) {
-				auto& mats = om->GetComponent<MaterialComponent>(scene, c->entity).materials;
-				if (c->mat_index < mats.size()) {
-					auto& st = mats[c->mat_index].states;
-					const TextureSlotRole role = static_cast<TextureSlotRole>(c->role);
-					auto it = std::find_if(st.begin(), st.end(),
-						[role](const auto& p) { return p.first == role; });
-					// Ноль — это «как у всех», а не «выбран вариант 0»: запись удаляем, чтобы
-					// states остались разреженными и гейт HasAnyTextureState снова стал ложным
-					// (сущность уходит из буфера состояний целиком).
-					if (c->variant == 0) { if (it != st.end()) st.erase(it); }
-					else if (it != st.end()) it->second = c->variant;
-					else st.emplace_back(role, c->variant);
-				}
-			}
+			// Вся логика — в EngineContext::SetEntityTextureVariant: тот же вход есть у игровых
+			// систем с sim-потока (наведение на UI), и раздваивать её нельзя.
+			ctx->SetEntityTextureVariant(c->entity, c->mat_index,
+				static_cast<TextureSlotRole>(c->role), c->variant);
 			delete c;
 		});
 

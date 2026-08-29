@@ -27,24 +27,79 @@ StructuredBuffer<uint2> TextIndex    : register(t4, space2);   // {offset,count}
 StructuredBuffer<uint>  TextPool     : register(t5, space2);   // коды глифов подряд
 StructuredBuffer<uint4> GlyphUVL     : register(t6, space2);   // code → UVL глифа (.w = advance-биты)
 
-// ── Униформы (space3): b0 = UVL слотов материала (albedo), b1 = MaterialBlock (UIMaterialParams). ──
+// ── Потолки раскладки вариантов ──
+// Приходят ДЕФАЙНАМИ (Engine::InitDefaultShaders, они же в ключе кэша .spv). Дефолты держат
+// сборку без них и ОБЯЗАНЫ совпадать с C++ (ShaderTypes.h).
+#ifndef MAX_SLOTS
+#define MAX_SLOTS 12
+#endif
+#ifndef MAX_VARIATIVE_SLOTS
+#define MAX_VARIATIVE_SLOTS 4
+#endif
+#ifndef MAX_UVL_BLOCKS
+#define MAX_UVL_BLOCKS 32
+#endif
+
+// ── Униформы (space3): b0 = UVL слотов материала (albedo), b1 = MaterialBlock (UIMaterialParams),
+//    b2 = раскладка таблицы UVL (варианты). Порядок фиксирован пушем в ExecuteRenderBatches. ──
 struct TextureData { uint4 data; };
-cbuffer TextureUVLBlock : register(b0, space3) { TextureData textures[1]; };   // [0] = albedo UVL
+// Таблица СГРУППИРОВАНА ПО СЛОТАМ: подряд все блоки слота, внутри группы [0] — дефолт. Индекс
+// блока слота НЕ равен номеру слота — только через TexIndex. У материала без вариантов
+// вырождается в прежний плотный UVL по required_slots (у UI это один albedo).
+cbuffer TextureUVLBlock : register(b0, space3) { TextureData textures[MAX_UVL_BLOCKS]; };
 cbuffer MaterialBlock   : register(b1, space3) { float4 bg_color; float4 text_color; float4 text_params; };
 // text_params.x = text_height (доля высоты ректа под строку), .y = text_anchor (0=верх..1=низ).
+cbuffer VariantLayoutBlock : register(b2, space3) {
+    uint4 slot_layout[MAX_SLOTS / 4];   // (base<<16)|(cell<<8)|count на слот
+    uint  material_index;               // offset 48 — массив кончается на 16-байтной границе
+};
 
-float4 sampleAlbedo(float2 uv)
+// ПЕРЕКЛЮЧЕНИЕ вариантов — opt-in по TEXTURE_VARIANTS (ставит Engine своим ui_fs). Без него
+// шейдер собирается без обоих буферов и показывает ДЕФОЛТ слота: адресация через base остаётся
+// (она в пуше), пропадает только выбор. Симметрично прологу main-пасса.
+#ifdef TEXTURE_VARIANTS
+// 2 сэмплера + 5 текст-буферов (t2..t6) → префикс t7, состояния t8. Строку трансформа
+// вершинник уже отдаёт (v_row — он же адресует разреженный текст-канал), новых полей не нужно.
+StructuredBuffer<int>  TexStatePrefix : register(t7, space2);
+StructuredBuffer<uint> TexState       : register(t8, space2);
+#endif
+
+// Индекс блока UVL для слота s. Три проверки с разными ролями: g_stateOfs >= 0 — безопасность
+// (нет элемента → индекс ушёл бы в минус), v >= count — корректность (номер протух), count > 1 —
+// стоимость (иначе storage читал бы каждый пиксель каждого материала). См. main_pass/material_api.
+uint TexIndex(uint s, int state_ofs)
 {
-    float2 off = unpackUnorm2x16(textures[0].data.x);
-    float2 scl = unpackUnorm2x16(textures[0].data.y);
-    uint   lay = textures[0].data.z;
+    uint L     = slot_layout[s >> 2][s & 3];
+    uint count = L & 0xFFu;
+    uint v = 0u;
+#ifdef TEXTURE_VARIANTS
+    if (count > 1u && state_ofs >= 0)
+        v = TexState[state_ofs + material_index * MAX_VARIATIVE_SLOTS + ((L >> 8) & 0xFFu)];
+    if (v >= count) v = 0u;
+#endif
+    return (L >> 16) + v;
+}
+
+float4 sampleAlbedo(float2 uv, uint row)
+{
+    // Префикс читаем здесь, а не в вершиннике: буфер в ВЕРШИННОМ списке обязана была бы биндить
+    // каждая sp с этим вершинником. row у нас уже есть — им же адресуется текст-канал.
+#ifdef TEXTURE_VARIANTS
+    const int state_ofs = TexStatePrefix[row];
+#else
+    const int state_ofs = -1;
+#endif
+    const uint b = TexIndex(0, state_ofs);   // 0 — единственный слот UI-материала (Albedo)
+    float2 off = unpackUnorm2x16(textures[b].data.x);
+    float2 scl = unpackUnorm2x16(textures[b].data.y);
+    uint   lay = textures[b].data.z;
     return u_albedo.Sample(u_albedoSampler, float3(uv * scl + off, float(lay)));
 }
 
 float4 main(PSInput input) : SV_Target0
 {
     // Фон: albedo × тинт.
-    float4 bg = sampleAlbedo(input.v_uv) * bg_color;
+    float4 bg = sampleAlbedo(input.v_uv, input.v_row) * bg_color;
     bg.a *= input.v_alpha;
 
     // Текст: покрытие глифа из разреженного канала по row.

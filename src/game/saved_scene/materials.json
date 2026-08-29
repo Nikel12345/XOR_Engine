@@ -618,24 +618,22 @@
             "shaders": [
                 {
                     "name": "UI",
-                    "params_type": "Opaque",
+                    "params_type": "UI",
                     "params": {
-                        "baseColor": [
+                        "bg_color": [
                             1.0,
                             1.0,
                             1.0,
                             1.0
                         ],
-                        "emissive": [
-                            0.0,
-                            0.0,
-                            0.0
+                        "text_color": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
                         ],
-                        "emissiveStrength": 1.0,
-                        "metallic": 0.0,
-                        "roughness": 1.0,
-                        "heightScale": 0.0,
-                        "pomBias": 0.0
+                        "text_height": 1.0,
+                        "text_anchor": 0.0
                     }
                 }
             ],
