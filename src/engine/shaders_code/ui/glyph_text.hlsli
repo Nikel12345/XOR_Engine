@@ -7,14 +7,14 @@
 // с нужными регистрами — модуль не диктует регистры, переносим.
 
 #include "main_pass/math.hlsl"   // unpackUnorm2x16
+#include "sparse_rank.hlsli"      // presence-бит + пословный rank — механизм общий с каналом
+                                  // состояний вариантов текстур, поэтому определён один раз
 
 // Есть ли текст у row (по уже загруженному слову presence-маски).
-bool UIHasText(uint word, uint bit) { return ((word >> bit) & 1u) != 0u; }
+bool UIHasText(uint word, uint bit) { return SparseHasBit(word, bit); }
 
 // rank(row) = компактный индекс в index[] = число единиц presence ДО этого row.
-uint UITextRank(uint word, uint wordBase, uint bit) {
-    return wordBase + countbits(word & ((1u << bit) - 1u));
-}
+uint UITextRank(uint word, uint wordBase, uint bit) { return SparseRank(word, wordBase, bit); }
 
 // Покрытие глифа: сэмпл __TextAtlas (R8) по UVL глифа и локальной координате внутри его ячейки.
 // glyphUvl = TextureData.data (x=packed offset, y=packed scale, z=layer, w=advance-биты — не тут).

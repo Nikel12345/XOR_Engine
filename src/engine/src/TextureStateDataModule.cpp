@@ -14,115 +14,144 @@ static inline uint32_t ElementCells(const MaterialComponent& mc)
 {
 	return safe_u32(mc.materials.size()) * MAX_VARIATIVE_SLOTS;
 }
-// Гейт «у сущности есть что переключать»: элемента в буфере состояний нет вовсе, пока ни один
-// материал сущности ничего не переключил. Ценность — имя и одно определение условия: «пусто»
-// здесь значит именно «ни одного непустого states», а не «нет материалов». Считается ПО
-// КОМПОНЕНТУ, без резолва материалов, — решение принимается на миллионе строк за копейки.
-inline bool HasAnyTextureState(const MaterialComponent& mc) {
-	for (const MaterialRef& m : mc.materials) if (!m.states.empty()) return true;
-	return false;
+
+// Слово rank-буфера: биты присутствия + число носителей до этого слова. Пара уходит на GPU как
+// StructuredBuffer<uint2>, поэтому раскладка обязана совпадать — отсюда static_assert.
+struct RankWord { uint32_t bits; uint32_t base; };
+static_assert(sizeof(RankWord) == 2 * sizeof(uint32_t), "rank word must match StructuredBuffer<uint2>");
+
+// Сколько слов копится в локальном буфере до сброса в трансфер. Вызов заливки несёт проверки
+// таска и границ буфера-назначения, и платить их поэлементно дорого (ЗАМЕРЕНО на 800k, Release:
+// поэлементно 14.0 мс против 1.3 мс пачками). Буфер ОГРАНИЧЕННЫЙ и локальный — это не
+// CPU-отражение буфера.
+static constexpr size_t RANK_FLUSH_WORDS = 4096;
+
+TextureStateDataModule::TextureStateDataModule()
+{
+	// ~0 — «в слоте не лежит ничего»: первый же кадр разойдётся с любой настоящей ревизией.
+	for (uint64_t& r : last_rank_revision)  r = ~0ull;
+	for (uint64_t& r : last_index_revision) r = ~0ull;
 }
 
-// Сколько строк префикса копится в локальном буфере до сброса в трансфер. Вызов заливки несёт
-// проверки таска и границ буфера-назначения, и на домене в миллион строк платить их построчно
-// дорого (ЗАМЕРЕНО на 800k, Release: построчно 14.0 мс против 1.3 мс пачками, при бюджете
-// prepare ~11 мс на кадр). Буфер ОГРАНИЧЕННЫЙ и локальный — это не CPU-отражение буфера.
-static constexpr size_t PREFIX_FLUSH_ROWS = 4096;
-
-// Размер префикса = размер домена строк, ровно как у InstanceDataModule. Материалы тут ни при
-// чём: строка есть у каждой рисуемой сущности, даже если переключать ей нечего (получит -1).
-// Здесь уместен именно ForEachArchetype: нужен размер КОЛОНКИ, а не обход сущностей.
-uint32_t TextureStateDataModule::CalculatePrefixSize(ObjectManager* om, SceneData* scene)
+// Строит канал целиком: домен строк + список носителей. Ни одна строка не опрашивается по
+// сущности — вопрос «есть ли тег» задаётся АРХЕТИПУ (фильтром ForEach), а адрес носителя
+// считается как «база его архетипа + индекс в архетипе».
+//
+// Почему не построчный обход с Has<>: такой вопрос задаётся СУЩНОСТИ (поиск в словаре сцены +
+// резолв колонки по typeid) и стоит ЗАМЕРЕНО на 800k, Release: 158 нс на строку, 128 мс на
+// вызов — при том что голый обход тех же строк это 1.3 мс.
+//
+// Связь двух обходов — указатель на колонку Positions: ForEachArchetype отдаёт
+// ComponentArray<Positions>*, ForEach кладёт &arr->data в SoAElement::soa — это один и тот же
+// адрес. Архетипов десятки, поэтому линейный поиск по ним, а не второй индекс.
+uint32_t TextureStateDataModule::CalculateRankSize(ObjectManager* om, SceneData* scene, uint64_t revision, uint8_t slot)
 {
-	uint32_t rows = 0;
+	if (revision == last_rank_revision[slot]) return 0;
+	last_rank_revision[slot] = revision;
+
+	// 1. Базы архетипов в порядке домена строк. Здесь уместен именно ForEachArchetype: нужен
+	//    размер КОЛОНКИ, а не обход сущностей.
+	struct ArchBase { const Positions* col; uint32_t base; };
+	std::vector<ArchBase> bases;
+	rows_ = 0;
 	om->ForEachArchetype<Positions, DrawComponent>(scene,
 		[&](ComponentArray<Positions, void>* posArr,
 			ComponentArray<DrawComponent, void>*)
 	{
-		rows += safe_u32(posArr->size());
+		bases.push_back(ArchBase{ &posArr->data, rows_ });
+		rows_ += safe_u32(posArr->size());
 	});
-	return rows * sizeof(int32_t);
+
+	// 2. Носители: тот же обход и в том же порядке, что у StoreState, — поэтому смещение,
+	//    посчитанное здесь той же прогрессией, указывает ровно на ячейки, которые там лягут.
+	//    Строки выходят по возрастанию: архетипы обходятся в одном порядке, внутри — по индексу.
+	hit_rows_.clear();
+	hit_ofs_.clear();
+	uint32_t running = 0;
+	om->ForEach<Positions, DrawComponent, MaterialComponent, TextureStateComponent>(scene,
+		[&](SoAElement<Positions> pos, DrawComponent&, MaterialComponent& mc, TextureStateComponent&)
+	{
+		const Positions* col = pos.soa;
+		for (const ArchBase& a : bases) {
+			if (a.col != col) continue;
+			hit_rows_.push_back(a.base + safe_u32(pos.i()));
+			hit_ofs_.push_back(running);
+			break;
+		}
+		running += ElementCells(mc);
+	});
+
+	return RankWords() * safe_u32(sizeof(RankWord));
 }
 
-// Домен — сущности С материалами: у остальных элемента нет по определению. Резолва материалов
-// не требует: длина элемента выводится из КОМПОНЕНТА (сколько у сущности материалов), а есть ли
-// элемент вообще — из HasAnyTextureState.
+void TextureStateDataModule::StoreRank(BufferManager* bm, UploadTask* task)
+{
+	// chunk держится нулевым: слово без носителей — это ровно {bits = 0, base = сколько было},
+	// поэтому переписывается только base, а биты ставятся лишь у слов с попаданиями.
+	const uint32_t words = RankWords();
+	std::vector<RankWord> chunk(RANK_FLUSH_WORDS);
+	size_t h = 0;
+	uint32_t base = 0;
+
+	for (uint32_t w0 = 0; w0 < words; w0 += RANK_FLUSH_WORDS) {
+		const uint32_t n = (words - w0 < RANK_FLUSH_WORDS) ? words - w0
+		                                                   : safe_u32(RANK_FLUSH_WORDS);
+		for (uint32_t i = 0; i < n; ++i) {
+			// base — состояние ДО слова, поэтому пишется раньше, чем поглощаются его носители.
+			chunk[i].base = base;
+			uint32_t bits = 0;
+			const uint32_t row_end = (w0 + i + 1u) * 32u;
+			while (h < hit_rows_.size() && hit_rows_[h] < row_end) {
+				bits |= 1u << (hit_rows_[h] & 31u);
+				++h; ++base;
+			}
+			chunk[i].bits = bits;
+		}
+		bm->UploadToTransferBuffer(task, safe_u32(size_t(n) * sizeof(RankWord)), chunk.data());
+	}
+}
+
+// Смещения носителей уже лежат подряд и в нужном порядке — заливаются как есть, одним блобом.
+uint32_t TextureStateDataModule::CalculateIndexSize(uint64_t revision, uint8_t slot)
+{
+	if (revision == last_index_revision[slot]) return 0;
+	last_index_revision[slot] = revision;
+	return safe_u32(hit_ofs_.size() * sizeof(uint32_t));
+}
+
+void TextureStateDataModule::StoreIndex(BufferManager* bm, UploadTask* task)
+{
+	if (hit_ofs_.empty()) return;
+	bm->UploadToTransferBuffer(task, safe_u32(hit_ofs_.size() * sizeof(uint32_t)), hit_ofs_.data());
+}
+
+// Домен — носители тега: у остальных элемента нет по определению. Фильтр стоит в списке типов
+// ForEach, то есть архетипы без тега отсеиваются целиком, а не построчно, — из-за этого обход и
+// дёшев настолько, что гейт ему не нужен (ЗАМЕРЕНО на 800k: 0.001 мс). Резолва материалов не
+// требует: длина элемента выводится из КОМПОНЕНТА (сколько у сущности материалов).
 uint32_t TextureStateDataModule::CalculateStateSize(ObjectManager* om, SceneData* scene)
 {
 	uint32_t cells = 0;
-	om->ForEach<Positions, DrawComponent, MaterialComponent>(scene,
-		[&](SoAElement<Positions>, DrawComponent&, MaterialComponent& mc)
+	om->ForEach<Positions, DrawComponent, MaterialComponent, TextureStateComponent>(scene,
+		[&](SoAElement<Positions>, DrawComponent&, MaterialComponent& mc, TextureStateComponent&)
 	{
-		if (!HasAnyTextureState(mc)) return;
 		cells += ElementCells(mc);
 	});
 
-	// Единственный обход, который вынужден трогать MaterialComponent КАЖДОЙ строки, и он дорог:
-	// компонент — вектор MaterialRef, то есть 24 байта заголовка на строку ПЛЮС отдельный блок в
-	// куче, куда надо шагнуть за states. ЗАМЕРЕНО на 800k (Release): скан одних заголовков 1.8 мс,
-	// с разыменованием 5.6 мс — при том что сама заливка префикса (3.2 МБ) стоит 1.6 мс.
-	// Поэтому вывод обхода запоминается и переиспользуется в StorePrefix, а не считается дважды.
-	any_states = cells != 0;
 	return cells * sizeof(uint32_t);
-}
-
-void TextureStateDataModule::StorePrefix(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene)
-{
-	// Домен и ПОРЯДОК обязаны совпадать с CalculatePrefixSize и TransformDataModule: префикс
-	// индексируется строкой трансформа, и разъезд нумерации даст чужие варианты без единого
-	// симптома в момент ошибки. Поэтому обход идёт по ВСЕМ строкам, а не только по тем, у кого
-	// есть материалы: пропуск сущности оставил бы не дырку, а сдвиг всех последующих строк.
-	//
-	// MaterialComponent в этом домене НЕОБЯЗАТЕЛЕН (рисуемую сущность без него делает, например,
-	// форма создания в редакторе), поэтому он спрашивается ПО СУЩНОСТИ, а не стоит в списке типов
-	// ForEach: там он выкинул бы такие строки из обхода.
-	std::vector<int32_t> chunk;
-	chunk.reserve(PREFIX_FLUSH_ROWS);
-	uint32_t running = 0;
-
-	auto flush = [&] {
-		if (chunk.empty()) return;
-		bm->UploadToTransferBuffer(task, safe_u32(chunk.size() * sizeof(int32_t)), chunk.data());
-		chunk.clear();
-	};
-
-	om->ForEach<Positions, DrawComponent>(scene,
-		[&](Entity e, SoAElement<Positions>, DrawComponent&)
-	{
-		int32_t ofs = -1;
-		// Быстрый путь: во всей сцене никто ничего не переключал → весь буфер это -1, и ни
-		// спрашивать компонент, ни шагать за ним в кучу незачем. Это НЕ эвристика: any_states
-		// посчитан точно, тем самым обходом, что дал размер второго буфера. Типовой случай —
-		// именно он: варианты у материала есть, а переключил их кто-то один или никто.
-		// Полагаться на то, что size уже отработал, можно: движок гоняет ВСЕ size_fn и только
-		// потом все updater'ы (_ExecuteUpdateInstructions) — от порядка РЕГИСТРАЦИИ это не зависит.
-		if (any_states && om->Has<MaterialComponent>(scene, e)) {
-			const MaterialComponent& mc = om->GetComponent<MaterialComponent>(scene, e);
-			if (HasAnyTextureState(mc)) {
-				ofs = safe_u32t_i(running);
-				running += ElementCells(mc);
-			}
-		}
-		chunk.push_back(ofs);
-		if (chunk.size() >= PREFIX_FLUSH_ROWS) flush();
-	});
-	flush();
 }
 
 void TextureStateDataModule::StoreState(BufferManager* bm, UploadTask* task, ObjectManager* om,
 	SceneData* scene, MaterialManager* mtm)
 {
-	// Тот же домен и порядок, что у CalculateStateSize; со StorePrefix он согласован тем, что
-	// подпоследовательность сущностей С материалами в обоих обходах одна и та же (архетипы в
-	// одном порядке, внутри архетипа — по индексу).
+	// Тот же домен и порядок, что у CalculateStateSize и у обхода носителей в CalculateRankSize:
+	// index[rank] указывает ровно на ячейки, которые кладёт этот проход.
 	//
 	// Абсолютного смещения эта фаза не знает и не должна: секции дописываются ПОДРЯД, курсором
 	// служит сам аппенд UploadToTransferBuffer (он двигает task->written_size).
-	om->ForEach<Positions, DrawComponent, MaterialComponent>(scene,
-		[&](SoAElement<Positions>, DrawComponent&, MaterialComponent& mc)
+	om->ForEach<Positions, DrawComponent, MaterialComponent, TextureStateComponent>(scene,
+		[&](SoAElement<Positions>, DrawComponent&, MaterialComponent& mc, TextureStateComponent&)
 	{
-		if (!HasAnyTextureState(mc)) return;
-
 		for (const MaterialRef& m : mc.materials) {
 			// Нули — это и «слот дефолтный», и хвост секции: массив обнуляется целиком,
 			// а заполняются только ячейки вариативных ролей.

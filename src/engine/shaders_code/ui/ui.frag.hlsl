@@ -60,8 +60,19 @@ cbuffer VariantLayoutBlock : register(b2, space3) {
 #ifdef TEXTURE_VARIANTS
 // 2 сэмплера + 5 текст-буферов (t2..t6) → префикс t7, состояния t8. Строку трансформа
 // вершинник уже отдаёт (v_row — он же адресует разреженный текст-канал), новых полей не нужно.
-StructuredBuffer<int>  TexStatePrefix : register(t7, space2);
-StructuredBuffer<uint> TexState       : register(t8, space2);
+#include "sparse_rank.hlsli"
+StructuredBuffer<uint2> TexStateRank  : register(t7, space2);   // x = биты, y = носителей до слова
+StructuredBuffer<uint>  TexStateIndex : register(t8, space2);   // смещение ячеек носителя
+StructuredBuffer<uint>  TexState      : register(t9, space2);
+
+// -1 = у строки элемента нет. Не-носитель отвечает ОДНОЙ загрузкой (слово rank).
+int TexStateOfs(uint row)
+{
+    const uint  b  = row & 31u;
+    const uint2 rw = TexStateRank[row >> 5u];
+    if (!SparseHasBit(rw.x, b)) return -1;
+    return int(TexStateIndex[SparseRank(rw.x, rw.y, b)]);
+}
 #endif
 
 // Индекс блока UVL для слота s. Три проверки с разными ролями: g_stateOfs >= 0 — безопасность
@@ -85,7 +96,7 @@ float4 sampleAlbedo(float2 uv, uint row)
     // Префикс читаем здесь, а не в вершиннике: буфер в ВЕРШИННОМ списке обязана была бы биндить
     // каждая sp с этим вершинником. row у нас уже есть — им же адресуется текст-канал.
 #ifdef TEXTURE_VARIANTS
-    const int state_ofs = TexStatePrefix[row];
+    const int state_ofs = TexStateOfs(row);
 #else
     const int state_ofs = -1;
 #endif

@@ -30,7 +30,8 @@ namespace DefaultBuffersNames {
 	// (сущность ничего не переключала). STATE плоский: элементы подряд, внутри элемента по
 	// секции на материал сущности, ровно MAX_VARIATIVE_SLOTS ячеек в каждой.
 	// Согласовать их обязано то, что обе заливки идут по одному домену в одном порядке.
-	inline constexpr const char* DEFAULT_TEX_STATE_PREFIX_BUFFER = "_DefaultTexStatePrefixBuffer";
+	inline constexpr const char* DEFAULT_TEX_STATE_RANK_BUFFER   = "_DefaultTexStateRankBuffer";
+	inline constexpr const char* DEFAULT_TEX_STATE_INDEX_BUFFER  = "_DefaultTexStateIndexBuffer";
 	inline constexpr const char* DEFAULT_TEX_STATE_BUFFER        = "_DefaultTexStateBuffer";
 
 	// Индиректы: теперь ПО-КАМЕРНО — num_cameras копий команд, num_instances у каждой

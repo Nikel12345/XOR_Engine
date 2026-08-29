@@ -263,19 +263,22 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
             Entity e;
             // GeneratedComponent → SaveScene не пишет их в scene.json: узлы UI пересоздаёт
             // UI_Yoga::Emit из дерева каждую сессию, копия в файле = дубли/баги при загрузке.
+            // TextureStateComponent — БЕЗУСЛОВНО: тег ставится только при создании (миграции
+            // архетипов нет), а материал узлу можно сменить на вариативный позже. Узлов UI
+            // десятки, лишний элемент из нулей в буфере состояний ничего не стоит.
             if (!r.glyphs.empty())
                 e = ctx->CreateEntity(scene_name,
                         DrawComponent{ true, 1.0f, 0 },
                         ModelComponent{ r.quad },
                         MaterialComponent{ { MaterialRef{ r.material } } },
-                        m, UIComponent{}, GeneratedComponent{},
+                        m, UIComponent{}, GeneratedComponent{}, TextureStateComponent{},
                         UITextComponent{ r.glyphs, r.font });
             else
                 e = ctx->CreateEntity(scene_name,
                         DrawComponent{ true, 1.0f, 0 },
                         ModelComponent{ r.quad },
                         MaterialComponent{ { MaterialRef{ r.material } } },
-                        m, UIComponent{}, GeneratedComponent{});
+                        m, UIComponent{}, GeneratedComponent{}, TextureStateComponent{});
             r.entity = e;  r.has_entity = true;
             impl->created.push_back(e);
         }

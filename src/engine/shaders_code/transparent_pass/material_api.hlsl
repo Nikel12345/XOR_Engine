@@ -78,17 +78,31 @@ cbuffer VariantLayoutBlock : register(b2, space3) {
 // binding». Без дефайна шейдер работает как раньше и показывает ДЕФОЛТ слота: адресация через
 // base остаётся (она в пуше, буферов не требует), пропадает только выбор варианта.
 #ifdef TEXTURE_VARIANTS
-// Префикс (int на строку трансформа) и сами номера вариантов. Оба ФРАГМЕНТНЫЕ: вершинник общий
-// с чужими sp, и буфер в ЕГО списке пришлось бы биндить всем им без разбора.
-// 2 сэмплера (albedo t0, normal t1) + LightBlock t2 (объявляет база) → префикс t3, состояния t4.
-StructuredBuffer<int>  TexStatePrefix : register(t3, space2);
-StructuredBuffer<uint> TexState       : register(t4, space2);
+// Разреженный канал состояний (механизм — sparse_rank.hlsli). Все три буфера ФРАГМЕНТНЫЕ:
+// вершинник общий с чужими sp, и буфер в ЕГО списке пришлось бы биндить всем им без разбора.
+// 2 сэмплера (albedo t0, normal t1) + LightBlock t2 (объявляет база) → rank t3, index t4,
+// состояния t5.
+#include "sparse_rank.hlsli"
+StructuredBuffer<uint2> TexStateRank  : register(t3, space2);   // x = биты, y = носителей до слова
+StructuredBuffer<uint>  TexStateIndex : register(t4, space2);   // смещение ячеек носителя
+StructuredBuffer<uint>  TexState      : register(t5, space2);
+
+// -1 = у строки элемента нет. Не-носитель отвечает ОДНОЙ загрузкой (слово rank), и таких строк
+// подавляющее большинство — вторая загрузка достаётся только переключающимся.
+int TexStateOfs(int row)
+{
+    if (row < 0) return -1;
+    const uint  b  = uint(row) & 31u;
+    const uint2 rw = TexStateRank[uint(row) >> 5u];
+    if (!SparseHasBit(rw.x, b)) return -1;
+    return int(TexStateIndex[SparseRank(rw.x, rw.y, b)]);
+}
 
 // Инициализируются базой ОДИН раз за пиксель (BEGIN_MATERIAL_API), чтобы не менять сигнатуры
 // SampleAlbedo(uv)/getSurface и не ломать пользовательские surface.hlsl.
 static int  g_stateOfs   = -1;
 static uint g_sectionOfs = 0;
-#define BEGIN_MATERIAL_API(input) { g_stateOfs = ((input).v_row < 0) ? -1 : TexStatePrefix[(input).v_row]; \
+#define BEGIN_MATERIAL_API(input) { g_stateOfs = TexStateOfs((input).v_row); \
                                     g_sectionOfs = material_index * MAX_VARIATIVE_SLOTS; }
 #else
 #define BEGIN_MATERIAL_API(input)

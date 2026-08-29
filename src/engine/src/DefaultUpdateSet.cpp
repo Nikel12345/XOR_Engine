@@ -291,18 +291,36 @@ void DefaultUpdateSet::SetDefaultTexStateUpdaters(EngineContext& ctx, TextureSta
     auto* bm = ctx.GetBufferManager();
     auto* om = ctx.GetObjectManager();
     auto* mtm = ctx.GetMaterialManager();   // резолвер имени материала, ПАРАМЕТРОМ (см. CLAUDE.md)
+    auto* bb = ctx.GetBatchBuilder();
 
-    // Каждый кадр, без dirty-гейта: ревизия батчей тут не годится — переключение варианта дерево
-    // не трогает намеренно, и гейт по ней пропускал бы ровно нужные кадры (см. TextureStateDataModule).
-    bm->CreateUpdateInstruction(DEFAULT_TEX_STATE_PREFIX_BUFFER,
-        [om, tsm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+    // ПОРЯДОК РЕГИСТРАЦИИ ЗНАЧИМ: size_fn'ы гоняются в нём, а канал строит первый из них
+    // (CalculateRankSize) — index берёт готовое число носителей. Тот же приём, что у UI_DataModule
+    // с его BuildStaging в size-фазе первого буфера.
+    //
+    // rank и index — послотный гейт по ревизии батчей: они зависят от порядка строк, наличия тега
+    // и числа материалов, то есть только от структуры. Состояния ниже гейта не имеют — их домен
+    // фильтруется тегом, и смену номера варианта ревизия батчей не видит (см. модуль).
+    bm->CreateUpdateInstruction(DEFAULT_TEX_STATE_RANK_BUFFER,
+        [tsm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
-        if (SceneData* scene = om->GetActiveScene()) tsm->StorePrefix(bm, &task, om, scene);
+        tsm->StoreRank(bm, &task);
     },
-        [om, tsm]() -> uint32_t
+        [om, tsm, bb, bm]() -> uint32_t
     {
         SceneData* scene = om->GetActiveScene();
-        return scene ? tsm->CalculatePrefixSize(om, scene) : 0u;
+        return scene ? tsm->CalculateRankSize(om, scene, bb->BatchesRevision(),
+                                              bm->logic_index.load()) : 0u;
+    }
+    );
+
+    bm->CreateUpdateInstruction(DEFAULT_TEX_STATE_INDEX_BUFFER,
+        [tsm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+    {
+        tsm->StoreIndex(bm, &task);
+    },
+        [tsm, bb, bm]() -> uint32_t
+    {
+        return tsm->CalculateIndexSize(bb->BatchesRevision(), bm->logic_index.load());
     }
     );
 

@@ -346,6 +346,10 @@ void RegisterBuiltinComponentSpecs()
     reg.Register({ .name = "Shadow", .sig_type = typeid(ShadowComponent),
         .add_default = AddDefaultAoS<ShadowComponent> });
 
+    // Сами номера вариантов лежат в колонке "states" компонента Material — тег их не дублирует.
+    reg.Register({ .name = "TextureState", .sig_type = typeid(TextureStateComponent),
+        .add_default = AddDefaultAoS<TextureStateComponent> });
+
     // ---- LocalMatrix: SoA LocalMatrices, 16 колонок m0..m15 (column-major glm) ----
     reg.Register({ .name = "LocalMatrix", .sig_type = typeid(LocalMatrices),
         .add_default = AddDefaultSoA<LocalMatrices, LocalMatrixProxy16>,

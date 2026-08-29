@@ -19,7 +19,10 @@ BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_ma
 	// Dynamic, как все покадровые: Static — одно тело на все слоты, и заливка слота N писала бы
 	// туда, откуда рендер читает слот N-1. usage не трогаем — он приходит декларацией sp,
 	// которая эти буферы называет (Engine::InitDefaultShaders).
-	CreateBufferData(DEFAULT_TEX_STATE_PREFIX_BUFFER, BASE_TB_SIZE / 160, BufferDataType::Dynamic);
+	// Стартовые размеры условны — все три растит EnsureBufferCapacity. Разреженный канал: rank
+	// полноразмерный, но 8 байт на 32 строки; index и state живут по числу переключающихся.
+	CreateBufferData(DEFAULT_TEX_STATE_RANK_BUFFER, sizeof(uint32_t) * 2 * 256, BufferDataType::Dynamic);
+	CreateBufferData(DEFAULT_TEX_STATE_INDEX_BUFFER, sizeof(uint32_t) * 256, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_TEX_STATE_BUFFER, sizeof(uint32_t) * 256, BufferDataType::Dynamic);
 
     CreateBufferData(DEFAULT_INDIRECT_BUFFER, sizeof(SDL_GPUIndexedIndirectDrawCommand) * 10, BufferDataType::Dynamic)

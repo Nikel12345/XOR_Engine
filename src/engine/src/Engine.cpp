@@ -401,7 +401,7 @@ void Engine::InitDefaultShaders()
 		// это только те sp, которым варианты нужны.
 		engine_context->CreateShaderProgram("Lit", spd, RP::MAIN_PASS,
 			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-			"main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TEX_STATE_PREFIX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
+			"main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive },
 			/*dont_save=*/true);
 
@@ -419,7 +419,7 @@ void Engine::InitDefaultShaders()
 		spd.BehavesAsTransparentGeometry();
 		engine_context->CreateShaderProgram("LitTransparent", spd, RP::TRANSPARENT_PASS,
 			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
-			"transparent_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_TEX_STATE_PREFIX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
+			"transparent_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo, TextureSlotRole::Normal }, /*dont_save=*/true);
 	}
 	{
@@ -465,7 +465,7 @@ void Engine::InitDefaultShaders()
 			// Буферы вариантов — в ХВОСТ фрагментного списка (t7/t8 после GlyphUVL t6). Вершинный
 			// не трогаем: ui_vs и так отдаёт row, а буфер в его списке пришлось бы биндить всем.
 			"ui_fs", { UI_TEXT_BITS_BUFFER, UI_TEXT_WORDBASE_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER,
-			           DEFAULT_TEX_STATE_PREFIX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
+			           DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo }, /*dont_save=*/true);
 	}
 
