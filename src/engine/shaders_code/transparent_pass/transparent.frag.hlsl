@@ -7,6 +7,8 @@ static const float AMBIENT_LIGHT = 0.75;    // пол освещённости (
 
 float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 {
+    BEGIN_MATERIAL_API(input);   // адресация вариантов до getSurface (см. main-базу)
+
     // Пользовательская часть: какова поверхность в этом пикселе (до освещения).
     SurfaceData surface = getSurface(input, isFrontFace);
     float3 n = surface.normal;

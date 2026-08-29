@@ -24,6 +24,15 @@ namespace DefaultBuffersNames {
 	inline constexpr const char* DEFAULT_INSTANCE_BUFFER = "_DefaultInstanceBuffer";
 	inline constexpr const char* DEFAULT_LIGHT_CAMERA_BUFFER = "DefaultLightCameraBuffer";
 
+	// ── Переключаемые варианты текстур (см. TextureStateDataModule) ──
+	// Пара, которую пишет ОДИН модуль: PREFIX индексируется СТРОКОЙ трансформа (как Transform/
+	// Instance) и говорит, где в STATE начинается элемент сущности; -1 = элемента нет вовсе
+	// (сущность ничего не переключала). STATE плоский: элементы подряд, внутри элемента по
+	// секции на материал сущности, ровно MAX_VARIATIVE_SLOTS ячеек в каждой.
+	// Согласовать их обязано то, что обе заливки идут по одному домену в одном порядке.
+	inline constexpr const char* DEFAULT_TEX_STATE_PREFIX_BUFFER = "_DefaultTexStatePrefixBuffer";
+	inline constexpr const char* DEFAULT_TEX_STATE_BUFFER        = "_DefaultTexStateBuffer";
+
 	// Индиректы: теперь ПО-КАМЕРНО — num_cameras копий команд, num_instances у каждой
 	// копии заполняет scatter-каллинг атомиком (компактный счётчик выживших). Блок 0 —
 	// камера игрока, 1..L — световые. Draw читает свой блок через additional_offset.

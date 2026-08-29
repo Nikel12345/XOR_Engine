@@ -443,6 +443,15 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 						texture_batch.params->data(), safe_u32(texture_batch.params->size()));
 				}
 
+				// Раскладка таблицы UVL — ТРЕТИЙ fragment-uniform, ПОСЛЕ params: так
+				// MATERIAL_BLOCK_REGISTER не двигается (b0 uvl, b1 params, b2 раскладка).
+				// Гейт тот же, что у params: пушим, только если шейдер объявил uniform на этом
+				// слоте (у shadow/wireframe/untextured его нет — туда не лезем).
+				if (uvl_slot + 2 < shader_batch.frag_uniform_count) {
+					SDL_PushGPUFragmentUniformData(cb, uvl_slot + 2,
+						&texture_batch.variant_layout, sizeof(VariantLayout));
+				}
+
 				SDL_DrawGPUIndexedPrimitivesIndirect(rp,
 					indirect_buf,
 					safe_u32(additional_offset +

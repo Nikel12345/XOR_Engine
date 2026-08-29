@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <string>
 #include "ComponentStorage.h"
+#include "ShaderTypes.h"   // TextureSlotRole — RoleName ниже
 
 // Разделяемое между панелями редактора состояние. Панели живут в разных TU
 // (UI_Hierarchy / UI_AssetBrowser / UI_Inspector), но общаются через один выбор
@@ -31,5 +32,26 @@ extern bool      g_show_internal;// показывать служебные ас
 
 // Полупрозрачный фон панелей (0 = сквозь пустые места видно 3D-сцену).
 constexpr float kPanelBgAlpha = 0.0f;
+
+// Слот-роль → подпись. Живёт здесь, а не в одной из панелей: её просят обе — инспектор
+// материала (список вариантов слота) и редактор компонента (какой вариант показывает энтити).
+inline const char* RoleName(TextureSlotRole r)
+{
+    switch (r) {
+    case TextureSlotRole::Albedo:   return "Albedo";
+    case TextureSlotRole::Normal:   return "Normal";
+    case TextureSlotRole::ORM:      return "ORM";        // == MetallicRoughness (алиас)
+    case TextureSlotRole::Emissive: return "Emissive";
+    case TextureSlotRole::Custom0:  return "Custom0";
+    case TextureSlotRole::Custom1:  return "Custom1";
+    case TextureSlotRole::Custom2:  return "Custom2";
+    case TextureSlotRole::Custom3:  return "Custom3";
+    case TextureSlotRole::Custom4:  return "Custom4";
+    case TextureSlotRole::Custom5:  return "Custom5";
+    case TextureSlotRole::Custom6:  return "Custom6";
+    case TextureSlotRole::Custom7:  return "Custom7";
+    default:                        return "Role";
+    }
+}
 
 } // namespace ui

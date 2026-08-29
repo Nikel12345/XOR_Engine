@@ -56,24 +56,7 @@ namespace {
 
     // TextureSlotRole (enum слота) → строка для ImGui. Явный switch, а не рефлексия: набор ролей
     // фиксирован и мал, а Custom0=1000 сломал бы range-scan magic_enum/source_location-трюков.
-    const char* RoleName(TextureSlotRole r)
-    {
-        switch (r) {
-        case TextureSlotRole::Albedo:   return "Albedo";
-        case TextureSlotRole::Normal:   return "Normal";
-        case TextureSlotRole::ORM:      return "ORM";        // == MetallicRoughness (алиас)
-        case TextureSlotRole::Emissive: return "Emissive";
-        case TextureSlotRole::Custom0:  return "Custom0";
-        case TextureSlotRole::Custom1:  return "Custom1";
-        case TextureSlotRole::Custom2:  return "Custom2";
-        case TextureSlotRole::Custom3:  return "Custom3";
-        case TextureSlotRole::Custom4:  return "Custom4";
-        case TextureSlotRole::Custom5:  return "Custom5";
-        case TextureSlotRole::Custom6:  return "Custom6";
-        case TextureSlotRole::Custom7:  return "Custom7";
-        default:                        return "Role";
-        }
-    }
+    // RoleName переехал в UI_Internal.h — его просит и редактор компонента (см. там же).
 
     // ChannelConvention (enum) → строка для дропдауна конвенции каналов текстуры.
     const char* ConvName(ChannelConvention c)
@@ -216,29 +199,116 @@ namespace {
             if (!sp) MissingRefMark("shader program not found — renders with fallback");
 
             // Слоты этого sp; значение — из общей карты по роли (правка отражается во всех sp с этой ролью).
-            if (sp)
+            // На роль — СПИСОК вариантов: [0] дефолт (рисуется без переключения), дальше те, между
+            // которыми переключается сущность. Комбобокс на КАЖДЫЙ номер, потому что вариант — это
+            // позиция в списке: она и есть то, что хранит состояние сущности.
+            if (sp) {
+                // Ячеек в секции состояний ровно MAX_VARIATIVE_SLOTS, и достаются они первым
+                // вариативным ролям в порядке обхода материала (то же CollectVariativeRoles, что
+                // читают заливка и сборка батчей). Роли, которой не хватило, варианты собираются,
+                // но НЕ переключаются — она молча показывает дефолт. Гасить её в UI нельзя (роль
+                // может стать вариативной раньше соседней), поэтому просто помечаем.
+                const VariativeRoles cells = CollectVariativeRoles(*mat);
+                auto has_cell = [&cells](TextureSlotRole r) {
+                    for (uint32_t c = 0; c < cells.count; ++c) if (cells.role[c] == r) return true;
+                    return false;
+                };
+                // Потолок таблицы UVL — на пару (материал, sp): столько блоков влезает в пуш.
+                uint32_t total_blocks = 0;
+                for (TextureSlotRole r : sp->required_slots) {
+                    auto rit = mat->textures.find(r);
+                    total_blocks += (rit == mat->textures.end() || rit->second.empty())
+                        ? 1u : safe_u32(rit->second.size());
+                }
+                const bool uvl_full = total_blocks >= MAX_UVL_BLOCKS;
+
                 for (TextureSlotRole role : sp->required_slots) {
-                    // Показывается ДЕФОЛТ слота (вариант 0); список вариантов редактор пока не
-                    // правит — это блок 9 плана (форма с +/x вместо комбобокса).
                     auto it = mat->textures.find(role);
-                    const std::string current = (it != mat->textures.end() && !it->second.empty())
-                        ? it->second[0] : std::string();
+                    const uint32_t n = (it != mat->textures.end()) ? safe_u32(it->second.size()) : 0u;
                     ImGui::PushID(static_cast<int>(role));
-                    if (ImGui::BeginCombo(RoleName(role), current.c_str())) {   // RoleName: enum слота → строка
+
+                    // Какой номер сейчас показан — состояние ФОРМЫ, а не материала, поэтому живёт
+                    // в ImGui-storage (ключ = стек ID, то есть своё на роль и на sp), а не в
+                    // ресурсе. Каждый кадр КЛАМПИТСЯ: список могли укоротить кнопкой x, командой
+                    // из другого места или загрузкой сцены — форма обязана это пережить.
+                    ImGuiStorage* store = ImGui::GetStateStorage();
+                    const ImGuiID  vkey = ImGui::GetID("variant_view");
+                    uint32_t v = safe_i_u32(store->GetInt(vkey, 0));
+                    // Кламп к ПОСЛЕДНЕМУ валидному, а не к нулю: список укоротили (кнопкой x,
+                    // командой из другого места, загрузкой сцены) — показ должен отступить на
+                    // столько, на сколько список ужался, а не прыгать в начало. Удалили один —
+                    // отступили на один. Ноль тут только когда вариантов не осталось вовсе.
+                    if (n == 0)      v = 0;
+                    else if (v >= n) v = n - 1;
+
+                    ImGui::TextUnformatted(RoleName(role));   // RoleName: enum слота → строка
+                    if (n > 1 && !has_cell(role))
+                        MissingRefMark("too many variative slots for MAX_VARIATIVE_SLOTS - "
+                                       "this one is not switchable, it always shows variant 0");
+
+                    // Стрелки листают НОМЕР варианта: одновременно виден один комбобокс, а номер
+                    // и есть то, что хранит состояние сущности, — поэтому он подписан явно.
+                    ImGui::SameLine();
+                    ImGui::BeginDisabled(v == 0);
+                    if (ImGui::ArrowButton("prev", ImGuiDir_Left)) --v;
+                    ImGui::EndDisabled();
+                    ImGui::SameLine();
+                    ImGui::Text("%u", v);
+                    ImGui::SameLine();
+                    ImGui::BeginDisabled(v + 1 >= n);
+                    if (ImGui::ArrowButton("next", ImGuiDir_Right)) ++v;
+                    ImGui::EndDisabled();
+
+                    // + : новый вариант = копия дефолта (сразу резолвится, dummy не даёт).
+                    // Показываем сразу его — он появится следующим номером.
+                    ImGui::SameLine();
+                    ImGui::BeginDisabled(uvl_full);
+                    if (ImGui::SmallButton("+")) {
+                        im->PushCommand(CommandId::AddMaterialTextureVariant,
+                            new MaterialVariantCmd{ matName, static_cast<uint32_t>(role), 0 });
+                        v = n;   // список вырастет к следующему кадру; кламп выше подстрахует
+                    }
+                    ImGui::EndDisabled();
+                    // AllowWhenDisabled: у выключенного элемента SetItemTooltip молчит, а нужна
+                    // подсказка именно тогда, когда кнопка погашена.
+                    if (uvl_full && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                        ImGui::SetTooltip("UVL table is full (MAX_UVL_BLOCKS = %u blocks per material + shader)",
+                            MAX_UVL_BLOCKS);
+
+                    // x : убрать ПОКАЗАННЫЙ вариант. Нулевой не убрать — это дефолт слота, то,
+                    // что рисуется без переключения; «убрать текстуру у слота» — другая операция.
+                    ImGui::SameLine();
+                    ImGui::BeginDisabled(v == 0);
+                    if (ImGui::SmallButton("x")) {
+                        im->PushCommand(CommandId::RemoveMaterialTextureVariant,
+                            new MaterialVariantCmd{ matName, static_cast<uint32_t>(role), v });
+                        --v;   // отклик в ЭТОМ же кадре: команда исполнится на sim позже, а кламп
+                               // выше добьёт случай, когда список ужался не нашей кнопкой
+                    }
+                    ImGui::EndDisabled();
+
+                    store->SetInt(vkey, safe_u32t_i(v));
+
+                    // Комбобокс — ровно один, на показанный номер. Роль без текстур показываем
+                    // пустой строкой номера 0: назначить ей текстуру можно тут же.
+                    // БЕЗ Indent: комбобокс встаёт по левому краю, вровень со строкой роли над ним.
+                    const std::string current = (v < n) ? it->second[v] : std::string();
+                    if (ImGui::BeginCombo("##variant", current.c_str())) {
                         for (const std::string& tn : texNames) {
                             bool is_cur = (tn == current);
                             if (ImGui::Selectable(tn.c_str(), is_cur) && !is_cur)
                                 im->PushCommand(CommandId::SetMaterialTexture,
-                                    new SetMaterialTextureCmd{ matName, static_cast<uint32_t>(role), tn });
+                                    new SetMaterialTextureCmd{ matName, static_cast<uint32_t>(role), v, tn });
                             if (is_cur) ImGui::SetItemDefaultFocus();
                         }
                         ImGui::EndCombo();
                     }
-                    // Имя назначено, но текстуры с ним нет (удалена/переименована) → маркер в конце строки.
+                    // Имя назначено, но текстуры с ним нет (удалена/переименована) → маркер.
                     if (!current.empty() && !ctx->GetTextureManager()->GetTextureHandles().count(current))
-                        MissingRefMark("texture not found — dummy is used");
+                        MissingRefMark("texture not found - dummy is used");
                     ImGui::PopID();
                 }
+            }
 
             // -- params ЭТОЙ sp -- Смена ТИПА = дефолтный блоб типа из реестра. Правка ПОЛЕЙ идёт
             // in-place и дерево не трогает (ключ узла — адрес блоба, а не байты), но смена типа

@@ -15,6 +15,13 @@ BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_ma
 	CreateBufferData(DEFAULT_INSTANCE_BUFFER, BASE_TB_SIZE / 80, BufferDataType::Dynamic);
 	CreateBufferData(DEFAULT_LIGHT_CAMERA_BUFFER, sizeof(CameraData) * 6, BufferDataType::Dynamic);
 
+	// Варианты текстур: префикс на строку + плоские ячейки состояний (см. TextureStateDataModule).
+	// Dynamic, как все покадровые: Static — одно тело на все слоты, и заливка слота N писала бы
+	// туда, откуда рендер читает слот N-1. usage не трогаем — он приходит декларацией sp,
+	// которая эти буферы называет (Engine::InitDefaultShaders).
+	CreateBufferData(DEFAULT_TEX_STATE_PREFIX_BUFFER, BASE_TB_SIZE / 160, BufferDataType::Dynamic);
+	CreateBufferData(DEFAULT_TEX_STATE_BUFFER, sizeof(uint32_t) * 256, BufferDataType::Dynamic);
+
     CreateBufferData(DEFAULT_INDIRECT_BUFFER, sizeof(SDL_GPUIndexedIndirectDrawCommand) * 10, BufferDataType::Dynamic)
         ->usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
 

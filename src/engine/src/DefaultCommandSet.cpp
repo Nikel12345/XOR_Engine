@@ -190,11 +190,11 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 		{
 			const SetMaterialTextureCmd* c = static_cast<const SetMaterialTextureCmd*>(data);
 			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
-				// Правится ДЕФОЛТ слота (вариант 0) — команда номера варианта пока не носит:
-				// список вариантов редактируется отдельными командами (блок 9 плана, ещё не сделан).
+				// Номер варианта в слоте; 0 — дефолт. Вне диапазона (список успели укоротить
+				// между кадром UI и исполнением) — тихо игнорируем: это не ошибка, а гонка.
 				std::vector<TextureName>& variants = m->textures[static_cast<TextureSlotRole>(c->role)];
 				if (variants.empty()) variants.emplace_back(c->texture);
-				else                  variants[0] = c->texture;
+				else if (c->variant < variants.size()) variants[c->variant] = c->texture;
 				// Новый слот → его атлас сэмплится (сбор usage-флагов + проверка намерения).
 				ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->material);
 			}
@@ -257,6 +257,69 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 					break;
 				}
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			}
+			delete c;
+		});
+
+	// Дописать вариант слот-роли КОПИЕЙ дефолта: новый вариант сразу резолвится (не даёт dummy),
+	// а нужную текстуру ему назначат следующим SetMaterialTexture. Потолок MAX_UVL_BLOCKS здесь
+	// НЕ проверяем: он на пару (материал, sp) — таблицу собирает BatchBuilder, он же и логирует
+	// переполнение. UI гасит кнопку заранее, это лишь страховка от кривого вызова.
+	im.RegisterCommand(CommandId::AddMaterialTextureVariant,
+		[](EngineContext* ctx, const void* data)
+		{
+			const MaterialVariantCmd* c = static_cast<const MaterialVariantCmd*>(data);
+			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
+				std::vector<TextureName>& variants = m->textures[static_cast<TextureSlotRole>(c->role)];
+				variants.push_back(variants.empty() ? TextureName{} : variants[0]);
+				ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->material);
+				// Структурная правка: сменились длина таблицы UVL и нумерация ячеек секции.
+				ctx->GetBatchBuilder()->SetDirtyBatches(true);
+			}
+			delete c;
+		});
+
+	// Убрать вариант. Ноль убрать нельзя — это ДЕФОЛТ слота, то, что рисуется без переключения;
+	// «убрать текстуру у слота» — другая операция, её тут нет.
+	// Состояния на сущностях НЕ подрезаем: номер, ставший протухшим, гасит кламп v >= count
+	// в шейдере (объект показывает дефолт). Обходить ради этого весь ECS дороже и не полнее.
+	im.RegisterCommand(CommandId::RemoveMaterialTextureVariant,
+		[](EngineContext* ctx, const void* data)
+		{
+			const MaterialVariantCmd* c = static_cast<const MaterialVariantCmd*>(data);
+			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
+				auto it = m->textures.find(static_cast<TextureSlotRole>(c->role));
+				if (it != m->textures.end() && c->variant > 0 && c->variant < it->second.size()) {
+					it->second.erase(it->second.begin() + c->variant);
+					ctx->GetBatchBuilder()->SetDirtyBatches(true);
+				}
+			}
+			delete c;
+		});
+
+	// Какой вариант показывает энтити. НЕ структурная правка: пишем поле существующего объекта,
+	// архетип и дерево батчей не трогаются — в этом вся идея фичи (два куба с одним материалом
+	// показывают разное и остаются в одном инстанс-батче). Заливка подхватит со следующего кадра.
+	im.RegisterCommand(CommandId::SetEntityTextureVariant,
+		[](EngineContext* ctx, const void* data)
+		{
+			const EntityTextureVariantCmd* c = static_cast<const EntityTextureVariantCmd*>(data);
+			ObjectManager* om = ctx->GetObjectManager();
+			SceneData* scene = om->GetActiveScene();
+			if (scene && om->Has<MaterialComponent>(scene, c->entity)) {
+				auto& mats = om->GetComponent<MaterialComponent>(scene, c->entity).materials;
+				if (c->mat_index < mats.size()) {
+					auto& st = mats[c->mat_index].states;
+					const TextureSlotRole role = static_cast<TextureSlotRole>(c->role);
+					auto it = std::find_if(st.begin(), st.end(),
+						[role](const auto& p) { return p.first == role; });
+					// Ноль — это «как у всех», а не «выбран вариант 0»: запись удаляем, чтобы
+					// states остались разреженными и гейт HasAnyTextureState снова стал ложным
+					// (сущность уходит из буфера состояний целиком).
+					if (c->variant == 0) { if (it != st.end()) st.erase(it); }
+					else if (it != st.end()) it->second = c->variant;
+					else st.emplace_back(role, c->variant);
+				}
 			}
 			delete c;
 		});

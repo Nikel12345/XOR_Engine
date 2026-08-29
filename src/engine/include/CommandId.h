@@ -30,6 +30,9 @@ enum class CommandId : uint32_t {
     CreateMaterial,       // payload: CreateMaterialCmd* (имя из UI). Новый материал с sp "Lit" + дефолты
     AddMaterialShader,    // payload: MaterialShaderCmd* — добавить sp материалу (+ дефолты НОВЫХ ролей)
     RemoveMaterialShader, // payload: MaterialShaderCmd* — убрать sp у материала
+    AddMaterialTextureVariant,    // payload: MaterialVariantCmd* — дописать вариант в слот-роль
+    RemoveMaterialTextureVariant, // payload: MaterialVariantCmd* — убрать вариант (0 нельзя: дефолт)
+    SetEntityTextureVariant,      // payload: EntityTextureVariantCmd* — какой вариант показывает энтити
     RenameMaterial,       // payload: RenameMaterialCmd* — ре-кей материала в словаре + пересборка
     UpsertModel,          // payload: UpsertModelCmd* — создать/перезагрузить модель из файла (in-place)
     RebuildShaderPipeline,// payload: RebuildShaderPipelineCmd* — spd правится in-place, тут инвалидация

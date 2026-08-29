@@ -13,17 +13,17 @@
             "conv": "AsIs"
         },
         {
+            "name": "new_car_glass",
+            "atlas": "albedo_atlas",
+            "path": "textures/assets/Tex_Glass.jpg",
+            "conv": "AsIs"
+        },
+        {
             "name": "_env_skybox_cube",
             "atlas": "env_skybox",
             "path": "textures/skybox.png",
             "conv": "AsIs",
             "cube": true
-        },
-        {
-            "name": "new_car_glass",
-            "atlas": "albedo_atlas",
-            "path": "textures/assets/Tex_Glass.jpg",
-            "conv": "AsIs"
         },
         {
             "name": "norm",
@@ -78,6 +78,18 @@
             "atlas": "orm_atlas",
             "path": "textures/blocks/brick_orm.png",
             "conv": "SmoothnessInGreen"
+        },
+        {
+            "name": "hover_1",
+            "atlas": "albedo_atlas",
+            "path": "textures/buttons/hover_1.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "hover_2",
+            "atlas": "albedo_atlas",
+            "path": "textures/buttons/hover_2.png",
+            "conv": "AsIs"
         }
     ]
 }

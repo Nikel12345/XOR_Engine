@@ -16,6 +16,13 @@ struct VSOutput
     float3 v_worldTangent   : TEXCOORD3;
     float3 v_worldBitangent : TEXCOORD4;
     float  v_alpha          : TEXCOORD5;
+    // Строка трансформа этого инстанса (-1 = отсечён каллингом). Нужна фрагментнику, чтобы
+    // прочитать префикс состояний вариантов; сам буфер вершинник НЕ читает — иначе его обязана
+    // была бы биндить КАЖДАЯ sp с этим вершинником, включая чужие (теневые, фрактальные игровые).
+    // nointerpolation: это индекс, а не величина.
+    // Член ОБЯЗАН быть и в PSInput всех трёх прологов (main/transparent/untextured): вершинник
+    // общий, разъехавшийся PSInput = молча битые локейшены.
+    nointerpolation int v_row : TEXCOORD6;
 };
 
 // GLSL std430 buffer → HLSL StructuredBuffer
@@ -47,6 +54,7 @@ VSOutput main(VSInput input)
         // целиком клипается, фрагментов нет. Голый return нельзя — SV_Position был бы UB.
         output = (VSOutput)0;
         output.position = float4(2.0, 2.0, 2.0, 1.0);
+        output.v_row = -1;   // строки нет → читать буфер состояний нечем
         return output;
     }
 
@@ -72,6 +80,7 @@ VSOutput main(VSInput input)
     output.v_worldTangent   = worldTangent;
     output.v_worldBitangent = worldBitangent;
     output.v_alpha          = InstanceDataBlock[row].alpha;
+    output.v_row            = row;
 
     return output;
 }

@@ -10,6 +10,7 @@
 #include "PIB_DataModule.h"
 #include "TransformDataModule.h"
 #include "InstanceDataModule.h"
+#include "TextureStateDataModule.h"
 #include "IndirectDataModule.h"
 #include "BoundSphereDataModule.h"
 #include "UI_DataModule.h"
@@ -278,6 +279,45 @@ void DefaultUpdateSet::SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModu
     }
     );
     out_pib_update_inited = true;
+}
+
+void DefaultUpdateSet::SetDefaultTexStateUpdaters(EngineContext& ctx, TextureStateDataModule* tsm)
+{
+    static bool tex_state_update_inited = false;
+    if (tex_state_update_inited) {
+        SDL_Log("Default texture state updaters are already initialized.");
+        return;
+    }
+    auto* bm = ctx.GetBufferManager();
+    auto* om = ctx.GetObjectManager();
+    auto* mtm = ctx.GetMaterialManager();   // резолвер имени материала, ПАРАМЕТРОМ (см. CLAUDE.md)
+
+    // Каждый кадр, без dirty-гейта: ревизия батчей тут не годится — переключение варианта дерево
+    // не трогает намеренно, и гейт по ней пропускал бы ровно нужные кадры (см. TextureStateDataModule).
+    bm->CreateUpdateInstruction(DEFAULT_TEX_STATE_PREFIX_BUFFER,
+        [om, tsm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+    {
+        if (SceneData* scene = om->GetActiveScene()) tsm->StorePrefix(bm, &task, om, scene);
+    },
+        [om, tsm]() -> uint32_t
+    {
+        SceneData* scene = om->GetActiveScene();
+        return scene ? tsm->CalculatePrefixSize(om, scene) : 0u;
+    }
+    );
+
+    bm->CreateUpdateInstruction(DEFAULT_TEX_STATE_BUFFER,
+        [om, tsm, mtm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+    {
+        if (SceneData* scene = om->GetActiveScene()) tsm->StoreState(bm, &task, om, scene, mtm);
+    },
+        [om, tsm]() -> uint32_t
+    {
+        SceneData* scene = om->GetActiveScene();
+        return scene ? tsm->CalculateStateSize(om, scene) : 0u;
+    }
+    );
+    tex_state_update_inited = true;
 }
 
 void DefaultUpdateSet::SetUITextUpdaters(EngineContext& ctx, UI_DataModule* uidm, FontManager* fm, const std::string& fontName)

@@ -80,3 +80,29 @@ struct Material {
         return nullptr;
     }
 };
+
+// Вариативные роли материала В КАНОНИЧЕСКОМ ПОРЯДКЕ. ЯЧЕЙКА = ИНДЕКС В ЭТОМ МАССИВЕ — другого
+// определения ячейки нет, и ячейка сама по себе никакой семантики не несёт: что под номером 2
+// лежит именно Emissive, устанавливает ПУШ (поле cell в слове слота, см. VariantLayout), а буфер
+// состояний обязан лишь СОХРАНЯТЬ ПОРЯДОК.
+//
+// Читают двое: BatchBuilder::BuildMaterialLayouts (кладёт номер в слово слота) и
+// TextureStateDataModule (в этом же порядке выписывает секцию). Поэтому порядок и живёт одним
+// определением, а не двумя одинаковыми циклами: разъедутся — картинка останется правдоподобной
+// (нормалка сэмплится как альбедо), краша и лога не будет.
+struct VariativeRoles {
+    TextureSlotRole role[MAX_VARIATIVE_SLOTS];
+    uint32_t        count = 0;
+};
+
+// Переполнение НЕ логируется: у функции нет ни имени материала, ни контекста. Признак виден
+// вызывающему как count == MAX_VARIATIVE_SLOTS, сообщение — там (одна строка на материал).
+inline VariativeRoles CollectVariativeRoles(const Material& m) {
+    VariativeRoles out{};
+    for (const auto& [role, names] : m.textures) {
+        if (names.size() <= 1) continue;               // невариативная — ячейки нет
+        if (out.count >= MAX_VARIATIVE_SLOTS) break;   // ячейки в секции кончились
+        out.role[out.count++] = role;
+    }
+    return out;
+}

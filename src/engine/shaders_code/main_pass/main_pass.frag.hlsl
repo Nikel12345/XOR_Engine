@@ -85,6 +85,10 @@ struct PSOutput
 
 PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
 {
+    // Адресация вариантов — ДО getSurface: та зовёт SampleAlbedo/SampleNormalWorld, а те ходят
+    // через TexIndex. У прологов без таблицы UVL макрос пустой.
+    BEGIN_MATERIAL_API(input);
+
     // Пользовательская часть: какова поверхность в этом пикселе (до освещения).
     SurfaceData surface = getSurface(input, isFrontFace);
     float3 n = surface.normal;

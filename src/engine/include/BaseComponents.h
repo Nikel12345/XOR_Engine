@@ -198,6 +198,7 @@ struct MaterialComponent {
     std::vector<MaterialRef> materials;
 };
 
+
 enum class LightTypes {   // scoped: SPOT/SPHERE/DIRECT слишком общие для глобала
     SPOT,
     SPHERE,

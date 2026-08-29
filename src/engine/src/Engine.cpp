@@ -21,6 +21,7 @@
 #include "PIB_DataModule.h"
 #include "TransformDataModule.h"
 #include "InstanceDataModule.h"
+#include "TextureStateDataModule.h"
 #include "LightDataModule.h"
 #include "IndirectDataModule.h"
 #include "BoundSphereDataModule.h"
@@ -110,6 +111,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	light_data_module = new LightDataModule();
 	indirect_data_module = new IndirectDataModule();
 	bound_sphere_data_module = new BoundSphereDataModule();
+	tex_state_data_module = new TextureStateDataModule();
 	ui_data_module = new UI_DataModule();
 	ui_yoga = new UI_Yoga();   // flex-раскладка UI (Yoga) → UI-энтити; Emit в PrepareFunc
 
@@ -353,9 +355,22 @@ void Engine::InitDefaultShaders()
 		POS_UV_NORM_POOL, { POSITION }, /*dont_save=*/true);
 
 	// ── Фрагментники ──
-	engine_context->CreateFragmentShader("main_surface_fs",        "../engine/shaders_code/main_pass/surface.hlsl", /*dont_save=*/true);
+	// Потолки раскладки вариантов уезжают в HLSL ДЕФАЙНАМИ, а не дублируются литералом: разъезд
+	// C++ и байткода тихо перемешал бы секции состояний. Дефайны входят в ключ кэша .spv, поэтому
+	// смена константы сама инвалидирует кэш. Набор отдаётся КАЖДОМУ fs, который включает пролог с
+	// таблицей UVL, — забыть один значит собрать его на дефолте #ifndef, без ошибки и без лога.
+	const ShaderDefines kVariantDefines = {
+		// Включает САМО переключение (чтение буферов состояний). Без него пролог собирается
+		// без них и показывает дефолт слота — так живут пользовательские surface из кода игры,
+		// которым эти буферы никто не биндит.
+		{ "TEXTURE_VARIANTS",    "1" },
+		{ "MAX_VARIATIVE_SLOTS", std::to_string(MAX_VARIATIVE_SLOTS) },
+		{ "MAX_SLOTS",           std::to_string(MAX_SLOTS) },
+		{ "MAX_UVL_BLOCKS",      std::to_string(MAX_UVL_BLOCKS) },
+	};
+	engine_context->CreateFragmentShader("main_surface_fs",        "../engine/shaders_code/main_pass/surface.hlsl", /*dont_save=*/true, kVariantDefines);
 	engine_context->CreateFragmentShader("untextured_surface_fs",  "../engine/shaders_code/main_pass/untextured/surface.hlsl", /*dont_save=*/true);
-	engine_context->CreateFragmentShader("transparent_surface_fs", "../engine/shaders_code/transparent_pass/surface.hlsl", /*dont_save=*/true);
+	engine_context->CreateFragmentShader("transparent_surface_fs", "../engine/shaders_code/transparent_pass/surface.hlsl", /*dont_save=*/true, kVariantDefines);
 	engine_context->CreateFragmentShader("shadow_fs",              "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl", /*dont_save=*/true);
 	engine_context->CreateFragmentShader("skybox_fs",              "../engine/shaders_code/skybox/skybox.frag.hlsl", /*dont_save=*/true);
 	engine_context->CreateFragmentShader("debug_collider_fs",      "../engine/shaders_code/debug/debug_collider.frag.hlsl", /*dont_save=*/true);
@@ -378,13 +393,20 @@ void Engine::InitDefaultShaders()
 	{
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry();
+		// Оба буфера вариантов — во ФРАГМЕНТНОМ списке, и это не вкусовщина: вершинник
+		// main_pass_vs общий не только с LitColor/LitTransparent, но и с программами ИГР
+		// (фрактальные поверхности mygame). Буфер в вершинном списке обязана была бы биндить
+		// КАЖДАЯ такая sp — иначе «Missing vertex storage buffer binding». Поэтому вершинник
+		// отдаёт лишь row (он у него и так есть), а префикс читает фрагментник — и платят за
+		// это только те sp, которым варианты нужны.
 		engine_context->CreateShaderProgram("Lit", spd, RP::MAIN_PASS,
 			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-			"main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
+			"main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TEX_STATE_PREFIX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive },
 			/*dont_save=*/true);
 
 		// Тот же vs и те же буферы, но fs без текстур: материал без карт рисуется цветом из params.
+		// Без буферов вариантов вовсе: у текстурелесс материала их нет по определению.
 		engine_context->CreateShaderProgram("LitColor", spd, RP::MAIN_PASS,
 			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"untextured_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
@@ -397,7 +419,7 @@ void Engine::InitDefaultShaders()
 		spd.BehavesAsTransparentGeometry();
 		engine_context->CreateShaderProgram("LitTransparent", spd, RP::TRANSPARENT_PASS,
 			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
-			"transparent_surface_fs", { DEFAULT_LIGHT_BUFFER },
+			"transparent_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_TEX_STATE_PREFIX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo, TextureSlotRole::Normal }, /*dont_save=*/true);
 	}
 	{
@@ -470,6 +492,12 @@ void Engine::InitDefaultBufferUpdaters()
 	SetDefaultEntityToCmdUpdater(*engine_context, pib_data_module);
 	SetDefaultOutPibUpdater(*engine_context, light_data_module);
 
+	// Переключаемые варианты текстур: префикс по строкам + плоские ячейки состояний, ОДИН модуль
+	// на оба буфера. Пока ни одна sp их не объявила, обе инструкции — бесплатный no-op: буфер без
+	// usage не бейкается, и _ExecuteUpdateInstructions гейтит инструкцию целиком, даже не считая
+	// size_fn. Оживут сами, когда буферы попадут в списки sp.
+	SetDefaultTexStateUpdaters(*engine_context, tex_state_data_module);
+
 	// UI-текст: bits/wordbase/index/text (UI_DataModule) + GlyphUVL (FontManager, шрифт "default").
 	// Буферы бейкаются, когда программа "UI" объявит их usage (InitDefaultShaders, ниже по Init).
 	SetUITextUpdaters(*engine_context, ui_data_module, font_manager, "default");
@@ -526,6 +554,7 @@ Engine::~Engine()
 	delete transform_data_module;
 	delete light_data_module;
 	delete ui_data_module;
+	delete tex_state_data_module;
 	delete ui_yoga;   // YGNodeFreeRecursive дерева + YGConfigFree (в его dtor)
 
 	dev = nullptr;

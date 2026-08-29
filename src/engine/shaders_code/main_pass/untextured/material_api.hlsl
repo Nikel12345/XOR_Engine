@@ -15,6 +15,9 @@ struct PSInput
     [[vk::location(3)]] float3 v_worldTangent   : TEXCOORD3;
     [[vk::location(4)]] float3 v_worldBitangent : TEXCOORD4;
     [[vk::location(5)]] float  v_alpha          : TEXCOORD5;
+    // Строка трансформа инстанса (-1 = отсечён). Член контракта VS→PS: вершинник общий на три
+    // пролога, разъехавшийся PSInput = молча битые локейшены. Здесь не используется.
+    [[vk::location(6)]] nointerpolation int v_row : TEXCOORD6;
 };
 
 struct SurfaceData
@@ -34,6 +37,10 @@ struct SurfaceData
 #define LIGHT_BLOCK_REGISTER     register(t2, space2)
 #define SHADOW_CAMERAS_REGISTER  register(t3, space2)
 #define CAMERA_REGISTER          register(t4, space2)   // 2 сэмплера (тень+env) + LightBlock(t2) + ShadowCameras(t3) → Camera t4
+
+// Таблицы UVL здесь нет, значит нет и вариантов: пролог держит только ПУСТУЮ форму общего
+// контракта с базой (та зовёт BEGIN_MATERIAL_API вне зависимости от пролога).
+#define BEGIN_MATERIAL_API(input)
 
 // Камера объявлена в прологе (симметрично текстурному: там getSurface считает POM-view до базы).
 // Текстурелесс POM не использует, но объявление держим здесь, чтобы база была единой (без Camera).

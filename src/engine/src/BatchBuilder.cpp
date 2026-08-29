@@ -235,32 +235,24 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
     if (dummy && !dummy->atlas) dummy = nullptr;   // без атласа он ничего не заменяет
     ShaderProgram* fallback = fallback_shader_name.empty() ? nullptr : sm->GetShaderProgram(fallback_shader_name);
 
-    // Ячейки секции состояний этого материала и хэндлы блоков этой таблицы — переиспользуемые
-    // буферы, чтобы предпроход не аллоцировал на каждую пару.
-    std::vector<std::pair<TextureSlotRole, uint32_t>> cells;
+    // Хэндлы блоков текущей таблицы — переиспользуемый буфер, чтобы предпроход не аллоцировал
+    // на каждую пару.
     std::vector<const TextureHandle*> block_handles;
 
     for (const auto& [mat_name, mat_owner] : mtm->GetMaterials()) {
         Material* material = mat_owner.get();
         if (!material) continue;
 
-        // ── Нумерация ячеек секции ──
-        // ВАРИАТИВНАЯ роль = роль с >1 текстурой; порядок — обход Material::textures (std::map,
-        // по возрастанию TextureSlotRole). Ровно ту же нумерацию независимо повторяет модуль
-        // заливки состояний: расходиться им нельзя — объекты молча покажут чужие варианты.
-        // Нумерация НЕ зависит от того, резолвятся ли имена вариантов: иначе битая текстура
-        // сдвинула бы ячейки только на одной из двух сторон.
-        cells.clear();
-        for (const auto& [role, names] : material->textures) {
-            if (names.size() <= 1) continue;   // невариативная — ячейки нет
-            if (cells.size() >= MAX_VARIATIVE_SLOTS) {
-                SDL_Log("BuildMaterialLayouts: material '%s' has more variative slots than "
-                        "MAX_VARIATIVE_SLOTS (%u) - the rest show their default only (raise the constant)",
-                    mat_name.c_str(), MAX_VARIATIVE_SLOTS);
-                break;
-            }
-            cells.emplace_back(role, safe_u32(cells.size()));
-        }
+        // Ячейки секции состояний: порядок — ОДНО определение на весь движок
+        // (CollectVariativeRoles в MaterialData.h), его же читает TextureStateDataModule при
+        // заливке. Расходиться им нельзя — объекты молча покажут чужие варианты, поэтому цикл
+        // здесь не переписывается, а вызывается. Переполнение функция не логирует (у неё нет
+        // имени материала) — сообщение здесь, одна строка на материал.
+        const VariativeRoles cells = CollectVariativeRoles(*material);
+        if (cells.count >= MAX_VARIATIVE_SLOTS)
+            SDL_Log("BuildMaterialLayouts: material '%s' may have more variative slots than "
+                    "MAX_VARIATIVE_SLOTS (%u) - the rest show their default only (raise the constant)",
+                mat_name.c_str(), MAX_VARIATIVE_SLOTS);
 
         for (const SpBinding& binding : material->shader_programs) {
             const std::vector<uint8_t>* sp_params =
@@ -319,7 +311,8 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
                 // мог её срезать — тогда слот остаётся невариативным и показывает дефолт.
                 // has_cell ⇒ names непуст и в нём больше одного имени: cells строились из него же.
                 bool has_cell = false;
-                for (const auto& [r, c] : cells) if (r == role) { cell = c; has_cell = true; break; }
+                for (uint32_t c = 0; c < cells.count; ++c)
+                    if (cells.role[c] == role) { cell = c; has_cell = true; break; }
 
                 if (has_cell) {
                     if (lay.uvl.size() + names->size() - 1 > MAX_UVL_BLOCKS) {
@@ -341,7 +334,7 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
                 // Материал БЕЗ вариантов обязан давать сегодняшнюю таблицу байт-в-байт: один
                 // блок на слот, base[s] == s. Вырождение в прежнее поведение — главное свойство
                 // раскладки, и ловится оно тут одной строкой (в Release её нет).
-                assert((!cells.empty() || (count == 1 && base == safe_u32(s)))
+                assert((cells.count != 0 || (count == 1 && base == safe_u32(s)))
                     && "BuildMaterialLayouts: material without variants must yield the legacy UVL table");
 
                 if (s < MAX_SLOTS)

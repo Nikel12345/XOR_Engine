@@ -116,7 +116,30 @@ struct DeleteTextureCmd { std::string name; };
 struct SetMaterialTextureCmd {
     std::string material;
     uint32_t    role;      // TextureSlotRole как uint32_t (без завязки на порядок объявлений)
+    uint32_t    variant;   // номер варианта в слоте; 0 — дефолт (то, что рисуется без переключения)
     std::string texture;
+};
+
+// Добавить/убрать ВАРИАНТ слот-роли (Material::textures[role]). Это структурная правка: меняется
+// длина таблицы UVL и нумерация ячеек секции, значит дерево батчей пересобирается — в отличие от
+// смены ЗНАЧЕНИЯ варианта у сущности, которая дерево не трогает вовсе.
+// Add кладёт КОПИЮ дефолта: новый вариант сразу резолвится, а какую текстуру он покажет —
+// выбирают следующим шагом обычным SetMaterialTexture с этим номером.
+struct MaterialVariantCmd {
+    std::string material;
+    uint32_t    role;
+    uint32_t    variant;   // у Add игнорируется (всегда в конец), у Remove — что убрать
+};
+
+// Какой вариант слот-роли показывает КОНКРЕТНАЯ сущность (MaterialRef::states). Правка поля
+// НА МЕСТЕ: архетип не меняется, сущность не создаётся и не удаляется — дерево батчей не
+// трогается вовсе, ни SetDirtyBatches, ни QueueUpdate. Командой это идёт по другой причине:
+// ECS мутирует только sim-поток, UI читает и шлёт.
+struct EntityTextureVariantCmd {
+    Entity   entity;
+    uint32_t mat_index;   // какой материал сущности (= submesh.material_index)
+    uint32_t role;
+    uint32_t variant;     // 0 = дефолт; запись нуля УБИРАЕТ пару из states (список разреженный)
 };
 
 // Нагрузка save/load: строки в указатель не упаковать, поэтому продьюсер (UI) выделяет

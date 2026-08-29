@@ -9,6 +9,8 @@
 // EngineContext держит менеджеры forward-декларациями — полные типы тянет этот TU.
 #include "ModelManager.h"
 #include "MaterialManager.h"
+#include "MaterialData.h"   // CollectVariativeRoles: какие слоты вариативны и в каком порядке
+#include <algorithm>
 #include <cstring>
 #include <cstdio>
 
@@ -257,21 +259,75 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
     }
 
     for (size_t k = 0; k < mats.materials.size(); ++k) {
+        ImGui::PushID(static_cast<int>(k));
         const std::string sel = mats.materials[k].name;   // копия: правка живой энтити идёт командой
         char label[32];
         snprintf(label, sizeof(label), "submesh %zu", k);
 
-        if (!ImGui::BeginCombo(label, sel.empty() ? "(none)" : sel.c_str())) continue;
-        for (auto& [nm, m] : t.ctx->GetMaterialManager()->GetMaterials()) {
-            if (!g_show_internal && IsInternalName(nm)) continue;
-            if (!ImGui::Selectable(nm.c_str(), nm == sel)) continue;
-            if (t.live())
-                t.ctx->GetInputManager()->PushCommand(CommandId::SetEntityMaterial,
-                    new FieldEditCmd{ t.entity, "Material", "names", (double)k, nm });
-            else
-                mats.materials[k] = MaterialRef{ nm, {} };   // черновик: смена материала сбрасывает состояния (как в SetEntityMaterial)
+        if (ImGui::BeginCombo(label, sel.empty() ? "(none)" : sel.c_str())) {
+            for (auto& [nm, m] : t.ctx->GetMaterialManager()->GetMaterials()) {
+                if (!g_show_internal && IsInternalName(nm)) continue;
+                if (!ImGui::Selectable(nm.c_str(), nm == sel)) continue;
+                if (t.live())
+                    t.ctx->GetInputManager()->PushCommand(CommandId::SetEntityMaterial,
+                        new FieldEditCmd{ t.entity, "Material", "names", (double)k, nm });
+                else
+                    mats.materials[k] = MaterialRef{ nm, {} };   // черновик: смена материала сбрасывает состояния (как в SetEntityMaterial)
+            }
+            ImGui::EndCombo();
         }
-        ImGui::EndCombo();
+
+        // ── Какой вариант показывает ЭТА сущность ──
+        // Слоты сюда диктует МАТЕРИАЛ (у кого больше одной текстуры), как выше их диктовала
+        // модель. Показываем только те роли, у которых реально есть ячейка состояния:
+        // CollectVariativeRoles обрывается на MAX_VARIATIVE_SLOTS, и роль за этой границей
+        // переключить нечем — предлагать её тут значило бы врать. Что такая роль есть, видно
+        // в инспекторе материала (там у неё «(!)»).
+        const Material* mat = nullptr;
+        if (!sel.empty()) {
+            const auto& mm = t.ctx->GetMaterialManager()->GetMaterials();
+            auto mit = mm.find(sel);
+            if (mit != mm.end()) mat = mit->second.get();
+        }
+        if (mat) {
+            const VariativeRoles vr = CollectVariativeRoles(*mat);
+            for (uint32_t c = 0; c < vr.count; ++c) {
+                const TextureSlotRole role = vr.role[c];
+                const uint32_t count = safe_u32(mat->textures.at(role).size());
+
+                auto& st = mats.materials[k].states;
+                auto sit = std::find_if(st.begin(), st.end(),
+                    [role](const auto& pr) { return pr.first == role; });
+                // Нет записи = дефолт. И протухший номер (вариант убрали) показываем как дефолт —
+                // ровно так же его трактует кламп в шейдере.
+                uint32_t cur = (sit != st.end() && sit->second < count) ? sit->second : 0u;
+
+                ImGui::PushID(static_cast<int>(role));
+                ImGui::TextUnformatted(RoleName(role));
+                ImGui::SameLine();
+                uint32_t next = cur;
+                ImGui::BeginDisabled(cur == 0);
+                if (ImGui::ArrowButton("prev", ImGuiDir_Left)) --next;
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                ImGui::Text("%u / %u", cur, count - 1);
+                ImGui::SameLine();
+                ImGui::BeginDisabled(cur + 1 >= count);
+                if (ImGui::ArrowButton("next", ImGuiDir_Right)) ++next;
+                ImGui::EndDisabled();
+                ImGui::PopID();
+
+                if (next == cur) continue;
+                if (t.live())
+                    t.ctx->GetInputManager()->PushCommand(CommandId::SetEntityTextureVariant,
+                        new EntityTextureVariantCmd{ t.entity, safe_u32(k),
+                                                     static_cast<uint32_t>(role), next });
+                else if (next == 0) { if (sit != st.end()) st.erase(sit); }        // черновик: та же
+                else if (sit != st.end()) sit->second = next;                      // логика, что в
+                else st.emplace_back(role, next);                                  // хендлере команды
+            }
+        }
+        ImGui::PopID();
     }
 }
 

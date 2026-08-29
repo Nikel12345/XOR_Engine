@@ -15,6 +15,7 @@ class ModelManager;
 class PassManager;
 class IndirectDataModule;
 class BoundSphereDataModule;
+class TextureStateDataModule;
 class BatchBuilder;
 
 class EngineContext;
@@ -37,6 +38,11 @@ namespace DefaultUpdateSet
 	void SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSphereDataModule* bdm);
 	void SetDefaultEntityToCmdUpdater(EngineContext& ctx, PIB_DataModule* pib_dm);
 	void SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModule* ldm);
+
+	// Переключаемые варианты текстур: ПАРА буферов от ОДНОГО модуля (префикс по строкам +
+	// плоские ячейки состояний). Порядок регистрации тут безразличен — в отличие от UI-текста,
+	// ни один из двух не готовит данные для другого (см. TextureStateDataModule).
+	void SetDefaultTexStateUpdaters(EngineContext& ctx, TextureStateDataModule* tsm);
 
 	// UI-текст: 4 буфера разреженного канала (bits/wordbase/index/text из UI_DataModule) +
 	// GlyphUVL (из FontManager по имени шрифта). BITS регистрируется первым — его size-фаза
