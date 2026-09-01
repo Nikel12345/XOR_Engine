@@ -796,7 +796,7 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
             rp->debug_name.c_str(), pass_draws, pass_cmds,
             rp->shader_batches.size(), offset - pass_list.first_instance);
 
-        // Суммы прохода: из них AskRegions складывает размеры его региона (записей и команд
+        // Суммы прохода: из них StampRegions складывает размеры его региона (записей и команд
         // на камеру) и границы его сегмента во входном PIB для диапазона каллинга.
         pass_list.num_instances = offset - pass_list.first_instance;
         pass_list.num_commands = pass_cmds;

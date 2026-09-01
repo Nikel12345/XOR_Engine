@@ -90,34 +90,4 @@ namespace RenderSnap {
         BufferData* indirectBuffer = nullptr;
     };
 
-    // ── Регионы out-буферов ──
-    // Индирект и out_pib нарезаны на регион НА ПРОХОД: в регионе — блок на каждый ДРОУ прохода
-    // за кадр, в блоке только его команды/записи. Сколько блоков — решает вызывающий
-    // (AskRegions); обычно это число камер прохода (тень: L), но камера лишь обычная причина:
-    // UI рисуется один раз без всякой камеры — блок один. Размер = сумма по проходам
-    // blocks*commands, а не произведение сумм — блок не таскает команды чужого прохода.
-    // Раскладка пасс-мажорная, в порядке ordinal:
-    //
-    //   индирект: [ проход0: blocks0 x commands0 ][ проход1: blocks1 x commands1 ]…
-    //   out_pib:  [ проход0: blocks0 x pib0      ][ проход1: blocks1 x pib1      ]…
-    //
-    // Здесь только СЛОВАРЬ типов — общий для вычислителя и потребителей (IndirectDataModule,
-    // пуши каллинга, дроу). Считает регионы ЕДИНСТВЕННАЯ функция —
-    // DefaultRenderPassNamespace::AskRegions: она же владеет знанием «сколько камер у прохода»,
-    // которого у слоя раскладки нет. Контракт баз: StoreIndirect пишет буфер в этом же
-    // пасс-мажорном порядке.
-    struct Region {
-        uint32_t command_blocks_count = 0;   // блоков (дроу за кадр); 0 — региона нет, диспатч пуст
-        uint32_t commands = 0;      // команд на камеру (= PassDrawList::num_commands)
-        uint32_t pib = 0;           // PIB-записей на камеру (= PassDrawList::num_instances)
-        uint32_t first_pib = 0;     // начало сегмента прохода во ВХОДНОМ PIB (диапазон каллинга)
-        uint32_t cmd_base = 0;      // база региона в индиректе, в командах
-        uint32_t pib_base = 0;      // база региона в out_pib, в записях
-    };
-
-    struct Regions {
-        std::vector<Region> per_pass;   // индекс = ordinal прохода
-        uint32_t total_commands = 0;    // сумма blocks*commands — размер индиректа в командах
-        uint32_t total_pib = 0;         // сумма blocks*pib — размер out_pib в записях
-    };
 }

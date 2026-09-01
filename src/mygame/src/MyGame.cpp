@@ -55,7 +55,7 @@ SDL_AppResult MyGame::MainInit()
         // csp хранит имя cs — резолв на сборке compute-пайплайна (после LoadScene).
         using namespace DefaultShaderProgramSet;
         SetBloomPrograms(ctx);
-        SetCullingPibPrograms(ctx, engine->GetLightDataModule());   // GPU-каллинг: out_pib
+        SetCullingPibPrograms(ctx);   // GPU-каллинг: программа на проход, регионы у PassManager
     }
 
     // Сцена = выбор фрактала. Всё сценозависимое — буфер кадра (CreateBufferData) и его

@@ -17,7 +17,6 @@
 #include "FontManager.h"
 #include "ObjectManager.h"
 #include "BatchBuilder.h"
-#include "DefaultRenderPassSet.h"   // AskRegions: единый расчёт регионов out-буферов
 
 namespace DefaultUpdateSet
 {
@@ -166,9 +165,8 @@ void DefaultUpdateSet::SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDa
     }
     auto* bm = ctx.GetBufferManager();
     auto* om = ctx.GetObjectManager();
-    // ИНВАРИАНТ ПОРЯДКА: эта инструкция обязана регистрироваться РАНЬШЕ indirect/out_pib —
-    // её size-фаза пишет слепок теневых камер слота (CalculateLightCamerasSize), который
-    // они читают через AskNumLightCameras(slot) в своих size-фазах того же прохода.
+    // Порядок регистрации больше НЕ значим: слепок камер пишет фаза слепков в PrepareFunc,
+    // а size-функции только читают его.
     bm->CreateUpdateInstruction(DEFAULT_LIGHT_CAMERA_BUFFER,
         [om, ldm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
@@ -176,11 +174,10 @@ void DefaultUpdateSet::SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDa
         if (!scene) return;
         ldm->StoreLightCameras(bm, &task, om, scene);
     },
-        [om, ldm, bm]() -> uint32_t
+        [ldm, bm]() -> uint32_t
     {
-        // Size-фаза выполняется всегда (store при size==0 скипается) → слепок слота
-        // никогда не остаётся стейлым, даже если последний теневой свет удалили.
-        return ldm->CalculateLightCamerasSize(om, om->GetActiveScene(), bm->logic_index.load());
+        // Читалка: слепок камер к этому моменту уже записан фазой слепков в PrepareFunc.
+        return ldm->CalculateLightCamerasSize(bm->logic_index.load());
     }
     );
     light_cameras_update_inited = true;
@@ -196,24 +193,20 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
     auto* pm = ctx.GetPassManager();
     auto* bb = ctx.GetBatchBuilder();
 
-    // Гейт по ПАРЕ {ревизия батчей, число теневых камер}: содержимое команд зависит только от
-    // них, а покадрово меняется единственное поле num_instances — его обнуляет culling_clear
-    // на GPU перед каждым scatter (WARNINGS.md). Обе величины — из слепков ТОГО ЖЕ слота, что
-    // и раскладка: слепок камер пишет size-фаза LIGHT_CAMERA_BUFFER, зарегистрированная выше
-    // (инвариант порядка там), и теперь он несущий ещё и для ключа гейта.
+    // Гейт по ПАРЕ {ревизия батчей, штамп регионов слота}: от них зависит содержимое команд,
+    // а покадрово меняется единственное поле num_instances — его обнуляет culling_clear на GPU
+    // перед каждым scatter (WARNINGS.md). Оба входа — от фазы слепков этого же слота.
     // Гейт безопасен при ресайзе (буфер RESIZE_ONLY, содержимое теряется): размер — функция
-    // от тех же двух чисел, значит ресайз невозможен без смены ключа.
+    // от той же раскладки, значит ресайз невозможен без смены ключа.
     bm->CreateUpdateInstruction(DEFAULT_INDIRECT_BUFFER,
         [pm, idm, ldm, bb](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
-        const uint8_t slot = bm->logic_index.load();
-        idm->StoreIndirect(bm, pm, &task, DefaultRenderPassNamespace::AskRegions(pm, bb, ldm, slot));
+        idm->StoreIndirect(bm, pm, &task, pm->AskRegions(bm->logic_index.load()));
     },
-        [pm, idm, ldm, bb, bm]() -> uint32_t
+        [pm, idm, bb, bm]() -> uint32_t
     {
         const uint8_t slot = bm->logic_index.load();
-        return idm->CalculateIndirectSize(DefaultRenderPassNamespace::AskRegions(pm, bb, ldm, slot),
-                                          bb->BatchesRevision(), ldm->AskNumLightCameras(slot), slot);
+        return idm->CalculateIndirectSize(pm->AskRegions(slot), bb->BatchesRevision(), slot);
     }
     );
     indirect_update_inited = true;
@@ -281,10 +274,9 @@ void DefaultUpdateSet::SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModu
     // StampLayoutSnapshot в PrepareFunc до апдейтеров).
     bm->CreateUpdateInstruction(DEFAULT_OUT_PIB_BUFFER,
         nullptr,
-        [pm, bb, ldm, bm]() -> uint32_t
+        [pm, bm]() -> uint32_t
     {
-        const uint8_t slot = bm->logic_index.load();
-        return DefaultRenderPassNamespace::AskRegions(pm, bb, ldm, slot).total_pib * sizeof(int32_t);
+        return pm->AskRegions(bm->logic_index.load()).total_pib * sizeof(int32_t);
     }
     );
     out_pib_update_inited = true;

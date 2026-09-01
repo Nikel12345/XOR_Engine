@@ -78,7 +78,7 @@ SDL_AppResult Game::MainInit()
     {
         using namespace DefaultShaderProgramSet;
         SetBloomPrograms(ctx);
-        SetCullingPibPrograms(ctx, engine->GetLightDataModule());   // GPU-каллинг: out_pib
+        SetCullingPibPrograms(ctx);   // GPU-каллинг: программа на проход, регионы у PassManager
     }
 
 	// UI-материал (тип UI: bg/text цвета, albedo=default_albedo). Программу "UI" создаёт движок

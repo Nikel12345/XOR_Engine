@@ -1,18 +1,11 @@
 ﻿#pragma once
 #include "TextureData.h"
-#include "RenderSnapshot.h"   // RenderSnap::Regions — возвращается по значению из AskRegions
 class EngineContext;
 class LightDataModule;
 class BatchBuilder;
 class PassManager;
 namespace DefaultRenderPassNamespace
 {
-    // Регионы out-буферов для слота, ПО ПРОХОДАМ (индекс = ordinal). ЕДИНСТВЕННЫЙ способ их
-    // получить: размеры буферов, пуши каллинга и смещения дроу обязаны считать их одинаково,
-    // иначе адреса разъедутся молча. Здесь же — ВСЁ знание о камерах: теневой проход рисуют
-    // L световых камер, любой другой — одна камера игрока (дефолт). Ни проход, ни ядро о
-    // камерах не знают; новый тип камер = ещё одна строка в AskRegions + своя culling-программа.
-    RenderSnap::Regions AskRegions(PassManager* pm, BatchBuilder* bb, LightDataModule* ldm, uint8_t slot);
     inline constexpr const char* DEPTH_PASS = "_DefaultDepthRenderPass";
     inline constexpr const char* MAIN_PASS = "_DefaultMainRenderPass";
     inline constexpr const char* TRANSPARENT_PASS = "_DefaultTransparentRenderPass";
@@ -50,20 +43,20 @@ namespace DefaultRenderPassNamespace
     // Должна вызываться ПЕРЕД Set*Pass, которые их потребляют (main/transparent/debug).
     void _SetDefaultCommonResources(EngineContext* ctx, uint32_t width, uint32_t height);
 
-    void SetDefaultMainRenderPass(EngineContext* ctx, LightDataModule* ldm);
+    void SetDefaultMainRenderPass(EngineContext* ctx);
     void SetDefaultMainRenderPass(EngineContext* ctx, SDL_GPUDevice* dev, SDL_Window* win);
 
     // Состояние DEBUG_PASS: цвет рамок коллайдеров. Тело прохода его не трогает — это чистая
     // настройка, поэтому у прохода есть схема (имя ниже) и он редактируется.
     struct alignas(16) DebugColliderPushData { float color[4] = { 0.0f, 1.0f, 0.2f, 1.0f }; };
     inline const std::string DEBUG_COLLIDER_STATE = "DebugCollider";
-    void SetDebugColliderPass(EngineContext* ctx, LightDataModule* ldm);
+    void SetDebugColliderPass(EngineContext* ctx);
 
-    void SetTransparentPass(EngineContext* ctx, LightDataModule* ldm);
+    void SetTransparentPass(EngineContext* ctx);
 
     // UI-оверлей: рендер UI-энтити (NDC-квады) в scene_hdr ПОСЛЕ bloom, ДО present (не блумится).
     // Своя глубина (main_depth с CLEAR — z-пространство UI отдельное), __TextAtlas как глобалка.
-    void SetUIPass(EngineContext* ctx, LightDataModule* ldm);
+    void SetUIPass(EngineContext* ctx);
 
     // Финальный проход: blit HDR-сцены (scene_hdr) в свопчейн с конвертацией формата.
     // Регистрируется последним (приоритет 30). Тонмаппинг появится на этапе bloom-composite.
@@ -128,7 +121,7 @@ namespace DefaultRenderPassNamespace
     };
     // culling_clear.comp: обнуляет num_instances всех (камера,команда) перед scatter.
     struct alignas(16) CullingClearUniform {
-        uint32_t total_slots;      // сумма по группам cams*commands (RenderSnap::Regions)
+        uint32_t total_slots;      // PassRegions::total_commands слота — все блоки всех проходов
     };
     void SetDefaultCullingPass(EngineContext* ctx);
 

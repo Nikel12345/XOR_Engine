@@ -76,7 +76,7 @@ public:
 	// совпадает с indirect_buffer[slot], живое дерево приватно для sim.
 	void StampLayoutSnapshot(uint8_t slot);
 	// Счётчиков по всей раскладке здесь нет намеренно: размеры out-буферов, диспатчи и
-	// смещения дроу считаются ПО ПРОХОДАМ (AskRegions над этим слепком), а сумма по всем
+	// смещения дроу считаются ПО ПРОХОДАМ (PassManager::StampRegions над этим слепком), а сумма по всем
 	// проходам ни для одного из них больше не является ответом.
 	const RenderSnap::BatchLayout* AskLayout(uint8_t slot) const { return slot_layouts[slot].get(); }
 

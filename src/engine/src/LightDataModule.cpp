@@ -166,11 +166,16 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
 // же порядке spot→sphere→direct, что StoreLightCameras: индекс в cams = camera_index =
 // позиция камеры в буфере. Совпадение больше не инвариант «трёх одинаковых ForEach по
 // файлам» — теневой проход и каллинг читают эту таблицу, а не ECS.
-uint32_t LightDataModule::CalculateLightCamerasSize(ObjectManager* om, SceneData* scene, uint8_t slot)
+uint32_t LightDataModule::CalculateLightCamerasSize(uint8_t slot) const
+{
+    return safe_u32(snapshots[slot].cams.size()) * safe_u32(sizeof(LightCamera));
+}
+
+void LightDataModule::StampShadowCameras(ObjectManager* om, SceneData* scene, uint8_t slot)
 {
     std::vector<RenderSnap::ShadowCam>& cams = snapshots[slot].cams;
     cams.clear();   // capacity переживает кадры — аллокаций в steady state нет
-    if (!scene) return 0;
+    if (!scene) return;
 
     om->ForEach<Positions, SpotLightComponent, ShadowCasterComponent>(scene,
         [&](SoAElement<Positions>, SpotLightComponent& light, ShadowCasterComponent) {
@@ -191,7 +196,6 @@ uint32_t LightDataModule::CalculateLightCamerasSize(ObjectManager* om, SceneData
                 cams.push_back({ light.light_data.CascadeFar(c), 1,
                                  static_cast<uint8_t>(light.needsUpdate ? 1 : 0) });
         });
-    return safe_u32(cams.size()) * safe_u32(sizeof(LightCamera));
 }
 
 inline void StoreSpotLightCamera(BufferManager* bm, UploadTask* task, Positions& P, size_t i, SpotLightComponent::SpotLightData& light) {

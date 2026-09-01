@@ -253,8 +253,24 @@ void PassManager::ExecutePrepassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_f
 	}
 }
 
-void PassManager::RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass_step, BufferManager* bm, uint32_t additional_offset, const void* push_data_raw)
+void PassManager::RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass_step, BufferManager* bm, uint32_t region_index, const void* push_data_raw)
 {
+	// Блок (проход, region_index) в индиректе: база региона плюс страйд блока.
+	const PassRegions& stamped = AskRegions(render_frame);
+	uint32_t first_command = 0;
+	if (render_pass_step->ordinal < stamped.per_pass.size()) {
+		const PassRegion& region = stamped.per_pass[render_pass_step->ordinal];
+		// Тело рисует больше блоков, чем проход заказал инструкцией счёта регионов: смещение
+		// уедет в регион соседа. Дроу НЕ отменяем — иначе рассинхрон выглядит как «просто не
+		// рисуется», и его ищут не там; пусть он виден и в логе, и на экране.
+		if (region_index >= region.command_blocks_count) {
+			SDL_Log("RenderPassStandardBody: pass '%s' draws block %u, but its region count instruction asked for %u - the draw reads a neighbour region",
+				render_pass_step->debug_name.c_str(), region_index, region.command_blocks_count);
+		}
+		first_command = region.cmd_base + region_index * region.commands;
+	}
+	const uint32_t additional_offset = first_command * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand));
+
 	auto& tex_data = render_pass_step->renderPassTexsData;
 	// Атласы/shared-depth → актуальные текстуры (создаёт бейк, подменяет ресайз).
 
@@ -332,6 +348,54 @@ void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassS
 
 		SDL_EndGPUComputePass(cmp);
 	}
+}
+
+void PassManager::CreateRegionCountInstruction(const RenderPassName& name, std::function<uint32_t(uint8_t)> fn)
+{
+	region_count_instructions[name] = std::move(fn);
+}
+
+void PassManager::StampRegions(uint8_t slot, const RenderSnap::BatchLayout* layout)
+{
+	PassRegions& stamped = regions[slot];
+	stamped.per_pass.clear();
+	stamped.total_commands = 0;
+	stamped.total_pib = 0;
+	if (!layout) return;
+
+	stamped.per_pass.resize(layout->passes.size());
+
+	// Размеры прохода — из его строки слепка; блоков по умолчанию один (обычный проход).
+	for (uint32_t i = 0; i < stamped.per_pass.size(); ++i) {
+		const RenderSnap::PassDrawList& pass_list = layout->passes[i];
+		PassRegion& region = stamped.per_pass[i];
+		region.command_blocks_count = 1;
+		region.commands = pass_list.num_commands;
+		region.pib = pass_list.num_instances;
+		region.first_pib = pass_list.first_instance;
+	}
+
+	// Проходы, у которых блоков не один, говорят это сами. Инструкция ключуется ИМЕНЕМ прохода
+	// (ключ реестра), поэтому резолвим через реестр: промах = ошибка конфигурации, он залогирует.
+	for (const auto& [name, count_fn] : region_count_instructions) {
+		if (!count_fn) continue;
+		RenderPassStep* rp = GetRenderPassStep(name);
+		if (!rp || rp->ordinal >= stamped.per_pass.size()) continue;
+		stamped.per_pass[rp->ordinal].command_blocks_count = count_fn(slot);
+	}
+
+	// Границы — ТОЛЬКО здесь: покрытие непересекающееся по построению, что бы ни вернули счётчики.
+	uint32_t cmd_base = 0;
+	uint32_t pib_base = 0;
+	for (PassRegion& region : stamped.per_pass) {
+		region.cmd_base = cmd_base;
+		region.pib_base = pib_base;
+		cmd_base += region.command_blocks_count * region.commands;
+		pib_base += region.command_blocks_count * region.pib;
+	}
+
+	stamped.total_commands = cmd_base;
+	stamped.total_pib = pib_base;
 }
 
 RenderPassStep* PassManager::GetRenderPassStep(const RenderPassName& name)

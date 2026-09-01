@@ -514,12 +514,11 @@ void Engine::InitPasses()
 		_SetDefaultCommonResources(engine_context, safe_f_u32(GetWidth()), safe_f_u32(GetHeight()));
 		SetDefaultCullingPass(engine_context);     // GPU-каллинг: out_pib до SHADOW_PASS (индекс 5)
 		SetDefaultShadowPCFRenderPass(engine_context, light_data_module);
-		// ldm — для смещения региона прохода в индиректе (AskRegions), как у теневого.
-		SetDefaultMainRenderPass(engine_context, light_data_module);
-		SetTransparentPass(engine_context, light_data_module);
-		SetDebugColliderPass(engine_context, light_data_module);
+		SetDefaultMainRenderPass(engine_context);
+		SetTransparentPass(engine_context);
+		SetDebugColliderPass(engine_context);
 		SetDefaultBloomPass(engine_context);       // bloom от эмиссии (compute) + composite/tonemap в scene_hdr
-		SetUIPass(engine_context, light_data_module);   // UI-оверлей (NDC-квады) в scene_hdr после bloom, до present
+		SetUIPass(engine_context);                 // UI-оверлей (NDC-квады) в scene_hdr после bloom, до present
 		SetPresentPass(engine_context);            // финал: HDR-сцену в свопчейн (blit)
 	}
 }

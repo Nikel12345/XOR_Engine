@@ -17,9 +17,9 @@ namespace DefaultShaderProgramSet
     // compute-программы: они держат УКАЗАТЕЛИ на буферы/атласы, поэтому создаются кодом.
 
     // GPU-каллинг (culling_pib.comp): программа на проход с батчами, каждая пишет регион
-    // своего прохода в out_pib/индиректе (раскладку считает AskRegions).
+    // своего прохода в out_pib/индиректе (раскладку штампует PassManager).
     // Проход создаёт engine (SetDefaultCullingPass); здесь программа + её push/dispatch.
-    void SetCullingPibPrograms(EngineContext* ctx, LightDataModule* ldm);
+    void SetCullingPibPrograms(EngineContext* ctx);
     void SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm);
 
     // Программы bloom-пирамиды (prefilter/down/up/composite), привязка к BLOOM_PASS по имени.

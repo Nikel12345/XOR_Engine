@@ -26,7 +26,11 @@ public:
     // (snapshots[slot]) — одним перечислением, тем же порядком spot→sphere→direct, каким
     // StoreLightCameras наполняет буфер. Size-фаза выполняется ВСЕГДА (в отличие от store,
     // который скипается при size==0), поэтому слепок слота не бывает стейлым.
-    uint32_t CalculateLightCamerasSize(ObjectManager* om, SceneData* scene, uint8_t slot);
+    // Слепок теневых камер слота. Пишется в СВОЕЙ фазе PrepareFunc (Engine), а не в size_fn:
+    // size-функции обязаны быть читалками, иначе порядок регистрации инструкций становится
+    // несущим — на этом уже стоял отдельный инвариант.
+    void StampShadowCameras(ObjectManager* om, SceneData* scene, uint8_t slot);
+    uint32_t CalculateLightCamerasSize(uint8_t slot) const;
     void StoreLightCameras(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene);
 
     // ── Ask*(slot): читают ТОЛЬКО слепок слота — безопасны с рендер-потока (и с sim после
