@@ -3,7 +3,7 @@ add_executable(MyGame)
 target_sources(MyGame PRIVATE
     src/main.cpp
     src/MyGame.cpp
-    src/DefaultShaderSet.cpp
+    src/FractalShaderSet.cpp
     src/FractalUpdateSet.cpp
 )
 

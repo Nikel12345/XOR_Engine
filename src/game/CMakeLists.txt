@@ -3,7 +3,7 @@ add_executable(Game)
 target_sources(Game PRIVATE
     src/main.cpp
     src/Game.cpp
-    src/DefaultShaderSet.cpp
+    src/GameShaderSet.cpp
     src/GameComponents.cpp
 )
 

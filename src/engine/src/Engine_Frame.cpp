@@ -69,11 +69,8 @@ void Engine::PrepareFunc(uint8_t slot)
 	slot_controller->StampSlotEpoch(slot, batch_builder->RebuildEpoch());
 
 	batch_builder->StampLayoutSnapshot(slot);
-
-	// ФАЗА СЛЕПКОВ. Сначала состояние мира для слота, затем раскладка регионов по нему — и
-	// только потом инструкции заливки, чьи size-функции обязаны быть чистыми читалками.
-	// Порядок здесь ЯВНЫЙ: раньше он держался на порядке регистрации инструкций.
 	light_data_module->StampShadowCameras(object_manager, object_manager->GetActiveScene(), slot);
+
 	pass_manager->StampRegions(slot, batch_builder->AskLayout(slot));
 
 	{

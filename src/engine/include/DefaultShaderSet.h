@@ -1,5 +1,4 @@
 #pragma once
-#include <string>
 
 class ShaderManager;
 class PassManager;
@@ -13,15 +12,12 @@ class LightDataModule;
 
 namespace DefaultShaderProgramSet
 {
-    // Движковые render-программы (Lit/ShadowCaster/…) и их push-константы — дефолты движка
-    // (Engine::InitDefaultShaders). Из сцены идут только СВОИ: фрактальные фоны.
-
-    // Регистрация push-констант render-sp ПО ИМЕНИ в реестре ShaderManager. push_func — код-байндинг,
-    // он НЕ сериализуется: загруженная из манифеста sp рождается без него. Реестр это и решает —
-    // зовётся ОДИН РАЗ на инициализации, ДО первой LoadScene, а привязка к sp идёт сама.
-    // Пуши фрактальных фонов ("Fractal"/"Mandelbrot") регистрируются ОБА, без разбора имени сцены:
-    // сцена привозит свой sp — он и получит свою функцию, вторая просто ждёт (одна строка в логе).
-    void RegisterShaderFuncs(EngineContext* ctx);
+    // Render-программы (Lit/LitColor/LitTransparent/ShadowCaster/Wireframe/Skybox/UI) и их
+    // push-константы — движковые дефолты (Engine::InitDefaultShaders). Здесь — вторая половина
+    // того же набора: compute-программы. Они держат УКАЗАТЕЛИ на буферы/атласы и код-байндинги
+    // (push/dispatch), поэтому не сериализуются и создаются кодом, а не манифестом сцены.
+    // Зовёт их игра из MainInit: набор проходов у неё уже свой, а порядок вызова значим
+    // (программы читают ординалы проходов, см. WARNINGS.md).
 
     // GPU-каллинг (culling_pib.comp): программа на проход с батчами, каждая пишет регион
     // своего прохода в out_pib/индиректе (раскладку штампует PassManager).

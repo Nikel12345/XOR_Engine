@@ -11,6 +11,7 @@
 #include "ThreadController.h"
 #include "LightDataModule.h"
 #include "DefaultShaderSet.h"
+#include "FractalShaderSet.h"
 #include "BufferManager.h"
 #include "FractalUpdateSet.h"
 #include "MaterialManager.h"
@@ -86,7 +87,7 @@ SDL_AppResult MyGame::MainInit()
     // атласов): регистрируем ДО первого LoadScene, а вешает их на sp сам движок — и на создании
     // программы, и общим проходом в конце каждой загрузки. Имя сцены сюда не идёт: функции
     // фракталов названы по своим sp и находят их сами.
-    DefaultShaderProgramSet::RegisterShaderFuncs(ctx);
+    FractalShaderSet::RegisterShaderFuncs(ctx);
 
     objectManager->CreateScene(scene_name);
     ctx->LoadScene(scene_name, "saved_" + scene_name);   // папка сцены (scene.json + ресурсы)

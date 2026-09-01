@@ -260,6 +260,7 @@ set(ENGINE_CORE_SRC
     src/Engine_Scene.cpp
     src/Engine_PrepassBench.cpp
     src/DefaultRenderPassSet.cpp
+    src/DefaultShaderSet.cpp
     src/DefaultUpdateSet.cpp
     src/DefaultCommandSet.cpp
     src/UI_ImGui.cpp
@@ -276,6 +277,7 @@ set(ENGINE_CORE_SRC
 set(ENGINE_CORE_HDR
     include/Engine.h
     include/DefaultRenderPassSet.h
+    include/DefaultShaderSet.h
     include/DefaultUpdateSet.h
     include/DefaultCommandSet.h
     include/UI_ImGui.h

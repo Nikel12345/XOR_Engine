@@ -14,6 +14,7 @@
 #include "UI_ImGui.h"
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
+#include "GameShaderSet.h"
 #include "MaterialParams.h"
 #include "BufferManager.h"
 #include "DefaultRenderPassSet.h"
@@ -76,10 +77,13 @@ SDL_AppResult Game::MainInit()
 	ctx->CreateFont("default", "fonts/cuyabra-Regular.otf", 48.0f);
 
     {
+        // Движковый набор compute-программ (DefaultShaderSet.h в движке).
         using namespace DefaultShaderProgramSet;
         SetBloomPrograms(ctx);
         SetCullingPibPrograms(ctx);   // GPU-каллинг: программа на проход, регионы у PassManager
     }
+    // Push/dispatch своих sp — ДО первого LoadScene: реестр ShaderManager вешает их на sp сам.
+    GameShaderSet::RegisterShaderFuncs(ctx);
 
 	// UI-материал (тип UI: bg/text цвета, albedo=default_albedo). Программу "UI" создаёт движок
 	// (InitDefaultShaders) — к MainInit она уже есть.
