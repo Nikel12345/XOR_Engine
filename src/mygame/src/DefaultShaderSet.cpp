@@ -16,17 +16,6 @@ using namespace ShaderBase;   // POSITION/UV/... в раскладках вер�
 #include "BatchBuilder.h"
 #include "RenderSnapshot.h"
 
-namespace {
-    // shadow_pib слота = сумма инстансов SHADOW_PASS в СЛЕПКЕ раскладки слота = граница PIB
-    // между теневыми записями [0, sp) и остальными [sp, N). Она же first_instance первой
-    // не-теневой команды (FinalizeOffsets нумерует по проходам, shadow первый по pass_index=10).
-    // Так каждая scatter-программа берёт свой диапазон PIB.
-    uint32_t ShadowPib(const RenderSnap::BatchLayout* layout, uint32_t shadow_ordinal)
-    {
-        if (!layout || shadow_ordinal >= layout->passes.size()) return 0u;
-        return layout->passes[shadow_ordinal].num_instances;
-    }
-}
 
 namespace DefaultShaderProgramSet
 {
@@ -84,11 +73,6 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
     // сами compute-программы (держат указатели на буферы, не сериализуются) + их push/dispatch.
     // csp хранит cs_name; резолв в CSD — на сборке compute-пайплайна (после LoadScene).
 
-    // Ordinal теневого прохода в слепке раскладки (стабилен после FillRenderPasses) —
-    // ключ для ShadowPib. Все лямбды ниже читают ТОЛЬКО слепки слота binder.slot.
-    RenderPassStep* shadow_rp = pm->GetRenderPassStep(RP::SHADOW_PASS);
-    const uint32_t shadow_ord = shadow_rp ? shadow_rp->ordinal : 0xFFFFFFFFu;
-
     // (1) CLEAR — обнуляет num_instances ВСЕХ (камера,команда) перед scatter. Создаётся ПЕРВОЙ →
     // в CULLING_PASS это shader_batch[0], SDL барьерит между compute-пассами → scatter видит нули.
     ComputeShaderProgram* csp_clear = ctx->CreateComputeShaderProgram("csp_culling_clear", "culling_clear_cs",
@@ -97,17 +81,17 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
         RP::CULLING_PASS, /*dont_save=*/true);
     sm->CreateComputePushFunc<RP::CullingClearUniform>("csp_culling_clear",
         [ldm, bb](const PushConstantBinder& binder, RP::CullingClearUniform data) {
-        data.total_slots = (1 + ldm->AskNumLightCameras(binder.slot)) * bb->AskNumCommands(binder.slot);
+        data.total_slots = RP::AskRegions(bb, ldm, binder.slot).total_commands;
         binder.Push(0, data);
     });
     sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_culling_clear",
         [ldm, bb](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-        binder.element_count = { (1 + ldm->AskNumLightCameras(binder.slot)) * bb->AskNumCommands(binder.slot), 1, 1 };
+        binder.element_count = { RP::AskRegions(bb, ldm, binder.slot).total_commands, 1, 1 };
     });
 
     // Общий шейдер scatter'а для всех групп камер (разные программы = разные камерные буферы).
 
-    // (2) ИГРОК — камера игрока (блок 0, num_blocks=1), main-записи [shadow_pib, N). Cameras=CAMERA_BUFFER (t3).
+    // (2) ИГРОК — камера игрока (группа 0, одна камера), нетеневые записи PIB. Cameras=CAMERA_BUFFER (t3).
     ComputeShaderProgram* csp_player = ctx->CreateComputeShaderProgram("csp_cull_player", "culling_pib_cs",
         { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
         { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
@@ -115,28 +99,23 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
         {}, {}, {},
         RP::CULLING_PASS, /*dont_save=*/true);
     sm->CreateComputePushFunc<RP::CullingPibUniform>("csp_cull_player",
-        [bb, shadow_ord](const PushConstantBinder& binder, RP::CullingPibUniform data) {
-        const RenderSnap::BatchLayout* lo = bb->AskLayout(binder.slot);
-        uint32_t sp = ShadowPib(lo, shadow_ord);
-        uint32_t N  = lo ? lo->num_instances : 0u;
-        data.range_start = sp;
-        data.range_count = (N > sp) ? (N - sp) : 0u;
-        data.block_base = 0u;
-        data.num_blocks = 1u;
-        data.block_stride = N;
-        data.total_commands = lo ? lo->num_commands : 0u;
+        [bb, ldm](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+        const RenderSnap::Region reg = RP::AskRegions(bb, ldm, binder.slot).g[RP::CAMERA_GROUP_PLAYER];
+        data.range_start = reg.first_pib;
+        data.range_count = reg.pib;
+        data.num_blocks  = reg.cams;
+        data.cmd_base    = reg.cmd_base;
+        data.commands    = reg.commands;
         binder.Push(0, data);
     });
     sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_cull_player",
-        [bb, shadow_ord](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-        const RenderSnap::BatchLayout* lo = bb->AskLayout(binder.slot);
-        uint32_t sp = ShadowPib(lo, shadow_ord);
-        uint32_t N  = lo ? lo->num_instances : 0u;
-        binder.element_count = { (N > sp) ? (N - sp) : 0u, 1, 1 };
+        [bb, ldm](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+        const RenderSnap::Region reg = RP::AskRegions(bb, ldm, binder.slot).g[RP::CAMERA_GROUP_PLAYER];
+        binder.element_count = { reg.cams ? reg.pib : 0u, 1, 1 };
     });
 
-    // (3) СВЕТ — световые камеры (блоки 1..L, num_blocks=L), теневые записи [0, shadow_pib).
-    // Cameras=LIGHT_CAMERA_BUFFER (t3). При L=0 диспатч 0 → пропуск.
+    // (3) СВЕТ — световые камеры (группа 1, L камер), теневые записи PIB.
+    // Cameras=LIGHT_CAMERA_BUFFER (t3). При L=0 регион пуст и диспатч 0 → пропуск.
     ComputeShaderProgram* csp_light = ctx->CreateComputeShaderProgram("csp_cull_light", "culling_pib_cs",
         { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
         { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
@@ -144,22 +123,19 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
         {}, {}, {},
         RP::CULLING_PASS, /*dont_save=*/true);
     sm->CreateComputePushFunc<RP::CullingPibUniform>("csp_cull_light",
-        [ldm, bb, shadow_ord](const PushConstantBinder& binder, RP::CullingPibUniform data) {
-        const RenderSnap::BatchLayout* lo = bb->AskLayout(binder.slot);
-        uint32_t L  = ldm->AskNumLightCameras(binder.slot);
-        uint32_t sp = ShadowPib(lo, shadow_ord);
-        data.range_start = 0u;
-        data.range_count = (L > 0) ? sp : 0u;
-        data.block_base = 1u;
-        data.num_blocks = L;
-        data.block_stride = lo ? lo->num_instances : 0u;
-        data.total_commands = lo ? lo->num_commands : 0u;
+        [ldm, bb](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+        const RenderSnap::Region reg = RP::AskRegions(bb, ldm, binder.slot).g[RP::CAMERA_GROUP_LIGHT];
+        data.range_start = reg.first_pib;
+        data.range_count = reg.pib;
+        data.num_blocks  = reg.cams;
+        data.cmd_base    = reg.cmd_base;
+        data.commands    = reg.commands;
         binder.Push(0, data);
     });
     sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_cull_light",
-        [ldm, bb, shadow_ord](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-        uint32_t L = ldm->AskNumLightCameras(binder.slot);
-        binder.element_count = { (L > 0) ? ShadowPib(bb->AskLayout(binder.slot), shadow_ord) : 0u, 1, 1 };
+        [ldm, bb](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+        const RenderSnap::Region reg = RP::AskRegions(bb, ldm, binder.slot).g[RP::CAMERA_GROUP_LIGHT];
+        binder.element_count = { reg.cams ? reg.pib : 0u, 1, 1 };
     });
 
     culling_pib_inited = true;

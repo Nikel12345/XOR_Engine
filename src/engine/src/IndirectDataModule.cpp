@@ -2,62 +2,69 @@
 #include "IndirectDataModule.h"
 #include "BufferManager.h"
 #include "RenderManager.h"
+#include "RenderSnapshot.h"
 #include "ModelData.h"
 
 IndirectDataModule::IndirectDataModule()
 {
+	for (uint64_t& r : last_revision) r = ~0ull;
+	for (uint32_t& c : last_light_cams) c = ~0u;
 }
 
-uint32_t IndirectDataModule::CalculateIndirectSize(PassManager* pm, uint32_t num_cameras)
+uint32_t IndirectDataModule::CalculateIndirectSize(const RenderSnap::Regions& regions, uint64_t revision,
+                                                   uint32_t light_cams, uint8_t slot)
 {
-	total_size = num_cameras * AskNumCommands(pm) * sizeof(SDL_GPUIndexedIndirectDrawCommand);
+	// Ключ из двух чисел: команды зависят от ревизии батчей, разложение по камерам — от числа
+	// теневых камер, которое меняется без ревизии (добавили свет, сняли ShadowCaster).
+	if (revision == last_revision[slot] && light_cams == last_light_cams[slot]) return 0;
+	last_revision[slot] = revision;
+	last_light_cams[slot] = light_cams;
+
+	total_size = regions.total_commands * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand));
 	return total_size;
 }
 
-void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, UploadTask* task, uint32_t num_cameras)
+void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, UploadTask* task,
+                                       const RenderSnap::BatchLayout* layout,
+                                       const RenderSnap::Regions& regions)
 {
-	const std::vector<RenderPassStep*>& render_passes = pm->GetOrderedRenderPasses();
+	const std::vector<RenderPassStep*>& ordered = pm->GetOrderedRenderPasses();
 
-	// num_cameras копий команд подряд: блок камеры c = [c*num_commands, (c+1)*num_commands).
-	// num_instances = 0 у всех — scatter атомарно наберёт компактный счётчик выживших.
-	// first_instance/first_index/vertex_offset/num_indices — исходные (компактация НА МЕСТЕ,
-	// внутри диапазона команды, поэтому first_instance не меняется).
-	for (uint32_t c = 0; c < num_cameras; ++c) {
-		for (const RenderPassStep* rp : render_passes) {
-			for (const auto& [_, shader_batch] : rp->shader_batches) {
-				for (const auto& [_, atlas_batch] : shader_batch.atlases_batches) {
-					for (const auto& [_, texture_batch] : atlas_batch.texture_batches) {
-						for (const auto& [_, model_batch] : texture_batch.model_batches) {
-							SDL_GPUIndexedIndirectDrawCommand data;
-							data.num_indices = model_batch.submesh->indexCount;
-							data.num_instances = 0;
-							data.first_index = model_batch.submesh->indexOffset;
-							data.vertex_offset = model_batch.submesh->vertexOffset;
-							data.first_instance = model_batch.firstInstance;
+	// Порядок записи ОБЯЗАН совпадать с порядком регионов в BuildRegions (по group id):
+	// базы регионов считает вызывающая сторона по той же функции, и разъехавшись, они
+	// молча отправят дроу в чужой регион.
+	for (uint32_t gid = 0; gid < RenderSnap::kMaxCameraGroups; ++gid) {
+		const RenderSnap::Region& reg = regions.g[gid];
 
-							bm->UploadToTransferBuffer(task, sizeof(data), &data);
+		for (uint32_t b = 0; b < reg.cams; ++b) {
+			// Смещение куска от начала PIB-сегмента группы НАКАПЛИВАЕМ по ходу обхода: вычесть
+			// начало сегмента из глобального firstInstance было бы то же число, но беззнаковым
+			// вычитанием, которое при рассинхроне групп молчит.
+			uint32_t local_fi = 0;
+
+			for (uint32_t pass_i = 0; pass_i < ordered.size(); ++pass_i) {
+				if (!layout || RenderSnap::GroupOfPass(layout->groups, pass_i) != gid) continue;
+				const RenderPassStep* rp = ordered[pass_i];
+
+				for (const auto& [_, shader_batch] : rp->shader_batches) {
+					for (const auto& [_, atlas_batch] : shader_batch.atlases_batches) {
+						for (const auto& [_, texture_batch] : atlas_batch.texture_batches) {
+							for (const auto& [_, model_batch] : texture_batch.model_batches) {
+								SDL_GPUIndexedIndirectDrawCommand data;
+								data.num_indices = model_batch.submesh->indexCount;
+								data.num_instances = 0;
+								data.first_index = model_batch.submesh->indexOffset;
+								data.vertex_offset = model_batch.submesh->vertexOffset;
+								// Абсолютный адрес куска в out_pib (см. заголовок модуля).
+								data.first_instance = reg.pib_base + b * reg.pib + local_fi;
+								local_fi += model_batch.instanceCount;
+
+								bm->UploadToTransferBuffer(task, sizeof(data), &data);
+							}
 						}
 					}
 				}
 			}
 		}
 	}
-}
-
-uint32_t IndirectDataModule::AskNumCommands(PassManager* pm)
-{
-	uint32_t num_model_batches = 0;
-	const std::vector<RenderPassStep*>& render_passes = pm->GetOrderedRenderPasses();
-
-	for (const RenderPassStep* rp : render_passes) {
-		for (const auto& [_, shader_batch] : rp->shader_batches) {
-			for (const auto& [_, atlas_batch] : shader_batch.atlases_batches) {
-				for (const auto& [_, texture_batch] : atlas_batch.texture_batches) {
-					num_model_batches += safe_u32(texture_batch.model_batches.size());
-				}
-			}
-		}
-	}
-
-	return num_model_batches;
 }

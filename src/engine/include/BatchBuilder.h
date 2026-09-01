@@ -9,8 +9,7 @@
 #include "config.h"
 #include "Aliases.h"
 #include "RenderCommandData.h"   // MatSpLayout — значение памятки предпрохода (полный тип обязателен)
-
-namespace RenderSnap { struct BatchLayout; }
+#include "RenderSnapshot.h"      // GroupSpan — прогоны хранятся значением
 
 class ObjectManager;
 class PipeManager;
@@ -75,11 +74,10 @@ public:
 	// Ask*(slot) — ЕДИНСТВЕННЫЙ доступ рендера к раскладке: слепок слота гарантированно
 	// совпадает с indirect_buffer[slot], живое дерево приватно для sim.
 	void StampLayoutSnapshot(uint8_t slot);
+	// Счётчиков по всей раскладке здесь нет намеренно: размеры out-буферов, диспатчи и
+	// смещения дроу считаются ПО ГРУППАМ КАМЕР (RenderSnap::BuildRegions над этим слепком),
+	// а сумма по всем проходам ни для одного из них больше не является ответом.
 	const RenderSnap::BatchLayout* AskLayout(uint8_t slot) const { return slot_layouts[slot].get(); }
-	uint32_t AskNumCommands(uint8_t slot) const;
-	// Число PIB-записей по всем пассам (сумма инстансов всех батчей) в раскладке слота.
-	// Нужен GPU-каллингу (размер out_pib и диспатч) и адресации камерных блоков out_pib.
-	uint32_t AskNumInstances(uint8_t slot) const;
 
 	// Dummy-текстура ПО ИМЕНИ (та же конвенция, что SetFallbackShader ниже): резолв на сборке
 	// батча, удаление dummy = промах → пропуск отрисовки sp у битого материала (пустой рендер,
@@ -87,6 +85,15 @@ public:
 	// tm — на вызове (не полем): dummy подставляется вместо отсутствующего слота материала, то есть
 	// биндится ФРАГМЕНТНЫМ СЭМПЛЕРОМ. Материала у него нет, поэтому SAMPLER его атласу собирается
 	// здесь — единственная декларация «эта текстура будет сэмплиться как фолбэк».
+	// Прогоны проходов, делящих ОДИН регион команд. Объявляет их набор проходов (он же заводит
+	// камеры), а сюда они инжектятся один раз после FillRenderPasses: по ним FinalizeOffsets
+	// нумерует команды и кладёт их же в раскладку, поэтому нумерация и регионы физически не
+	// могут разойтись. Сам BatchBuilder о камерах по-прежнему ничего не знает.
+	void SetCameraGroupSpans(const std::array<RenderSnap::GroupSpan, RenderSnap::kMaxCameraGroups>& spans)
+	{
+		camera_group_spans = spans;
+	}
+
 	void SetDummyTexture(const std::string& name, TextureManager* tm);
 	// Fallback-sp ПО ИМЕНИ для материалов, чья sp удалена. Резолвится на сборке как обычная sp,
 	// поэтому удаление самого fallback = промах → пустой рендер (без висячего указателя).
@@ -130,6 +137,7 @@ private:
 		const MaterialComponent& material_component, const ModelComponent& model_component);
 	void RemoveEntityFromBatches(Entity entity);
 
+	std::array<RenderSnap::GroupSpan, RenderSnap::kMaxCameraGroups> camera_group_spans{};
 	std::string dummy_texture_name;     // dummy по имени для битых текстурных ссылок (см. SetDummyTexture)
 	std::string fallback_shader_name;   // sp по имени для материала с удалённой sp (см. SetFallbackShader)
 	// Reverse index: entity -> all its slots across model batches. Rebuilt on full

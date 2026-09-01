@@ -1,9 +1,29 @@
 ﻿#pragma once
 #include "TextureData.h"
+#include "RenderSnapshot.h"   // RenderSnap::Regions — возвращается по значению из AskRegions
 class EngineContext;
 class LightDataModule;
+class BatchBuilder;
+class PassManager;
 namespace DefaultRenderPassNamespace
 {
+    // Группы камер дефолтного набора проходов. Номер группы — это и порядок её региона в
+    // индиректе/out_pib (RenderSnap::BuildRegions), поэтому у игрока он 0: база его региона
+    // всегда 0, и его проходы рисуют со смещением 0.
+    inline constexpr uint32_t CAMERA_GROUP_PLAYER = 0;
+    inline constexpr uint32_t CAMERA_GROUP_LIGHT = 1;
+
+    // ЕДИНСТВЕННОЕ объявление связи «проход — камеры»: теневой проход рисуют световые камеры,
+    // остальные — камера игрока. Живёт здесь, у набора, который эти камеры и заводит; ни сам
+    // проход, ни ядро о камерах не знают. Считается ОДИН раз после FillRenderPasses (список
+    // проходов дальше не меняется) и отдаётся BatchBuilder'у, который по этим прогонам
+    // нумерует команды и кладёт их в раскладку.
+    std::array<RenderSnap::GroupSpan, RenderSnap::kMaxCameraGroups> BuildCameraGroupSpans(PassManager* pm);
+
+    // Регионы out-буферов для слота. ЕДИНСТВЕННЫЙ способ их получить: размеры буферов,
+    // пуши каллинга и смещения дроу обязаны считать их одинаково, иначе адреса разъедутся
+    // молча. Прогоны берутся из слепка раскладки, число камер — из слепка того же слота.
+    RenderSnap::Regions AskRegions(BatchBuilder* bb, LightDataModule* ldm, uint8_t slot);
     inline constexpr const char* DEPTH_PASS = "_DefaultDepthRenderPass";
     inline constexpr const char* MAIN_PASS = "_DefaultMainRenderPass";
     inline constexpr const char* TRANSPARENT_PASS = "_DefaultTransparentRenderPass";
@@ -27,9 +47,6 @@ namespace DefaultRenderPassNamespace
         // 1 — directional (ortho): в карту пишется линейная осевая глубина -viewZ/far.
         // 0 — spot/sphere (perspective): евклидова дистанция length(viewPos)/far.
         Uint32 is_ortho;
-        // Размер одного камерного блока out_pib (= число PIB-записей). Вершиннику
-        // shadow_pass нужен для адреса блока: (1 + camera_index) * num_instances.
-        Uint32 num_instances;
     };
     // ldm — источник слепка теневых камер (AskShadowCameras(slot)): проход итерирует его
     // таблицу, а не ECS, поэтому camera_index совпадает с LIGHT_CAMERA_BUFFER слота.
@@ -114,16 +131,15 @@ namespace DefaultRenderPassNamespace
     // GPU-каллинг с компактацией (culling_pib.comp = scatter). Одна программа на группу камер:
     // раскладка = CullParams шейдера. Никакого is_shadow — группу задаёт push + камерный буфер.
     struct alignas(16) CullingPibUniform {
-        uint32_t range_start;      // первая PIB-запись программы (диапазон прохода)
+        uint32_t range_start;      // первая PIB-запись группы (её сегмент во входном PIB)
         uint32_t range_count;      // сколько записей (= размер диспатча)
-        uint32_t block_base;       // первый камерный блок (0 игрок, 1 свет, …)
-        uint32_t num_blocks;       // число камер группы
-        uint32_t block_stride;     // N — всего PIB-записей (страйд блока out_pib)
-        uint32_t total_commands;   // TC — команд на камеру (страйд блока индиректа)
+        uint32_t num_blocks;       // число камер группы (Cameras[0..num_blocks))
+        uint32_t cmd_base;         // база региона группы в индиректе, в командах
+        uint32_t commands;         // команд на камеру = страйд блока внутри региона
     };
     // culling_clear.comp: обнуляет num_instances всех (камера,команда) перед scatter.
     struct alignas(16) CullingClearUniform {
-        uint32_t total_slots;      // (1+L) * total_commands
+        uint32_t total_slots;      // сумма по группам cams*commands (RenderSnap::Regions)
     };
     void SetDefaultCullingPass(EngineContext* ctx);
 

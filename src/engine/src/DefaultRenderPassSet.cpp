@@ -16,6 +16,47 @@ namespace DefaultRenderPassNamespace
     static TextureAtlas* shadow_moments_array = nullptr;
     static TextureAtlas* shadow_depth_flat_array = nullptr;
 
+    std::array<RenderSnap::GroupSpan, RenderSnap::kMaxCameraGroups> BuildCameraGroupSpans(PassManager* pm)
+    {
+        std::array<RenderSnap::GroupSpan, RenderSnap::kMaxCameraGroups> spans{};
+        if (!pm) return spans;
+
+        const std::vector<RenderPassStep*>& ordered = pm->GetOrderedRenderPasses();
+        const uint32_t n = safe_u32(ordered.size());
+
+        // Позицию теневого прохода спрашиваем у РЕЕСТРА (обход), а не у самого прохода: индекс
+        // в ordered_passes — свойство контейнера. Путь холодный, зовётся один раз за старт.
+        RenderPassStep* shadow = pm->GetRenderPassStep(SHADOW_PASS);
+        uint32_t s = n;
+        for (uint32_t i = 0; i < n; ++i) if (ordered[i] == shadow) { s = i; break; }
+
+        if (s == n) {   // теневого прохода нет — все проходы рисует камера игрока
+            spans[CAMERA_GROUP_PLAYER] = { 0u, n };
+            return spans;
+        }
+        // Проходы группы обязаны идти ПОДРЯД: регион непрерывен и в командах, и в PIB, а
+        // диапазон PIB у culling-программы — один отрезок. Теневой проход первый по pass_index,
+        // поэтому игроку достаётся хвост. Сдвинулся — это не «чуть хуже», это разъехавшиеся
+        // адреса, поэтому громко.
+        if (s != 0) {
+            SDL_Log("BuildCameraGroupSpans: SHADOW_PASS is not the first ordered pass (%u) - "
+                    "camera groups must be contiguous runs, passes before it lose their region", s);
+        }
+        spans[CAMERA_GROUP_LIGHT] = { s, 1u };
+        spans[CAMERA_GROUP_PLAYER] = { s + 1u, n - (s + 1u) };
+        return spans;
+    }
+
+    // Камер в группе: у игрока одна, у света — сколько теневых камер в слепке слота. Число
+    // НЕклэмпнутое: клэмп по слоям теневого атласа ограничивает отрисовку, а не адреса.
+    RenderSnap::Regions AskRegions(BatchBuilder* bb, LightDataModule* ldm, uint8_t slot)
+    {
+        std::array<uint32_t, RenderSnap::kMaxCameraGroups> cams{};
+        cams[CAMERA_GROUP_PLAYER] = 1u;
+        cams[CAMERA_GROUP_LIGHT] = ldm ? ldm->AskNumLightCameras(slot) : 0u;
+        return RenderSnap::BuildRegions(bb ? bb->AskLayout(slot) : nullptr, cams);
+    }
+
     // "Псевдокласс" PassSystem: общие ресурсы дефолтного набора проходов. Создаются один раз
     // в _SetDefaultCommonResources, дальше их ПОТРЕБЛЯЮТ конкретные Set*Pass — свободные функции
     // ниже концептуально "методы" этого псевдокласса, разделяющие данное состояние. Так формат и
@@ -98,11 +139,15 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
         // LIGHT_CAMERA_BUFFER слота по построению слепка (один проход в prepare пишет оба).
         const uint8_t slot = pm->RenderFrame();
         const std::vector<RenderSnap::ShadowCam>& cams = ldm->AskShadowCameras(slot);
-        const uint32_t num_commands = bb->AskNumCommands(slot);
-        const uint32_t num_instances = bb->AskNumInstances(slot);
+        // Регион световой группы в индиректе: cams блоков по commands команд, база cmd_base.
+        // Берём ТУ ЖЕ функцию, что size-фазы буферов и пуши каллинга (см. AskRegions).
+        const RenderSnap::Regions regions = AskRegions(bb, ldm, slot);
+        const RenderSnap::Region& light_region = regions.g[CAMERA_GROUP_LIGHT];
 
         auto flat_array = tm->GetTextureAtlas(SHADOW_DEPTH_FLAT_ARRAY);
 
+        // Клэмп ТОЛЬКО для цикла отрисовки (слоёв в атласе меньше, чем камер): регион считается
+        // по полному числу камер, иначе базы разъедутся с теми, по которым залит буфер.
         uint32_t num_cams = safe_u32(cams.size());
         if (num_cams > max_layers) num_cams = max_layers;
 
@@ -118,9 +163,10 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
             st->camera_index = camera_index;
             st->max_range = cam.max_range;         // spot/sphere: max distance, direct: per-cascade far
             st->is_ortho = cam.is_ortho;           // 1 → линейная осевая глубина (directional)
-            st->num_instances = num_instances;
             SDL_PushGPUVertexUniformData(cb, 0, st, sizeof(ShadowPushData));
-            pm->RenderPassStandardBody(cb, &rp, bm, (1u + camera_index) * num_commands * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), st);
+            pm->RenderPassStandardBody(cb, &rp, bm,
+                (light_region.cmd_base + camera_index * light_region.commands)
+                    * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), st);
 
             auto cp = SDL_BeginGPUCopyPass(cb);
             SDL_GPUTextureLocation src = {

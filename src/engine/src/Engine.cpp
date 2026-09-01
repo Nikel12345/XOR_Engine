@@ -134,6 +134,10 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	// до старта потоков: карту сцен после старта не мутируем (GetActiveScene её итерирует).
 	object_manager->CreateScene("_staging")->is_active = false;
 	pass_manager->FillRenderPasses();
+	// Прогоны проходов, делящих один регион команд. Считаются ОДИН раз: после FillRenderPasses
+	// список проходов не меняется. Объявляет их набор проходов (он же заводит камеры), а
+	// BatchBuilder по ним нумерует команды — сами проходы и ядро о камерах не знают.
+	batch_builder->SetCameraGroupSpans(DefaultRenderPassNamespace::BuildCameraGroupSpans(pass_manager));
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});
 	thread_controller->SetUploadCallback([this](uint8_t slot) {this->UploadFunc(slot); });

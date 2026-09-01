@@ -5,6 +5,7 @@
 #include "BufferManager.h"
 #include "RenderCommandData.h"
 #include "RenderManager.h"
+#include "RenderSnapshot.h"
 
 PIB_DataModule::PIB_DataModule()
 {
@@ -116,16 +117,26 @@ uint32_t PIB_DataModule::CalculateEntityToCmd(PassManager* rm, uint64_t revision
     return e2c_elements * sizeof(uint32_t);
 }
 
-void PIB_DataModule::StoreEntityToCmd(BufferManager* bm, PassManager* rm, UploadTask* task)
+void PIB_DataModule::StoreEntityToCmd(BufferManager* bm, PassManager* rm, UploadTask* task,
+                                      const RenderSnap::BatchLayout* layout)
 {
-    // Тот же обход, что StorePIB/StoreIndirect/FinalizeOffsets: команды нумеруются подряд
-    // по проходам (cmd_idx++ на model_batch), а каждая запись получает индекс своей команды.
+    // Тот же обход, что StorePIB/FinalizeOffsets, и та же нумерация команд, что в слепке:
+    // индекс ЛОКАЛЬНЫЙ для ГРУППЫ (сбрасывается на смене прогона), потому что каллинг адресует
+    // команду от базы региона своей группы, а не от начала буфера. Прогоны берём из слепка —
+    // по ним он и пронумерован.
     uint32_t* dst = static_cast<uint32_t*>(
         bm->AcquireTransferWritePtr(task, e2c_elements * sizeof(uint32_t)));
     if (!dst) return;
 
-    uint32_t n = 0, cmd_idx = 0;
-    for (RenderPassStep* rp : rm->GetOrderedRenderPasses())
+    uint32_t n = 0, cmd_idx = 0, prev_group = ~0u;
+    const std::vector<RenderPassStep*>& ordered = rm->GetOrderedRenderPasses();
+    for (uint32_t pass_i = 0; pass_i < ordered.size(); ++pass_i) {
+        RenderPassStep* rp = ordered[pass_i];
+        const uint32_t group = layout ? RenderSnap::GroupOfPass(layout->groups, pass_i) : 0u;
+        if (group != prev_group) {
+            cmd_idx = 0;
+            prev_group = group;
+        }
         for (const auto& [_, sb] : rp->shader_batches)
             for (const auto& [_, ab] : sb.atlases_batches)
                 for (const auto& [_, tb] : ab.texture_batches)
@@ -137,4 +148,5 @@ void PIB_DataModule::StoreEntityToCmd(BufferManager* bm, PassManager* rm, Upload
                         }
                         cmd_idx++;
                     }
+    }
 }

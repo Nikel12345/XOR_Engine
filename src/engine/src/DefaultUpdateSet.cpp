@@ -16,6 +16,8 @@
 #include "UI_DataModule.h"
 #include "FontManager.h"
 #include "ObjectManager.h"
+#include "BatchBuilder.h"
+#include "DefaultRenderPassSet.h"   // AskRegions: единый расчёт регионов out-буферов
 
 namespace DefaultUpdateSet
 {
@@ -192,20 +194,27 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
     }
     auto* bm = ctx.GetBufferManager();
     auto* pm = ctx.GetPassManager();
+    auto* bb = ctx.GetBatchBuilder();
 
-    // PER-FRAME (без revision-гейта): num_instances у каждой копии обязан быть 0 в начале
-    // кадра (scatter накапливает атомиком). num_cameras = 1 игрок + L световых — из слепка
-    // слота (его уже записала size-фаза LIGHT_CAMERA_BUFFER, см. инвариант порядка там).
+    // Гейт по ПАРЕ {ревизия батчей, число теневых камер}: содержимое команд зависит только от
+    // них, а покадрово меняется единственное поле num_instances — его обнуляет culling_clear
+    // на GPU перед каждым scatter (WARNINGS.md). Обе величины — из слепков ТОГО ЖЕ слота, что
+    // и раскладка: слепок камер пишет size-фаза LIGHT_CAMERA_BUFFER, зарегистрированная выше
+    // (инвариант порядка там), и теперь он несущий ещё и для ключа гейта.
+    // Гейт безопасен при ресайзе (буфер RESIZE_ONLY, содержимое теряется): размер — функция
+    // от тех же двух чисел, значит ресайз невозможен без смены ключа.
     bm->CreateUpdateInstruction(DEFAULT_INDIRECT_BUFFER,
-        [pm, idm, ldm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+        [pm, idm, ldm, bb](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
-        uint32_t nc = 1 + ldm->AskNumLightCameras(bm->logic_index.load());
-        idm->StoreIndirect(bm, pm, &task, nc);
+        const uint8_t slot = bm->logic_index.load();
+        idm->StoreIndirect(bm, pm, &task, bb->AskLayout(slot),
+                           DefaultRenderPassNamespace::AskRegions(bb, ldm, slot));
     },
-        [pm, idm, ldm, bm]() -> uint32_t
+        [idm, ldm, bb, bm]() -> uint32_t
     {
-        uint32_t nc = 1 + ldm->AskNumLightCameras(bm->logic_index.load());
-        return idm->CalculateIndirectSize(pm, nc);
+        const uint8_t slot = bm->logic_index.load();
+        return idm->CalculateIndirectSize(DefaultRenderPassNamespace::AskRegions(bb, ldm, slot),
+                                          bb->BatchesRevision(), ldm->AskNumLightCameras(slot), slot);
     }
     );
     indirect_update_inited = true;
@@ -219,9 +228,10 @@ void DefaultUpdateSet::SetDefaultEntityToCmdUpdater(EngineContext& ctx, PIB_Data
 
     // Гейт по ревизии батчей (меняется только со структурой), как у PIB.
     bm->CreateUpdateInstruction(DEFAULT_ENTITY_TO_CMD_BUFFER,
-        [pm, pib_dm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+        [pm, pib_dm, bb](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
-        pib_dm->StoreEntityToCmd(bm, pm, &task);
+        // Слепок слота — источник прогонов групп: нумерация обязана совпасть с его собственной.
+        pib_dm->StoreEntityToCmd(bm, pm, &task, bb->AskLayout(bm->logic_index.load()));
     },
         [pm, pib_dm, bb, bm]() -> uint32_t
     {
@@ -266,16 +276,16 @@ void DefaultUpdateSet::SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModu
     auto* bb = ctx.GetBatchBuilder();
 
     // Только ресайз (updater = nullptr): содержимое пишет scatter-каллинг каждый кадр
-    // (компактно). Блок int'ов на камеру (N = число PIB-записей): блок 0 — камера игрока.
-    // Оба множителя — из слепков слота (камеры пишет size-фаза LIGHT_CAMERA_BUFFER выше,
-    // раскладку батчей — StampLayoutSnapshot в PrepareFunc до апдейтеров).
+    // (компактно). Регион на группу камер, внутри — блок int'ов на камеру, и в блоке только
+    // записи проходов этой группы: сумма cams*pib, а не (1+L)*N. Раскладку берём из слепков
+    // слота (камеры пишет size-фаза LIGHT_CAMERA_BUFFER выше, раскладку батчей —
+    // StampLayoutSnapshot в PrepareFunc до апдейтеров).
     bm->CreateUpdateInstruction(DEFAULT_OUT_PIB_BUFFER,
         nullptr,
         [bb, ldm, bm]() -> uint32_t
     {
-        uint8_t slot = bm->logic_index.load();
-        uint32_t num_cameras_total = ldm->AskNumLightCameras(slot) + 1;
-        return num_cameras_total * bb->AskNumInstances(slot) * sizeof(int32_t);
+        const uint8_t slot = bm->logic_index.load();
+        return DefaultRenderPassNamespace::AskRegions(bb, ldm, slot).total_pib * sizeof(int32_t);
     }
     );
     out_pib_update_inited = true;
