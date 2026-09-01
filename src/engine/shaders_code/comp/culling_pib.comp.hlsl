@@ -1,15 +1,15 @@
-// GPU-каллинг С КОМПАКТАЦИЕЙ. Одна ПРОГРАММА на группу камер (игрок / свет / …): каждая биндит
-// СВОЙ камерный буфер (Cameras) и обрабатывает СВОЙ диапазон PIB-записей [range_start, +range_count),
-// раскидывая выживших по блокам своего РЕГИОНА индиректа. Никакого is_shadow — какие камеры,
-// записи и команды брать задаёт программа (push + биндинг камерного буфера). PIB сгруппирован
-// по проходам, поэтому диапазон группы непрерывен.
+// GPU-каллинг С КОМПАКТАЦИЕЙ. Одна ПРОГРАММА НА ПРОХОД с батчами: каждая биндит камерный
+// буфер своего прохода (Cameras) и обрабатывает его диапазон PIB-записей [range_start,
+// +range_count), раскидывая выживших по блокам его РЕГИОНА индиректа.
 //
-// Регион группы в индиректе: num_blocks блоков по commands команд, начиная с команды cmd_base.
-// Команда k (индекс ЛОКАЛЬНЫЙ для группы, так его пишет EntityToCmd) камеры b лежит в слоте
-// cmd_base + b*commands + k. Чужих команд в блоке нет — камера не таскает команды чужого прохода.
+// Регион прохода в индиректе: num_blocks блоков по commands команд, начиная с команды cmd_base.
+// Блок = один дроу прохода за кадр; обычно это камера (для блока b тестируется Cameras[b]),
+// но проход может не отсекаться вовсе — тогда сферы его записей приходят с w<0 и Cameras
+// не читается. Команда k (индекс ЛОКАЛЬНЫЙ для прохода, так его пишет EntityToCmd) блока b
+// лежит в слоте cmd_base + b*commands + k.
 //
 // Адрес в out_pib НЕ считается здесь: его несёт сама команда. StoreIndirect кладёт в first_instance
-// АБСОЛЮТНЫЙ адрес куска записей этой команды у этой камеры, поэтому и скаттер, и вершинник
+// АБСОЛЮТНЫЙ адрес куска записей этой команды у этого блока, поэтому и скаттер, и вершинник
 // (SV_InstanceID = first_instance + i) адресуют out_pib без арифметики блоков.
 // num_instances @4, first_instance @16 в команде.
 
@@ -26,9 +26,9 @@ RWByteAddressBuffer     Indirect : register(u1, space1);   // команды р�
 cbuffer CullParams : register(b0, space2) {
     uint range_start;      // первая PIB-запись, которую обрабатывает эта программа
     uint range_count;      // сколько записей (= размер диспатча)
-    uint num_blocks;       // число камер в группе (Cameras[0..num_blocks))
-    uint cmd_base;         // база региона группы в индиректе, в командах
-    uint commands;         // команд на камеру = страйд блока внутри региона
+    uint num_blocks;       // блоков региона; для блока b тестируется Cameras[b]
+    uint cmd_base;         // база региона прохода в индиректе, в командах
+    uint commands;         // команд на блок = страйд внутри региона
 };
 
 static const uint CMD_STRIDE = 20u;   // sizeof(SDL_GPUIndexedIndirectDrawCommand); num_instances@4, first_instance@16
@@ -48,7 +48,7 @@ bool SphereVisible(float4x4 vp, float3 center, float radius)
     return true;
 }
 
-// Кладёт выжившую запись в блок камеры b, команду k своей группы.
+// Кладёт выжившую запись в блок b, команду k своего прохода.
 void ScatterInto(uint b, uint k, int row)
 {
     uint cmd = cmd_base + b * commands + k;
@@ -64,14 +64,14 @@ void main(uint3 tid : SV_DispatchThreadID)
 {
     uint local = tid.x;
     if (local >= range_count) return;
-    uint i = range_start + local;               // запись в СВОЁМ диапазоне прохода
+    uint i = range_start + local;               // запись в диапазоне СВОЕГО прохода
 
     int row = PIB[i];   // -1 = transformless (нет Positions): строки/сферы нет — видим всегда
 
-    uint k = EntityToCmd[i];   // индекс команды ЛОКАЛЬНЫЙ для группы (см. StoreEntityToCmd)
+    uint k = EntityToCmd[i];   // индекс команды ЛОКАЛЬНЫЙ для прохода (см. StoreEntityToCmd)
 
     // Мировые центр/радиус — один раз (не зависят от камеры). w<0 → нет геометрии, видим всегда.
-    // row<0 идёт тем же путём: сфера-заглушка w=-1 → безусловный скаттер во все камеры группы
+    // row<0 идёт тем же путём: сфера-заглушка w=-1 → безусловный скаттер во все блоки прохода
     // (-1 уезжает в out_pib — читатели трактуют его как вырожденный, а transformless-VS позицию
     // строит сам и out_pib не читает). [branch] обязателен: flatten прочитал бы BoundSpheres[-1].
     float4 sphere = float4(0.0, 0.0, 0.0, -1.0);
@@ -89,7 +89,7 @@ void main(uint3 tid : SV_DispatchThreadID)
         radius = sphere.w * max(sc.x, max(sc.y, sc.z));
     }
 
-    // Камеры группы: Cameras[b] тестируем, пишем в b-й блок региона.
+    // Блоки региона: для b-го тестируем Cameras[b] (если у записи есть геометрия) и пишем в него.
     for (uint b = 0; b < num_blocks; ++b) {
         bool vis = !has_geom || SphereVisible(mul(Cameras[b].proj, Cameras[b].view), center, radius);
         if (vis) ScatterInto(b, k, row);

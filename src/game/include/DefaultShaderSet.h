@@ -16,7 +16,8 @@ namespace DefaultShaderProgramSet
     // push-константы — движковые дефолты (Engine::InitDefaultShaders). Игре остаются только
     // compute-программы: они держат УКАЗАТЕЛИ на буферы/атласы, поэтому создаются кодом.
 
-    // GPU-каллинг (culling_pib.comp): пишет out_pib блоками по камерам (0 — игрок, 1..N — световые).
+    // GPU-каллинг (culling_pib.comp): программа на проход с батчами, каждая пишет регион
+    // своего прохода в out_pib/индиректе (раскладку считает AskRegions).
     // Проход создаёт engine (SetDefaultCullingPass); здесь программа + её push/dispatch.
     void SetCullingPibPrograms(EngineContext* ctx, LightDataModule* ldm);
     void SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm);

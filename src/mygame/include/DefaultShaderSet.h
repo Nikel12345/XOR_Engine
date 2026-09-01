@@ -23,7 +23,8 @@ namespace DefaultShaderProgramSet
     // сцена привозит свой sp — он и получит свою функцию, вторая просто ждёт (одна строка в логе).
     void RegisterShaderFuncs(EngineContext* ctx);
 
-    // GPU-каллинг (culling_pib.comp): пишет out_pib блоками по камерам (0 — игрок, 1..N — световые).
+    // GPU-каллинг (culling_pib.comp): программа на проход с батчами, каждая пишет регион
+    // своего прохода в out_pib/индиректе (раскладку считает AskRegions).
     // Проход создаёт engine (SetDefaultCullingPass); здесь программа + её push/dispatch.
     void SetCullingPibPrograms(EngineContext* ctx, LightDataModule* ldm);
     void SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm);

@@ -16,45 +16,78 @@ namespace DefaultRenderPassNamespace
     static TextureAtlas* shadow_moments_array = nullptr;
     static TextureAtlas* shadow_depth_flat_array = nullptr;
 
-    std::array<RenderSnap::GroupSpan, RenderSnap::kMaxCameraGroups> BuildCameraGroupSpans(PassManager* pm)
+    RenderSnap::Regions AskRegions(PassManager* pm, BatchBuilder* bb, LightDataModule* ldm, uint8_t slot)
     {
-        std::array<RenderSnap::GroupSpan, RenderSnap::kMaxCameraGroups> spans{};
-        if (!pm) return spans;
+        RenderSnap::Regions regions{};
 
-        const std::vector<RenderPassStep*>& ordered = pm->GetOrderedRenderPasses();
-        const uint32_t n = safe_u32(ordered.size());
-
-        // Позицию теневого прохода спрашиваем у РЕЕСТРА (обход), а не у самого прохода: индекс
-        // в ordered_passes — свойство контейнера. Путь холодный, зовётся один раз за старт.
-        RenderPassStep* shadow = pm->GetRenderPassStep(SHADOW_PASS);
-        uint32_t s = n;
-        for (uint32_t i = 0; i < n; ++i) if (ordered[i] == shadow) { s = i; break; }
-
-        if (s == n) {   // теневого прохода нет — все проходы рисует камера игрока
-            spans[CAMERA_GROUP_PLAYER] = { 0u, n };
-            return spans;
+        if (!pm || !bb || !ldm) {
+            SDL_Log("AskRegions: missing manager");
+            return regions;
         }
-        // Проходы группы обязаны идти ПОДРЯД: регион непрерывен и в командах, и в PIB, а
-        // диапазон PIB у culling-программы — один отрезок. Теневой проход первый по pass_index,
-        // поэтому игроку достаётся хвост. Сдвинулся — это не «чуть хуже», это разъехавшиеся
-        // адреса, поэтому громко.
-        if (s != 0) {
-            SDL_Log("BuildCameraGroupSpans: SHADOW_PASS is not the first ordered pass (%u) - "
-                    "camera groups must be contiguous runs, passes before it lose their region", s);
+
+        const RenderSnap::BatchLayout* layout = bb->AskLayout(slot);
+        if (!layout) {
+            // Первые кадры: слепка раскладки ещё нет — нет и регионов (все размеры нулевые).
+            return regions;
         }
-        spans[CAMERA_GROUP_LIGHT] = { s, 1u };
-        spans[CAMERA_GROUP_PLAYER] = { s + 1u, n - (s + 1u) };
-        return spans;
+
+        // ВСЁ знание о камерах — здесь: теневой проход рисуют световые камеры, любой другой —
+        // одна камера игрока. Число НЕклэмпнутое: клэмп по слоям теневого атласа ограничивает
+        // только отрисовку, адреса считаются по полному числу камер.
+        // Новый тип камер = ещё одна ветка при выборе command_blocks_count ниже.
+        uint32_t shadow_ordinal = UINT32_MAX;   // нет теневого прохода — всем по одной камере
+        RenderPassStep* shadow_pass = pm->GetRenderPassStep(SHADOW_PASS);
+        if (shadow_pass) {
+            shadow_ordinal = shadow_pass->ordinal;
+        }
+        const uint32_t light_cams = ldm->AskNumLightCameras(slot);
+
+        regions.per_pass.resize(layout->passes.size());
+
+        uint32_t cmd_base = 0;
+        uint32_t pib_base = 0;
+        for (uint32_t i = 0; i < regions.per_pass.size(); ++i) {
+            const RenderSnap::PassDrawList& pass = layout->passes[i];
+            RenderSnap::Region& region = regions.per_pass[i];
+
+            // Блок = один дроу прохода за кадр. У тени дроу по разу на световую камеру,
+            // у остальных (включая безкамерный UI) — один.
+            if (i == shadow_ordinal) {
+                region.command_blocks_count = light_cams;
+            }
+            else {
+                region.command_blocks_count = 1;
+            }
+            region.commands  = pass.num_commands;
+            region.pib       = pass.num_instances;
+            region.first_pib = pass.first_instance;
+
+            region.cmd_base = cmd_base;
+            region.pib_base = pib_base;
+            cmd_base += region.command_blocks_count * region.commands;
+            pib_base += region.command_blocks_count * region.pib;
+        }
+
+        regions.total_commands = cmd_base;
+        regions.total_pib = pib_base;
+        return regions;
     }
 
-    // Камер в группе: у игрока одна, у света — сколько теневых камер в слепке слота. Число
-    // НЕклэмпнутое: клэмп по слоям теневого атласа ограничивает отрисовку, а не адреса.
-    RenderSnap::Regions AskRegions(BatchBuilder* bb, LightDataModule* ldm, uint8_t slot)
+    // Байтовое смещение блока (проход, номер блока) в индиректе для рендеримого слота — ЕДИНОЕ
+    // место расчёта у всех дроу. Обычные проходы рисуют один блок и зовут с дефолтным
+    // block_index = 0 (сдвиг нулевой, остаётся база региона); теневой зовёт по разу на
+    // световую камеру — там номер блока и есть номер камеры.
+    static uint32_t PassIndirectOffset(PassManager* pm, BatchBuilder* bb, LightDataModule* ldm,
+                                       const RenderPassStep& rp, uint32_t block_index = 0)
     {
-        std::array<uint32_t, RenderSnap::kMaxCameraGroups> cams{};
-        cams[CAMERA_GROUP_PLAYER] = 1u;
-        cams[CAMERA_GROUP_LIGHT] = ldm ? ldm->AskNumLightCameras(slot) : 0u;
-        return RenderSnap::BuildRegions(bb ? bb->AskLayout(slot) : nullptr, cams);
+        const RenderSnap::Regions regions = AskRegions(pm, bb, ldm, pm->RenderFrame());
+        if (rp.ordinal >= regions.per_pass.size()) {
+            // Слепка ещё нет (первые кадры) — дроу по нему всё равно не случится.
+            return 0;
+        }
+        const RenderSnap::Region& region = regions.per_pass[rp.ordinal];
+        return (region.cmd_base + block_index * region.commands)
+             * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand));
     }
 
     // "Псевдокласс" PassSystem: общие ресурсы дефолтного набора проходов. Создаются один раз
@@ -139,10 +172,6 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
         // LIGHT_CAMERA_BUFFER слота по построению слепка (один проход в prepare пишет оба).
         const uint8_t slot = pm->RenderFrame();
         const std::vector<RenderSnap::ShadowCam>& cams = ldm->AskShadowCameras(slot);
-        // Регион световой группы в индиректе: cams блоков по commands команд, база cmd_base.
-        // Берём ТУ ЖЕ функцию, что size-фазы буферов и пуши каллинга (см. AskRegions).
-        const RenderSnap::Regions regions = AskRegions(bb, ldm, slot);
-        const RenderSnap::Region& light_region = regions.g[CAMERA_GROUP_LIGHT];
 
         auto flat_array = tm->GetTextureAtlas(SHADOW_DEPTH_FLAT_ARRAY);
 
@@ -165,8 +194,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
             st->is_ortho = cam.is_ortho;           // 1 → линейная осевая глубина (directional)
             SDL_PushGPUVertexUniformData(cb, 0, st, sizeof(ShadowPushData));
             pm->RenderPassStandardBody(cb, &rp, bm,
-                (light_region.cmd_base + camera_index * light_region.commands)
-                    * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand)), st);
+                PassIndirectOffset(pm, bb, ldm, rp, camera_index), st);
 
             auto cp = SDL_BeginGPUCopyPass(cb);
             SDL_GPUTextureLocation src = {
@@ -257,7 +285,7 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     g_pass_system.common_inited = true;
 }
 
-void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
+void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx, LightDataModule* ldm)
 {
     if (main_pass_inited) {
         SDL_Log("Default main render pass is already initialized.");
@@ -282,11 +310,12 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
     main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.0f,0.0f,0.0f,0.0f }, g_pass_system.scene_emission->format);
     main_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, g_pass_system.main_depth_format);
 
+    BatchBuilder* bb = ctx->GetBatchBuilder();
     auto mainPass = pm->CreateRenderPass(
         MAIN_PASS,
-        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+        [pm, bm, bb, ldm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
-        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
+        pm->RenderPassStandardBody(cb, &rp, bm, PassIndirectOffset(pm, bb, ldm, rp), nullptr);
     },
         std::move(main_rptd),
         20
@@ -309,7 +338,7 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
     main_pass_inited = true;
 }
 
-void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
+void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx, LightDataModule* ldm)
 {
     PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
@@ -327,9 +356,10 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
     debug_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
     debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, g_pass_system.main_depth_format);
 
+    BatchBuilder* bb = ctx->GetBatchBuilder();
     auto debugPass = pm->CreateRenderPass(
         DEBUG_PASS,
-        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+        [pm, bm, bb, ldm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
         // Резолв ДО гарда — иначе вечный пропуск (см. TRANSPARENT_PASS: таргеты привязаны
         // атласами, texture заполняет только ResolveTargets). Старый комментарий про свопчейн
@@ -338,7 +368,7 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
         if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
         // Цвет рамок прокидываем как push_data_raw — его читает push_func дебаг-шейдера
         // (fragment slot 0). Другие программы к этому пассу не привязаны.
-        pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
+        pm->RenderPassStandardBody(cb, &rp, bm, PassIndirectOffset(pm, bb, ldm, rp), rp.state.data());
     },
         std::move(debug_rptd),
         25
@@ -357,7 +387,7 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
     debugPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 }
 
-void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
+void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx, LightDataModule* ldm)
 {
     PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
@@ -371,9 +401,10 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
     transparent_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
     transparent_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, g_pass_system.main_depth_format);
 
+    BatchBuilder* bb = ctx->GetBatchBuilder();
     auto transparentPass = pm->CreateRenderPass(
         TRANSPARENT_PASS,
-        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+        [pm, bm, bb, ldm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
         // Резолв ДО гарда: colorTargetInfos[0].texture заполняется из атласа только в
         // ResolveTargets (таргеты привязаны атласами, сырой хэндл на setup не пишется).
@@ -382,7 +413,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
         // RenderPassStandardBody идемпотентен и дёшев.
         rp.renderPassTexsData.ResolveTargets();
         if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
-        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
+        pm->RenderPassStandardBody(cb, &rp, bm, PassIndirectOffset(pm, bb, ldm, rp), nullptr);
     },
         std::move(transparent_rptd),
         22   // между MAIN_PASS (20) и DEBUG_PASS (25)
@@ -392,7 +423,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
     transparentPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 }
 
-void DefaultRenderPassNamespace::SetUIPass(EngineContext* ctx)
+void DefaultRenderPassNamespace::SetUIPass(EngineContext* ctx, LightDataModule* ldm)
 {
     PassManager*    pm = ctx->GetPassManager();
     BufferManager*  bm = ctx->GetBufferManager();
@@ -410,13 +441,14 @@ void DefaultRenderPassNamespace::SetUIPass(EngineContext* ctx)
     ui_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
     ui_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_DONT_CARE, g_pass_system.main_depth_format);
 
+    BatchBuilder* bb = ctx->GetBatchBuilder();
     auto uiPass = pm->CreateRenderPass(
         UI_PASS,
-        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+        [pm, bm, bb, ldm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
         rp.renderPassTexsData.ResolveTargets();
         if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
-        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
+        pm->RenderPassStandardBody(cb, &rp, bm, PassIndirectOffset(pm, bb, ldm, rp), nullptr);
     },
         std::move(ui_rptd),
         28   // после bloom (composite ~26), до present (30) — UI не блумится, но попадает в present

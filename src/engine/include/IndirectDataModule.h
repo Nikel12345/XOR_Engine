@@ -5,10 +5,10 @@
 class BufferManager;
 class PassManager;
 struct UploadTask;
-namespace RenderSnap { struct Regions; struct BatchLayout; }
+namespace RenderSnap { struct Regions; }
 
-// Строит индирект РЕГИОНАМИ: регион на группу камер, внутри — блок на камеру, и в блоке
-// только команды проходов этой группы (раскладку считает RenderSnap::BuildRegions).
+// Строит индирект РЕГИОНАМИ: регион на проход, внутри — command_blocks_count блоков (по числу
+// дроу прохода за кадр, обычно = его камерам), в блоке только его команды (раскладка — AskRegions).
 // num_instances у всех = 0 — компактный счётчик выживших дозаполняет scatter-каллинг атомиком.
 //
 // В first_instance пишется АБСОЛЮТНЫЙ адрес куска записей в out_pib: SV_InstanceID =
@@ -21,10 +21,8 @@ public:
 	IndirectDataModule();
 	uint32_t CalculateIndirectSize(const RenderSnap::Regions& regions, uint64_t revision,
 	                               uint32_t light_cams, uint8_t slot);
-	// layout нужен за прогонами групп (какие проходы делят регион) — по ним же пронумерованы
-	// команды слепка; regions — за размерами и базами регионов.
 	void StoreIndirect(BufferManager* bm, PassManager* pm, UploadTask* task,
-	                   const RenderSnap::BatchLayout* layout, const RenderSnap::Regions& regions);
+	                   const RenderSnap::Regions& regions);
 private:
 	// Per-slot ключ гейта: у каждого из BUFFERING_LEVEL буферов своя пара.
 	uint64_t last_revision[BUFFERING_LEVEL];

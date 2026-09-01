@@ -80,63 +80,244 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx, LightDat
         {}, {}, {}, {},
         RP::CULLING_PASS, /*dont_save=*/true);
     sm->CreateComputePushFunc<RP::CullingClearUniform>("csp_culling_clear",
-        [ldm, bb](const PushConstantBinder& binder, RP::CullingClearUniform data) {
-        data.total_slots = RP::AskRegions(bb, ldm, binder.slot).total_commands;
+        [pm, ldm, bb](const PushConstantBinder& binder, RP::CullingClearUniform data) {
+        data.total_slots = RP::AskRegions(pm, bb, ldm, binder.slot).total_commands;
         binder.Push(0, data);
     });
     sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_culling_clear",
-        [ldm, bb](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-        binder.element_count = { RP::AskRegions(bb, ldm, binder.slot).total_commands, 1, 1 };
+        [pm, ldm, bb](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+        binder.element_count = { RP::AskRegions(pm, bb, ldm, binder.slot).total_commands, 1, 1 };
     });
 
-    // Общий шейдер scatter'а для всех групп камер (разные программы = разные камерные буферы).
+    // Общий шейдер скаттера: ПРОГРАММА НА ПРОХОД с батчами. Каждая биндит камерный буфер
+    // своего прохода и обрабатывает его регион (AskRegions по ordinal, захваченному здесь —
+    // MainInit идёт после FillRenderPasses, ordinal стабилен). Копипаст намеренный:
+    // возможный следующий шаг — фабрика по таблице, пока паттерн повторяется явно.
 
-    // (2) ИГРОК — камера игрока (группа 0, одна камера), нетеневые записи PIB. Cameras=CAMERA_BUFFER (t3).
-    ComputeShaderProgram* csp_player = ctx->CreateComputeShaderProgram("csp_cull_player", "culling_pib_cs",
-        { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
-        { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
-          DEFAULT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4 (Cameras = игрок)
-        {}, {}, {},
-        RP::CULLING_PASS, /*dont_save=*/true);
-    sm->CreateComputePushFunc<RP::CullingPibUniform>("csp_cull_player",
-        [bb, ldm](const PushConstantBinder& binder, RP::CullingPibUniform data) {
-        const RenderSnap::Region reg = RP::AskRegions(bb, ldm, binder.slot).g[RP::CAMERA_GROUP_PLAYER];
-        data.range_start = reg.first_pib;
-        data.range_count = reg.pib;
-        data.num_blocks  = reg.cams;
-        data.cmd_base    = reg.cmd_base;
-        data.commands    = reg.commands;
-        binder.Push(0, data);
-    });
-    sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_cull_player",
-        [bb, ldm](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-        const RenderSnap::Region reg = RP::AskRegions(bb, ldm, binder.slot).g[RP::CAMERA_GROUP_PLAYER];
-        binder.element_count = { reg.cams ? reg.pib : 0u, 1, 1 };
-    });
+    // (2) SHADOW: L световых камер, Cameras=LIGHT_CAMERA_BUFFER (t3). При L=0 диспатч 0.
+    {
+        uint32_t pass_ordinal = UINT32_MAX;   // прохода нет — регион не найдётся, диспатч пуст
+        RenderPassStep* pass = pm->GetRenderPassStep(RP::SHADOW_PASS);
+        if (pass) {
+            pass_ordinal = pass->ordinal;
+        }
 
-    // (3) СВЕТ — световые камеры (группа 1, L камер), теневые записи PIB.
-    // Cameras=LIGHT_CAMERA_BUFFER (t3). При L=0 регион пуст и диспатч 0 → пропуск.
-    ComputeShaderProgram* csp_light = ctx->CreateComputeShaderProgram("csp_cull_light", "culling_pib_cs",
-        { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
-        { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
-          DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4 (Cameras = свет)
-        {}, {}, {},
-        RP::CULLING_PASS, /*dont_save=*/true);
-    sm->CreateComputePushFunc<RP::CullingPibUniform>("csp_cull_light",
-        [ldm, bb](const PushConstantBinder& binder, RP::CullingPibUniform data) {
-        const RenderSnap::Region reg = RP::AskRegions(bb, ldm, binder.slot).g[RP::CAMERA_GROUP_LIGHT];
-        data.range_start = reg.first_pib;
-        data.range_count = reg.pib;
-        data.num_blocks  = reg.cams;
-        data.cmd_base    = reg.cmd_base;
-        data.commands    = reg.commands;
-        binder.Push(0, data);
-    });
-    sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_cull_light",
-        [ldm, bb](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-        const RenderSnap::Region reg = RP::AskRegions(bb, ldm, binder.slot).g[RP::CAMERA_GROUP_LIGHT];
-        binder.element_count = { reg.cams ? reg.pib : 0u, 1, 1 };
-    });
+        ctx->CreateComputeShaderProgram("csp_cull_shadow", "culling_pib_cs",
+            { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
+            { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
+              DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4
+            {}, {}, {},
+            RP::CULLING_PASS, /*dont_save=*/true);
+
+        sm->CreateComputePushFunc<RP::CullingPibUniform>("csp_cull_shadow",
+            [pm, bb, ldm, pass_ordinal](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+            const RenderSnap::Regions regions = RP::AskRegions(pm, bb, ldm, binder.slot);
+            RenderSnap::Region region{};
+            if (pass_ordinal < regions.per_pass.size()) {
+                region = regions.per_pass[pass_ordinal];
+            }
+            data.range_start = region.first_pib;
+            data.range_count = region.pib;
+            data.num_blocks  = region.command_blocks_count;
+            data.cmd_base    = region.cmd_base;
+            data.commands    = region.commands;
+            binder.Push(0, data);
+        });
+
+        sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_cull_shadow",
+            [pm, bb, ldm, pass_ordinal](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+            const RenderSnap::Regions regions = RP::AskRegions(pm, bb, ldm, binder.slot);
+            RenderSnap::Region region{};
+            if (pass_ordinal < regions.per_pass.size()) {
+                region = regions.per_pass[pass_ordinal];
+            }
+            uint32_t records = region.pib;
+            if (region.command_blocks_count == 0) {
+                records = 0;   // блоков у прохода нет (напр. L=0 у теней) — работы нет
+            }
+            binder.element_count = { records, 1, 1 };
+        });
+    }
+
+    // (3) MAIN: камера игрока, Cameras=CAMERA_BUFFER (t3).
+    {
+        uint32_t pass_ordinal = UINT32_MAX;   // прохода нет — регион не найдётся, диспатч пуст
+        RenderPassStep* pass = pm->GetRenderPassStep(RP::MAIN_PASS);
+        if (pass) {
+            pass_ordinal = pass->ordinal;
+        }
+
+        ctx->CreateComputeShaderProgram("csp_cull_main", "culling_pib_cs",
+            { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
+            { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
+              DEFAULT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4
+            {}, {}, {},
+            RP::CULLING_PASS, /*dont_save=*/true);
+
+        sm->CreateComputePushFunc<RP::CullingPibUniform>("csp_cull_main",
+            [pm, bb, ldm, pass_ordinal](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+            const RenderSnap::Regions regions = RP::AskRegions(pm, bb, ldm, binder.slot);
+            RenderSnap::Region region{};
+            if (pass_ordinal < regions.per_pass.size()) {
+                region = regions.per_pass[pass_ordinal];
+            }
+            data.range_start = region.first_pib;
+            data.range_count = region.pib;
+            data.num_blocks  = region.command_blocks_count;
+            data.cmd_base    = region.cmd_base;
+            data.commands    = region.commands;
+            binder.Push(0, data);
+        });
+
+        sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_cull_main",
+            [pm, bb, ldm, pass_ordinal](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+            const RenderSnap::Regions regions = RP::AskRegions(pm, bb, ldm, binder.slot);
+            RenderSnap::Region region{};
+            if (pass_ordinal < regions.per_pass.size()) {
+                region = regions.per_pass[pass_ordinal];
+            }
+            uint32_t records = region.pib;
+            if (region.command_blocks_count == 0) {
+                records = 0;   // блоков у прохода нет (напр. L=0 у теней) — работы нет
+            }
+            binder.element_count = { records, 1, 1 };
+        });
+    }
+
+    // (4) TRANSPARENT: камера игрока.
+    {
+        uint32_t pass_ordinal = UINT32_MAX;   // прохода нет — регион не найдётся, диспатч пуст
+        RenderPassStep* pass = pm->GetRenderPassStep(RP::TRANSPARENT_PASS);
+        if (pass) {
+            pass_ordinal = pass->ordinal;
+        }
+
+        ctx->CreateComputeShaderProgram("csp_cull_transparent", "culling_pib_cs",
+            { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
+            { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
+              DEFAULT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4
+            {}, {}, {},
+            RP::CULLING_PASS, /*dont_save=*/true);
+
+        sm->CreateComputePushFunc<RP::CullingPibUniform>("csp_cull_transparent",
+            [pm, bb, ldm, pass_ordinal](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+            const RenderSnap::Regions regions = RP::AskRegions(pm, bb, ldm, binder.slot);
+            RenderSnap::Region region{};
+            if (pass_ordinal < regions.per_pass.size()) {
+                region = regions.per_pass[pass_ordinal];
+            }
+            data.range_start = region.first_pib;
+            data.range_count = region.pib;
+            data.num_blocks  = region.command_blocks_count;
+            data.cmd_base    = region.cmd_base;
+            data.commands    = region.commands;
+            binder.Push(0, data);
+        });
+
+        sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_cull_transparent",
+            [pm, bb, ldm, pass_ordinal](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+            const RenderSnap::Regions regions = RP::AskRegions(pm, bb, ldm, binder.slot);
+            RenderSnap::Region region{};
+            if (pass_ordinal < regions.per_pass.size()) {
+                region = regions.per_pass[pass_ordinal];
+            }
+            uint32_t records = region.pib;
+            if (region.command_blocks_count == 0) {
+                records = 0;   // блоков у прохода нет (напр. L=0 у теней) — работы нет
+            }
+            binder.element_count = { records, 1, 1 };
+        });
+    }
+
+    // (5) DEBUG: камера игрока (коллайдеры рисуются, когда включены).
+    {
+        uint32_t pass_ordinal = UINT32_MAX;   // прохода нет — регион не найдётся, диспатч пуст
+        RenderPassStep* pass = pm->GetRenderPassStep(RP::DEBUG_PASS);
+        if (pass) {
+            pass_ordinal = pass->ordinal;
+        }
+
+        ctx->CreateComputeShaderProgram("csp_cull_debug", "culling_pib_cs",
+            { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
+            { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
+              DEFAULT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4
+            {}, {}, {},
+            RP::CULLING_PASS, /*dont_save=*/true);
+
+        sm->CreateComputePushFunc<RP::CullingPibUniform>("csp_cull_debug",
+            [pm, bb, ldm, pass_ordinal](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+            const RenderSnap::Regions regions = RP::AskRegions(pm, bb, ldm, binder.slot);
+            RenderSnap::Region region{};
+            if (pass_ordinal < regions.per_pass.size()) {
+                region = regions.per_pass[pass_ordinal];
+            }
+            data.range_start = region.first_pib;
+            data.range_count = region.pib;
+            data.num_blocks  = region.command_blocks_count;
+            data.cmd_base    = region.cmd_base;
+            data.commands    = region.commands;
+            binder.Push(0, data);
+        });
+
+        sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_cull_debug",
+            [pm, bb, ldm, pass_ordinal](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+            const RenderSnap::Regions regions = RP::AskRegions(pm, bb, ldm, binder.slot);
+            RenderSnap::Region region{};
+            if (pass_ordinal < regions.per_pass.size()) {
+                region = regions.per_pass[pass_ordinal];
+            }
+            uint32_t records = region.pib;
+            if (region.command_blocks_count == 0) {
+                records = 0;   // блоков у прохода нет (напр. L=0 у теней) — работы нет
+            }
+            binder.element_count = { records, 1, 1 };
+        });
+    }
+
+    // (6) UI: камера игрока (как и раньше: записи UI тестировались игроцким скаттером).
+    {
+        uint32_t pass_ordinal = UINT32_MAX;   // прохода нет — регион не найдётся, диспатч пуст
+        RenderPassStep* pass = pm->GetRenderPassStep(RP::UI_PASS);
+        if (pass) {
+            pass_ordinal = pass->ordinal;
+        }
+
+        ctx->CreateComputeShaderProgram("csp_cull_ui", "culling_pib_cs",
+            { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
+            { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
+              DEFAULT_CAMERA_BUFFER, DEFAULT_TRANSFORM_BUFFER },   // ro t0..t4
+            {}, {}, {},
+            RP::CULLING_PASS, /*dont_save=*/true);
+
+        sm->CreateComputePushFunc<RP::CullingPibUniform>("csp_cull_ui",
+            [pm, bb, ldm, pass_ordinal](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+            const RenderSnap::Regions regions = RP::AskRegions(pm, bb, ldm, binder.slot);
+            RenderSnap::Region region{};
+            if (pass_ordinal < regions.per_pass.size()) {
+                region = regions.per_pass[pass_ordinal];
+            }
+            data.range_start = region.first_pib;
+            data.range_count = region.pib;
+            data.num_blocks  = region.command_blocks_count;
+            data.cmd_base    = region.cmd_base;
+            data.commands    = region.commands;
+            binder.Push(0, data);
+        });
+
+        sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_cull_ui",
+            [pm, bb, ldm, pass_ordinal](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+            const RenderSnap::Regions regions = RP::AskRegions(pm, bb, ldm, binder.slot);
+            RenderSnap::Region region{};
+            if (pass_ordinal < regions.per_pass.size()) {
+                region = regions.per_pass[pass_ordinal];
+            }
+            uint32_t records = region.pib;
+            if (region.command_blocks_count == 0) {
+                records = 0;   // блоков у прохода нет (напр. L=0 у теней) — работы нет
+            }
+            binder.element_count = { records, 1, 1 };
+        });
+    }
 
     culling_pib_inited = true;
 }

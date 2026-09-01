@@ -134,10 +134,6 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	// до старта потоков: карту сцен после старта не мутируем (GetActiveScene её итерирует).
 	object_manager->CreateScene("_staging")->is_active = false;
 	pass_manager->FillRenderPasses();
-	// Прогоны проходов, делящих один регион команд. Считаются ОДИН раз: после FillRenderPasses
-	// список проходов не меняется. Объявляет их набор проходов (он же заводит камеры), а
-	// BatchBuilder по ним нумерует команды — сами проходы и ядро о камерах не знают.
-	batch_builder->SetCameraGroupSpans(DefaultRenderPassNamespace::BuildCameraGroupSpans(pass_manager));
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});
 	thread_controller->SetUploadCallback([this](uint8_t slot) {this->UploadFunc(slot); });
@@ -518,11 +514,12 @@ void Engine::InitPasses()
 		_SetDefaultCommonResources(engine_context, safe_f_u32(GetWidth()), safe_f_u32(GetHeight()));
 		SetDefaultCullingPass(engine_context);     // GPU-каллинг: out_pib до SHADOW_PASS (индекс 5)
 		SetDefaultShadowPCFRenderPass(engine_context, light_data_module);
-		SetDefaultMainRenderPass(engine_context);
-		SetTransparentPass(engine_context);
-		SetDebugColliderPass(engine_context);
+		// ldm — для смещения региона прохода в индиректе (AskRegions), как у теневого.
+		SetDefaultMainRenderPass(engine_context, light_data_module);
+		SetTransparentPass(engine_context, light_data_module);
+		SetDebugColliderPass(engine_context, light_data_module);
 		SetDefaultBloomPass(engine_context);       // bloom от эмиссии (compute) + composite/tonemap в scene_hdr
-		SetUIPass(engine_context);                 // UI-оверлей (NDC-квады) в scene_hdr после bloom, до present
+		SetUIPass(engine_context, light_data_module);   // UI-оверлей (NDC-квады) в scene_hdr после bloom, до present
 		SetPresentPass(engine_context);            // финал: HDR-сцену в свопчейн (blit)
 	}
 }

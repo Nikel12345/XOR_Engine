@@ -7,23 +7,12 @@ class BatchBuilder;
 class PassManager;
 namespace DefaultRenderPassNamespace
 {
-    // Группы камер дефолтного набора проходов. Номер группы — это и порядок её региона в
-    // индиректе/out_pib (RenderSnap::BuildRegions), поэтому у игрока он 0: база его региона
-    // всегда 0, и его проходы рисуют со смещением 0.
-    inline constexpr uint32_t CAMERA_GROUP_PLAYER = 0;
-    inline constexpr uint32_t CAMERA_GROUP_LIGHT = 1;
-
-    // ЕДИНСТВЕННОЕ объявление связи «проход — камеры»: теневой проход рисуют световые камеры,
-    // остальные — камера игрока. Живёт здесь, у набора, который эти камеры и заводит; ни сам
-    // проход, ни ядро о камерах не знают. Считается ОДИН раз после FillRenderPasses (список
-    // проходов дальше не меняется) и отдаётся BatchBuilder'у, который по этим прогонам
-    // нумерует команды и кладёт их в раскладку.
-    std::array<RenderSnap::GroupSpan, RenderSnap::kMaxCameraGroups> BuildCameraGroupSpans(PassManager* pm);
-
-    // Регионы out-буферов для слота. ЕДИНСТВЕННЫЙ способ их получить: размеры буферов,
-    // пуши каллинга и смещения дроу обязаны считать их одинаково, иначе адреса разъедутся
-    // молча. Прогоны берутся из слепка раскладки, число камер — из слепка того же слота.
-    RenderSnap::Regions AskRegions(BatchBuilder* bb, LightDataModule* ldm, uint8_t slot);
+    // Регионы out-буферов для слота, ПО ПРОХОДАМ (индекс = ordinal). ЕДИНСТВЕННЫЙ способ их
+    // получить: размеры буферов, пуши каллинга и смещения дроу обязаны считать их одинаково,
+    // иначе адреса разъедутся молча. Здесь же — ВСЁ знание о камерах: теневой проход рисуют
+    // L световых камер, любой другой — одна камера игрока (дефолт). Ни проход, ни ядро о
+    // камерах не знают; новый тип камер = ещё одна строка в AskRegions + своя culling-программа.
+    RenderSnap::Regions AskRegions(PassManager* pm, BatchBuilder* bb, LightDataModule* ldm, uint8_t slot);
     inline constexpr const char* DEPTH_PASS = "_DefaultDepthRenderPass";
     inline constexpr const char* MAIN_PASS = "_DefaultMainRenderPass";
     inline constexpr const char* TRANSPARENT_PASS = "_DefaultTransparentRenderPass";
@@ -61,20 +50,20 @@ namespace DefaultRenderPassNamespace
     // Должна вызываться ПЕРЕД Set*Pass, которые их потребляют (main/transparent/debug).
     void _SetDefaultCommonResources(EngineContext* ctx, uint32_t width, uint32_t height);
 
-    void SetDefaultMainRenderPass(EngineContext* ctx);
+    void SetDefaultMainRenderPass(EngineContext* ctx, LightDataModule* ldm);
     void SetDefaultMainRenderPass(EngineContext* ctx, SDL_GPUDevice* dev, SDL_Window* win);
 
     // Состояние DEBUG_PASS: цвет рамок коллайдеров. Тело прохода его не трогает — это чистая
     // настройка, поэтому у прохода есть схема (имя ниже) и он редактируется.
     struct alignas(16) DebugColliderPushData { float color[4] = { 0.0f, 1.0f, 0.2f, 1.0f }; };
     inline const std::string DEBUG_COLLIDER_STATE = "DebugCollider";
-    void SetDebugColliderPass(EngineContext* ctx);
+    void SetDebugColliderPass(EngineContext* ctx, LightDataModule* ldm);
 
-    void SetTransparentPass(EngineContext* ctx);
+    void SetTransparentPass(EngineContext* ctx, LightDataModule* ldm);
 
     // UI-оверлей: рендер UI-энтити (NDC-квады) в scene_hdr ПОСЛЕ bloom, ДО present (не блумится).
     // Своя глубина (main_depth с CLEAR — z-пространство UI отдельное), __TextAtlas как глобалка.
-    void SetUIPass(EngineContext* ctx);
+    void SetUIPass(EngineContext* ctx, LightDataModule* ldm);
 
     // Финальный проход: blit HDR-сцены (scene_hdr) в свопчейн с конвертацией формата.
     // Регистрируется последним (приоритет 30). Тонмаппинг появится на этапе bloom-composite.
@@ -128,12 +117,12 @@ namespace DefaultRenderPassNamespace
     // scene_hdr. Должна вызываться ПОСЛЕ main/transparent/debug (читает их результат) и до present.
     void SetDefaultBloomPass(EngineContext* ctx);
 
-    // GPU-каллинг с компактацией (culling_pib.comp = scatter). Одна программа на группу камер:
-    // раскладка = CullParams шейдера. Никакого is_shadow — группу задаёт push + камерный буфер.
+    // GPU-каллинг с компактацией (culling_pib.comp = scatter). Одна программа НА ПРОХОД с
+    // батчами: раскладка = CullParams шейдера, регион и камерный буфер задаёт программа.
     struct alignas(16) CullingPibUniform {
         uint32_t range_start;      // первая PIB-запись группы (её сегмент во входном PIB)
         uint32_t range_count;      // сколько записей (= размер диспатча)
-        uint32_t num_blocks;       // число камер группы (Cameras[0..num_blocks))
+        uint32_t num_blocks;       // блоков региона; для блока b тестируется Cameras[b]
         uint32_t cmd_base;         // база региона группы в индиректе, в командах
         uint32_t commands;         // команд на камеру = страйд блока внутри региона
     };

@@ -207,13 +207,12 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
         [pm, idm, ldm, bb](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
         const uint8_t slot = bm->logic_index.load();
-        idm->StoreIndirect(bm, pm, &task, bb->AskLayout(slot),
-                           DefaultRenderPassNamespace::AskRegions(bb, ldm, slot));
+        idm->StoreIndirect(bm, pm, &task, DefaultRenderPassNamespace::AskRegions(pm, bb, ldm, slot));
     },
-        [idm, ldm, bb, bm]() -> uint32_t
+        [pm, idm, ldm, bb, bm]() -> uint32_t
     {
         const uint8_t slot = bm->logic_index.load();
-        return idm->CalculateIndirectSize(DefaultRenderPassNamespace::AskRegions(bb, ldm, slot),
+        return idm->CalculateIndirectSize(DefaultRenderPassNamespace::AskRegions(pm, bb, ldm, slot),
                                           bb->BatchesRevision(), ldm->AskNumLightCameras(slot), slot);
     }
     );
@@ -228,10 +227,9 @@ void DefaultUpdateSet::SetDefaultEntityToCmdUpdater(EngineContext& ctx, PIB_Data
 
     // Гейт по ревизии батчей (меняется только со структурой), как у PIB.
     bm->CreateUpdateInstruction(DEFAULT_ENTITY_TO_CMD_BUFFER,
-        [pm, pib_dm, bb](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
+        [pm, pib_dm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
-        // Слепок слота — источник прогонов групп: нумерация обязана совпасть с его собственной.
-        pib_dm->StoreEntityToCmd(bm, pm, &task, bb->AskLayout(bm->logic_index.load()));
+        pib_dm->StoreEntityToCmd(bm, pm, &task);
     },
         [pm, pib_dm, bb, bm]() -> uint32_t
     {
@@ -274,18 +272,19 @@ void DefaultUpdateSet::SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModu
     }
     auto* bm = ctx.GetBufferManager();
     auto* bb = ctx.GetBatchBuilder();
+    auto* pm = ctx.GetPassManager();
 
     // Только ресайз (updater = nullptr): содержимое пишет scatter-каллинг каждый кадр
-    // (компактно). Регион на группу камер, внутри — блок int'ов на камеру, и в блоке только
-    // записи проходов этой группы: сумма cams*pib, а не (1+L)*N. Раскладку берём из слепков
-    // слота (камеры пишет size-фаза LIGHT_CAMERA_BUFFER выше, раскладку батчей —
+    // (компактно). Регион на ПРОХОД, внутри — блок int'ов на каждый его дроу за кадр, и в
+    // блоке только его записи: сумма blocks*pib, а не (1+L)*N. Раскладку берём из слепков слота
+    // (камеры пишет size-фаза LIGHT_CAMERA_BUFFER выше, раскладку батчей —
     // StampLayoutSnapshot в PrepareFunc до апдейтеров).
     bm->CreateUpdateInstruction(DEFAULT_OUT_PIB_BUFFER,
         nullptr,
-        [bb, ldm, bm]() -> uint32_t
+        [pm, bb, ldm, bm]() -> uint32_t
     {
         const uint8_t slot = bm->logic_index.load();
-        return DefaultRenderPassNamespace::AskRegions(bb, ldm, slot).total_pib * sizeof(int32_t);
+        return DefaultRenderPassNamespace::AskRegions(pm, bb, ldm, slot).total_pib * sizeof(int32_t);
     }
     );
     out_pib_update_inited = true;

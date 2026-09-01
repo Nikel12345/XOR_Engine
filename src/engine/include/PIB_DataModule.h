@@ -8,7 +8,6 @@ class BufferManager;
 class PassManager;
 struct SceneData;
 struct UploadTask;
-namespace RenderSnap { struct BatchLayout; }
 
 
 // Dirty по ревизии батчей живёт в модуле, но модуль НЕ знает о BatchBuilder:
@@ -21,14 +20,11 @@ public:
     uint32_t CalculatePIBSizes(PassManager* pm, uint64_t revision, uint8_t slot);
     void StorePIB(BufferManager* bm, PassManager* pm, UploadTask* task, ObjectManager* om);
 
-    // entity -> индекс команды (model_batch) В СВОЕЙ ГРУППЕ, по одному uint на PIB-запись,
-    // в том же обходе, что PIB. scatter-каллинг по нему находит команду записи в регионе своей
-    // группы. Гейт по ревизии батчей (меняется только со структурой).
-    // layout нужен ровно за прогонами групп: нумерация обязана совпасть с той, по которой
-    // пронумерован слепок, поэтому берётся оттуда же, а не считается заново.
+    // entity -> индекс команды (model_batch) В СВОЁМ ПРОХОДЕ, по одному uint на PIB-запись,
+    // в том же обходе, что PIB. scatter-каллинг по нему находит команду записи в регионе своего
+    // прохода. Гейт по ревизии батчей (меняется только со структурой).
     uint32_t CalculateEntityToCmd(PassManager* pm, uint64_t revision, uint8_t slot);
-    void StoreEntityToCmd(BufferManager* bm, PassManager* pm, UploadTask* task,
-                          const RenderSnap::BatchLayout* layout);
+    void StoreEntityToCmd(BufferManager* bm, PassManager* pm, UploadTask* task);
 
 private:
     uint32_t ComputeElementCount(PassManager* pm) const;

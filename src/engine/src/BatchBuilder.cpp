@@ -708,14 +708,6 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
 void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
 {
     uint32_t offset = 0;
-    uint32_t command_index = 0;
-    // Индекс команды в слепке — ЛОКАЛЬНЫЙ для группы (прогона проходов, делящих один регион):
-    // регион содержит только свои команды, и дроу адресует их от базы региона, без вычитаний
-    // (см. culling_fix.md). Локальный именно для группы, а не для прохода: в группе игрока
-    // проходов несколько и они делят один регион. Прогон непрерывен, поэтому база сбрасывается
-    // на смене номера группы.
-    uint32_t group_command_base = 0;
-    uint32_t prev_group = ~0u;
 
     // Одним обходом: проставляем офсеты в ДЕРЕВЕ (его читают sim-модули — indirect/PIB
     // при заливке буферов) и строим НОВУЮ версию СЛЕПКА раскладки (RenderSnap::BatchLayout) —
@@ -727,24 +719,16 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
     // здесь: цикл отрисовки не лазит в реестр по имени на каждый texture batch.
     layout->indirectBuffer = bm->GetBufferData(DefaultBuffersNames::DEFAULT_INDIRECT_BUFFER);
 
-    // Прогоны кладём в раскладку: её команды пронумерованы ИМЕННО по ним, и читатели
-    // (BuildRegions, StoreEntityToCmd) обязаны брать их отсюда, а не считать заново.
-    layout->groups = camera_group_spans;
-
-    const std::vector<RenderPassStep*>& ordered = pass_manager->GetOrderedRenderPasses();
-    for (uint32_t pass_i = 0; pass_i < ordered.size(); ++pass_i)
+    for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses())
     {
-        RenderPassStep* rp = ordered[pass_i];
-
         RenderSnap::PassDrawList pass_list;
         pass_list.first_instance = offset;
         pass_list.shaders.reserve(rp->shader_batches.size());
 
-        const uint32_t group = RenderSnap::GroupOfPass(camera_group_spans, pass_i);
-        if (group != prev_group) {
-            group_command_base = command_index;
-            prev_group = group;
-        }
+        // Индекс команды в слепке — ЛОКАЛЬНЫЙ для прохода: регион прохода в индиректе содержит
+        // только его команды, и дроу адресует их от базы своего региона (см. culling_fix.md).
+        // Никакого внешнего знания для нумерации не нужно — счётчик просто свой на проход.
+        uint32_t pass_cmd_index = 0;
 
         // Счётчик формы дерева: draw = texture-батч (одна SDL_DrawGPUIndexedPrimitivesIndirect),
         // cmd = model-батч (одна команда мультидроу внутри неё). Печатается ТОЛЬКО отсюда,
@@ -785,20 +769,20 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
 
                 for (auto& [texture_key, texture_batch] : atlas_batch.texture_batches)
                 {
-                    texture_batch.indirect_command_index = command_index - group_command_base;
+                    texture_batch.indirect_command_index = pass_cmd_index;
 
                     RenderSnap::TextureDraw td;
                     td.texture_uvl = texture_batch.texture_uvl;
                     td.variant_layout = texture_batch.variant_layout;
                     td.params = texture_batch.params;   // невладеющий, адрес стабилен (см. RenderSnapshot.h)
-                    td.indirect_command_index = command_index - group_command_base;
+                    td.indirect_command_index = pass_cmd_index;
                     td.draw_count = safe_u32(texture_batch.model_batches.size());
 
                     for (auto& [model_key, model_batch] : texture_batch.model_batches)
                     {
                         model_batch.firstInstance = offset;
                         offset += model_batch.instanceCount;
-                        command_index++;
+                        pass_cmd_index++;
                     }
                     ++pass_draws;
                     pass_cmds += td.draw_count;
@@ -812,8 +796,8 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
             rp->debug_name.c_str(), pass_draws, pass_cmds,
             rp->shader_batches.size(), offset - pass_list.first_instance);
 
-        // Суммы прохода: из них BuildRegions складывает размеры регионов группы (записей и
-        // команд на камеру) и границы её сегмента во входном PIB для caller'а каллинга.
+        // Суммы прохода: из них AskRegions складывает размеры его региона (записей и команд
+        // на камеру) и границы его сегмента во входном PIB для диапазона каллинга.
         pass_list.num_instances = offset - pass_list.first_instance;
         pass_list.num_commands = pass_cmds;
         layout->passes.push_back(std::move(pass_list));
