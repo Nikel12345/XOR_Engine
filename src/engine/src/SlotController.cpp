@@ -74,6 +74,14 @@ uint8_t SlotController::WaitFreeSlotIndex(bool allow_frame_skip)
 {
     std::unique_lock<std::mutex> lock(mutex_);
     for (;;) {
+        // Останов — ПЕРЕД попыткой взять слот, как в WaitComputableSlot. Без этого
+        // NotifyShutdown будил ожидание ровно один раз, свободного слота по-прежнему не
+        // было, и поток уходил в cv_free_.wait() уже НАВСЕГДА: разбудить его больше некому
+        // (остальные стадии в этот момент сами останавливаются). Sim джойнится первым —
+        // значит висла вся остановка движка, то есть закрытие окна игры.
+        if (shutting_down_.load(std::memory_order_acquire))
+            return INVALID_SLOT;
+
         uint8_t slot = AcquireFreeSlotUnsafe(allow_frame_skip);
         if (slot != INVALID_SLOT)
             return slot;
@@ -235,6 +243,11 @@ uint8_t SlotController::WaitRenderableSlot(bool latest_wins)
     constexpr auto SOFT_WAIT = std::chrono::milliseconds(2);
 
     for (;;) {
+        // 0. Останов — до всего остального (та же причина, что в WaitFreeSlotIndex): иначе
+        // ветка 3 ниже уходит в cv_renderable_.wait() без будильника и вешает join рендера.
+        if (shutting_down_.load(std::memory_order_acquire))
+            return INVALID_SLOT;
+
         // 1. Новый готовый кадр — берём сразу.
         uint8_t slot = GetReadySlotUnsafe(latest_wins);
         if (slot != INVALID_SLOT) {

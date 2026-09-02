@@ -32,6 +32,11 @@ public:
     void SetFenceCallback(FenceCallback cb);
 
     void StartThreads();
+    // Остановить и ПРИСОЕДИНИТЬ все потоки конвейера. Идемпотентен (повторный вызов —
+    // no-op по joinable), поэтому зовётся и явно (Engine::Run перед возвратом), и из dtor.
+    // Явный вызов обязателен там, где после цикла разрушается что-то, что держит sim-поток:
+    // игровой колбэк замкнут на объект игры, живущий у вызывающего Run().
+    void Shutdown();
     AvgRateCounter* fps_counter = nullptr;
     AvgRateCounter* ups_counter = nullptr;
 private:

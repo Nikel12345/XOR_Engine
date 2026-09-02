@@ -558,10 +558,11 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
     TextureManager* tm, ShaderManager* sm, BufferManager* bm,
     ModelManager* mdm, MaterialManager* mtm, SceneData* scene)
 {
-    if (!scene) {
-        SDL_Log("UpdateRenderBatches called with null scene!");
-        return;
-    }
+    // Нет активной сцены — собирать нечего, дерево батчей остаётся пустым (кадр рисуется чёрным).
+    // МОЛЧА: зовётся каждый кадр, и лог тут давал сотни строк в секунду об одном и том же, забивая
+    // и настоящую диагностику, и консоль. О самом состоянии один раз сообщает ObjectManager::
+    // GetActiveScene — там же, где оно возникает.
+    if (!scene) return;
 
     // Either a full rebuild (scene activation) or an incremental delta — never
     // both. exchange(false) consumes the rebuild request atomically.

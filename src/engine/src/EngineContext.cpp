@@ -358,6 +358,7 @@ void EngineContext::LoadScene(const SceneName& scene_name, const std::string& di
 void EngineContext::ExecuteGenerators()
 {
 	auto scene = object_manager->GetActiveScene();
+	if (!scene) return;   // генераторы живут В сцене: нет сцены — нечего восстанавливать
 	for (auto& g : scene->generators)
 		if (g) g();
 

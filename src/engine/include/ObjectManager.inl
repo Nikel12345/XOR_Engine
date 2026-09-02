@@ -94,10 +94,10 @@ make_param(ComponentArray<T>* arr, size_t i) {
 
 template<typename... Ts, typename Fn>
 void ObjectManager::ForEach(SceneData* scene, Fn&& fn) {
-    if (!scene) {
-        SDL_Log("ForEach called on null scene!");
-        return;
-    }
+    // Как и в ForEachArchetype/Has: нет сцены — пустой обход. МОЛЧА, по той же причине, что в
+    // BatchBuilder::UpdateRenderBatches — это покадровый путь, и лог тут превращается в сотни
+    // одинаковых строк в секунду. Состояние один раз называет ObjectManager::GetActiveScene.
+    if (!scene) return;
 
     auto& f = fn;
 
@@ -160,6 +160,10 @@ void ObjectManager::add_components(Archetype& arch, Components&&... comps) {
 template<typename T>
 foreach_arg_t<T> ObjectManager::GetComponent(SceneData* scene, Entity e)
 {
+    // Тут, в отличие от Has, тихо вернуть «ничего» нельзя — возвращается ССЫЛКА. Поэтому нулевая
+    // сцена ловится assert'ом в точке возникновения: вызывающий обязан был отсеять её раньше
+    // (штатно — тем же Has, который теперь это делает сам).
+    SDL_assert(scene && "GetComponent on null scene - gate it with Has() first");
     auto arch_it = scene->entity_to_archetype.find(e);
     SDL_assert(arch_it != scene->entity_to_archetype.end());
 
@@ -183,6 +187,12 @@ foreach_arg_t<T> ObjectManager::GetComponent(SceneData* scene, Entity e)
 
 template<typename Component>
 bool ObjectManager::Has(SceneData* scene, Entity e) const {
+    // Нет сцены — нет и компонента. Это ГЛАВНЫЙ фильтр отсутствующей активной сцены: почти каждый
+    // доступ к компоненту в движке и играх стоит за `Has`, поэтому проверка здесь снимает нулевую
+    // сцену разом на всех этих путях (UI_Yoga::EmitNode, EngineContext::Delete/HideEntity, ввод игр),
+    // вместо копии `if (!scene)` в каждом. Тихо, а не assert: «сцены нет» — легальное состояние
+    // движка (пустой кадр = чёрный экран), а не ошибка вызывающего.
+    if (!scene) return false;
     auto arch_it = scene->entity_to_archetype.find(e);
     if (arch_it == scene->entity_to_archetype.end())
         return false;

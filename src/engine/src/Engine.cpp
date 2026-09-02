@@ -35,6 +35,7 @@
 #include "ParamsSpec.h"
 #include "PositionStructure.h"
 #include "DefaultCommandSet.h"
+#include "UI_ImGui.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
@@ -74,11 +75,85 @@ void Engine::SetRenderResolution(uint32_t w, uint32_t h)
 	size_state_.render_size.store(EngineSizeState::Pack(w, h), std::memory_order_release);
 }
 
-Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height)
+bool Engine::InitPlatform(const EngineConfig& cfg)
 {
-	this->win = window;
-	this->dev = dev;
-	// Стартовый размер (аргументы ctor) кладём ТОЛЬКО в size_state_ — отдельных width/height в движке нет,
+	if (!SDL_Init(SDL_INIT_VIDEO)) {
+		SDL_Log("SDL_Init failed: %s", SDL_GetError());
+		return false;
+	}
+
+	auto make_window = [&cfg] {
+		return SDL_CreateWindow(cfg.title, safe_u32t_i(cfg.width), safe_u32t_i(cfg.height), cfg.window_flags);
+	};
+	win = make_window();
+	if (!win) {
+		SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
+		return false;
+	}
+
+	// ТОЛЬКО SPIRV, и это НЕ настройка: движок компилирует шейдеры единственным путём
+	// (LoadOrCompileSPIRV → SDL_ShaderCross_CompileSPIRVFromHLSL), а compute-пайплайны отдаёт в SDL
+	// сырым SPIR-V (PipeManager::GetOrCreateComputePipeline). Перечислить тут DXIL/MSL — значит
+	// разрешить SDL выбрать бэкенд, для которого у нас нет байткода: на SDL 3.4 авто-выбор на
+	// Windows уходит в D3D12, и все compute-пайплайны падают на «not valid DXIL». Запрос ровно того
+	// формата, который мы умеем, — и есть контракт; SDL сам подберёт подходящий бэкенд.
+	dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, cfg.gpu_debug, nullptr);
+	// Отказ здесь раньше не проверялся, и поломка проявлялась каскадом «Must claim window
+	// before…» из последующих запросов свопчейна — то есть симптомом, а не причиной.
+	if (!dev) {
+		SDL_Log("SDL_CreateGPUDevice failed: %s", SDL_GetError());
+		return false;
+	}
+	SDL_Log("GPU backend: %s", SDL_GetGPUDeviceDriver(dev));
+	SDL_ClaimWindowForGPUDevice(dev, win);
+
+	// БАГ SDL 3.4.14: ПЕРВОЕ созданное в процессе окно Vulkan-девайс не заклеймливает —
+	// ClaimWindowForGPUDevice возвращает true, но окно не регистрируется, и дальше весь свопчейн
+	// отвечает «Must claim window before…». Второе окно клеймится штатно. Воспроизведено голым
+	// SDL, без движка: sandbox/src/ClaimWindowProbe.cpp (там же отсеяны ложные версии — способ
+	// выбора бэкенда, debug_mode, SDL_WINDOW_VULKAN, порядок создания девайсов: ни при чём).
+	// Поэтому проверяем ФАКТ (формат свопчейна), а не возврат claim, и один раз пересоздаём окно.
+	// Условная ветка: когда баг починят, она просто перестанет срабатывать.
+	if (SDL_GetGPUSwapchainTextureFormat(dev, win) == SDL_GPU_TEXTUREFORMAT_INVALID) {
+		SDL_Log("Claim didn't take (SDL 3.4 first-window bug) - recreating window");
+		SDL_ReleaseWindowFromGPUDevice(dev, win);
+		SDL_DestroyWindow(win);
+		win = make_window();
+		if (!win || !SDL_ClaimWindowForGPUDevice(dev, win)) {
+			SDL_Log("Window re-claim failed: %s", SDL_GetError());
+			return false;
+		}
+	}
+	// Не из конфига: глубина конвейера слотов — устройство движка (SlotController/BUFF_LVL),
+	// расхождение с ней здесь рассинхронизирует кадры в полёте со слотами.
+	SDL_SetGPUAllowedFramesInFlight(dev, BUFFERING_LEVEL);
+
+	SDL_GPUPresentMode desired_mode = cfg.present_mode;
+	SDL_GPUSwapchainComposition desired_comp = cfg.composition;
+	if (!SDL_WindowSupportsGPUPresentMode(dev, win, desired_mode)) {
+		SDL_Log("Present mode %d not supported - falling back to VSYNC", (int)desired_mode);
+		desired_mode = SDL_GPU_PRESENTMODE_VSYNC;
+	}
+	if (!SDL_WindowSupportsGPUSwapchainComposition(dev, win, desired_comp)) {
+		SDL_Log("Composition %d not supported - fallback to SDR", (int)desired_comp);
+		desired_comp = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
+	}
+	if (!SDL_SetGPUSwapchainParameters(dev, win, desired_comp, desired_mode))
+		SDL_Log("Failed to set swapchain parameters: %s", SDL_GetError());
+	else
+		SDL_Log("Swapchain set: comp=%d, mode=%d", desired_comp, desired_mode);
+
+	return true;
+}
+
+Engine::Engine(const EngineConfig& cfg)
+{
+	// Платформа ПЕРВЫМ делом: менеджеры принимают dev в конструкторах, без девайса создавать
+	// нечего. Отказ оставляет объект невалидным (init_ok=false) — dtor это учитывает.
+	if (!InitPlatform(cfg)) return;
+	const float width = safe_sint32_f(safe_u32t_i(cfg.width));
+	const float height = safe_sint32_f(safe_u32t_i(cfg.height));
+	// Стартовый размер (из конфига) кладём ТОЛЬКО в size_state_ — отдельных width/height в движке нет,
 	// геттеры GetWidth/GetHeight читают render_size оттуда (единый источник истины размеров).
 	// Экранные таргеты создаются в _SetDefaultCommonResources под этот стартовый размер, поэтому и
 	// render_size, и applied стартуют «уже применёнными» — первый НАСТОЯЩИЙ ресайз (render или window) их сдвинет.
@@ -151,11 +226,11 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;   // docking-ветка ImGui: окна можно стыковать (см. будущий DockSpace)
 
-	ImGui_ImplSDL3_InitForSDLGPU(window);
+	ImGui_ImplSDL3_InitForSDLGPU(win);
 
 	ImGui_ImplSDLGPU3_InitInfo init_info = {};
 	init_info.Device = dev;
-	init_info.ColorTargetFormat = SDL_GetGPUSwapchainTextureFormat(dev, window);
+	init_info.ColorTargetFormat = SDL_GetGPUSwapchainTextureFormat(dev, win);
 	init_info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
 	ImGui_ImplSDLGPU3_Init(&init_info);
 
@@ -191,6 +266,7 @@ Engine::Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height
 	// Бейк GPU-ресурсов здесь НЕ делаем: игра объявляет свои ресурсы и шейдерные программы позже
 	// (атласы в Game::Init, sp — в манифесте сцены), а именно объявления sp несут usage-флаги.
 	// Точка бейка — конец первого Engine::LoadScene.
+	init_ok = true;
 }
 
 void Engine::InitDefaultResources()
@@ -531,8 +607,64 @@ void Engine::InitUICommands()
 }
 
 
+void Engine::SetGameIterate(std::function<void()> cb)
+{
+	thread_controller->SetGameIterationCallback(std::move(cb));
+}
+
+int Engine::Run()
+{
+	if (!init_ok) {
+		SDL_Log("Engine::Run on an invalid engine (platform init failed)");
+		return 1;
+	}
+	// Потоки поднимаются ЗДЕСЬ, а не в конструкторе: между конструированием движка и стартом
+	// конвейера игра успевает создать свои ресурсы и сцену (MainInit). Sim-поток пошёл бы по ним
+	// раньше, чем они появились.
+	thread_controller->StartThreads();
+
+	running.store(true, std::memory_order_relaxed);
+	while (running.load(std::memory_order_relaxed)) {
+		SDL_Event event;
+		while (SDL_PollEvent(&event)) {
+			UI_ImGui::ProcessEvent(event);
+
+			if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED || event.type == SDL_EVENT_QUIT) {
+				running.store(false, std::memory_order_relaxed);
+				break;
+			}
+			if (event.type == SDL_EVENT_WINDOW_RESIZED)
+				// window-пара из события; render-пара (0,0) пока не используется — внутреннее
+				// разрешение зафиксировано в движке, картинка тянется на окно present-блитом.
+				OnWindowResized(event.window.data1, event.window.data2, 0, 0);
+
+			// Весь игровой ввод — в очередь IM, дренит sim-поток.
+			input_manager->HandleEvent(event);
+		}
+		SDL_Delay(16);
+	}
+
+	// ДО возврата, а не в dtor движка: игровой колбэк, который крутит sim-поток, замкнут на объект
+	// игры, живущий у вызывающего Run() и разрушаемый сразу после него. Вернуться с живыми потоками
+	// = дать sim позвать метод уже разрушенной игры.
+	thread_controller->Shutdown();
+	return 0;
+}
+
 Engine::~Engine()
 {
+	if (!init_ok) {
+		// Конструктор оборвался на платформе: менеджеров нет, ImGui не поднимался — рушим
+		// только то, что успело появиться (оба Destroy терпят nullptr).
+		SDL_DestroyGPUDevice(dev);
+		SDL_DestroyWindow(win);
+		SDL_Quit();
+		return;
+	}
+	// Первым делом и здесь: dtor вправе сработать без Run() (ранний выход игры), а ниже удаляются
+	// менеджеры, по которым ходят потоки конвейера. Повторный вызов после Run() — no-op.
+	thread_controller->Shutdown();
+
 	ImGui_ImplSDLGPU3_Shutdown();
 	ImGui_ImplSDL3_Shutdown();
 	ImGui::DestroyContext();
@@ -547,8 +679,13 @@ Engine::~Engine()
 	delete pass_manager;
 	delete object_manager;
 	delete camera_manager;
-	delete slot_controller;
+	// ThreadController — СТРОГО раньше SlotController: он держит на него сырой указатель и в своём
+	// dtor зовёт NotifyShutdown() (остановка потоков). При обратном порядке это лочило мьютекс уже
+	// освобождённой памяти — в Release прокатывало (байты ещё «те самые»), в Debug куча забита 0xDD
+	// и остановка вставала намертво. Раньше не всплывало: dtor Engine вообще не вызывался, main
+	// выходил через `return 0`.
 	delete thread_controller;
+	delete slot_controller;
 	delete material_manager;
 	delete input_manager;
 	delete texture_loader;
@@ -559,6 +696,13 @@ Engine::~Engine()
 	delete ui_data_module;
 	delete tex_state_data_module;
 	delete ui_yoga;   // YGNodeFreeRecursive дерева + YGConfigFree (в его dtor)
+
+	// Платформу подняли мы (InitPlatform) — мы же её и рушим. Строго после менеджеров и ImGui:
+	// они держат ресурсы устройства, а release окна должен опережать уничтожение девайса.
+	SDL_ReleaseWindowFromGPUDevice(dev, win);
+	SDL_DestroyGPUDevice(dev);
+	SDL_DestroyWindow(win);
+	SDL_Quit();
 
 	dev = nullptr;
 	win = nullptr;

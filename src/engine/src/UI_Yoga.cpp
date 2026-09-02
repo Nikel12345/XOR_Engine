@@ -294,15 +294,20 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
 void UI_Yoga::Emit(EngineContext* ctx, float screen_w, float screen_h)
 {
     if (!ctx) return;
+
+    ObjectManager* om       = ctx->GetObjectManager();
+    SceneData*     scene    = om->GetActiveScene();
+    // Узлы UI — обычные энтити активной сцены, класть их некуда. Выходим ДО гашения dirty_ и до
+    // записи last_w/h: иначе состояние «раскладка не выложена» считалось бы обработанным, и
+    // появившаяся позже сцена осталась бы без UI до следующего структурного изменения.
+    if (!scene) return;
+    const SceneName scene_name = om->GetActiveSceneName();
+
     // Смена размера экрана инвалидирует раскладку так же, как dirty_ (см. Impl::last_w/h): без этого
     // ресайз не перекладывал UI — узлы держали NDC от стартового разрешения, отсюда «другой размер UI».
     const bool size_changed = (screen_w != impl_->last_w) || (screen_h != impl_->last_h);
     if (!dirty_ && !size_changed) return;
     impl_->last_w = screen_w;  impl_->last_h = screen_h;
-
-    ObjectManager* om       = ctx->GetObjectManager();
-    SceneData*     scene    = om->GetActiveScene();
-    const SceneName scene_name = om->GetActiveSceneName();
 
     if (impl_->root == kInvalid || screen_w <= 0.0f || screen_h <= 0.0f) {
         // Дерева нет: снять энтити прошлой раскладки, если были.

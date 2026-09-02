@@ -14,6 +14,13 @@
 // (EngineEcs) не тянуло GPU-заголовки.
 
 SceneData* ObjectManager::CreateScene(const SceneName& name) {
+    // Пустое имя — не сцена, а СЛЕД отсутствующей активной сцены: GetActiveSceneName возвращает {},
+    // и это значение утекает в UI-команды (SceneIOCmd/CreateEntityCmd). Раньше оно доезжало сюда и
+    // заводило живую сцену "" — активную по умолчанию, то есть подменяющую собой настоящую.
+    if (name.empty()) {
+        SDL_Log("CreateScene: empty scene name rejected (no active scene?)");
+        return nullptr;
+    }
     auto [it, inserted] = scenes_data.emplace(name, std::make_unique<SceneData>());
     return it->second.get();
 }
@@ -97,20 +104,32 @@ void ObjectManager::SetSceneState(const SceneName& scene_name, bool is_active)
 SceneData* ObjectManager::GetActiveScene()
 {
     for (auto& [name, scene] : scenes_data) {
-        if (scene->is_active)
+        if (scene->is_active) {
+            no_active_scene_reported = false;
             return scene.get();
+        }
     }
-    SDL_Log("No active scene found!");
+    if (!no_active_scene_reported) {
+        no_active_scene_reported = true;
+        SDL_Log("No active scene found! (further reports suppressed until one becomes active)");
+    }
     return nullptr; // не найдено
 }
 
 SceneName ObjectManager::GetActiveSceneName()
 {
     for (auto& [name, scene] : scenes_data) {
-        if (scene->is_active)
+        if (scene->is_active) {
+            no_active_scene_reported = false;
             return name;
+        }
     }
-    SDL_Log("No active scene found!");
+    if (!no_active_scene_reported) {
+        no_active_scene_reported = true;
+        SDL_Log("No active scene found! (further reports suppressed until one becomes active)");
+    }
+    // ПУСТОЕ имя — не сцена. Потребители обязаны считать его «нет активной сцены»: CreateScene и
+    // ObjectManager::LoadScene его отвергают, UI на нём не рисует блок сцен и не шлёт команд.
     return {};
 }
 
@@ -260,12 +279,20 @@ std::string ObjectManager::SaveScene(SceneData* scene)
 
 std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const std::string& text)
 {
+    std::vector<Entity> created;
+
     auto sit = scenes_data.find(scene_name);
+    // Автосоздание по имени — штатный путь первой загрузки (игре не нужен отдельный CreateScene),
+    // но ТОЛЬКО для настоящего имени: пустое приезжает из UI при отсутствующей активной сцене и
+    // завело бы сцену "" (CreateScene её теперь отвергает, отсюда и повторная проверка на null).
     SceneData* scene = (sit != scenes_data.end()) ? sit->second.get()
                                                   : CreateScene(scene_name);
+    if (!scene) {
+        SDL_Log("ObjectManager::LoadScene: no scene for name '%s' - nothing loaded", scene_name.c_str());
+        return created;
+    }
     auto& reg = ComponentSpecRegistry::Get();
 
-    std::vector<Entity> created;
     std::unordered_map<uint32_t, Entity> old_to_new;     // файл-локальный id → новый Entity
 
     const auto t_pass1 = Prof::Clock::now();   // фаза 1: парс json + сборка архетипов

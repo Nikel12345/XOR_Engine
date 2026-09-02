@@ -80,10 +80,28 @@ struct EngineSizeState {
     float WindowH() const { return static_cast<float>(H(window_size.load(std::memory_order_relaxed))); }
 };
 
+// Всё, что игра вправе решать про окно и свопчейн. Остальное параметром не является:
+// формат шейдеров (только SPIRV), число кадров в полёте (BUFFERING_LEVEL) и обход бага
+// claim'а — это контракты движка, а не вкус игры, поэтому их тут нет (см. InitPlatform).
+struct EngineConfig {
+    const char* title = "SDL_Engine";
+    uint32_t width = 800;
+    uint32_t height = 600;
+    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE;
+    // ЖЕЛАЕМЫЕ: неподдержанные молча падают на VSYNC/SDR (устройство спрашивается в InitPlatform).
+    SDL_GPUPresentMode present_mode = SDL_GPU_PRESENTMODE_MAILBOX;
+    SDL_GPUSwapchainComposition composition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
+    bool gpu_debug = true;
+};
+
 class Engine
 {
 public:
-    Engine(SDL_Window* window, SDL_GPUDevice* dev, float width, float height);
+    // Поднимает платформу САМ (SDL_Init → окно → GPU-девайс → свопчейн) и владеет ею: dtor
+    // рушит окно с девайсом и зовёт SDL_Quit. Отказ платформы — НЕ исключение: пишем в лог и
+    // остаёмся невалидными (IsValid()==false, менеджеры не создавались), Run() сразу вернёт 1.
+    explicit Engine(const EngineConfig& cfg);
+    bool IsValid() const { return init_ok; }
     QueueManager* GetQueueManager() const { return queue_manager; }
     TransferManager* GetTransferManager() const { return transfer_manager; }
     BufferManager* GetBufferManager() const { return buffer_manager; }
@@ -132,6 +150,20 @@ public:
 
     void EndImGuiFrame();
 
+    // Игровой тик: зовётся SIM-потоком (ThreadController::SimulationThread), НЕ main-потоком.
+    // Задавать до Run(): StartThreads внутри него уже раздаёт колбэки по потокам.
+    void SetGameIterate(std::function<void()> cb);
+
+    // Насос событий приложения. ОБЯЗАН зваться с main-потока — того, что инициализировал видео
+    // и создал окно (очередь сообщений окна привязана к потоку-создателю). Поэтому вызов
+    // блокирующий: движок не забирает поток себе, он лишь избавляет игру от переписывания цикла.
+    // Возврат означает, что потоки конвейера УЖЕ остановлены и присоединены (см. тело).
+    int Run();
+
+    // Попросить цикл завершиться — можно с любого потока (например, кнопка «Выход» игрового UI
+    // с sim-потока). Насос заметит на следующей итерации, максимум через SDL_Delay(16).
+    void RequestQuit() { running.store(false, std::memory_order_relaxed); }
+
     // ВНУТРЕННЕЕ (render) разрешение как float для UI-раскладки/камеры/первичного создания таргетов —
     // читается ИЗ size_state_.render_size (единый источник истины, отдельных полей в движке нет). При
     // «полноценном» ресайзе игрой (SetRenderResolution) эти геттеры сразу отражают новое значение.
@@ -153,6 +185,10 @@ public:
     const double targetFPS = 1000.0 / 60.0;
 
 private:
+    // SDL_Init + окно + GPU-девайс + claim + параметры свопчейна. Всё, что раньше руками писал
+    // каждый main. false = дальше конструировать нечего (менеджеры не создаются).
+    bool InitPlatform(const EngineConfig& cfg);
+
     void PrepareFuncPrepassUndepended(uint8_t idx);
     void PrepareFuncPrepassDepended(uint8_t idx);
 
@@ -220,8 +256,10 @@ private:
 	UI_DataModule* ui_data_module = nullptr;
 	UI_Yoga* ui_yoga = nullptr;
 
-	EngineContext* engine_context;
-    std::atomic<bool> running = true;
+	EngineContext* engine_context = nullptr;
+    bool init_ok = false;   // платформа поднялась и менеджеры созданы (см. IsValid)
+    // Флаг насоса событий: пишет main-поток (закрытие окна) и любой другой через RequestQuit.
+    std::atomic<bool> running{ false };
     ImDrawData* imgui_draw_data = nullptr;
 
     // Transfer-буферы, ушедшие в полёт для слота: держим до fence той фазы, что их читает

@@ -87,6 +87,11 @@ void ThreadController::StartThreads()
 
 ThreadController::~ThreadController()
 {
+    Shutdown();
+}
+
+void ThreadController::Shutdown()
+{
     running.store(false);
     // ДО join'ов: поток, стоящий на condvar слота, сам по себе выключения running не увидит.
     if (slot_controller)
@@ -129,6 +134,10 @@ void ThreadController::SimulationThread()
                 slot = slot_controller->WaitFreeSlotIndex(UPS_priority);
             }
         }
+        // Из ожидания могли выпустить остановкой, а не свободным слотом. Выходим ДО игрового
+        // колбэка: гонять ещё один тик игры на сносе конвейера незачем.
+        if (!running.load(std::memory_order_relaxed))
+            break;
 
         {
             PROF_SCOPE(Sim, "game_iter (Game::MainIterate)");
@@ -224,6 +233,8 @@ void ThreadController::RenderThread()
         auto frame_start = std::chrono::high_resolution_clock::now();
 
         uint8_t slot = slot_controller->WaitRenderableSlot(UPS_priority);
+        if (slot == INVALID_SLOT)   // останов (как в ComputeThread)
+            break;
         fps_counter->start();
 
         while (running.load())

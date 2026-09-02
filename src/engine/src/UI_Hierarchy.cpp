@@ -121,16 +121,21 @@ namespace {
         }
 
         ImGui::Separator();
-        ImGui::BeginDisabled(g_ce_entity == kNoEntity);
+        // Целевая сцена — активная. Без неё имя пустое: создавать некуда, поэтому кнопка гаснет,
+        // а не шлёт команду в никуда (сам обработчик её тоже отсеет по GetScene, но черновик при
+        // этом был бы уже удалён — то есть форма «сработала бы» и потеряла набранное).
+        const SceneName target = om->GetActiveSceneName();
+        ImGui::BeginDisabled(g_ce_entity == kNoEntity || target.empty());
         if (ImGui::Button("Create")) {
             std::string json = om->SaveScene(stg);   // staging = ровно одна сущность
             ctx->GetInputManager()->PushCommand(CommandId::CreateEntity,
-                new CreateEntityCmd{ om->GetActiveSceneName(), std::move(json) });
+                new CreateEntityCmd{ target, std::move(json) });
             om->DeleteEntity(stg, g_ce_entity);
             g_ce_entity = kNoEntity;
             g_ce_open = false;
         }
         ImGui::EndDisabled();
+        if (target.empty()) { ImGui::SameLine(); ImGui::TextDisabled("(no active scene)"); }
         ImGui::SameLine();
         if (ImGui::Button("Cancel")) {
             if (g_ce_entity != kNoEntity) om->DeleteEntity(stg, g_ce_entity);
@@ -181,6 +186,16 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
     ObjectManager* om = ctx->GetObjectManager();
     SceneData* scene = om->GetActiveScene();
 
+    // Проверка ПЕРЕД блоком сцен, а не после него (как было): без активной сцены её имя —
+    // пустая строка, и блок ниже отдавал её в ImGui как лейбл (он же ID виджета), а кнопкам
+    // Save/Load — как имя сцены в команду. Панель в этом состоянии не рисует ничего, кроме
+    // подписи: показывать нечего, а любое действие тут работало бы с несуществующей сценой.
+    if (!scene) {
+        ImGui::TextDisabled("No active scene");
+        ImGui::End();
+        return;
+    }
+
     // ---- Сцены (пока одна активная; список — задел) + Save/Load ----
     if (ImGui::CollapsingHeader("Scenes", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -198,8 +213,6 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
                 new SceneIOCmd{ active, "saved_scene" });
         }
     }
-
-    if (!scene) { ImGui::End(); return; }
 
     // ---- Обычные энтити (с моделью/материалом; debug-рамки скрыты тегом) ----
     if (ImGui::CollapsingHeader("Entities", ImGuiTreeNodeFlags_DefaultOpen))
