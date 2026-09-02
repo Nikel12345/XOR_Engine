@@ -20,6 +20,8 @@
 // Фракталу не нужны, но объявлены и «заякорены» веткой в main(): DXC стрипает неиспользуемые
 // ресурсы, а SDL GPU ждёт ПЛОТНЫЕ слоты от 0 — см. тот же приём в skybox.frag.hlsl.
 
+#include "main_pass/pass_targets.hlsl"
+
 [[vk::combinedImageSampler]]
 Texture2DArray<float>     u_shadowDepthArray  : register(t0, space2);
 [[vk::combinedImageSampler]]
@@ -54,8 +56,7 @@ struct PSInput
 
 struct PSOutput
 {
-    float4 color    : SV_Target0;   // линейный HDR-цвет сцены
-    float4 emission : SV_Target1;   // MRT пасса: яркая кромка множества слегка блумит
+    MAIN_PASS_TARGETS               // ambient = 0: множество экранным AO не затеняется
 };
 
 // Палитра IQ-косинусами: гладкая, циклится по дробному счётчику побега.
@@ -124,6 +125,7 @@ PSOutput main(PSInput input)
 
     o.color    = float4(col, 1.0);
     o.emission = float4(emi, 0.0);
+    o.ambient  = float4(0.0, 0.0, 0.0, 0.0);   // своё затенение, экранный AO не применяется
 
     // ЯКОРЬ t0/t1: ветка никогда не выполняется (sv_pos.x >= 0 во вьюпорте), но компилятор
     // доказать этого не может → глобалки пасса не стрипаются, слоты остаются плотными.

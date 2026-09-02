@@ -56,6 +56,7 @@ SDL_AppResult MyGame::MainInit()
         // csp хранит имя cs — резолв на сборке compute-пайплайна (после LoadScene).
         using namespace DefaultShaderProgramSet;
         SetBloomPrograms(ctx);
+        SetAOPrograms(ctx);           // SSAO: якорённые кубы затеняются как обычная геометрия, губка — нет (её ambient = 0)
         SetCullingPibPrograms(ctx);   // GPU-каллинг: программа на проход, регионы у PassManager
     }
 

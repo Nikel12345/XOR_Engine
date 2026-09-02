@@ -1,6 +1,7 @@
 ﻿#include "main_pass/math.hlsl"
 #include "main_pass/lighting.hlsl"
 #include "main_pass/shadowPCF.hlsl"
+#include "main_pass/pass_targets.hlsl"
 
 [[vk::combinedImageSampler]]
 Texture2DArray<float>     u_shadowDepthArray  : register(t0, space2);
@@ -73,14 +74,13 @@ float shadowRefDist(float dist, float maxRange, float NdotL)
     return d - bias;
 }
 
-// Два выхода MRT: color (location 0) и emission (location 1). Раздельная эмиссия нужна,
-// чтобы будущий bloom брал ИМЕННО светящееся, а не яркость вообще (тусклый glow должен
-// блумить, освещённая стена — нет). Число выходов обязано совпадать с числом color-таргетов
-// прохода (MAIN_PASS: scene_hdr + scene_emission).
+// Выходы MRT — раскладка прохода, общая с остальными его шейдерами (main_pass/pass_targets.hlsl).
+// Раздельная эмиссия нужна, чтобы bloom брал ИМЕННО светящееся, а не яркость вообще (тусклый glow
+// должен блумить, освещённая стена — нет); раздельный ambient — чтобы экранный AO гасил только
+// непрямой свет, не трогая лампы.
 struct PSOutput
 {
-    float4 color    : SV_Target0;   // линейный HDR-цвет сцены (свет + спекуляр + эмиссия)
-    float4 emission : SV_Target1;   // только эмиссия — отдельный выход под bloom
+    MAIN_PASS_TARGETS
 };
 
 PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
@@ -259,13 +259,21 @@ PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
     float3 Fenv    = F0 + (max((float3)(1.0 - surface.roughness), F0) - F0) * pow(1.0 - NdotV, 5.0);
     float3 R       = reflect(-V, n);
     float3 envRefl = sampleEnv(R, surface.roughness);
-    specSum += envRefl * Fenv * surface.ao;   // AO гасит непрямое отражение
+    float3 envTerm = envRefl * Fenv * surface.ao;   // AO гасит непрямое отражение
+    specSum += envTerm;
 
     // AO — затенение НЕпрямого света: модулирует только ambient-пол (и env выше), прямой свет нетронут.
     float3 lighting = max(lightSum, (float3)AMBIENT_LIGHT * surface.ao);
     // Диффуз гаснет на металле: проводник почти не имеет диффузного отражения, вся энергия — в зеркальном.
     float3 diffuse  = surface.baseColor * lighting * (1.0 - surface.metallic);
     float3 color    = diffuse + specSum + surface.emission;   // диффуз + спекуляр/отражение + эмиссия
+
+    // Доля цвета, которую вправе гасить ЭКРАННЫЙ AO: подъём диффуза ambient-полом над прямым светом
+    // (`max(lightSum, AMB·ao) - lightSum`, покомпонентно) плюс отражение окружения. Композит
+    // AO-прохода вычитает `ambient·(1-AO)`, поэтому при AO=1 кадр совпадает с прежним до бита, а при
+    // AO=0 диффуз садится ровно на прямой свет — ниже него затенение не уводит по построению.
+    float3 ambient  = surface.baseColor * max((float3)0.0, (float3)AMBIENT_LIGHT * surface.ao - lightSum)
+                    * (1.0 - surface.metallic) + envTerm;
 
 #ifdef FRACTAL_FOG
     // Туман фрактала: формула и небо — КОПИЯ menger.frag.hlsl, объект гаснет ровно синхронно
@@ -279,11 +287,15 @@ PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
         float  fogF = saturate(length(input.v_worldPos) * FractalFrame[1].z);
         color             = lerp(color, skyF, fogF);
         surface.emission *= (1.0 - fogF);
+        // Затеняемая доля обязана гаснуть тем же множителем: композит вычитает её из УЖЕ
+        // затуманенного цвета, и полновесный ambient увёл бы даль в чёрное.
+        ambient          *= (1.0 - fogF);
     }
 #endif
 
     PSOutput o;
     o.color    = float4(color, surface.alpha);
     o.emission = float4(surface.emission, 1.0);
+    o.ambient  = float4(ambient, 1.0);
     return o;
 }

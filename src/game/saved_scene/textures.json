@@ -1,9 +1,9 @@
 {
     "textures": [
         {
-            "name": "wood_albedo",
+            "name": "cyber",
             "atlas": "albedo_atlas",
-            "path": "C:\\Users\\Nikita\\Desktop\\SDL_Engine\\src\\game\\textures\\blocks\\wood_base.png",
+            "path": "textures/assets/cyber.png",
             "conv": "AsIs"
         },
         {
@@ -89,6 +89,18 @@
             "name": "hover_2",
             "atlas": "albedo_atlas",
             "path": "textures/buttons/hover_2.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "line",
+            "atlas": "albedo_atlas",
+            "path": "textures/assets/line.jpg",
+            "conv": "AsIs"
+        },
+        {
+            "name": "wood",
+            "atlas": "albedo_atlas",
+            "path": "textures/blocks/wood_base.png",
             "conv": "AsIs"
         }
     ]

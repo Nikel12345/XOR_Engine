@@ -80,6 +80,7 @@ SDL_AppResult Game::MainInit()
         // Движковый набор compute-программ (DefaultShaderSet.h в движке).
         using namespace DefaultShaderProgramSet;
         SetBloomPrograms(ctx);
+        SetAOPrograms(ctx);           // SSAO: глубина main'а → карта AO → вычитание из scene_hdr
         SetCullingPibPrograms(ctx);   // GPU-каллинг: программа на проход, регионы у PassManager
     }
     // Push/dispatch своих sp — ДО первого LoadScene: реестр ShaderManager вешает их на sp сам.

@@ -12,6 +12,7 @@ namespace DefaultRenderPassNamespace
     inline constexpr const char* DEBUG_PASS = "_DefaultDebugRenderPass";
     inline constexpr const char* PRESENT_PASS = "_DefaultPresentPass";
     inline constexpr const char* BLOOM_PASS = "_DefaultBloomPass";
+    inline constexpr const char* AO_PASS = "_DefaultAOPass";
     inline constexpr const char* UI_PASS = "_DefaultUIPass";
 
     // Число уровней bloom-пирамиды (bloom_0 = ½ окна, каждый следующий ещё вдвое меньше).
@@ -109,6 +110,31 @@ namespace DefaultRenderPassNamespace
     // Создаёт compute-проход bloom: пирамида downsample→upsample по эмиссии + composite/tonemap в
     // scene_hdr. Должна вызываться ПОСЛЕ main/transparent/debug (читает их результат) и до present.
     void SetDefaultBloomPass(EngineContext* ctx);
+
+    // Экранное затенение непрямого света (SSAO). Считается по ГЛУБИНЕ main-прохода (нормаль
+    // восстанавливается из неё же), применяется вычитанием из scene_hdr доли, которую main-проход
+    // отложил в scene_ambient — третий MRT-таргет. Прямой свет и эмиссия не затрагиваются.
+    //
+    // Состояние прохода = его настройки (радиус/сила/контраст/bias), одно на все четыре программы:
+    // они делят один cbuffer AOParams. intensity = 0 выключает эффект целиком, не убирая проход.
+    struct alignas(16) AOState {
+        float radius    = 0.5f;    // радиус полусферы в МИРОВЫХ единицах
+        float intensity = 1.0f;    // сила затенения; 0 — выключено
+        float power     = 1.5f;    // контраст кривой: >1 темнит углы и осветляет открытое
+        // Порог самозатенения как ДОЛЯ view-глубины точки (не абсолют): шум восстановленной
+        // нормали и квантование буфера глубины растут с дистанцией так же, поэтому абсолютный
+        // порог пришлось бы перекручивать под каждый ракурс. Без него плоскость затеняет себя.
+        float bias      = 0.01f;
+    };
+    inline const std::string AO_STATE = "AOState";
+
+    inline const std::string SCENE_AMBIENT = "scene_ambient";
+    inline const std::string SSAO_TEXTURE  = "__ssao";
+    inline const std::string SSAO_TEMP     = "__ssao_temp";
+
+    // Проход-compute между MAIN (20) и TRANSPARENT (22): к моменту его исполнения глубина и
+    // ambient непрозрачной геометрии готовы, а bloom (26) увидит уже затенённую сцену.
+    void SetDefaultAOPass(EngineContext* ctx);
 
     // GPU-каллинг с компактацией (culling_pib.comp = scatter). Одна программа НА ПРОХОД с
     // батчами: раскладка = CullParams шейдера, регион и камерный буфер задаёт программа.

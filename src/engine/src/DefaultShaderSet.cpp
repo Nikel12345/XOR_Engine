@@ -185,6 +185,87 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
     shadow_blur_inited = true;
 }
 
+void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
+{
+    ShaderManager* sm = ctx->GetShaderManager();
+    using namespace DefaultRenderPassNamespace;
+    using namespace DefaultBuffersNames;
+    static bool inited = false;
+    if (inited) { SDL_Log("AO shader programs already initialized."); return; }
+
+    // Порядок создания = порядок исполнения в проходе, а он здесь единственная связь между шагами:
+    // ssao пишет __ssao, blur_h переносит его в __ssao_temp, blur_v — обратно, композит читает
+    // __ssao. Переставить местами = читать прошлый кадр.
+    //
+    // Камерный буфер нужен и блюру: билатеральный вес считается по ЛИНЕЙНОЙ глубине, а её из
+    // буфера глубины достают членами proj.
+
+    // (1) SSAO: глубина (сэмплер) + камера (ro) → карта AO половинного разрешения.
+    ctx->CreateComputeShaderProgram("ssao", "ssao_cs",
+        {}, { DEFAULT_CAMERA_BUFFER },
+        { { SSAO_TEXTURE, 0, 0 } },   // rw
+        {},
+        { std::string("__main_depth") },
+        AO_PASS, /*dont_save=*/true);
+
+    // (2)(3) Разделимый блюр: ping-pong между двумя картами. SIMULTANEOUS не нужен — каждый шаг
+    // читает ЧУЖУЮ текстуру, а пишет только свой тексель.
+    ctx->CreateComputeShaderProgram("ssao_blur_h", "ssao_blur_h_cs",
+        {}, { DEFAULT_CAMERA_BUFFER },
+        { { SSAO_TEMP, 0, 0 } },
+        {},
+        { SSAO_TEXTURE, std::string("__main_depth") },
+        AO_PASS, /*dont_save=*/true);
+
+    ctx->CreateComputeShaderProgram("ssao_blur_v", "ssao_blur_v_cs",
+        {}, { DEFAULT_CAMERA_BUFFER },
+        { { SSAO_TEXTURE, 0, 0 } },
+        {},
+        { SSAO_TEMP, std::string("__main_depth") },
+        AO_PASS, /*dont_save=*/true);
+
+    // (4) Композит: scene_hdr -= ambient*(1-AO). scene_hdr здесь только storage, ambient и AO
+    // только сэмплеры — одновременного sampler+storage на одной текстуре нет.
+    ctx->CreateComputeShaderProgram("ao_composite", "ao_composite_cs",
+        {}, {},
+        { { std::string("scene_hdr"), 0, 0 } },
+        {},
+        { SCENE_AMBIENT, SSAO_TEXTURE },
+        AO_PASS, /*dont_save=*/true);
+
+    // Один cbuffer AOParams на все четыре: состояние прохода уходит вниз как есть, раскладка
+    // AOState совпадает с ним.
+    const char* programs[] = { "ssao", "ssao_blur_h", "ssao_blur_v", "ao_composite" };
+    for (const char* name : programs) {
+        sm->CreateComputePushFunc<AOState>(name, [](const PushConstantBinder& b, AOState st) {
+            b.Push(0, st);
+        });
+    }
+
+    // Размеры диспатчей берём у ЖИВЫХ атласов: ресайз меняет width/height внутри атласа, поэтому
+    // указатель остаётся верным, а числа приезжают уже новые.
+    {
+        TextureAtlas* ao_tex = ctx->GetTextureAtlas(SSAO_TEXTURE);
+        TextureAtlas* ao_tmp = ctx->GetTextureAtlas(SSAO_TEMP);
+        TextureAtlas* hdr    = ctx->GetTextureAtlas(std::string("scene_hdr"));
+
+        sm->CreateDispatchFunc<DummyDispatchData>("ssao", [ao_tex](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { ao_tex->width, ao_tex->height, 1 };
+        });
+        sm->CreateDispatchFunc<DummyDispatchData>("ssao_blur_h", [ao_tmp](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { ao_tmp->width, ao_tmp->height, 1 };
+        });
+        sm->CreateDispatchFunc<DummyDispatchData>("ssao_blur_v", [ao_tex](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { ao_tex->width, ao_tex->height, 1 };
+        });
+        sm->CreateDispatchFunc<DummyDispatchData>("ao_composite", [hdr](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { hdr->width, hdr->height, 1 };
+        });
+    }
+
+    inited = true;
+}
+
 void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
 {
     // push/dispatch регистрируем в РЕЕСТРЕ по имени программы (не полем csp):

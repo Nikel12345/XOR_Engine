@@ -15,6 +15,8 @@
 // Фракталу не нужны, но объявлены и «заякорены» веткой в main(): DXC стрипает неиспользуемые
 // ресурсы, а SDL GPU ждёт ПЛОТНЫЕ слоты от 0 — см. тот же приём в skybox.frag.hlsl.
 
+#include "main_pass/pass_targets.hlsl"
+
 [[vk::combinedImageSampler]]
 Texture2DArray<float>     u_shadowDepthArray  : register(t0, space2);
 [[vk::combinedImageSampler]]
@@ -58,8 +60,7 @@ struct PSInput
 
 struct PSOutput
 {
-    float4 color    : SV_Target0;   // линейный HDR-цвет сцены
-    float4 emission : SV_Target1;   // MRT пасса: у губки эмиссии нет
+    MAIN_PASS_TARGETS               // ambient = 0: у губки СВОЙ AO (по числу шагов марша), экранный ей не нужен
     // Честная глубина хита (DepthReplacing): растеризатор глубину этого дроу не считает
     // (вершины скайбокса на z=w), её выдаёт шейдер — в ОБЫЧНЫЙ depth-attachment пасса.
     // Стенки губки и якорённые объекты режут друг друга штатным depth-тестом; цена —
@@ -244,6 +245,7 @@ PSOutput main(PSInput input)
 
     o.color    = float4(col, 1.0);
     o.emission = float4(0.0, 0.0, 0.0, 0.0);
+    o.ambient  = float4(0.0, 0.0, 0.0, 0.0);
     o.depth    = depthOut;
 
     // ЯКОРЬ t0/t1: ветка никогда не выполняется (sv_pos.x >= 0 во вьюпорте), но компилятор

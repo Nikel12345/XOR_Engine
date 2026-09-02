@@ -38,6 +38,9 @@ namespace DefaultSamplersNames {
 	inline constexpr const char* DEFAULT_SHADOW_SAMPLER = "_DefaultShadowSampler";
 	inline constexpr const char* VSM_SAMPLER = "_VsmSampler";
 	inline constexpr const char* ENV_SAMPLER = "_EnvSampler";
+	// NEAREST + clamp. Для глубины: билинейная фильтрация усреднила бы значения с РАЗНЫХ
+	// поверхностей, а из них потом восстанавливают позицию — получилась бы точка, которой нет.
+	inline constexpr const char* SIMPLE_SAMPLER = "_SimpleSampler";
 };
 
 namespace DefaultAtlasNames {

@@ -29,4 +29,9 @@ namespace DefaultShaderProgramSet
     // Проход создаёт engine (DefaultRenderPassNamespace::SetDefaultBloomPass); сюда вынесены сами
     // программы и их push/dispatch — атласы берутся по имени, локальных зависимостей от прохода нет.
     void SetBloomPrograms(EngineContext* ctx);
+
+    // Программы AO-прохода: ssao → blur_h → blur_v → composite. Порядок создания ЗНАЧИМ — он же
+    // порядок исполнения внутри прохода, а каждый шаг читает результат предыдущего.
+    // Проход создаёт engine (DefaultRenderPassNamespace::SetDefaultAOPass).
+    void SetAOPrograms(EngineContext* ctx);
 }

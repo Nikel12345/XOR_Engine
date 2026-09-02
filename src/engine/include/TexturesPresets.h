@@ -492,6 +492,41 @@ namespace TexturePresets {
         return info;
     }
 
+    // Третий MRT-таргет main-прохода: доля цвета, которую гасит экранный AO (ambient-пол + env).
+    // R11G11B10 как у эмиссии — три канала в 4 байта, альфа не нужна, значения неотрицательны и
+    // могут уходить за 1 (отражение окружения в HDR).
+    inline SDL_GPUTextureCreateInfo AmbientHDR(uint32_t width, uint32_t height) {
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT;
+        info.usage = 0;   // COLOR_TARGET — MRT main-прохода, SAMPLER — ao_composite (декларации)
+        info.width = width;
+        info.height = height;
+        info.layer_count_or_depth = 1;
+        info.num_levels = 1;
+        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        info.props = 0;
+        return info;
+    }
+
+    // Карта AO (половина кадра) и её ping-pong-двойник под разделимый блюр. Формат R32_FLOAT, хотя
+    // по точности хватило бы R8: одноканальные 8/16-битные форматы НЕ входят в обязательный к
+    // поддержке набор storage-образов Vulkan, а R32_FLOAT входит. Половинное разрешение делает
+    // цену этого выбора незаметной (0.5 Мпикс × 4 байта на 1080p).
+    inline SDL_GPUTextureCreateInfo AmbientOcclusion(uint32_t width, uint32_t height) {
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+        info.usage = 0;   // SAMPLER + COMPUTE_STORAGE_WRITE выведут декларации AO-программ
+        info.width = width;
+        info.height = height;
+        info.layer_count_or_depth = 1;
+        info.num_levels = 1;
+        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        info.props = 0;
+        return info;
+    }
+
     // ОДИН уровень bloom-пирамиды — ОТДЕЛЬНАЯ текстура (уровень 0 = ½ окна, дальше /2), а не мип
     // общей. Раньше пирамида была одной текстурой с мипами, но down/up-шаг биндит dst-мип как
     // RW-storage, а src читает сэмплером — sampled-вью покрывает ВСЕ мипы, включая RW-мип

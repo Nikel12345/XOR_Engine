@@ -29,6 +29,11 @@ namespace DefaultRenderPassNamespace
         // Не мипы одной текстуры: dst-уровень биндится RW, src — сэмплером, отдельные текстуры
         // исключают одновременный RW+sampled бинд одной (см. TexturesPresets::BloomLevel).
         TextureAtlas*        bloom_levels[BLOOM_LEVELS] = {};
+        TextureAtlas*        scene_ambient = nullptr;   // затеняемая AO доля цвета (location 2 MAIN_PASS, MRT)
+        // Карта AO и её ping-pong-двойник, ОБА в половину кадра. Пара, а не одна текстура: блюр
+        // разделимый, а сэмплить и писать одну текстуру в одном диспатче нельзя (см. bloom).
+        TextureAtlas*        ssao = nullptr;
+        TextureAtlas*        ssao_temp = nullptr;
         uint32_t             width = 0;                 // размер HDR-таргетов (= окно на момент init); нужен present-blit'у
         uint32_t             height = 0;
         bool                 common_inited = false;
@@ -37,6 +42,10 @@ namespace DefaultRenderPassNamespace
 
     bool shadow_pass_inited = false;
 	bool main_pass_inited = false;
+
+    // Половинное разрешение с округлением ВВЕРХ: при нечётной стороне «вниз» потеряло бы крайний
+    // столбец/строку кадра, и композит читал бы AO за краем текстуры.
+    static uint32_t HalfDim(uint32_t v) { return (v + 1) / 2 > 0 ? (v + 1) / 2 : 1; }
 
     static SDL_GPUTexture* main_color_half = nullptr; // левая половина — сцена
     static SDL_GPUTexture* debug_color_half = nullptr; // правая половина — debug-затычка
@@ -161,10 +170,13 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     depth_tci.width = width;
     depth_tci.height = height;
 
-    // Depth — обычный TextureAtlas (как shadow-depth). Сэмплер nullptr: depth основного прохода не
-    // сэмплится (debug-проход читает его как depth-attachment, не сэмплером). usage DEPTH_STENCIL_TARGET
-    // доложит декларация SetDepthTexture проходов до бейка (в самом tci он 0 — CreateTextureAtlas его стрижёт).
-    g_pass_system.main_depth = tm->CreateTextureAtlas("__main_depth", depth_tci, nullptr);
+    // Depth — обычный TextureAtlas (как shadow-depth). Сэмплер точечный: глубину сэмплят программы
+    // AO-прохода (восстановление view-позиции и веса блюра), а LINEAR смешал бы значения с разных
+    // поверхностей в несуществующую точку. usage DEPTH_STENCIL_TARGET доложит декларация
+    // SetDepthTexture проходов, SAMPLER — декларации AO-программ, обе до бейка (в самом tci он 0 —
+    // CreateTextureAtlas его стрижёт).
+    g_pass_system.main_depth = tm->CreateTextureAtlas("__main_depth", depth_tci,
+        tm->GetSampler(DefaultSamplersNames::SIMPLE_SAMPLER));
     g_pass_system.main_depth_format = depth_tci.format;
 
     // HDR-таргеты набора: сцена рендерится в линейный HDR (эмиссия/блики уходят за 1.0), на экран
@@ -174,6 +186,11 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     auto env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
     g_pass_system.scene_hdr      = tm->CreateTextureAtlas("scene_hdr",      TexturePresets::SceneHDR(width, height),    env_sampler);
     g_pass_system.scene_emission = tm->CreateTextureAtlas("scene_emission", TexturePresets::EmissionHDR(width, height), env_sampler);
+    // Третий MRT main-прохода + пара карт AO (половина кадра). Сэмплер LINEAR: композит читает AO
+    // с половинного разрешения на полном — билинейный апскейл идёт даром, отдельного шага не нужно.
+    g_pass_system.scene_ambient  = tm->CreateTextureAtlas(SCENE_AMBIENT, TexturePresets::AmbientHDR(width, height), env_sampler);
+    g_pass_system.ssao      = tm->CreateTextureAtlas(SSAO_TEXTURE, TexturePresets::AmbientOcclusion(HalfDim(width), HalfDim(height)), env_sampler);
+    g_pass_system.ssao_temp = tm->CreateTextureAtlas(SSAO_TEMP,    TexturePresets::AmbientOcclusion(HalfDim(width), HalfDim(height)), env_sampler);
 
     // Bloom-пирамида: BLOOM_LEVELS отдельных текстур "bloom_L<i>". Уровень 0 = ½ окна, дальше /2.
     // Флаги (в т.ч. SIMULTANEOUS только назначениям апсемпла) выведут декларации bloom-программ.
@@ -203,6 +220,18 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
                 t.RecreateAtlasTexture(a, TexturePresets::BloomLevel(lw, lh));
             });
     }
+    tm->CreateResizeInstruction(SCENE_AMBIENT,
+        [a = g_pass_system.scene_ambient](TextureManager& t, uint32_t w, uint32_t h) {
+            t.RecreateAtlasTexture(a, TexturePresets::AmbientHDR(w, h));
+        });
+    tm->CreateResizeInstruction(SSAO_TEXTURE,
+        [a = g_pass_system.ssao](TextureManager& t, uint32_t w, uint32_t h) {
+            t.RecreateAtlasTexture(a, TexturePresets::AmbientOcclusion(HalfDim(w), HalfDim(h)));
+        });
+    tm->CreateResizeInstruction(SSAO_TEMP,
+        [a = g_pass_system.ssao_temp](TextureManager& t, uint32_t w, uint32_t h) {
+            t.RecreateAtlasTexture(a, TexturePresets::AmbientOcclusion(HalfDim(w), HalfDim(h)));
+        });
     tm->CreateResizeInstruction("__main_depth",
         [a = g_pass_system.main_depth](TextureManager& t, uint32_t w, uint32_t h) {
             auto tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
@@ -233,12 +262,14 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
     PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
-    // Два color-таргета (MRT): location 0 — HDR-цвет сцены, location 1 — эмиссия. Форматы берём
-    // из созданных атласов (PipeManager строит пайплайн по этому массиву → согласовано с фрагментом,
-    // у которого теперь два SV_Target). Раньше color был INVALID (= свопчейн); теперь сцена в HDR.
+    // Три color-таргета (MRT): location 0 — HDR-цвет сцены, 1 — эмиссия, 2 — затеняемая AO доля.
+    // Форматы берём из созданных атласов (PipeManager строит пайплайн по этому массиву → согласовано
+    // с фрагментом, у которого столько же SV_Target — раскладка в main_pass/pass_targets.hlsl).
+    // CLEAR у ambient обязателен: пиксель, который никто не закрасил, обязан вычесть НОЛЬ.
     RenderPassTexturesInfo main_rptd{};
     main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.1f,0.1f,0.14f,1.0f }, g_pass_system.scene_hdr->format);
     main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.0f,0.0f,0.0f,0.0f }, g_pass_system.scene_emission->format);
+    main_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, { 0.0f,0.0f,0.0f,0.0f }, g_pass_system.scene_ambient->format);
     main_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, g_pass_system.main_depth_format);
 
     auto mainPass = pm->CreateRenderPass(
@@ -263,6 +294,7 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
     // создаёт бейк и подменяет ресайз, резолв идёт на исполнении прохода.
     mainPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr, 0);
     mainPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_emission, 1);
+    mainPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_ambient, 2);
     mainPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 
     main_pass_inited = true;
@@ -452,6 +484,39 @@ void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
         26
     );
     SetPassState(bloom, BLOOM_STATE, BloomState{});
+}
+
+void DefaultRenderPassNamespace::SetDefaultAOPass(EngineContext* ctx)
+{
+    if (!g_pass_system.common_inited || !g_pass_system.scene_ambient) {
+        SDL_Log("SetDefaultAOPass: common resources must be initialized first.");
+        return;
+    }
+    // Схема состояния — рядом с проходом, которому состояние принадлежит (как у bloom). Все четыре
+    // программы прохода читают ОДИН этот cbuffer, поэтому настройка одна на эффект, а не на шаг.
+    {
+        using K = ParamsFieldKind;
+        ParamsSpecRegistry::Passes().Register(MakeParamsSpec<AOState>(AO_STATE, {
+            ParamsFieldSpec::Num(PARAMS_FIELD(AOState, radius),    K::F32, 0.01f, 5.0f, 0.01f).Label("Radius (world)"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(AOState, intensity), K::F32, 0.0f, 2.0f, 0.01f).Label("Intensity"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(AOState, power),     K::F32, 0.1f, 4.0f, 0.01f).Label("Power"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(AOState, bias),      K::F32, 0.0f, 0.1f, 0.001f).Label("Bias (доля глубины)"),
+        }));
+    }
+
+    PassManager* pm = ctx->GetPassManager();
+    BufferManager* bm = ctx->GetBufferManager();
+
+    ComputePassStep* ao = pm->CreateComputePass(
+        AO_PASS,
+        [bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)
+    {
+        DummyDispatchData dd{};
+        pm->ComputePassStandardBody(cb, &cp, bm, cp.state.data(), &dd, pass_frame);
+    },
+        21   // между MAIN (20) и TRANSPARENT (22): глубина и ambient готовы, bloom (26) увидит затенённое
+    );
+    SetPassState(ao, AO_STATE, AOState{});
 }
 
 void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ctx, LightDataModule* ldm)
