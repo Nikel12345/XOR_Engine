@@ -42,13 +42,18 @@ def load_channel(path, size, default, invert=False):
 
 
 def pack(size, r=None, g=None, b=None, a=None, out="packed.png",
-         invert_r=False, invert_g=False, invert_b=False, invert_a=False):
+         invert_r=False, invert_g=False, invert_b=False, invert_a=False,
+         flip_y=False):
     """Pack up to four SEPARATE grayscale maps into one RGBA image.
 
     Use this for masks/data atlases (ORM etc.), where each source file is a
     single-channel map. Do NOT feed a color image (like a normal map) into one
     of these slots — it will be flattened to grayscale and its channels lost.
     For "keep an RGB map, add a grayscale into alpha" use pack_rgb_alpha().
+
+    flip_y mirrors the result vertically — for assets whose UVs use the opposite
+    V convention. Harmless for scalar maps like these; a tangent-space normal map
+    mirrored this way also needs its Y (green) negated.
     """
     planes = [
         load_channel(r, size, DEFAULTS["r"], invert_r),
@@ -57,12 +62,14 @@ def pack(size, r=None, g=None, b=None, a=None, out="packed.png",
         load_channel(a, size, DEFAULTS["a"], invert_a),
     ]
     arr = np.stack(planes, axis=-1)
+    if flip_y:
+        arr = arr[::-1]
     Image.fromarray(arr, "RGBA").save(out)
-    print(f"Wrote {out}  ({size[0]}x{size[1]}, RGBA)")
+    print(f"Wrote {out}  ({size[0]}x{size[1]}, RGBA{', Y-flipped' if flip_y else ''})")
 
 
 def pack_rgb_alpha(rgb_path, a_path=None, out="packed.png",
-                   size=None, a_default=255, invert_a=False):
+                   size=None, a_default=255, invert_a=False, flip_y=False):
     """Keep an existing RGB image intact and put a grayscale map into alpha.
 
     This is what you want for e.g. a normal map (RGB = XYZ) plus a height map
@@ -79,8 +86,10 @@ def pack_rgb_alpha(rgb_path, a_path=None, out="packed.png",
 
     alpha = load_channel(a_path, size, a_default, invert_a)
     arr = np.dstack([np.asarray(rgb, np.uint8), alpha])
+    if flip_y:
+        arr = arr[::-1]
     Image.fromarray(arr, "RGBA").save(out)
-    print(f"Wrote {out}  ({size[0]}x{size[1]}, RGB copied + alpha)")
+    print(f"Wrote {out}  ({size[0]}x{size[1]}, RGB copied + alpha{', Y-flipped' if flip_y else ''})")
 
 
 def main():

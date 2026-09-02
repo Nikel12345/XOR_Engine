@@ -1,6 +1,55 @@
 {
     "models": [
         {
+            "name": "building16",
+            "vertex": "models/buildings/building16_v.bin",
+            "index": "models/buildings/building16_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building5",
+            "vertex": "models/buildings/building5_v.bin",
+            "index": "models/buildings/building5_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "telecom6",
+            "vertex": "models/telecom/telecom6.bin",
+            "index": "models/telecom/telecom6_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building28",
+            "vertex": "models/buildings/building28_v.bin",
+            "index": "models/buildings/building28_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building29",
+            "vertex": "models/buildings/building29_v.bin",
+            "index": "models/buildings/building29_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building20",
+            "vertex": "models/buildings/building20_v.bin",
+            "index": "models/buildings/building20_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building21",
+            "vertex": "models/buildings/building21_v.bin",
+            "index": "models/buildings/building21_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
             "name": "ship",
             "vertex": "models/low_poly_ship.bin",
             "index": "models/low_poly_ship_i.bin",
@@ -8,9 +57,72 @@
             "pool": "PosUVNorm"
         },
         {
-            "name": "skybox_cube",
-            "vertex": "models/skybox_cube.bin",
-            "index": "models/skybox_cube_i.bin",
+            "name": "building30",
+            "vertex": "models/buildings/building30_v.bin",
+            "index": "models/buildings/building30_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building7",
+            "vertex": "models/buildings/building7_v.bin",
+            "index": "models/buildings/building7_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "telecom4",
+            "vertex": "models/telecom/telecom4.bin",
+            "index": "models/telecom/telecom4_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building1",
+            "vertex": "models/buildings/building1_v.bin",
+            "index": "models/buildings/building1_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "telecom2",
+            "vertex": "models/telecom/telecom2.bin",
+            "index": "models/telecom/telecom2_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building2",
+            "vertex": "models/buildings/building2_v.bin",
+            "index": "models/buildings/building2_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "telecom1",
+            "vertex": "models/telecom/telecom1.bin",
+            "index": "models/telecom/telecom1_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building6",
+            "vertex": "models/buildings/building6_v.bin",
+            "index": "models/buildings/building6_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "telecom5",
+            "vertex": "models/telecom/telecom5.bin",
+            "index": "models/telecom/telecom5_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building17",
+            "vertex": "models/buildings/building17_v.bin",
+            "index": "models/buildings/building17_i.bin",
             "anchor": 0,
             "pool": "PosUVNorm"
         },
@@ -22,9 +134,170 @@
             "pool": "PosUVNorm"
         },
         {
+            "name": "building26",
+            "vertex": "models/buildings/building26_v.bin",
+            "index": "models/buildings/building26_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "radiotower",
+            "vertex": "models/telecom/radiotower.bin",
+            "index": "models/telecom/radiotower_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "skybox_cube",
+            "vertex": "models/skybox_cube.bin",
+            "index": "models/skybox_cube_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
             "name": "bulding1",
             "vertex": "models/buildings/building_v.bin",
             "index": "models/buildings/building_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "tower",
+            "vertex": "models/tower/tower.bin",
+            "index": "models/tower/tower_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "helipad",
+            "vertex": "models/helipad/helipad.bin",
+            "index": "models/helipad/helipad_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "telecom3",
+            "vertex": "models/telecom/telecom3.bin",
+            "index": "models/telecom/telecom3_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building3",
+            "vertex": "models/buildings/building3_v.bin",
+            "index": "models/buildings/building3_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building4",
+            "vertex": "models/buildings/building4_v.bin",
+            "index": "models/buildings/building4_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building8",
+            "vertex": "models/buildings/building8_v.bin",
+            "index": "models/buildings/building8_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building9",
+            "vertex": "models/buildings/building9_v.bin",
+            "index": "models/buildings/building9_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building10",
+            "vertex": "models/buildings/building10_v.bin",
+            "index": "models/buildings/building10_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building11",
+            "vertex": "models/buildings/building11_v.bin",
+            "index": "models/buildings/building11_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building12",
+            "vertex": "models/buildings/building12_v.bin",
+            "index": "models/buildings/building12_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building13",
+            "vertex": "models/buildings/building13_v.bin",
+            "index": "models/buildings/building13_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building14",
+            "vertex": "models/buildings/building14_v.bin",
+            "index": "models/buildings/building14_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building15",
+            "vertex": "models/buildings/building15_v.bin",
+            "index": "models/buildings/building15_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building18",
+            "vertex": "models/buildings/building18_v.bin",
+            "index": "models/buildings/building18_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building19",
+            "vertex": "models/buildings/building19_v.bin",
+            "index": "models/buildings/building19_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building22",
+            "vertex": "models/buildings/building22_v.bin",
+            "index": "models/buildings/building22_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building23",
+            "vertex": "models/buildings/building23_v.bin",
+            "index": "models/buildings/building23_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building24",
+            "vertex": "models/buildings/building24_v.bin",
+            "index": "models/buildings/building24_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building25",
+            "vertex": "models/buildings/building25_v.bin",
+            "index": "models/buildings/building25_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "building27",
+            "vertex": "models/buildings/building27_v.bin",
+            "index": "models/buildings/building27_i.bin",
             "anchor": 0,
             "pool": "PosUVNorm"
         }

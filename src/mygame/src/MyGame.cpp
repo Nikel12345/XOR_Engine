@@ -57,6 +57,11 @@ SDL_AppResult MyGame::MainInit()
         using namespace DefaultShaderProgramSet;
         SetBloomPrograms(ctx);
         SetAOPrograms(ctx);           // SSAO: якорённые кубы затеняются как обычная геометрия, губка — нет (её ambient = 0)
+        // Туман экранный, а губка пишет честный SV_Depth — значит он ляжет ПОВЕРХ её собственной
+        // атмосферы (menger.frag.hlsl) третьим слоем, и его дистанции в юнитах якоря непрерывными
+        // по масштабу не будут. Осознанно принято: отбор «чья это атмосфера» — свойство шейдера, а
+        // не пикселя, и экранному проходу недоступен. Max opacity = 0 выключает его в редакторе.
+        SetFogProgram(ctx);
         SetCullingPibPrograms(ctx);   // GPU-каллинг: программа на проход, регионы у PassManager
     }
 

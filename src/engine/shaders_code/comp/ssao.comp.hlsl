@@ -21,11 +21,7 @@
 //
 // Мир глазами шейдера — view-пространство камеры: там AO и считается (радиус в мировых единицах
 // одинаков во всех направлениях, чего экранный радиус не даёт). Обратное преобразование
-// depth → view выведено из СТОЛБЦОВ proj, а не из зашитой формулы: движок отдаёт glm-проекцию с
-// диапазоном NDC z ∈ [-1,1] (GLM_CLIP_CONTROL_RH_NO — GLM_FORCE_DEPTH_ZERO_TO_ONE нигде не задан),
-// и формула «как в ZO» тихо разъехалась бы. z_v = -proj[2][3] / (proj[2][2] + d) верна для обеих.
-//
-// NDC y — ВВЕРХ (UI_Yoga::px→NDC: `T = 1 - y/H*2`), поэтому uv→ndc идёт с флипом по y.
+// depth → view — в comp/view_from_depth.hlsli, общем с туманом.
 
 [[vk::combinedImageSampler]]
 Texture2D<float>  u_depth   : register(t0, space0);
@@ -51,25 +47,7 @@ cbuffer AOParams : register(b0, space2) {
 // С поворотом ядра по тайлу 4x4 и бокс-блюром 4x4 эффективный набор ещё в 16 раз шире.
 static const uint SAMPLE_COUNT = 32;
 
-// Глубина буфера → view-z (отрицательный, камера смотрит вдоль -z). Инверсия d = z_c/w_c при
-// z_c = A·z_v + B, w_c = -z_v: конвенция диапазона NDC z сюда не входит — она уже в A и B.
-float ViewZ(float d)
-{
-    const float A = Camera[0].proj[2][2];
-    const float B = Camera[0].proj[2][3];
-    return -B / (A + d);
-}
-
-// uv кадра + глубина → точка во view-пространстве.
-float3 ViewPos(float2 uv, float d)
-{
-    const float z = ViewZ(d);
-    const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
-    // x_v = -ndc.x·z / proj[0][0] (симметричная перспектива: сдвиговых членов нет)
-    return float3(-ndc.x * z / Camera[0].proj[0][0],
-                  -ndc.y * z / Camera[0].proj[1][1],
-                  z);
-}
+#include "comp/view_from_depth.hlsli"   // ViewZ/ViewPos — требуют объявленным Camera (выше)
 
 // Ядро вращается и сдвигается по радиусу ТАЙЛОМ 4x4 — свой вариант на каждый из 16 пикселей.
 // Не шумовая функция: рисунок обязан быть ТОЧНО периодичным с периодом 4, потому что гасит его

@@ -381,11 +381,22 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
         return;
     }
 
+    // Сверка длин — ОДИН раз на сущность: внутри цикла она печатала строку на каждый сабмеш,
+    // и город на 3000 домов давал десятки тысяч строк за сборку.
+    if (material_component.materials.size() != model->submeshes.size()) {
+        SDL_Log("BulidBatches:: Submash and material sizes mismatch (entity %u, model '%s': %u materials, %u submeshes)",
+            entity, model_component.name.c_str(),
+            safe_u32(material_component.materials.size()), safe_u32(model->submeshes.size()));
+    }
+
     for (SubMeshData& submesh : model->submeshes)
     {
-        if (material_component.materials.size() != model->submeshes.size()) {
-            SDL_Log("BulidBatches:: Submash and material sizes mismatch");
-        }
+        // Сабмеш без индексов рисовать нечем, но узел батча он заводил полноценный: свою
+        // индирект-команду с num_indices == 0 И СВОИ ИНСТАНСЫ в out_pib, которые кулинг честно
+        // обрабатывает. Пустые слоты — норма (модель обязана нести все номера сабмешей, иначе
+        // сдвинется адресация материалов), поэтому отсекаем их здесь, до узла.
+        if (submesh.indexCount == 0) continue;
+
         // Границы + промах имени материала (та же природа, что у модели выше).
         if (submesh.material_index >= material_component.materials.size()) {
             SDL_Log("BatchBuilder: entity %u material_index out of range - skipped", entity);

@@ -266,6 +266,41 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
     inited = true;
 }
 
+void DefaultShaderProgramSet::SetFogProgram(EngineContext* ctx)
+{
+    ShaderManager* sm = ctx->GetShaderManager();
+    using namespace DefaultRenderPassNamespace;
+    using namespace DefaultBuffersNames;
+    static bool inited = false;
+    if (inited) { SDL_Log("Fog shader program already initialized."); return; }
+
+    // Один шаг на весь эффект: глубина (сэмплер) + камера (ro) → домешивание тумана в scene_hdr.
+    // scene_hdr здесь ТОЛЬКО storage, глубина — только сэмплер: одновременного sampler+storage на
+    // одной текстуре нет. Своих таргетов у прохода не появляется вовсе.
+    ctx->CreateComputeShaderProgram("fog", "fog_cs",
+        {}, { DEFAULT_CAMERA_BUFFER },
+        { { std::string("scene_hdr"), 0, 0 } },   // rw
+        {},
+        { std::string("__main_depth") },
+        FOG_PASS, /*dont_save=*/true);
+
+    // Состояние прохода уходит вниз как есть: раскладка FogState совпадает с cbuffer FogParams.
+    sm->CreateComputePushFunc<FogState>("fog", [](const PushConstantBinder& b, FogState st) {
+        b.Push(0, st);
+    });
+
+    // Размер диспатча берём у ЖИВОГО атласа: ресайз меняет width/height внутри него, поэтому
+    // указатель остаётся верным, а числа приезжают уже новые.
+    {
+        TextureAtlas* hdr = ctx->GetTextureAtlas(std::string("scene_hdr"));
+        sm->CreateDispatchFunc<DummyDispatchData>("fog", [hdr](DispatchSizeBinder& b, DummyDispatchData) {
+            b.element_count = { hdr->width, hdr->height, 1 };
+        });
+    }
+
+    inited = true;
+}
+
 void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
 {
     // push/dispatch регистрируем в РЕЕСТРЕ по имени программы (не полем csp):

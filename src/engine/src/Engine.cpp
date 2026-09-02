@@ -462,6 +462,7 @@ void Engine::InitDefaultShaders()
 	engine_context->CreateComputeShader("ssao_blur_h_cs",     "../engine/shaders_code/comp/ssao_blur_h.comp.hlsl", /*dont_save=*/true);
 	engine_context->CreateComputeShader("ssao_blur_v_cs",     "../engine/shaders_code/comp/ssao_blur_v.comp.hlsl", /*dont_save=*/true);
 	engine_context->CreateComputeShader("ao_composite_cs",    "../engine/shaders_code/comp/ao_composite.comp.hlsl", /*dont_save=*/true);
+	engine_context->CreateComputeShader("fog_cs",             "../engine/shaders_code/comp/fog.comp.hlsl", /*dont_save=*/true);
 	engine_context->CreateComputeShader("culling_clear_cs",   "../engine/shaders_code/comp/culling_clear.comp.hlsl", /*dont_save=*/true);
 	engine_context->CreateComputeShader("culling_pib_cs",     "../engine/shaders_code/comp/culling_pib.comp.hlsl", /*dont_save=*/true);
 
@@ -595,7 +596,8 @@ void Engine::InitPasses()
 		SetDefaultCullingPass(engine_context);     // GPU-каллинг: out_pib до SHADOW_PASS (индекс 5)
 		SetDefaultShadowPCFRenderPass(engine_context, light_data_module);
 		SetDefaultMainRenderPass(engine_context);
-		SetDefaultAOPass(engine_context);           // SSAO по глубине main'а, применяется до прозрачных
+		SetDefaultAOPass(engine_context);           // SSAO по глубине main'а, применяется до тумана
+		SetDefaultFogPass(engine_context);          // атмосфера по глубине main'а: ПОСЛЕ AO, до прозрачных
 		SetTransparentPass(engine_context);
 		SetDebugColliderPass(engine_context);
 		SetDefaultBloomPass(engine_context);       // bloom от эмиссии (compute) + composite/tonemap в scene_hdr

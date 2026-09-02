@@ -65,12 +65,12 @@ SDL_AppResult Game::MainInit()
         glm::vec3(0.43f, -0.4f, -0.8f), // точка взгляда
         glm::vec3(0.0f, 1.0f, 0.0f)  // вектор вверх
     );
-    TextureAtlas* atlas = ctx->CreateTextureAtlas("albedo_atlas", TexturePresets::AlbedoAtlas(2048, 3, TexturePresets::FullMipLevels(2048)), DefaultSamplersNames::DEFAULT_SAMPLER);
+    TextureAtlas* atlas = ctx->CreateTextureAtlas("albedo_atlas", TexturePresets::AlbedoAtlas(2048, 7, 5), DefaultSamplersNames::DEFAULT_SAMPLER);
 	// Мипы обязательны: без них (а) POM-префильтр pomBias — no-op (нет грубых уровней), (б) нормаль
 	// не сглаживается (мерцание, см. заметку про red-shift). FullMipLevels включает мип-цепочку.
-	TextureAtlas* normal_atlas   = ctx->CreateTextureAtlas("normal_atlas",   TexturePresets::NormalAtlas(2048, 2, TexturePresets::FullMipLevels(2048)),   DefaultSamplersNames::DEFAULT_SAMPLER);
-	TextureAtlas* orm_atlas      = ctx->CreateTextureAtlas("orm_atlas",      TexturePresets::ORMAtlas(2048, 2), DefaultSamplersNames::DEFAULT_SAMPLER);
-	TextureAtlas* emissive_atlas = ctx->CreateTextureAtlas("emissive_atlas", TexturePresets::EmissiveAtlas(1024, 1), DefaultSamplersNames::DEFAULT_SAMPLER);
+	TextureAtlas* normal_atlas   = ctx->CreateTextureAtlas("normal_atlas",   TexturePresets::NormalAtlas(2048, 4, TexturePresets::FullMipLevels(2048)),   DefaultSamplersNames::DEFAULT_SAMPLER);
+	TextureAtlas* orm_atlas      = ctx->CreateTextureAtlas("orm_atlas",      TexturePresets::ORMAtlas(2048, 4), DefaultSamplersNames::DEFAULT_SAMPLER);
+	TextureAtlas* emissive_atlas = ctx->CreateTextureAtlas("emissive_atlas", TexturePresets::EmissiveAtlas(1024, 2), DefaultSamplersNames::DEFAULT_SAMPLER);
 
 
 	// --- Шрифт: растеризуется в общий __TextAtlas (CWD=src/game → путь fonts/…). ---
@@ -81,6 +81,7 @@ SDL_AppResult Game::MainInit()
         using namespace DefaultShaderProgramSet;
         SetBloomPrograms(ctx);
         SetAOPrograms(ctx);           // SSAO: глубина main'а → карта AO → вычитание из scene_hdr
+        SetFogProgram(ctx);           // туман: линейная стена по дистанции, поверх глубины main'а
         SetCullingPibPrograms(ctx);   // GPU-каллинг: программа на проход, регионы у PassManager
     }
     // Push/dispatch своих sp — ДО первого LoadScene: реестр ShaderManager вешает их на sp сам.

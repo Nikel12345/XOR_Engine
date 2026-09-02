@@ -34,4 +34,8 @@ namespace DefaultShaderProgramSet
     // порядок исполнения внутри прохода, а каждый шаг читает результат предыдущего.
     // Проход создаёт engine (DefaultRenderPassNamespace::SetDefaultAOPass).
     void SetAOPrograms(EngineContext* ctx);
+
+    // Программа тумана: один шаг (глубина + камера → домешивание в scene_hdr), поэтому порядка
+    // внутри прохода здесь нет. Проход создаёт engine (SetDefaultFogPass).
+    void SetFogProgram(EngineContext* ctx);
 }

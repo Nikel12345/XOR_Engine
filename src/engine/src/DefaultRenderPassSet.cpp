@@ -316,7 +316,8 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
     // геометрией сцены. depth_write выключен → рамки не портят буфер.
     RenderPassTexturesInfo debug_rptd{};
     debug_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
-    debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, g_pass_system.main_depth_format);
+    // STORE по той же причине, что у прозрачных: следом за этим проходом глубину сэмплит туман (27).
+    debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, g_pass_system.main_depth_format);
 
     auto debugPass = pm->CreateRenderPass(
         DEBUG_PASS,
@@ -360,7 +361,11 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
 
     RenderPassTexturesInfo transparent_rptd{};
     transparent_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
-    transparent_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_DONT_CARE, g_pass_system.main_depth_format);
+    // Глубину СОХРАНЯЕМ, хотя сам проход её больше не читает: после него по ней считает туман
+    // (FOG_PASS, 27). DONT_CARE делает содержимое неопределённым — драйвер вправе сбросить
+    // метаданные тайлового сжатия, и следующий сэмпл вернёт мусор ПОБЛОЧНО (видно как квадраты
+    // «есть эффект / нет»). См. WARNINGS.md.
+    transparent_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, g_pass_system.main_depth_format);
 
     auto transparentPass = pm->CreateRenderPass(
         TRANSPARENT_PASS,
@@ -517,6 +522,38 @@ void DefaultRenderPassNamespace::SetDefaultAOPass(EngineContext* ctx)
         21   // между MAIN (20) и TRANSPARENT (22): глубина и ambient готовы, bloom (26) увидит затенённое
     );
     SetPassState(ao, AO_STATE, AOState{});
+}
+
+void DefaultRenderPassNamespace::SetDefaultFogPass(EngineContext* ctx)
+{
+    if (!g_pass_system.common_inited) {
+        SDL_Log("SetDefaultFogPass: common resources must be initialized first.");
+        return;
+    }
+    // Схема состояния — рядом с проходом, которому состояние принадлежит (как у bloom и AO).
+    {
+        using K = ParamsFieldKind;
+        ParamsSpecRegistry::Passes().Register(MakeParamsSpec<FogState>(FOG_STATE, {
+            ParamsFieldSpec::Num(PARAMS_FIELD(FogState, color),           K::Color3).Label("Fog color"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(FogState, start_distance),  K::F32, 0.0f, 2000.0f, 0.25f).Label("Start distance"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(FogState, full_distance),   K::F32, 0.0f, 5000.0f, 1.0f).Label("Full distance"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(FogState, max_opacity),     K::F32, 0.0f, 1.0f, 0.01f).Label("Max opacity"),
+        }));
+    }
+
+    PassManager* pm = ctx->GetPassManager();
+    BufferManager* bm = ctx->GetBufferManager();
+
+    ComputePassStep* fog = pm->CreateComputePass(
+        FOG_PASS,
+        [bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)
+    {
+        DummyDispatchData dd{};
+        pm->ComputePassStandardBody(cb, &cp, bm, cp.state.data(), &dd, pass_frame);
+    },
+        27   // после bloom (26), до UI (28) — обоснование у объявления в заголовке
+    );
+    SetPassState(fog, FOG_STATE, FogState{});
 }
 
 void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ctx, LightDataModule* ldm)
