@@ -226,12 +226,12 @@ int main(int, char**)
             {}, {}, {}, "ROTATE_PREPASS", &bm, /*tm=*/nullptr);   // ссылки по имени; атласов у зонда нет
         if (!csp) { SDL_Log("CreateComputeShaderProgram не вернул программу."); return 1; }
 
-        csp->BindPushConstants<RotateParams>(
+        sm.CreateComputePushInstruction<RotateParams>("csp_rotate_tick",
             [](const PushConstantBinder& binder, RotateParams data) {
             data.vertex_count = VERTEX_COUNT;
-            binder.Push(0, data);
+            binder.Push(data);
         });
-        csp->BindDispatch<DummyDispatchData>(
+        sm.CreateDispatchInstruction<DummyDispatchData>("csp_rotate_tick",
             [](DispatchSizeBinder& binder, DummyDispatchData) { binder.Dispatch(VERTEX_COUNT, 1, 1); });
 
         // Тик слота. Лямбда исполняется на sim-потоке в СВОЁМ слоте — общего состояния между

@@ -216,6 +216,223 @@
             "index": "models/buildings/building30_i.bin",
             "anchor": 0,
             "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign01",
+            "vertex": "models/signs/sign01.bin",
+            "index": "models/signs/sign01_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign02",
+            "vertex": "models/signs/sign02.bin",
+            "index": "models/signs/sign02_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign03",
+            "vertex": "models/signs/sign03.bin",
+            "index": "models/signs/sign03_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign04",
+            "vertex": "models/signs/sign04.bin",
+            "index": "models/signs/sign04_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign05",
+            "vertex": "models/signs/sign05.bin",
+            "index": "models/signs/sign05_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign06",
+            "vertex": "models/signs/sign06.bin",
+            "index": "models/signs/sign06_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign07",
+            "vertex": "models/signs/sign07.bin",
+            "index": "models/signs/sign07_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign08",
+            "vertex": "models/signs/sign08.bin",
+            "index": "models/signs/sign08_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign09",
+            "vertex": "models/signs/sign09.bin",
+            "index": "models/signs/sign09_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign10",
+            "vertex": "models/signs/sign10.bin",
+            "index": "models/signs/sign10_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign11",
+            "vertex": "models/signs/sign11.bin",
+            "index": "models/signs/sign11_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign12",
+            "vertex": "models/signs/sign12.bin",
+            "index": "models/signs/sign12_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign13",
+            "vertex": "models/signs/sign13.bin",
+            "index": "models/signs/sign13_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign14",
+            "vertex": "models/signs/sign14.bin",
+            "index": "models/signs/sign14_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign15",
+            "vertex": "models/signs/sign15.bin",
+            "index": "models/signs/sign15_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign16",
+            "vertex": "models/signs/sign16.bin",
+            "index": "models/signs/sign16_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign17",
+            "vertex": "models/signs/sign17.bin",
+            "index": "models/signs/sign17_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign18",
+            "vertex": "models/signs/sign18.bin",
+            "index": "models/signs/sign18_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign19",
+            "vertex": "models/signs/sign19.bin",
+            "index": "models/signs/sign19_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign20",
+            "vertex": "models/signs/sign20.bin",
+            "index": "models/signs/sign20_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign21",
+            "vertex": "models/signs/sign21.bin",
+            "index": "models/signs/sign21_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign22",
+            "vertex": "models/signs/sign22.bin",
+            "index": "models/signs/sign22_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign23",
+            "vertex": "models/signs/sign23.bin",
+            "index": "models/signs/sign23_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign24",
+            "vertex": "models/signs/sign24.bin",
+            "index": "models/signs/sign24_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign25",
+            "vertex": "models/signs/sign25.bin",
+            "index": "models/signs/sign25_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign26",
+            "vertex": "models/signs/sign26.bin",
+            "index": "models/signs/sign26_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign27",
+            "vertex": "models/signs/sign27.bin",
+            "index": "models/signs/sign27_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign28",
+            "vertex": "models/signs/sign28.bin",
+            "index": "models/signs/sign28_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign29",
+            "vertex": "models/signs/sign29.bin",
+            "index": "models/signs/sign29_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign30",
+            "vertex": "models/signs/sign30.bin",
+            "index": "models/signs/sign30_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
+        },
+        {
+            "name": "sign31",
+            "vertex": "models/signs/sign31.bin",
+            "index": "models/signs/sign31_i.bin",
+            "anchor": 0,
+            "pool": "PosUVNorm"
         }
     ]
 }

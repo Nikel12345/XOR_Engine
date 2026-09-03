@@ -42,7 +42,7 @@ namespace DefaultRenderPassNamespace
     // приходить ЯВНО: размер буфера для этого не годится (он только растёт, см.
     // LightDataModule.h), а рендер-поток берёт значение из слепка слота, не из ECS.
     // КОНТРАКТ: программа, чей fs включает лайтинг-базу (main_pass.frag.hlsl / transparent.
-    // frag.hlsl), ОБЯЗАНА зарегистрировать пуш этой структуры (CreatePushFunc по имени sp) —
+    // frag.hlsl), ОБЯЗАНА зарегистрировать пуш этой структуры (CreatePushInstruction по имени sp) —
     // он занимает b0, а UVL/params/раскладка съезжают следом (uvl_slot = binder.frag_count).
     // Забыли — материальные униформы уедут на регистр ниже, это видно сразу.
     struct alignas(16) LightCountPushData

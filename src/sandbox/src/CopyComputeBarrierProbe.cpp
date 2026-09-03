@@ -143,13 +143,13 @@ int main(int, char**)
         { bm->GetBufferData(PROBE_BUFFER) },   // rw (u0, space1)
         {}, {}, {}, {},
         inc_pass);
-    csp->BindPushConstants<IncParams>(
+    sm->CreateComputePushInstruction<IncParams>("csp_increment_u64",
         [](const PushConstantBinder& binder, IncParams data) {
         data.total_elements = NUM_ELEMENTS;
         data.row_elems = ROW_ELEMS;
-        binder.Push(0, data);
+        binder.Push(data);
     });
-    csp->BindDispatch<DummyDispatchData>(
+    sm->CreateDispatchInstruction<DummyDispatchData>("csp_increment_u64",
         [](DispatchSizeBinder& binder, DummyDispatchData) {
         // 2D: x — внутри строки (threadcount_x=256 → 4096 групп), y — строки (по одной группе).
         binder.element_count = { ROW_ELEMS, NUM_ROWS, 1 };

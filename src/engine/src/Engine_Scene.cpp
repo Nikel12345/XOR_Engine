@@ -639,7 +639,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 					const ShaderProgramDescription spd = ReadSpd(yyjson_obj_get(e, "spd"));
 
 					// Merge-upsert: занятое имя = delete+create (кэш пайплайна по sp* — снять ДО).
-					// push_func НЕ переносим: его вернёт реестр код-байндингов по имени (внутри
+					// push-инструкции НЕ переносим: их вернёт реестр код-байндингов по имени (внутри
 					// CreateShaderProgram) — перенос со старой sp ломался бы на переименовании.
 					auto& progs = sm->GetShaderPrograms();
 					if (auto it = progs.find(name); it != progs.end()) {
@@ -845,9 +845,9 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 	}
 
 	// Пере-привязка код-байндингов (push/dispatch) к загруженным программам по имени. Сами
-	// инструкции игра регистрирует один раз (ShaderManager::CreatePushFunc), CreateShaderProgram
+	// инструкции игра регистрирует один раз (ShaderManager::CreatePushInstruction), CreateShaderProgram
 	// вешает их уже на создании — здесь остаётся общий проход и отчёт об осиротевших записях.
-	shader_manager->BindShaderFunctions();
+	shader_manager->ReportOrphanCodeBindings();
 
 	// Бейк GPU-ресурсов здесь НЕ делается: он дренируется каждый кадр в начале Engine::PrepareFunc
 	// (BakePending). Всё, что объявила эта загрузка (атласы, буферы, sp, материалы), попадёт в

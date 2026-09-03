@@ -30,6 +30,7 @@
 #include "EngineContext.h"
 #include "DefaultUpdateSet.h"
 #include "DefaultRenderPassSet.h"
+#include "DefaultShaderSet.h"   // код-байндинги движкового набора (SetDefaultPushes)
 #include "TexturesPresets.h"
 #include "ComponentSerializer.h"
 #include "ParamsSpec.h"
@@ -400,6 +401,11 @@ void Engine::InitDefaultShaders()
 	using namespace ShaderBase;
 	namespace RP = DefaultRenderPassNamespace;
 
+	// Код-байндинги движкового набора (типы типовых пушей + именные) — ПЕРЕД созданием шейдеров:
+	// разбор маркеров //@push сверяется с реестром типов прямо на компиляции.
+	DefaultShaderProgramSet::SetDefaultPushes(engine_context);
+
+
 	// ── Fallback: материал с УДАЛЁННОЙ sp рисуется им (аналог untextured — цвет из params, без
 	//    текстур). Держим ОТДЕЛЬНОЙ тройкой, а не ссылкой на main_pass_vs/untextured_surface_fs
 	//    ниже: смысл fallback-а в том, чтобы пережить удаление любого шейдера из редактора.
@@ -550,20 +556,7 @@ void Engine::InitDefaultShaders()
 			{ TextureSlotRole::Albedo }, /*dont_save=*/true);
 	}
 
-	// ── Push-константы движковых sp: код-байндинг живёт рядом с созданием программы. Реестр
-	//    ShaderManager вешает его по имени — и здесь, и на любой будущей пересборке этой sp. ──
-	shader_manager->CreatePushFunc<RP::ShadowPushData>("ShadowCaster",
-		[](const PushConstantBinder& b, RP::ShadowPushData data) { b.PushFragment(data); });   // слот 0
-	shader_manager->CreatePushFunc<RP::DebugColliderPushData>("Wireframe",
-		[](const PushConstantBinder& b, RP::DebugColliderPushData data) { b.PushFragment(data); });   // fragment slot 0 -> b0, space3
 
-	// Счётчик источников света — ПЕРВЫЙ fragment-uniform (b0, space3) у каждой программы, чей fs
-	// включает лайтинг-базу: UVL/params/раскладка съезжают за ним сами (uvl_slot =
-	// binder.frag_count, см. RenderManager). Игровые программы на движковой базе регистрируют
-	// такой же пуш у себя (GameShaderSet / FractalShaderSet) — иначе их униформы уедут на слот ниже.
-	for (const char* lit_sp : { "Lit", "LitColor", "LitTransparent", "_Fallback" })
-		shader_manager->CreatePushFunc<RP::LightCountPushData>(lit_sp,
-			[](const PushConstantBinder& b, RP::LightCountPushData data) { b.PushFragment(data); });
 }
 
 void Engine::InitDefaultBufferUpdaters()

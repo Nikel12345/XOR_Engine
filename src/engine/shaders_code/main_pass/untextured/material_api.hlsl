@@ -35,12 +35,15 @@ struct SurfaceData
 // программы (RP::LightCountPushData), а UVL/params/раскладка встают за ним — движок кладёт их с
 // binder.frag_count. Счётчик приходит push-константой, а НЕ из LightBlock.GetDimensions: буфер
 // умеет только расти, и его размер больше числа источников (в пределе — свет прошлой сцены).
+//@push light_count
 cbuffer LightCountBlock : register(b0, space3) {
     uint u_lightCount;
 };
 
 // UVL нет → MaterialBlock идёт сразу за счётчиком светов (b1). Сэмплеров пасса 2 (тень t0 +
 // env t1, оба объявлены базой), поэтому storage базы съезжают: LightBlock t2, ShadowCameras t3.
+// UVL и раскладки вариантов у бестекстурного пролога нет — только счётчик светов и параметры.
+//@push material_params
 #define MATERIAL_BLOCK_REGISTER  register(b1, space3)
 #define LIGHT_BLOCK_REGISTER     register(t2, space2)
 #define SHADOW_CAMERAS_REGISTER  register(t3, space2)

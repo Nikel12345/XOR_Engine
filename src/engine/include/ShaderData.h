@@ -55,6 +55,10 @@ struct VertexShaderData {
     // (сработали бы дефолты #ifndef), молча и без ошибки. Порядок канонизирован сортировкой
     // по имени в Create*Shader — от него зависит ключ кэша .spv.
     std::vector<ShaderDefine> defines;
+    // ТИПОВЫЕ ПУШИ, объявленные самим исходником: маркеры //@push <тип> в порядке, в котором они
+    // встречаются в развёрнутом тексте (файл + все его #include). Порядок значим — он и есть
+    // порядок cbuffer'ов, то есть будущая нумерация слотов. Сейчас только читается и логируется.
+    std::vector<std::string> push_kinds;
     bool dont_save = false;   // движковый дефолт (_fallback_vs) — в shaders.json не пишется
 };
 
@@ -62,6 +66,10 @@ struct FragmentShaderData {
     ShaderBase::ShaderData shader_data;
     std::string source_path;   // исходник fs (для перекомпиляции из редактора; см. VertexShaderData)
     std::vector<ShaderDefine> defines;   // см. VertexShaderData::defines
+    // ТИПОВЫЕ ПУШИ, объявленные самим исходником: маркеры //@push <тип> в порядке, в котором они
+    // встречаются в развёрнутом тексте (файл + все его #include). Порядок значим — он и есть
+    // порядок cbuffer'ов, то есть будущая нумерация слотов. Сейчас только читается и логируется.
+    std::vector<std::string> push_kinds;
     bool dont_save = false;    // см. VertexShaderData::dont_save
 };
 
@@ -79,6 +87,10 @@ struct ComputeShaderData {
     Uint32 num_readwrite_storage_textures = 0;
     Uint32 num_readwrite_storage_buffers = 0;
     Uint32 num_uniform_buffers = 0;
+    // ТИПОВЫЕ ПУШИ, объявленные самим исходником: маркеры //@push <тип> в порядке, в котором они
+    // встречаются в развёрнутом тексте (файл + все его #include). Порядок значим — он и есть
+    // порядок cbuffer'ов, то есть будущая нумерация слотов. Сейчас только читается и логируется.
+    std::vector<std::string> push_kinds;
     bool dont_save = false;    // см. VertexShaderData::dont_save
 };
 
@@ -99,12 +111,10 @@ struct ShaderProgram {
     // uniform sampler2D u_albedoTexture, then required_slots will contain TextureSlotRole::Albedo.
     std::vector<TextureSlotRole> required_slots;
 
-    std::function<void(const PushConstantBinder&, const void*)> push_func;
-    template<typename T, typename Fn> void BindPushConstants(Fn&& fn) {
-        push_func = [fn = std::forward<Fn>(fn)](const PushConstantBinder& b, const void* raw) {
-            fn(b, *static_cast<const T*>(raw));
-        };
-    }
+    // Push-инструкций у программы НЕТ полем: они лежат в плоском реестре ShaderManager под её
+    // ИМЕНЕМ (ShaderPushInstruction), а сборка батчей собирает их оттуда. Копия здесь была бы
+    // вторым источником истины про то же самое — и её пришлось бы синхронизировать на каждом
+    // пересоздании программы.
 	ShaderProgramDescription spd;   // ПО ЗНАЧЕНИЮ: параметры пайплайна живут в самом sp (не в словаре)
     // Проход — ССЫЛКА ПО ИМЕНИ, как vs_name/fs_name и буферы. Резолв в RenderPassStep* делают
     // потребители (PipeManager на сборке пайплайна, BatchBuilder на сборке батча), получая
@@ -137,21 +147,8 @@ struct ComputeShaderProgram {
     std::vector<AtlasName> ro_storage_texture_names;
     std::vector<AtlasName> texture_sampler_names;
 
-    std::function<void(const PushConstantBinder&, const void*)> push_func = nullptr;
-    template<typename T, typename Fn>
-    void BindPushConstants(Fn&& fn) {
-        push_func = [fn = std::forward<Fn>(fn)](const PushConstantBinder& binder, const void* raw) {
-            fn(binder, *static_cast<const T*>(raw));
-        };
-    }
-
-    std::function<void(DispatchSizeBinder&, const void*)> dispatch_func = nullptr;
-    template<typename T, typename Fn>
-    void BindDispatch(Fn&& fn) {
-        dispatch_func = [fn = std::forward<Fn>(fn)](DispatchSizeBinder& binder, const void* raw) {
-            fn(binder, *static_cast<const T*>(raw));
-        };
-    }
+    // Ни push-, ни dispatch-инструкций программа полем не держит: они в плоском реестре
+    // ShaderManager под её ИМЕНЕМ, сборка compute-батчей резолвит их оттуда (см. ShaderProgram).
 
     ComputePassName compute_pass_name;   // ссылка по имени, см. ShaderProgram::render_pass_name
 

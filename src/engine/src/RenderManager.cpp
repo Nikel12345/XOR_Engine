@@ -295,16 +295,18 @@ void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassS
 		glm::uvec3 elements{ 1, 1, 1 };
 		if (shader_batch.dispatch_func) {
 			DispatchSizeBinder dispatch_binder{};
-			dispatch_binder.slot = pass_frame;   // ключ пер-слотовых слепков для Ask*(slot)
+			dispatch_binder.frame = pass_frame;   // ключ пер-слотовых слепков для Ask*(frame)
 			shader_batch.dispatch_func(dispatch_binder, dispatch_data_raw);
 			elements = dispatch_binder.element_count;
 		}
 
 		if (elements.x == 0 || elements.y == 0 || elements.z == 0) continue;
 
-		if (shader_batch.push_func) {
-			PushConstantBinder binder{ cb, pass_frame };
-			shader_batch.push_func(binder, push_data_raw);
+		{
+			// Группы draw'а у compute нет — в контексте только состояние прохода и кадровый слот.
+			const PushInput push_in{ push_data_raw, nullptr, pass_frame };
+			for (const PushInstruction& pi : shader_batch.push_instructions)
+				pi.fn(PushConstantBinder{ cb, pi.stage, pi.uniform_slot, pass_frame }, push_in);
 		}
 
 		std::vector<SDL_GPUStorageBufferReadWriteBinding> storage_buffer_bindings =
@@ -471,12 +473,6 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 			continue;
 		}
 
-		PushConstantBinder binder{ cb, render_frame };
-		if (shader_batch.push_func) {
-			shader_batch.push_func(binder, push_data_raw);
-		}
-		const uint32_t uvl_slot = binder.frag_count;
-
 		if (!shader_batch.vertexStorageBuffers.empty()) {
 			bm->BindGPUVertexStorageBuffers(rp, 0, shader_batch.vertexStorageBuffers, render_frame);
 		}
@@ -494,27 +490,13 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 				SDL_BindGPUFragmentSamplers(rp, global_sampler_count, atlas_batch.texture_binding.data(), safe_u32(atlas_batch.texture_binding.size()));
 			}
 			for (const RenderSnap::TextureDraw& texture_batch : atlas_batch.draws) {
-				if (!texture_batch.texture_uvl.empty()) {
-					SDL_PushGPUFragmentUniformData(cb, uvl_slot,
-						texture_batch.texture_uvl.data(),
-						safe_u32(texture_batch.texture_uvl.size() * sizeof(UVL_Block)));
-				}
-
-				if (texture_batch.params && !texture_batch.params->empty()
-						/* пушим, ТОЛЬКО если шейдер объявил uniform на этом слоте (нет MaterialBlock у shadow/depth → не лезем) */
-						&& (uvl_slot + (texture_batch.texture_uvl.empty() ? 0u : 1u)) < shader_batch.frag_uniform_count) {
-					SDL_PushGPUFragmentUniformData(cb, uvl_slot + (texture_batch.texture_uvl.empty() ? 0u : 1u),   /* params: плотный слот (без UVL → uvl_slot) */
-						texture_batch.params->data(), safe_u32(texture_batch.params->size()));
-				}
-
-				// Раскладка таблицы UVL — ТРЕТИЙ fragment-uniform, ПОСЛЕ params: так
-				// MATERIAL_BLOCK_REGISTER не двигается (b0 uvl, b1 params, b2 раскладка).
-				// Гейт тот же, что у params: пушим, только если шейдер объявил uniform на этом
-				// слоте (у shadow/wireframe/untextured его нет — туда не лезем).
-				if (uvl_slot + 2 < shader_batch.frag_uniform_count) {
-					SDL_PushGPUFragmentUniformData(cb, uvl_slot + 2,
-						&texture_batch.variant_layout, sizeof(VariantLayout));
-				}
+				// Инструкции программы — на КАЖДУЮ группу: их источники данных разные (состояние
+				// прохода одно на проход, uvl/params/раскладка — свои у каждой группы), а слот у
+				// каждой фиксирован, так что повтор ничего не сдвигает. Цена — memcpy на блок,
+				// перевязку дескрипторов эти draw'ы всё равно уже платят за движковые блоки.
+				const PushInput push_in{ push_data_raw, &texture_batch, render_frame };
+				for (const PushInstruction& pi : shader_batch.push_instructions)
+					pi.fn(PushConstantBinder{ cb, pi.stage, pi.uniform_slot, render_frame }, push_in);
 
 				SDL_DrawGPUIndexedPrimitivesIndirect(rp,
 					indirect_buf,

@@ -80,10 +80,12 @@ struct TextureData { uint4 data; };
 // программы (RP::LightCountPushData), а UVL/params/раскладка встают за ним — движок кладёт их с
 // binder.frag_count. Счётчик приходит push-константой, а НЕ из LightBlock.GetDimensions: буфер
 // умеет только расти, и его размер больше числа источников (в пределе — свет прошлой сцены).
+//@push light_count
 cbuffer LightCountBlock : register(b0, space3) {
     uint u_lightCount;
 };
 
+//@push uvl
 cbuffer TextureUVLBlock : register(b1, space3) {
     // Таблица СГРУППИРОВАНА ПО СЛОТАМ: подряд все блоки слота, внутри группы [0] — дефолт.
     // Поэтому индекс блока слота s НЕ равен s — только через TexIndex(s) (см. ниже).
@@ -91,6 +93,9 @@ cbuffer TextureUVLBlock : register(b1, space3) {
     TextureData textures[MAX_UVL_BLOCKS];
 };
 
+// Слот раздаёт ПРОЛОГ (сам cbuffer объявляет шейдер этим макросом), поэтому и маркер здесь:
+// порядок маркеров в тексте = порядок слотов, и блок обязан встать между UVL и раскладкой.
+//@push material_params
 #define MATERIAL_BLOCK_REGISTER register(b2, space3)
 
 // Регистры движковых storage-буферов базы зависят от числа сэмплеров пасса (shadercross
@@ -105,6 +110,7 @@ cbuffer TextureUVLBlock : register(b1, space3) {
 // Как адресовать textures[]: слово на слот + номер материала у сущности. Третий uniform, ПОСЛЕ
 // MaterialBlock — чтобы не двигать его регистр (b0 занят счётчиком светов, см. выше).
 // Зеркало VariantLayout из RenderCommandData.h.
+//@push variant_layout
 cbuffer VariantLayoutBlock : register(b3, space3) {
     uint4 slot_layout[MAX_SLOTS / 4];   // (base<<16)|(cell<<8)|count на слот
     uint  material_index;               // offset 48 — массив кончается на 16-байтной границе

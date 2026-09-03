@@ -277,14 +277,14 @@ int main(int, char**)
             "ROTATE_PREPASS", &bm, /*tm=*/nullptr);
         if (!csp) { SDL_Log("CreateComputeShaderProgram не вернул программу."); return 1; }
 
-        // push_func: лямбда получает заготовку из тела прохода и досылает её шейдеру.
+        // push-инструкция: лямбда получает заготовку из тела прохода и досылает её шейдеру.
         // Здесь она только проставляет счётчик и пушит — дельту уже положило тело прохода.
-        csp->BindPushConstants<RotateParams>(
+        sm.CreateComputePushInstruction<RotateParams>("csp_rotate_tick",
             [](const PushConstantBinder& binder, RotateParams data) {
             data.vertex_count = VERTEX_COUNT;
-            binder.Push(0, data);   // слот 0 = b0, space2 (см. шейдер)
+            binder.Push(data);   // слот 0 = b0, space2 (см. шейдер)
         });
-        csp->BindDispatch<DummyDispatchData>(
+        sm.CreateDispatchInstruction<DummyDispatchData>("csp_rotate_tick",
             [](DispatchSizeBinder& binder, DummyDispatchData) {
             binder.Dispatch(VERTEX_COUNT, 1, 1);   // счёт ЭЛЕМЕНТОВ, деление на numthreads — внутри
         });

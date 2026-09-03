@@ -146,10 +146,9 @@ namespace FractalUpdateSet
     void FractalScaleStep(float delta_levels);
 
     // Push-константы фрактальных фонов (fragment слот 0 → b0, space3; раскладка = cbuffer
-    // FractalParams обоих фрагментников). ВАЖНО: тело MAIN_PASS передаёт в push_func nullptr
-    // вместо данных (RenderPassStandardBody(..., nullptr)), поэтому биндить надо НАПРЯМУЮ
-    // полем sp->push_func лямбдой, игнорирующей raw, — BindPushConstants<T> разыменовывает
-    // raw и на программах main-пасса падал бы.
+    // FractalParams обоих фрагментников). Данные инструкция строит САМА (время/итерации), а
+    // состояние прохода игнорирует — поэтому регистрируется сырой формой CreatePushInstruction,
+    // без типизированной обёртки: та разыменовала бы raw, который этим программам не нужен.
     struct alignas(16) FractalPushData {
         float    time      = 0.0f;   // губка: вращение света; Мандельброт: анимация палитры
         // Потолок шагов рэймарча (губка, over-relaxation ω=1.6) либо итераций пикселя

@@ -18,24 +18,22 @@ void FractalShaderSet::RegisterShaderFuncs(EngineContext* ctx)
     // Фрактальные фоны: у каждой сцены свой sp, имена разные — регистрируем обе функции разом,
     // разбор имени сцены больше не нужен. Данные эти sp строят сами (время/итерации), состояние
     // прохода им не нужно — берём сырую форму и raw игнорируем (fragment slot 0 → b0, space3).
-    sm->CreatePushFunc("Fractal", [](const PushConstantBinder& b, const void*) {
+    sm->CreatePushInstruction("Fractal", PushStage::Fragment, [](const PushConstantBinder& b, const PushInput&) {
         FractalUpdateSet::FractalPushData d{};   // max_steps по умолчанию — потолок рэймарча
         d.time = (float)SDL_GetTicks() / 1000.0f;
-        b.PushFragment(d);
+        b.Push(d);
     });
 
-    sm->CreatePushFunc("Mandelbrot", [](const PushConstantBinder& b, const void*) {
+    sm->CreatePushInstruction("Mandelbrot", PushStage::Fragment, [](const PushConstantBinder& b, const PushInput&) {
         FractalUpdateSet::FractalPushData d{};
         d.time = (float)SDL_GetTicks() / 1000.0f;
         // Потолок итераций пикселя = длина референс-орбиты: глубже неё дельты всё
         // равно не уходят (ре-базирование заворачивает m на начало орбиты).
         d.max_steps = FractalUpdateSet::MANDELBROT_ORBIT_MAX;
-        b.PushFragment(d);
+        b.Push(d);
     });
 
-    // AnchorObject — кубы-якоря на ДВИЖКОВОЙ лайтинг-базе (fs = main_pass/fractal/surface.hlsl):
-    // база читает число источников push-константой в b0, поэтому программа обязана его пушить
-    // (движок регистрирует такой пуш только своим sp). См. RP::LightCountPushData.
-    sm->CreatePushFunc<RP::LightCountPushData>("AnchorObject",
-        [](const PushConstantBinder& b, RP::LightCountPushData data) { b.PushFragment(data); });
+    // AnchorObject (кубы-якоря на движковой лайтинг-базе) тут НЕ значится намеренно: счётчик
+    // светов приезжает ему типовым пушем — маркер стоит в движковом прологе, который его fs
+    // включает. Регистрировать по имени программы нужно только СВОИ константы, как выше.
 }

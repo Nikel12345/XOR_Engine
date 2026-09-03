@@ -128,36 +128,72 @@ public:
 	// имён программ уже глобально (LoadScene делает merge-upsert в тот же словарь), так что
 	// реестр функций наследует ровно тот же контракт уникальности, а не вводит новый. Захотим
 	// сцено-локальные имена — менять надо ключ САМИХ программ, и эти словари пойдут за ним.
-	using PushFunc     = std::function<void(const PushConstantBinder&, const void*)>;
+	using PushFunc     = ::PushFunc;             // см. ShaderTypes.h
 	using DispatchFunc = std::function<void(DispatchSizeBinder&, const void*)>;
 
-	// Сырая форма: лямбда сама разбирается с raw (или игнорирует его — тело MAIN_PASS передаёт nullptr).
-	void CreatePushFunc(const std::string& sp_name, PushFunc fn);
-	// Типизированная: T — структура push-данных прохода, стирание типа делает обёртка
-	// (как ShaderProgram::BindPushConstants<T>, который остался для прямой правки готовой sp).
-	template<typename T, typename Fn> void CreatePushFunc(const std::string& sp_name, Fn&& fn) {
-		CreatePushFunc(sp_name, PushFunc([fn = std::forward<Fn>(fn)](const PushConstantBinder& b, const void* raw) {
+	// Реестр ПЛОСКИЙ (один вектор на все программы, как update-инструкции у BufferManager), а
+	// принадлежность несёт сама запись — именем программы. Каждая регистрация ДОБАВЛЯЕТ запись,
+	// а не заменяет предыдущую: порядок регистрации = порядок исполнения = нумерация слотов,
+	// поэтому регистрировать их надо ОДИН РАЗ на инициализации (повторный вызов удлинит список
+	// и сдвинет регистры). Все инструкции получают ОДНО И ТО ЖЕ состояние прохода и сами берут
+	// из него нужное.
+	//
+	// Сырая форма: лямбда сама разбирается с контекстом (и вправе не брать из него ничего).
+	// stage решает, в чьи слоты пишет инструкция; сам слот назначит CollectPushInstructions.
+	void CreatePushInstruction(const std::string& sp_name, PushStage stage, PushFunc fn);
+	// Типизированная: T — структура СОСТОЯНИЯ ПРОХОДА, разыменование делает обёртка. Инструкциям,
+	// которым нужны данные батча (uvl/params/раскладка), нужна сырая форма — у них источник другой.
+	template<typename T, typename Fn> void CreatePushInstruction(const std::string& sp_name, PushStage stage, Fn&& fn) {
+		CreatePushInstruction(sp_name, stage, PushFunc([fn = std::forward<Fn>(fn)](const PushConstantBinder& b, const PushInput& in) {
+			fn(b, *static_cast<const T*>(in.pass_state));
+		}));
+	}
+
+	// Compute: стадия одна, поэтому в сигнатуре её нет.
+	void CreateComputePushInstruction(const std::string& csp_name, PushFunc fn);
+	template<typename T, typename Fn> void CreateComputePushInstruction(const std::string& csp_name, Fn&& fn) {
+		CreateComputePushInstruction(csp_name, PushFunc([fn = std::forward<Fn>(fn)](const PushConstantBinder& b, const PushInput& in) {
+			fn(b, *static_cast<const T*>(in.pass_state));
+		}));
+	}
+
+	void CreateDispatchInstruction(const std::string& csp_name, DispatchFunc fn);
+	template<typename T, typename Fn> void CreateDispatchInstruction(const std::string& csp_name, Fn&& fn) {
+		CreateDispatchInstruction(csp_name, DispatchFunc([fn = std::forward<Fn>(fn)](DispatchSizeBinder& b, const void* raw) {
 			fn(b, *static_cast<const T*>(raw));
 		}));
 	}
 
-	void CreateComputePushFunc(const std::string& csp_name, PushFunc fn);
-	template<typename T, typename Fn> void CreateComputePushFunc(const std::string& csp_name, Fn&& fn) {
-		CreateComputePushFunc(csp_name, PushFunc([fn = std::forward<Fn>(fn)](const PushConstantBinder& b, const void* raw) {
-			fn(b, *static_cast<const T*>(raw));
+
+	// ── Реестр ТИПОВ пушей ────────────────────────────────────────────────────────────────
+	// Тип = имя + стадия + функтор. Программа его НЕ регистрирует: шейдер объявляет тип маркером
+	// //@push <тип> рядом со своим cbuffer'ом, парсер снимает маркеры из развёрнутого исходника
+	// (файл + все #include, в порядке текста), а сборка списка превращает их в инструкции.
+	// Отсюда главное свойство: включил чужой пролог/базу — получил их пуши, ничего не регистрируя.
+	// Регистрировать типы надо ДО создания шейдеров (разбор маркеров сверяется с этим реестром).
+	struct PushKind {
+		PushStage stage;
+		PushFunc  fn;
+	};
+	void RegisterPushKind(const std::string& kind, PushStage stage, PushFunc fn);
+	// Типизированная форма: T — структура состояния прохода (см. CreatePushInstruction).
+	template<typename T, typename Fn> void RegisterPushKind(const std::string& kind, PushStage stage, Fn&& fn) {
+		RegisterPushKind(kind, stage, PushFunc([fn = std::forward<Fn>(fn)](const PushConstantBinder& b, const PushInput& in) {
+			fn(b, *static_cast<const T*>(in.pass_state));
 		}));
 	}
 
-	void CreateDispatchFunc(const std::string& csp_name, DispatchFunc fn);
-	template<typename T, typename Fn> void CreateDispatchFunc(const std::string& csp_name, Fn&& fn) {
-		CreateDispatchFunc(csp_name, DispatchFunc([fn = std::forward<Fn>(fn)](DispatchSizeBinder& b, const void* raw) {
-			fn(b, *static_cast<const T*>(raw));
-		}));
-	}
+	// ── Резолв для потребителя (сборка батчей) ──
+	// Инструкции программы в порядке регистрации. Проход линейный: записей десятки, зовётся
+	// только на пересборке батчей — индекс «по имени» был бы вторым источником истины про то же.
+	PushInstructions CollectPushInstructions(const std::string& sp_name) const;
+	PushInstructions CollectComputePushInstructions(const std::string& csp_name) const;
+	DispatchFunc     GetDispatchInstruction(const std::string& csp_name) const;
 
-	// Пере-привязка всех зарегистрированных функций к текущим программам + лог записей, которым
-	// программы не нашлось (тот самый случай «функция есть, шейдера нет»). Зовёт Engine в конце LoadScene.
-	void BindShaderFunctions();
+	// Отчёт об инструкциях, которым не нашлось программы («функция есть, шейдера нет»): не ошибка
+	// (сцена могла не привезти свой sp), но и не то, что стоит съедать молча. Зовёт Engine в конце
+	// LoadScene. Привязывать тут больше нечего — списки резолвит сборка батчей.
+	void ReportOrphanCodeBindings();
 
 	std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& GetShaderPrograms() { return shader_programs; }
 	// Обход отдаёт пару «имя + программа» (см. ComputeProgramSlot) — как у GetShaderPrograms().
@@ -186,8 +222,16 @@ private:
 	std::string BuildCachePath(const char* source_path, uint64_t hash) const;
 	void ReadVertexAttributes(const std::vector<ShaderBase::VertexBufferBinding>& bindings, VertexShaderData& vs);
 
+	// out_push_kinds - маркеры //@push <тип> из развёрнутого исходника, в порядке текста
+	// (см. HashIncludesRecursive). Заполняется и при попадании в кэш .spv.
+	// Дописывает в список инструкции типовых пушей шейдера (slots_raw — счётчик слотов сборки;
+	// void*, чтобы служебный тип не торчал в заголовке).
+	void AddKindInstructions(PushInstructions& out, void* slots_raw,
+		const std::vector<std::string>& kinds, const std::string& owner) const;
+
 	Uint8* LoadOrCompileSPIRV(const char* hlsl_path, SDL_ShaderCross_ShaderStage stage, size_t& out_size,
-	                          const ShaderDefines& defines);
+	                          const ShaderDefines& defines,
+	                          std::vector<std::string>* out_push_kinds = nullptr);
 
 	// Дедуп GPU-шейдеров по хэшу SPIR-V: одинаковый байткод → один SDL_GPUShader на всех
 	// владельцев (ShaderData держит shared_ptr; здесь — неимущий weak-индекс для поиска).
@@ -211,10 +255,15 @@ private:
 
 	SDL_GPUDevice* dev;
 
-	// Инструкции код-байндингов по имени программы (см. CreatePushFunc): переживают пересоздание
-	// самих программ — 1 программа = 1 функция (повторная регистрация перезаписывает).
-	std::unordered_map<std::string, PushFunc>     push_instructions_;
-	std::unordered_map<std::string, PushFunc>     compute_push_instructions_;
+	// Известные типы пушей (см. RegisterPushKind).
+	std::unordered_map<std::string, PushKind> push_kinds_;
+
+	// Инструкции код-байндингов (см. CreatePushInstruction): плоские векторы, принадлежность — имя
+	// внутри записи. Переживают пересоздание самих программ, потому что на них не ссылаются.
+	std::vector<ShaderPushInstruction> push_instructions_;
+	std::vector<ShaderPushInstruction> compute_push_instructions_;
+	// Диспатч — РОВНО ОДИН на программу (он считает размер диспатча, двух ответов не бывает),
+	// поэтому словарь с перезаписью, а не вектор: вектор молча брал бы последнюю запись.
 	std::unordered_map<std::string, DispatchFunc> dispatch_instructions_;
 
 	std::unordered_map<uint64_t, std::weak_ptr<SDL_GPUShader>> gpu_shaders;

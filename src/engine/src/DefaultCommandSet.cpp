@@ -442,7 +442,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 				ctx->GetPipeManager()->InvalidatePipeline(old, ctx->GetBatchBuilder()->RebuildEpoch());
 				sm->DeleteShaderProgram(c->oldName);
 			}
-			// push_func не переносим руками: CreateShaderProgram сам возьмёт код-байндинг из
+			// push-инструкции не переносим руками: CreateShaderProgram сам возьмёт код-байндинги из
 			// реестра ПО ИМЕНИ. Переименование = смена владельца функции — перенос со старого
 			// имени всё равно жил бы лишь до ближайшей LoadScene, где связывает имя.
 			ShaderProgram* nw = sm->CreateShaderProgram(finalName, c->spd, passName, vsName, vbufs, fsName, fbufs, slots, ctx->GetBufferManager());

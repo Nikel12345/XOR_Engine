@@ -18,7 +18,7 @@ using ModelGeneratorFn = std::function<void(std::vector<std::byte>&, std::vector
 
 // Укладка типизированных вершин в байтовый выход. Деталь ТИПИЗИРОВАННОЙ обёртки
 // (EngineContext::CreateModel<V>), а не то, что зовёт сам генератор: тот просто заполняет свой
-// вектор, как раньше, а стиранием типа занимается обёртка — ровно как ShaderProgram::BindPushConstants<T>.
+// вектор, как раньше, а стиранием типа занимается обёртка — ровно как ShaderManager::CreatePushInstruction<T>.
 template<class V>
 inline void WriteVertices(std::vector<std::byte>& out, const std::vector<V>& src)
 {

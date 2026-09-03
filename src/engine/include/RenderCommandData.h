@@ -95,7 +95,7 @@ struct AtlasBatchData {
 };
 
 struct ShaderBatchData {
-    std::function<void(const PushConstantBinder&, const void*)> push_func = {};
+    PushInstructions push_instructions;
     std::unordered_map<BatchKeys::AtlasBatchKey, AtlasBatchData> atlases_batches;
 	std::vector<BufferData*> vertexBuffers;
 	// Индексный буфер пула, которому принадлежат стримы vs (у одного пула — один).
@@ -103,7 +103,6 @@ struct ShaderBatchData {
     std::vector<BufferData*> vertexStorageBuffers;
     std::vector<BufferData*> fragmentStorageBuffers;
     SDL_GPUGraphicsPipeline* pipeline = nullptr;
-    uint32_t frag_uniform_count = 0;   // число fragment uniform-буферов шейдера (гейт пуша params)
 };
 
 struct RenderPassTexturesInfo {
@@ -201,7 +200,7 @@ struct ComputeRWStorageTextureRef {
 };
 
 struct ComputeShaderBatchData {
-    std::function<void(const PushConstantBinder&, const void*)> push_func = {};
+    PushInstructions push_instructions;
     std::function<void(DispatchSizeBinder&, const void*)> dispatch_func = {};
     std::vector<BufferData*> ro_storage_buffers; // set=0, SDL_BindGPUComputeStorageBuffers
     std::vector<BufferData*> rw_storage_buffers; // set=1, SDL_BeginGPUComputePass

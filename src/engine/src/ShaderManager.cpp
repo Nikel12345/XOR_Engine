@@ -68,11 +68,9 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
         collect(program->fragment_shader_buffer_names);
     }
 
-    // Код-байндинг по имени — сразу на создании, если он уже зарегистрирован (CreatePushFunc).
-    // Так порядок «функция / программа» не значит ничего, и sp, пересозданная загрузкой сцены
-    // или редактором, приходит в мир уже с push_func, а не голой до ближайшего BindShaderFunctions.
-    if (auto pit = push_instructions_.find(name); pit != push_instructions_.end())
-        program->push_func = pit->second;
+    // Код-байндинги сюда не копируются: они живут в плоском реестре под ИМЕНЕМ программы, а
+    // сборка батчей резолвит их оттуда. Поэтому порядок «функция / программа» не значит ничего,
+    // и sp, пересозданная загрузкой сцены или редактором, получает их автоматически.
 
     ShaderProgram* ptr = program.get();
 
@@ -154,11 +152,7 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     for (const AtlasName& n : result->texture_sampler_names)
         if (TextureAtlas* a = atlas(n)) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
-    // См. CreateShaderProgram: зарегистрированные push/dispatch вешаются сразу.
-    if (auto pit = compute_push_instructions_.find(name); pit != compute_push_instructions_.end())
-        result->push_func = pit->second;
-    if (auto dit = dispatch_instructions_.find(name); dit != dispatch_instructions_.end())
-        result->dispatch_func = dit->second;
+    // См. CreateShaderProgram: push/dispatch программе не копируются — их резолвит сборка батчей.
 
     ComputeShaderProgram* ptr = result.get();
     compute_shader_programs.push_back({ name, std::move(result) });
@@ -169,30 +163,123 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
 }
 
 // ── Реестр код-байндингов ───────────────────────────────────────────────────────────────────
-// Регистрация двусторонняя: кладём запись И тут же вешаем её на программу, если та уже есть.
-// Вместе с привязкой на создании программы это даёт инвариант «push_func программы == запись
-// реестра под её именем» без единой точки синхронизации.
+// Реестр — ЕДИНСТВЕННЫЙ владелец инструкций: программы их копией не держат, поэтому и
+// синхронизировать нечего. Потребитель (сборка батчей) забирает их по имени программы через
+// Collect*/Get*, ровно как резолвит имена буферов и текстур.
 
-void ShaderManager::CreatePushFunc(const std::string& sp_name, PushFunc fn)
+void ShaderManager::CreatePushInstruction(const std::string& sp_name, PushStage stage, PushFunc fn)
 {
-    auto& slot = push_instructions_[sp_name] = std::move(fn);   // 1 программа — 1 функция (перезапись)
-    if (auto it = shader_programs.find(sp_name); it != shader_programs.end())
-        it->second->push_func = slot;
+    push_instructions_.push_back({ sp_name, stage, std::move(fn) });   // в КОНЕЦ: порядок = нумерация слотов
 }
 
-void ShaderManager::CreateComputePushFunc(const std::string& csp_name, PushFunc fn)
+void ShaderManager::CreateComputePushInstruction(const std::string& csp_name, PushFunc fn)
 {
-    auto& slot = compute_push_instructions_[csp_name] = std::move(fn);
-    if (ComputeShaderProgram* csp = GetComputeShaderProgram(csp_name)) csp->push_func = slot;
+    compute_push_instructions_.push_back({ csp_name, PushStage::Compute, std::move(fn) });
 }
 
-void ShaderManager::CreateDispatchFunc(const std::string& csp_name, DispatchFunc fn)
+void ShaderManager::CreateDispatchInstruction(const std::string& csp_name, DispatchFunc fn)
 {
-    auto& slot = dispatch_instructions_[csp_name] = std::move(fn);
-    if (ComputeShaderProgram* csp = GetComputeShaderProgram(csp_name)) csp->dispatch_func = slot;
+    dispatch_instructions_[csp_name] = std::move(fn);   // ровно один на программу (см. заголовок)
 }
 
-void ShaderManager::BindShaderFunctions()
+// Слоты считаются отдельно по стадиям (они независимые), поэтому вершинная инструкция между
+// двумя фрагментными ничего не сдвигает. Слот проставляется ЗДЕСЬ, а не на исполнении:
+// инструкция не должна зависеть от того, сколько блоков пушат соседи.
+namespace {
+    struct SlotCounter {
+        Uint32 next[3] = { 0, 0, 0 };   // по индексу PushStage
+        void Add(PushInstructions& out, PushStage stage, const PushFunc& fn) {
+            out.push_back({ stage, next[static_cast<size_t>(stage)]++, fn });
+        }
+    };
+}
+
+// Типовые пуши шейдера: маркеры //@push <тип> в порядке текста → функторы из реестра типов.
+// Незнакомый тип НЕ пропускаем молча: шейдер под него cbuffer уже объявил, и пропуск сдвинул бы
+// слоты всем следующим блокам. Занимаем слот пустой инструкцией и говорим об этом в лог.
+void ShaderManager::AddKindInstructions(PushInstructions& out, void* slots_raw,
+    const std::vector<std::string>& kinds, const std::string& owner) const
+{
+    SlotCounter& slots = *static_cast<SlotCounter*>(slots_raw);
+    for (const std::string& kind : kinds) {
+        auto it = push_kinds_.find(kind);
+        if (it == push_kinds_.end()) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                "PushKind '%s' (объявлен маркером в '%s') не зарегистрирован - слот занят пустышкой, "
+                "блок останется с данными прошлого draw'а", kind.c_str(), owner.c_str());
+            slots.Add(out, PushStage::Fragment, PushFunc{});
+            continue;
+        }
+        slots.Add(out, it->second.stage, it->second.fn);
+    }
+}
+
+PushInstructions ShaderManager::CollectPushInstructions(const std::string& sp_name) const
+{
+    PushInstructions out;
+    SlotCounter slots;
+
+    // 1) ТИПОВЫЕ — первыми и в порядке маркеров исходника: именно этот порядок автор шейдера
+    //    видит у себя в файле рядом с register(bN). Вершинные маркеры берём из vs, фрагментные
+    //    из fs — стадию задаёт сам тип, источник маркера только говорит, где его искать.
+    if (auto sit = shader_programs.find(sp_name); sit != shader_programs.end()) {
+        const ShaderProgram* sp = sit->second.get();
+        if (auto vit = vertex_shaders.find(sp->vs_name); vit != vertex_shaders.end())
+            AddKindInstructions(out, &slots, vit->second.push_kinds, sp->vs_name);
+        if (auto fit = fragment_shaders.find(sp->fs_name); fit != fragment_shaders.end())
+            AddKindInstructions(out, &slots, fit->second.push_kinds, sp->fs_name);
+    }
+
+    // 2) ИМЕННЫЕ — следом, в порядке регистрации. Их cbuffer'ы в шейдере объявлены ПОСЛЕ типовых.
+    for (const ShaderPushInstruction& instr : push_instructions_)
+        if (instr.program_name == sp_name) slots.Add(out, instr.stage, instr.fn);
+
+    // Сверка с РЕФЛЕКСИЕЙ: все фрагментные блоки — инструкции, значит их число обязано совпасть
+    // с числом uniform-буферов, которое объявил сам шейдер. Не совпало — забыт (или лишний)
+    // маркер, и слоты разъехались: у шейдера блок есть, а пушить его некому, либо наоборот.
+    // Это ловится ЗДЕСЬ, один раз на сборке, вместо разглядывания неправильной картинки.
+    if (auto sit = shader_programs.find(sp_name); sit != shader_programs.end()) {
+        if (auto fit = fragment_shaders.find(sit->second->fs_name); fit != fragment_shaders.end()) {
+            const Uint32 declared = fit->second.shader_data.num_uniform_buffers;
+            if (slots.next[static_cast<size_t>(PushStage::Fragment)] != declared)
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                    "sp '%s': fragment-инструкций %u, а шейдер '%s' объявил %u uniform-блоков "
+                    "- проверь маркеры //@push (порядок и наличие)",
+                    sp_name.c_str(), slots.next[static_cast<size_t>(PushStage::Fragment)],
+                    sit->second->fs_name.c_str(), declared);
+        }
+    }
+
+    return out;
+}
+
+PushInstructions ShaderManager::CollectComputePushInstructions(const std::string& csp_name) const
+{
+    PushInstructions out;
+    SlotCounter slots;
+
+    if (ComputeShaderProgram* csp = const_cast<ShaderManager*>(this)->GetComputeShaderProgram(csp_name))
+        if (auto cit = compute_shaders.find(csp->cs_name); cit != compute_shaders.end())
+            AddKindInstructions(out, &slots, cit->second.push_kinds, csp->cs_name);
+
+    for (const ShaderPushInstruction& instr : compute_push_instructions_)
+        if (instr.program_name == csp_name) slots.Add(out, instr.stage, instr.fn);
+
+    return out;
+}
+
+void ShaderManager::RegisterPushKind(const std::string& kind, PushStage stage, PushFunc fn)
+{
+    push_kinds_[kind] = PushKind{ stage, std::move(fn) };
+}
+
+ShaderManager::DispatchFunc ShaderManager::GetDispatchInstruction(const std::string& csp_name) const
+{
+    auto it = dispatch_instructions_.find(csp_name);
+    return it != dispatch_instructions_.end() ? it->second : DispatchFunc{};
+}
+
+void ShaderManager::ReportOrphanCodeBindings()
 {
     // Осиротевшие записи — не ошибка: сцена могла просто не привезти свою программу (у каждого
     // фрактала свой sp, а функции обоих зарегистрированы разом в Init). Но это ровно тот случай,
@@ -200,25 +287,21 @@ void ShaderManager::BindShaderFunctions()
     // set, а не строка: push и dispatch — РАЗНЫЕ реестры, и csp без программы попадала в отчёт
     // дважды, что читалось как удвоение списка.
     std::set<std::string> orphans;
-    auto bind = [&orphans](auto& instructions, auto&& lookup, auto&& assign) {
-        for (auto& [name, fn] : instructions) {
-            if (auto* prog = lookup(name)) assign(prog, fn);
-            else orphans.insert(name);
-        }
+    auto check_named = [&orphans](const auto& instructions, auto&& lookup) {
+        for (const auto& instr : instructions)
+            if (!lookup(instr.program_name)) orphans.insert(instr.program_name);
     };
 
-    bind(push_instructions_,
-        [this](const std::string& n) -> ShaderProgram* {
-            auto it = shader_programs.find(n);
-            return it != shader_programs.end() ? it->second.get() : nullptr;
-        },
-        [](ShaderProgram* sp, const PushFunc& fn) { sp->push_func = fn; });
-
+    auto find_sp = [this](const std::string& n) -> ShaderProgram* {
+        auto it = shader_programs.find(n);
+        return it != shader_programs.end() ? it->second.get() : nullptr;
+    };
     auto find_csp = [this](const std::string& n) { return GetComputeShaderProgram(n); };
-    bind(compute_push_instructions_, find_csp,
-        [](ComputeShaderProgram* csp, const PushFunc& fn) { csp->push_func = fn; });
-    bind(dispatch_instructions_, find_csp,
-        [](ComputeShaderProgram* csp, const DispatchFunc& fn) { csp->dispatch_func = fn; });
+
+    check_named(push_instructions_, find_sp);
+    check_named(compute_push_instructions_, find_csp);
+    for (const auto& [name, fn] : dispatch_instructions_)
+        if (!find_csp(name)) orphans.insert(name);
 
     if (!orphans.empty()) {
         std::string list;

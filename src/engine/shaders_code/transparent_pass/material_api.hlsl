@@ -61,20 +61,25 @@ struct TextureData { uint4 data; };
 // программы (RP::LightCountPushData), а UVL/params/раскладка встают за ним — движок кладёт их с
 // binder.frag_count. Счётчик приходит push-константой, а НЕ из LightBlock.GetDimensions: буфер
 // умеет только расти, и его размер больше числа источников (в пределе — свет прошлой сцены).
+//@push light_count
 cbuffer LightCountBlock : register(b0, space3) {
     uint u_lightCount;
 };
 
+//@push uvl
 cbuffer TextureUVLBlock : register(b1, space3) {
     // Сгруппирована по слотам, индекс блока — через TexIndex(s). См. main-пролог.
     TextureData textures[MAX_UVL_BLOCKS];
 };
 
+// Маркер у макроса, а не у cbuffer'а: слот раздаёт пролог (см. main-пролог).
+//@push material_params
 #define MATERIAL_BLOCK_REGISTER register(b2, space3)
 // ── Переключаемые варианты текстур ──
 
 // Как адресовать textures[]: слово на слот + номер материала у сущности. Третий uniform, ПОСЛЕ
 // MaterialBlock — чтобы не двигать его регистр. Зеркало VariantLayout из RenderCommandData.h.
+//@push variant_layout
 cbuffer VariantLayoutBlock : register(b3, space3) {
     uint4 slot_layout[MAX_SLOTS / 4];   // (base<<16)|(cell<<8)|count на слот
     uint  material_index;               // offset 48 — массив кончается на 16-байтной границе

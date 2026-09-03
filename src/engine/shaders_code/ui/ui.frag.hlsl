@@ -45,9 +45,12 @@ struct TextureData { uint4 data; };
 // Таблица СГРУППИРОВАНА ПО СЛОТАМ: подряд все блоки слота, внутри группы [0] — дефолт. Индекс
 // блока слота НЕ равен номеру слота — только через TexIndex. У материала без вариантов
 // вырождается в прежний плотный UVL по required_slots (у UI это один albedo).
+//@push uvl
 cbuffer TextureUVLBlock : register(b0, space3) { TextureData textures[MAX_UVL_BLOCKS]; };
+//@push material_params
 cbuffer MaterialBlock   : register(b1, space3) { float4 bg_color; float4 text_color; float4 text_params; };
 // text_params.x = text_height (доля высоты ректа под строку), .y = text_anchor (0=верх..1=низ).
+//@push variant_layout
 cbuffer VariantLayoutBlock : register(b2, space3) {
     uint4 slot_layout[MAX_SLOTS / 4];   // (base<<16)|(cell<<8)|count на слот
     uint  material_index;               // offset 48 — массив кончается на 16-байтной границе

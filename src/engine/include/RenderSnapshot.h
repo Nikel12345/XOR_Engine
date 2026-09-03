@@ -59,7 +59,7 @@ namespace RenderSnap {
 
     struct ShaderGroup {
         SDL_GPUGraphicsPipeline* pipeline = nullptr;
-        std::function<void(const PushConstantBinder&, const void*)> push_func;
+        PushInstructions push_instructions;
         // Вершинные СТРИМЫ пула из объявления vs (порядок = слоты пайплайна). Пустой список =
         // резолв сорвался → draw пропускается (бинд не того стрима в слот = UB, не деградация).
         std::vector<BufferData*> vertexBuffers;
@@ -68,7 +68,6 @@ namespace RenderSnap {
         BufferData* indexBuffer = nullptr;
         std::vector<BufferData*> vertexStorageBuffers;
         std::vector<BufferData*> fragmentStorageBuffers;
-        uint32_t frag_uniform_count = 0;                // гейт пуша params (как в дереве)
         std::vector<AtlasGroup> atlases;
     };
 

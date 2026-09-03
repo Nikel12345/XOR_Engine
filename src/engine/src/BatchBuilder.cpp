@@ -424,11 +424,16 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             // name-based ссылка: имя sp → указатель на сборке батча. Промах (sp удалена) → fallback-sp
             // (аналог textureless), а если и его нет — пропуск.
             ShaderProgram* sp = sm ? sm->GetShaderProgram(sp_name) : nullptr;
+            // Имя РЕАЛЬНО взятой программы: на fallback-ветке оно отличается от запрошенного, а по
+            // нему резолвятся push-инструкции (реестр ключуется именем) — с чужим именем fallback
+            // получил бы чужие пуши, то есть чужую нумерацию слотов.
+            const ShaderName* resolved_name = &sp_name;
             if (!sp) {
                 // sp удалена → fallback ПО ИМЕНИ (резолвим как обычную sp; удалён и он → пустой рендер, без краша).
                 SDL_Log("BatchBuilder::Material references deleted shader program '%s' - using fallback", sp_name.c_str());
                 sp = (sm && !fallback_shader_name.empty()) ? sm->GetShaderProgram(fallback_shader_name) : nullptr;
                 if (!sp) continue;
+                resolved_name = &fallback_shader_name;
             }
             RenderPassStep* rp = pass_manager->GetRenderPassStep(sp->render_pass_name);
             if (!rp) continue;
@@ -439,7 +444,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             if (it == shader_map.end())
             {
                 ShaderBatchData new_batch{};
-                new_batch.push_func = sp->push_func;
+                new_batch.push_instructions = sm->CollectPushInstructions(*resolved_name);   // реестр — владелец, тут резолв
                 new_batch.pipeline = pm->GetGraphicPipeline(sp);
                 // Буферы sp — по имени (BufferDataName = ключ реестра); резолвим в BufferData* здесь
                 // (как имена текстур/sp выше) через GetBufferData. Ненайденное имя пропускаем — слот
@@ -463,8 +468,6 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
                     if (vsd->index_buffer)
                         new_batch.indexBuffer = bm->GetBufferData(vsd->index_buffer);
                 }
-                FragmentShaderData* fsd = sm->GetFragmentShader(sp->fs_name);   // fs по имени из реестра
-                new_batch.frag_uniform_count = fsd ? fsd->shader_data.num_uniform_buffers : 0u;
                 shader_map[sp_key] = std::move(new_batch);
             }
 
@@ -765,12 +768,11 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
         {
             RenderSnap::ShaderGroup sg;
             sg.pipeline = shader_batch.pipeline;
-            sg.push_func = shader_batch.push_func;
+            sg.push_instructions = shader_batch.push_instructions;
             sg.vertexBuffers = shader_batch.vertexBuffers;
             sg.indexBuffer = shader_batch.indexBuffer;
             sg.vertexStorageBuffers = shader_batch.vertexStorageBuffers;
             sg.fragmentStorageBuffers = shader_batch.fragmentStorageBuffers;
-            sg.frag_uniform_count = shader_batch.frag_uniform_count;
             sg.atlases.reserve(shader_batch.atlases_batches.size());
 
             for (auto& [atlas_key, atlas_batch] : shader_batch.atlases_batches)
@@ -893,8 +895,8 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         }
         new_batch.ro_storage_textures = resolve_atlases(sp->ro_storage_texture_names, "ro");
         new_batch.texture_binding     = resolve_atlases(sp->texture_sampler_names, "sampler");   // даёт texture+sampler
-        new_batch.push_func = sp->push_func;
-        new_batch.dispatch_func = sp->dispatch_func;
+        new_batch.push_instructions = sm->CollectComputePushInstructions(slot.name);
+        new_batch.dispatch_func = sm->GetDispatchInstruction(slot.name);
 
         ComputeShaderData* csd = sm->GetComputeShader(sp->cs_name);   // cs по имени из реестра
         if (!csd)

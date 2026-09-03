@@ -102,6 +102,42 @@
             "atlas": "albedo_atlas",
             "path": "textures/assets/windows2light.jpg",
             "conv": "AsIs"
+        },
+        {
+            "name": "signs_board_albedo",
+            "atlas": "albedo_atlas",
+            "path": "textures/assets/signs/signs_board_albedo.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "signs_board_normal",
+            "atlas": "normal_atlas",
+            "path": "textures/assets/signs/signs_board_normal_h.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "signs_board_orm",
+            "atlas": "orm_atlas",
+            "path": "textures/assets/signs/signs_board_orm.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "signs_metal_albedo",
+            "atlas": "albedo_atlas",
+            "path": "textures/assets/signs/signs_metal_albedo.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "signs_metal_normal",
+            "atlas": "normal_atlas",
+            "path": "textures/assets/signs/signs_metal_normal_h.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "signs_metal_orm",
+            "atlas": "orm_atlas",
+            "path": "textures/assets/signs/signs_metal_orm.png",
+            "conv": "AsIs"
         }
     ]
 }

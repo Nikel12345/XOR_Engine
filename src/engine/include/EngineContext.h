@@ -111,7 +111,7 @@ public:
 		bool dont_save = false, const std::string& pool_name = {});
 
 	// Типизированная форма: V — структура вершины, которую заполняет генератор. Задаётся ЯВНО, как
-	// T у ShaderProgram::BindPushConstants<T>, и стирание типа делает обёртка — генератор просто
+	// T у ShaderManager::CreatePushInstruction<T>, и стирание типа делает обёртка — генератор просто
 	// заполняет свой вектор и про байты не знает. Раскладку по-прежнему определяет ПУЛ; V обязан ей
 	// соответствовать (грубое несовпадение ловит проверка кратности в ModelManager).
 	template<typename V, typename Fn>

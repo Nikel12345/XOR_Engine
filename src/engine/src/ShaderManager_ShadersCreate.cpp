@@ -42,8 +42,15 @@ static std::vector<ShaderDefine> NormalizeDefines(const ShaderDefines& in)
 // компиляции). visited защищает от циклов (наш сканер не видит include-guard'ы) и от
 // повторного учёта файла, включённого из нескольких мест. Так правка ЛЮБОГО файла по цепочке
 // инклудов меняет хэш → кэш .spv корректно инвалидируется (раньше хэшировался только верхний файл).
+//
+// ТОТ ЖЕ обход собирает маркеры типовых пушей (//@push <тип>) — даром, файлы уже читаются.
+// Директивы и маркеры разбираются В ПОРЯДКЕ СМЕЩЕНИЙ, поэтому markers выходит в порядке
+// РАЗВЁРНУТОГО текста: маркер до #include попадёт раньше маркеров включаемого файла, после —
+// позже. Именно этот порядок и есть порядок cbuffer'ов в шейдере. Хэш при этом мешается как
+// раньше (файл целиком, потом дети) — ключ кэша не меняется, старые .spv остаются валидны.
 static void HashIncludesRecursive(uint64_t& hash, const std::string& path,
-    const char* include_dir, std::unordered_set<std::string>& visited)
+    const char* include_dir, std::unordered_set<std::string>& visited,
+    std::vector<std::string>* markers = nullptr)
 {
     if (!visited.insert(path).second) return;
 
@@ -52,16 +59,36 @@ static void HashIncludesRecursive(uint64_t& hash, const std::string& path,
     if (!data) return;   // файл не найден — пропускаем; реальную ошибку выдаст компиляция
     FnvMix(hash, (const uint8_t*)data, size);
 
+    static constexpr std::string_view kMarker = "//@push";
     std::string_view sv(data, size);
-    for (size_t pos = 0; (pos = sv.find("#include", pos)) != std::string_view::npos; ) {
-        size_t q1 = sv.find('"', pos + 8);
-        size_t nl = sv.find('\n', pos + 8);
+    size_t pos = 0;
+    while (pos < sv.size()) {
+        const size_t inc  = sv.find("#include", pos);
+        const size_t mark = markers ? sv.find(kMarker, pos) : std::string_view::npos;
+        if (inc == std::string_view::npos && mark == std::string_view::npos) break;
+
+        if (mark < inc) {
+            // //@push <тип> — тип до конца строки, из [A-Za-z0-9_]. Пустой = маркер без имени.
+            size_t k = mark + kMarker.size();
+            const size_t nl = sv.find('\n', k);
+            const size_t line_end = (nl == std::string_view::npos) ? sv.size() : nl;
+            while (k < line_end && (sv[k] == ' ' || sv[k] == '\t')) ++k;
+            size_t e = k;
+            while (e < line_end && (std::isalnum((unsigned char)sv[e]) || sv[e] == '_')) ++e;
+            if (e > k) markers->emplace_back(sv.substr(k, e - k));
+            else SDL_Log("[Shader] %s: маркер '//@push' без имени типа - пропущен", path.c_str());
+            pos = line_end;
+            continue;
+        }
+
+        size_t q1 = sv.find('"', inc + 8);
+        size_t nl = sv.find('\n', inc + 8);
         // Кавычка обязана быть на той же строке, что и #include — иначе это не директива.
-        if (q1 == std::string_view::npos || (nl != std::string_view::npos && q1 > nl)) { pos += 8; continue; }
+        if (q1 == std::string_view::npos || (nl != std::string_view::npos && q1 > nl)) { pos = inc + 8; continue; }
         size_t q2 = sv.find('"', q1 + 1);
         if (q2 == std::string_view::npos) break;
         std::string rel(sv.substr(q1 + 1, q2 - q1 - 1));
-        HashIncludesRecursive(hash, std::string(include_dir) + "/" + rel, include_dir, visited);
+        HashIncludesRecursive(hash, std::string(include_dir) + "/" + rel, include_dir, visited, markers);
         pos = q2 + 1;
     }
     SDL_free(data);
@@ -113,10 +140,12 @@ void ShaderManager::ReadVertexAttributes(
     }
 }
 
+
 Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     SDL_ShaderCross_ShaderStage stage,
     size_t& out_size,
-    const ShaderDefines& defines)
+    const ShaderDefines& defines,
+    std::vector<std::string>* out_push_kinds)
 {
     size_t src_size = 0;
     char* src = (char*)SDL_LoadFile(hlsl_path, &src_size);
@@ -134,7 +163,9 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     uint64_t hash = 14695981039346656037ULL;
     {
         std::unordered_set<std::string> visited;
-        HashIncludesRecursive(hash, hlsl_path, include_dir, visited);
+        // Тем же обходом снимаем маркеры типовых пушей — ДО возможного выхода по кэш-хиту:
+        // объявленные типы должны быть известны и когда .spv взят готовым.
+        HashIncludesRecursive(hash, hlsl_path, include_dir, visited, out_push_kinds);
     }
 
     // Дефайны — часть исходника с точки зрения компилятора, значит и часть ключа кэша: без них
@@ -277,11 +308,13 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
     std::vector<ShaderDefine> norm = NormalizeDefines(defines);
 
     size_t n = 0;
-    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_VERTEX, n, norm);
+    std::vector<std::string> push_kinds;
+    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_VERTEX, n, norm, &push_kinds);
     if (!spv) return;
     VertexShaderData vs = BuildVertexShader(spv, n, hlsl_path, bindings);   // в реестр по имени
     SDL_free(spv);
     vs.defines = std::move(norm);
+    vs.push_kinds = std::move(push_kinds);
 
     vs.vertex_buffer_names = std::move(canonical_names);
     vs.pool_name = pool->Name();
@@ -305,11 +338,13 @@ void ShaderManager::CreateFragmentShader(const std::string& name, const char* hl
 {
     std::vector<ShaderDefine> norm = NormalizeDefines(defines);   // см. CreateVertexShader
     size_t n = 0;
-    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT, n, norm);
+    std::vector<std::string> push_kinds;
+    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT, n, norm, &push_kinds);
     if (!spv) return;
     FragmentShaderData fs = BuildFragmentShader(spv, n, hlsl_path);
     SDL_free(spv);
     fs.defines = std::move(norm);
+    fs.push_kinds = std::move(push_kinds);
     fragment_shaders[name] = std::move(fs);   // в реестр по имени
 }
 
@@ -317,13 +352,15 @@ void ShaderManager::CreateComputeShader(const std::string& name, const char* hls
 {
     std::vector<ShaderDefine> norm = NormalizeDefines(defines);   // см. CreateVertexShader
     size_t n = 0;
-    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_COMPUTE, n, norm);
+    std::vector<std::string> push_kinds;
+    Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_COMPUTE, n, norm, &push_kinds);
     if (!spv) return;
     // Реестр владеет сырым spv_code — при перезаписи имени старый освобождаем (иначе течёт).
     auto it = compute_shaders.find(name);
     if (it != compute_shaders.end() && it->second.spv_code) SDL_free(it->second.spv_code);
     ComputeShaderData cs = BuildComputeShader(spv, n, hlsl_path);   // владение spv уходит в реестр
     cs.defines = std::move(norm);
+    cs.push_kinds = std::move(push_kinds);
     compute_shaders[name] = std::move(cs);
 }
 

@@ -58,20 +58,20 @@ namespace {
             {}, {}, {},
             RP::CULLING_PASS, /*dont_save=*/true);
 
-        sm->CreateComputePushFunc<RP::CullingPibUniform>(program_name,
+        sm->CreateComputePushInstruction<RP::CullingPibUniform>(program_name,
             [pm, pass_ordinal](const PushConstantBinder& binder, RP::CullingPibUniform data) {
-            const PassRegion region = RegionOfPass(pm, pass_ordinal, binder.slot);
+            const PassRegion region = RegionOfPass(pm, pass_ordinal, binder.frame);
             data.range_start = region.first_pib;
             data.range_count = region.pib;
             data.num_blocks  = region.command_blocks_count;
             data.cmd_base    = region.cmd_base;
             data.commands    = region.commands;
-            binder.Push(0, data);
+            binder.Push(data);
         });
 
-        sm->CreateDispatchFunc<RP::DummyDispatchData>(program_name,
+        sm->CreateDispatchInstruction<RP::DummyDispatchData>(program_name,
             [pm, pass_ordinal](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-            const PassRegion region = RegionOfPass(pm, pass_ordinal, binder.slot);
+            const PassRegion region = RegionOfPass(pm, pass_ordinal, binder.frame);
             uint32_t records = region.pib;
             if (region.command_blocks_count == 0) {
                 records = 0;   // блоков у прохода нет (напр. ни одной теневой камеры) — работы нет
@@ -79,6 +79,52 @@ namespace {
             binder.element_count = { records, 1, 1 };
         });
     }
+}
+
+void DefaultShaderProgramSet::SetDefaultPushes(EngineContext* ctx)
+{
+    namespace RP = DefaultRenderPassNamespace;
+    ShaderManager* sm = ctx->GetShaderManager();
+
+    // ── ТИПОВЫЕ: тип объявляет ШЕЙДЕР маркером //@push, программа о нём не знает ──
+    // Число источников света: маркер стоит в прологах main/transparent, поэтому пуш получает
+    // ЛЮБАЯ программа, чей fs включает движковую лайтинг-базу, — и движковая, и игровая, без
+    // единой регистрации на стороне игры. Данные — из состояния прохода (MAIN/TRANSPARENT
+    // пишут туда AskNumLights слепка своего слота).
+    sm->RegisterPushKind<RP::LightCountPushData>("light_count", PushStage::Fragment,
+        [](const PushConstantBinder& b, RP::LightCountPushData data) { b.Push(data); });
+
+    // Материальные блоки: данные у них не в состоянии прохода, а в ГРУППЕ ТЕКСТУР текущего
+    // draw'а (in.draw — слепок батча), поэтому форма сырая, без типизированной обёртки.
+    // Объявлены маркерами в прологах (main текстурный/бестекстурный, transparent), значит их
+    // получает любой surface, написанный по движковому material_api, — включая игровые.
+    sm->RegisterPushKind("uvl", PushStage::Fragment, [](const PushConstantBinder& b, const PushInput& in) {
+        if (!in.draw) return;
+        if (!in.draw->texture_uvl.empty()) { b.Push(in.draw->texture_uvl); return; }
+        // Пустая таблица — всё равно пушим: блок ОБЪЯВЛЕН, а пропуск оставил бы в слоте таблицу
+        // предыдущего draw'а. Нулевой блок покрывает индекс 0, куда смотрит нулевая раскладка.
+        const UVL_Block empty{};
+        b.Push(empty);
+    });
+    sm->RegisterPushKind("material_params", PushStage::Fragment, [](const PushConstantBinder& b, const PushInput& in) {
+        // Блоб адресован ИМЕННО этой sp (SpBinding::params). Пусто = материал не дал параметров
+        // шейдеру, который их объявил, — авторская ошибка материала; пушить тут нечего.
+        if (!in.draw || !in.draw->params || in.draw->params->empty()) return;
+        b.Push(*in.draw->params);
+    });
+    sm->RegisterPushKind("variant_layout", PushStage::Fragment, [](const PushConstantBinder& b, const PushInput& in) {
+        if (!in.draw) return;
+        b.Push(in.draw->variant_layout);
+    });
+
+    // ── ИМЕННЫЕ: блок принадлежит КОНКРЕТНОЙ программе, общего типа тут нет ──
+    // ShadowCaster: номер световой камеры и режим глубины (fragment slot 0 → b0, space3).
+    // Тот же ShadowPushData тело теневого прохода пушит ещё и в вершинник, прямым вызовом.
+    sm->CreatePushInstruction<RP::ShadowPushData>("ShadowCaster", PushStage::Fragment,
+        [](const PushConstantBinder& b, RP::ShadowPushData data) { b.Push(data); });
+    // Wireframe: цвет debug-рамки, приезжает состоянием DEBUG_PASS.
+    sm->CreatePushInstruction<RP::DebugColliderPushData>("Wireframe", PushStage::Fragment,
+        [](const PushConstantBinder& b, RP::DebugColliderPushData data) { b.Push(data); });
 }
 
 void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx)
@@ -105,14 +151,14 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx)
         { DEFAULT_INDIRECT_BUFFER },   // rw (u0)
         {}, {}, {}, {},
         RP::CULLING_PASS, /*dont_save=*/true);
-    sm->CreateComputePushFunc<RP::CullingClearUniform>("csp_culling_clear",
+    sm->CreateComputePushInstruction<RP::CullingClearUniform>("csp_culling_clear",
         [pm](const PushConstantBinder& binder, RP::CullingClearUniform data) {
-        data.total_slots = pm->AskRegions(binder.slot).total_commands;
-        binder.Push(0, data);
+        data.total_slots = pm->AskRegions(binder.frame).total_commands;
+        binder.Push(data);
     });
-    sm->CreateDispatchFunc<RP::DummyDispatchData>("csp_culling_clear",
+    sm->CreateDispatchInstruction<RP::DummyDispatchData>("csp_culling_clear",
         [pm](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-        binder.element_count = { pm->AskRegions(binder.slot).total_commands, 1, 1 };
+        binder.element_count = { pm->AskRegions(binder.frame).total_commands, 1, 1 };
     });
 
     // Скаттер: программа НА ПРОХОД с батчами, отличаются только имя и камерный буфер.
@@ -151,14 +197,14 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
             { SHADOW_MOMENTS_ARRAY },                 // samplers
             SHADOW_BLUR_PASS, /*dont_save=*/true);
 
-        sm->CreateComputePushFunc<ShadowBlurUniform>(name_h,
+        sm->CreateComputePushInstruction<ShadowBlurUniform>(name_h,
             [L](const PushConstantBinder& binder, ShadowBlurUniform data) {
             data.layerIndex = L;
-            binder.Push(0, data);
+            binder.Push(data);
         });
-        sm->CreateDispatchFunc<DummyDispatchData>(name_h,
+        sm->CreateDispatchInstruction<DummyDispatchData>(name_h,
             [L, blur_temp_atlas, ldm](DispatchSizeBinder& binder, DummyDispatchData) {
-            if (ldm->IsShadowLayerDirty(binder.slot, L))
+            if (ldm->IsShadowLayerDirty(binder.frame, L))
                 binder.element_count = { blur_temp_atlas->width, blur_temp_atlas->height, 1 };
             else
                 binder.element_count = { 0, 0, 0 };
@@ -173,9 +219,9 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
             { SHADOW_MOMENTS_BLUR_TEMP },             // samplers
             SHADOW_BLUR_PASS, /*dont_save=*/true);
 
-        sm->CreateDispatchFunc<DummyDispatchData>(name_v,
+        sm->CreateDispatchInstruction<DummyDispatchData>(name_v,
             [L, moments_atlas, ldm](DispatchSizeBinder& binder, DummyDispatchData) {
-            if (ldm->IsShadowLayerDirty(binder.slot, L))
+            if (ldm->IsShadowLayerDirty(binder.frame, L))
                 binder.element_count = { moments_atlas->width, moments_atlas->height, 1 };
             else
                 binder.element_count = { 0, 0, 0 };
@@ -237,8 +283,8 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
     // AOState совпадает с ним.
     const char* programs[] = { "ssao", "ssao_blur_h", "ssao_blur_v", "ao_composite" };
     for (const char* name : programs) {
-        sm->CreateComputePushFunc<AOState>(name, [](const PushConstantBinder& b, AOState st) {
-            b.Push(0, st);
+        sm->CreateComputePushInstruction<AOState>(name, [](const PushConstantBinder& b, AOState st) {
+            b.Push(st);
         });
     }
 
@@ -249,16 +295,16 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
         TextureAtlas* ao_tmp = ctx->GetTextureAtlas(SSAO_TEMP);
         TextureAtlas* hdr    = ctx->GetTextureAtlas(std::string("scene_hdr"));
 
-        sm->CreateDispatchFunc<DummyDispatchData>("ssao", [ao_tex](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchInstruction<DummyDispatchData>("ssao", [ao_tex](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { ao_tex->width, ao_tex->height, 1 };
         });
-        sm->CreateDispatchFunc<DummyDispatchData>("ssao_blur_h", [ao_tmp](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchInstruction<DummyDispatchData>("ssao_blur_h", [ao_tmp](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { ao_tmp->width, ao_tmp->height, 1 };
         });
-        sm->CreateDispatchFunc<DummyDispatchData>("ssao_blur_v", [ao_tex](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchInstruction<DummyDispatchData>("ssao_blur_v", [ao_tex](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { ao_tex->width, ao_tex->height, 1 };
         });
-        sm->CreateDispatchFunc<DummyDispatchData>("ao_composite", [hdr](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchInstruction<DummyDispatchData>("ao_composite", [hdr](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { hdr->width, hdr->height, 1 };
         });
     }
@@ -285,15 +331,15 @@ void DefaultShaderProgramSet::SetFogProgram(EngineContext* ctx)
         FOG_PASS, /*dont_save=*/true);
 
     // Состояние прохода уходит вниз как есть: раскладка FogState совпадает с cbuffer FogParams.
-    sm->CreateComputePushFunc<FogState>("fog", [](const PushConstantBinder& b, FogState st) {
-        b.Push(0, st);
+    sm->CreateComputePushInstruction<FogState>("fog", [](const PushConstantBinder& b, FogState st) {
+        b.Push(st);
     });
 
     // Размер диспатча берём у ЖИВОГО атласа: ресайз меняет width/height внутри него, поэтому
     // указатель остаётся верным, а числа приезжают уже новые.
     {
         TextureAtlas* hdr = ctx->GetTextureAtlas(std::string("scene_hdr"));
-        sm->CreateDispatchFunc<DummyDispatchData>("fog", [hdr](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchInstruction<DummyDispatchData>("fog", [hdr](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { hdr->width, hdr->height, 1 };
         });
     }
@@ -328,18 +374,18 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
         BLOOM_PASS, /*dont_save=*/true);
     // Значения больше не литералы здесь: программа СОБИРАЕТ свой cbuffer из состояния прохода
     // (BloomState), которое лежит в шаге и правится редактором.
-    sm->CreateComputePushFunc<BloomState>("bloom_down_0",[](const PushConstantBinder& b, BloomState st) {
+    sm->CreateComputePushInstruction<BloomState>("bloom_down_0",[](const PushConstantBinder& b, BloomState st) {
         BloomParams d{};
         d.threshold = st.threshold;
         d.knee      = st.knee;
         d.intensity = st.scene_contribution;   // у prefilter intensity = вклад СЦЕНЫ
         d.clampMax  = st.halo_clamp;
         d.useKaris  = st.karis_prefilter;
-        b.Push(0, d);
+        b.Push(d);
     });
     {
         TextureAtlas* dst = ctx->GetTextureAtlas(L(0));
-        sm->CreateDispatchFunc<DummyDispatchData>("bloom_down_0",[dst](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchInstruction<DummyDispatchData>("bloom_down_0",[dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };
         });
     }
@@ -355,11 +401,11 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             { L(i - 1) },         // combined sampler: предыдущий (вдвое крупнее) уровень
             BLOOM_PASS, /*dont_save=*/true);
         // Из состояния берёт только выключатель Karis: остальное bloom_down не читает.
-        sm->CreateComputePushFunc<BloomState>(down_name,[](const PushConstantBinder& b, BloomState st) {
-            BloomParams d{}; d.useKaris = st.karis_down; b.Push(0, d);
+        sm->CreateComputePushInstruction<BloomState>(down_name,[](const PushConstantBinder& b, BloomState st) {
+            BloomParams d{}; d.useKaris = st.karis_down; b.Push(d);
         });
         TextureAtlas* dst = ctx->GetTextureAtlas(L(i));
-        sm->CreateDispatchFunc<DummyDispatchData>(down_name,[dst](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchInstruction<DummyDispatchData>(down_name,[dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };
         });
     }
@@ -377,11 +423,11 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             { L((uint32_t)i + 1) },         // combined sampler: следующий (вдвое мельче) уровень
             BLOOM_PASS, /*dont_save=*/true);
         // bloom_up не читает из cbuffer'а ничего, но слот пушить обязан.
-        sm->CreateComputePushFunc<BloomState>(up_name,[](const PushConstantBinder& b, BloomState) {
-            b.Push(0, BloomParams{});
+        sm->CreateComputePushInstruction<BloomState>(up_name,[](const PushConstantBinder& b, BloomState) {
+            b.Push(BloomParams{});
         });
         TextureAtlas* dst = ctx->GetTextureAtlas(L((uint32_t)i));
-        sm->CreateDispatchFunc<DummyDispatchData>(up_name,[dst](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchInstruction<DummyDispatchData>(up_name,[dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };
         });
     }
@@ -396,12 +442,12 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             {},
             { L(0) },                                 // combined sampler: bloom_L0
             BLOOM_PASS, /*dont_save=*/true);
-        sm->CreateComputePushFunc<BloomState>("bloom_composite",[](const PushConstantBinder& b, BloomState st) {
+        sm->CreateComputePushInstruction<BloomState>("bloom_composite",[](const PushConstantBinder& b, BloomState st) {
             BloomParams d{};
             d.intensity = st.glow_intensity;   // у composite intensity = сила свечения
-            b.Push(0, d);
+            b.Push(d);
         });
-        sm->CreateDispatchFunc<DummyDispatchData>("bloom_composite",[dst](DispatchSizeBinder& b, DummyDispatchData) {
+        sm->CreateDispatchInstruction<DummyDispatchData>("bloom_composite",[dst](DispatchSizeBinder& b, DummyDispatchData) {
             b.element_count = { dst->width, dst->height, 1 };
         });
     }

@@ -6,7 +6,7 @@ class EngineContext;
 // (каллинг/bloom/blur) живёт в движке — DefaultShaderSet.h.
 namespace FractalShaderSet
 {
-    // Регистрация push-констант render-sp ПО ИМЕНИ в реестре ShaderManager. push_func — код-байндинг,
+    // Регистрация push-констант render-sp ПО ИМЕНИ в реестре ShaderManager. Инструкция — код-байндинг,
     // он НЕ сериализуется: загруженная из манифеста sp рождается без него. Реестр это и решает —
     // зовётся ОДИН РАЗ на инициализации, ДО первой LoadScene, а привязка к sp идёт сама.
     // Пуши фрактальных фонов ("Fractal"/"Mandelbrot") регистрируются ОБА, без разбора имени сцены:

@@ -362,59 +362,6 @@
             "textures": []
         },
         {
-            "name": "windows",
-            "shaders": [
-                {
-                    "name": "LitDecal",
-                    "params_type": "Opaque",
-                    "params": {
-                        "baseColor": [
-                            1.0,
-                            1.0,
-                            1.0,
-                            1.0
-                        ],
-                        "emissive": [
-                            1.0,
-                            1.0,
-                            1.0
-                        ],
-                        "emissiveStrength": 1.1970000267028809,
-                        "metallic": 0.0,
-                        "roughness": 1.0,
-                        "heightScale": 0.0,
-                        "pomBias": 0.0
-                    }
-                }
-            ],
-            "textures": [
-                {
-                    "role": "Albedo",
-                    "textures": [
-                        "windows2"
-                    ]
-                },
-                {
-                    "role": "Normal",
-                    "textures": [
-                        "default_normal"
-                    ]
-                },
-                {
-                    "role": "ORM",
-                    "textures": [
-                        "default_orm"
-                    ]
-                },
-                {
-                    "role": "Emissive",
-                    "textures": [
-                        "windows light"
-                    ]
-                }
-            ]
-        },
-        {
             "name": "metal2",
             "shaders": [
                 {
@@ -533,28 +480,26 @@
             ]
         },
         {
-            "name": "building",
+            "name": "m_hover",
             "shaders": [
                 {
-                    "name": "LitTiled",
-                    "params_type": "Opaque",
+                    "name": "UI",
+                    "params_type": "UI",
                     "params": {
-                        "baseColor": [
+                        "bg_color": [
                             1.0,
                             1.0,
                             1.0,
                             1.0
                         ],
-                        "emissive": [
-                            0.0,
-                            0.0,
-                            0.0
+                        "text_color": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
                         ],
-                        "emissiveStrength": 1.0,
-                        "metallic": 0.0,
-                        "roughness": 1.0,
-                        "heightScale": 0.0,
-                        "pomBias": 0.0
+                        "text_height": 1.0,
+                        "text_anchor": 0.0
                     }
                 }
             ],
@@ -562,7 +507,8 @@
                 {
                     "role": "Albedo",
                     "textures": [
-                        "cyber"
+                        "hover_1",
+                        "hover_2"
                     ]
                 },
                 {
@@ -586,7 +532,7 @@
             ]
         },
         {
-            "name": "line",
+            "name": "iron_block",
             "shaders": [
                 {
                     "name": "Lit",
@@ -615,13 +561,66 @@
                 {
                     "role": "Albedo",
                     "textures": [
-                        "line"
+                        "block"
                     ]
                 },
                 {
                     "role": "Normal",
                     "textures": [
                         "default_normal"
+                    ]
+                },
+                {
+                    "role": "ORM",
+                    "textures": [
+                        "default_orm"
+                    ]
+                },
+                {
+                    "role": "Emissive",
+                    "textures": [
+                        "default_emissive"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "material_sun",
+            "shaders": [
+                {
+                    "name": "Lit",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.9900000095367432,
+                            0.8500000238418579,
+                            0.44999998807907104
+                        ],
+                        "emissiveStrength": 0.0,
+                        "metallic": 0.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                }
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "textures": [
+                        "texture_sun"
+                    ]
+                },
+                {
+                    "role": "Normal",
+                    "textures": [
+                        "norm"
                     ]
                 },
                 {

@@ -1,15 +1,20 @@
 ﻿#pragma once
 #include <vector>
+#include <functional>
 #include <string>
 #include <cstdint>
 #include <SDL3/SDL_gpu.h>
 #include <glm/glm.hpp>
+#include "Utils.h"   // safe_u32 в пуше массива блоков
 
 // ЛЁГКАЯ половина бывшего ShaderData.h: enum'ы, вершинные форматы, описание пайплайна (spd),
 // биндеры пуш-констант. Это стабильные типы, которые нужны материалам (TextureSlotRole),
 // вершинам (VertexFormat), UI-командам (spd) — БЕЗ тяжёлых структур шейдеров
 // (ShaderProgram/ShaderData/...), которые правятся часто и живут в ShaderData.h.
 // Правка ЭТОГО файла пересобирает почти весь движок — сюда только устоявшееся.
+
+// Слепок группы draw'а — только по указателю в PushInput (полный тип у потребителя).
+namespace RenderSnap { struct TextureDraw; }
 
 namespace ShaderBase {
     enum VertexSemantic : Uint32 { POSITION = 0, UV = 1, NORMAL = 2, TANGENT = 3 };
@@ -55,31 +60,83 @@ struct ShaderDefine {
 };
 using ShaderDefines = std::vector<ShaderDefine>;
 
-struct PushConstantBinder {
-    SDL_GPUCommandBuffer* cb;
-    // Слот кадра (pass_frame/render_frame) — ключ пер-слотовых слепков: push-лямбды берут
-    // данные ТОЛЬКО через Ask*(binder.slot), живые ECS/дерево батчей из них запрещены.
-    uint8_t slot = 0;
-    mutable Uint32 vert_count = 0;
-    mutable Uint32 frag_count = 0;
+// Стадия, в чьи uniform-слоты пишет инструкция. Слоты нумеруются НЕЗАВИСИМО по стадиям, поэтому
+// порядок вершинных и фрагментных инструкций между собой не значит ничего.
+enum class PushStage : uint8_t { Vertex, Fragment, Compute };
 
-    // compute — слот задаёт вызывающий явно
-    template<typename T> void Push(Uint32 slot, const T& d) const {
-        SDL_PushGPUComputeUniformData(cb, slot, &d, sizeof(T));
+// ВХОД инструкции — данные, из которых она собирает свой блок. Не «контекст»: имя ctx в движке
+// занято EngineContext, и путать эти две вещи не стоит. Источника три, функтор берёт нужный:
+//   pass_state — состояние прохода (rp.state); его ТИП знает только сам проход, отсюда void*;
+//   draw       — текущая группа текстур из слепка батча (uvl, params материала, раскладка);
+//   frame      — кадровый слот, ключ пер-слотовых слепков (Ask*(frame)).
+// Живые ECS/дерево батчей функтору по-прежнему запрещены: только слепки.
+struct PushInput {
+    const void*                    pass_state = nullptr;
+    const RenderSnap::TextureDraw* draw       = nullptr;
+    uint8_t                        frame      = 0;
+};
+
+// Приёмник РОВНО ОДНОГО блока: стадию и слот назначил движок (позиция инструкции в списке своей
+// стадии), функтору остаётся отдать данные. Слот намеренно НЕ выбирается функтором: инструкция,
+// пушнувшая лишний блок, сдвинула бы регистры всем следующим — а такое видно только глазами по
+// картинке. Один пуш = один cbuffer, и это структурно, а не по договорённости.
+struct PushConstantBinder {
+    SDL_GPUCommandBuffer* cb = nullptr;
+    PushStage stage = PushStage::Fragment;
+    Uint32    uniform_slot = 0;
+    uint8_t   frame = 0;   // тот же кадровый слот, что в PushInput — для краткости лямбд
+
+    // Один блок: размер берётся из типа.
+    template<typename T> void Push(const T& d) const { PushRaw(&d, sizeof(T)); }
+    // МАССИВ блоков (таблица UVL, блоб params материала): размер берётся из самого контейнера.
+    // Перегрузка, а не «сырой» пуш с void*: тип данных известен и в этом случае, мерить их
+    // руками на каждом вызове незачем.
+    template<typename T> void Push(const std::vector<T>& v) const {
+        PushRaw(v.data(), safe_u32(v.size() * sizeof(T)));
     }
-    // graphics — авто-слот инкрементом (mutable: лямбда остаётся const, как у compute)
-    template<typename T> void PushVertex(const T& d) const {
-        SDL_PushGPUVertexUniformData(cb, vert_count++, &d, sizeof(T));
+
+private:
+    void PushRaw(const void* data, Uint32 size) const {
+        switch (stage) {
+        case PushStage::Vertex:   SDL_PushGPUVertexUniformData(cb, uniform_slot, data, size);   break;
+        case PushStage::Fragment: SDL_PushGPUFragmentUniformData(cb, uniform_slot, data, size); break;
+        case PushStage::Compute:  SDL_PushGPUComputeUniformData(cb, uniform_slot, data, size);  break;
+        }
     }
-    template<typename T> void PushFragment(const T& d) const {
-        SDL_PushGPUFragmentUniformData(cb, frag_count++, &d, sizeof(T));
-    }
+};
+
+// Одна push-инструкция программы: собирает свой блок и отдаёт его биндеру. Что взять из
+// контекста — дело инструкции (и она вправе не брать ничего).
+using PushFunc = std::function<void(const struct PushConstantBinder&, const struct PushInput&)>;
+
+// Инструкции программы исполняются СТРОГО ПО ПОРЯДКУ, и порядок задаёт нумерацию слотов: биндер
+// инкрементирует счётчик стадии на каждый Push*, а движковые блоки (UVL/params/раскладка)
+// встают после них, с binder.frag_count. Значит порядок в списке = порядок register(bN)
+// в шейдере, и перестановка инструкций молча переназначит регистры.
+// Инструкция В СПИСКЕ ПРОГРАММЫ: слот уже назначен (позиция среди инструкций своей стадии),
+// поэтому исполнение не зависит ни от порядка вызова, ни от того, сколько блоков пушат соседи.
+struct PushInstruction {
+    PushStage stage = PushStage::Fragment;
+    Uint32    uniform_slot = 0;
+    PushFunc  fn;
+};
+using PushInstructions = std::vector<PushInstruction>;
+
+// Запись ПЛОСКОГО реестра ShaderManager — одна инструкция + программа, которой она принадлежит
+// (по образцу BufferManager::UpdateInstruction, где инструкция держит свой BufferData*).
+// Принадлежность — ИМЕНЕМ, а не указателем: программа пересоздаётся поимённо (LoadScene и
+// редактор делают delete+create), поэтому указатель повис бы на первой же перезагрузке сцены,
+// а имя переживает её. Резолв имени в программу — у потребителя, на сборке батчей.
+struct ShaderPushInstruction {
+    std::string program_name;
+    PushStage   stage = PushStage::Fragment;
+    PushFunc    fn;
 };
 
 struct DispatchSizeBinder {
     glm::uvec3 element_count{ 0, 0, 0 };
-    // Слот кадра — тот же контракт, что у PushConstantBinder::slot (см. выше).
-    uint8_t slot = 0;
+    // Кадровый слот — тот же контракт, что у PushConstantBinder::frame (см. выше).
+    uint8_t frame = 0;
 
     void Dispatch(uint32_t x, uint32_t y = 1, uint32_t z = 1) {
         element_count = { x, y, z };
