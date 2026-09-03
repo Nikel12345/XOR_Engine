@@ -15,10 +15,8 @@ float4 main(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 
     float3 lightSum = float3(0.0, 0.0, 0.0);
 
-    uint lightCount, stride;
-    LightBlock.GetDimensions(lightCount, stride);
-
-    for (uint i = 0; i < lightCount; ++i)
+    // Счётчик — push-константа пролога (u_lightCount), см. main_pass.frag.hlsl.
+    for (uint i = 0; i < u_lightCount; ++i)
     {
         Light  light    = LightBlock[i];
         int    type     = light.light_info.x;

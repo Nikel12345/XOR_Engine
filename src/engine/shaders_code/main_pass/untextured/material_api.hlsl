@@ -31,9 +31,17 @@ struct SurfaceData
     float  ao;         // контракт с базой (нет AO-карты → всегда 1)
 };
 
-// UVL нет → MaterialBlock первый fragment-uniform (b0). Сэмплеров пасса 2 (тень t0 + env t1,
-// оба объявлены базой), поэтому storage базы съезжают: LightBlock t2, ShadowCameras t3.
-#define MATERIAL_BLOCK_REGISTER  register(b0, space3)
+// Число источников света в LIGHT_BUFFER — ПЕРВЫЙ fragment-uniform (b0): его пушит push-функция
+// программы (RP::LightCountPushData), а UVL/params/раскладка встают за ним — движок кладёт их с
+// binder.frag_count. Счётчик приходит push-константой, а НЕ из LightBlock.GetDimensions: буфер
+// умеет только расти, и его размер больше числа источников (в пределе — свет прошлой сцены).
+cbuffer LightCountBlock : register(b0, space3) {
+    uint u_lightCount;
+};
+
+// UVL нет → MaterialBlock идёт сразу за счётчиком светов (b1). Сэмплеров пасса 2 (тень t0 +
+// env t1, оба объявлены базой), поэтому storage базы съезжают: LightBlock t2, ShadowCameras t3.
+#define MATERIAL_BLOCK_REGISTER  register(b1, space3)
 #define LIGHT_BLOCK_REGISTER     register(t2, space2)
 #define SHADOW_CAMERAS_REGISTER  register(t3, space2)
 #define CAMERA_REGISTER          register(t4, space2)   // 2 сэмплера (тень+env) + LightBlock(t2) + ShadowCameras(t3) → Camera t4

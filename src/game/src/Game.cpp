@@ -34,7 +34,7 @@
 // Стартовая сцена: имя ОДНО и то же для ECS и для файлов — папка сцены зовётся так же
 // (saved_scene/scene1, см. kScenesRoot). Литерал в одном месте: разъедься имя сцены с именем
 // папки — LoadScene молча грузил бы пустоту, а генератор навесился бы на чужую сцену.
-static const char* const kStartScene = "scene1M";
+static const char* const kStartScene = "scene2";
 
 Game::Game(Engine* engine)
 {

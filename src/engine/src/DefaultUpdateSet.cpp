@@ -120,15 +120,11 @@ void DefaultUpdateSet::SetDefaultLightUpdater(EngineContext& ctx, LightDataModul
         if (!scene) return;
         ldm->StoreLightData(bm, &task, om, scene);
     },
-        [om, ldm, bm]() -> uint32_t
+        [om, ldm]() -> uint32_t
     {
         SceneData* scene = om->GetActiveScene();
         if (!scene) return 0;
-        // Ёмкость буфера слота — она же счётчик источников у шейдера (GetDimensions), см.
-        // LightDataModule.h: пишем буфер целиком, иначе смена сцены оставляет в нём чужой свет.
-        BufferData* bd = bm->GetBufferData(DEFAULT_LIGHT_BUFFER);
-        const uint32_t capacity = bd ? bd->Dynamic.buffer_size[bm->logic_index.load()] : 0;
-        return ldm->CalculateLightSize(om, scene, capacity);
+        return ldm->CalculateLightSize(om, scene);
     }
     );
     light_update_inited = true;

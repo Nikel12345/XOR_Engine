@@ -76,14 +76,22 @@ Texture2DArray u_emissive      : register(t5, space2);
 SamplerState   u_emissiveSampler : register(s5, space2);
 
 struct TextureData { uint4 data; };
-cbuffer TextureUVLBlock : register(b0, space3) {
+// Число источников света в LIGHT_BUFFER — ПЕРВЫЙ fragment-uniform (b0): его пушит push-функция
+// программы (RP::LightCountPushData), а UVL/params/раскладка встают за ним — движок кладёт их с
+// binder.frag_count. Счётчик приходит push-константой, а НЕ из LightBlock.GetDimensions: буфер
+// умеет только расти, и его размер больше числа источников (в пределе — свет прошлой сцены).
+cbuffer LightCountBlock : register(b0, space3) {
+    uint u_lightCount;
+};
+
+cbuffer TextureUVLBlock : register(b1, space3) {
     // Таблица СГРУППИРОВАНА ПО СЛОТАМ: подряд все блоки слота, внутри группы [0] — дефолт.
     // Поэтому индекс блока слота s НЕ равен s — только через TexIndex(s) (см. ниже).
     // У материала без вариантов таблица вырождается в прежнюю плотную по required_slots.
     TextureData textures[MAX_UVL_BLOCKS];
 };
 
-#define MATERIAL_BLOCK_REGISTER register(b1, space3)
+#define MATERIAL_BLOCK_REGISTER register(b2, space3)
 
 // Регистры движковых storage-буферов базы зависят от числа сэмплеров пасса (shadercross
 // нумерует storage ПОСЛЕ сэмплеров). Здесь 6 сэмплеров (shadow t0 + env t1 + albedo t2 +
@@ -95,8 +103,9 @@ cbuffer TextureUVLBlock : register(b0, space3) {
 // ── Переключаемые варианты текстур ──
 
 // Как адресовать textures[]: слово на слот + номер материала у сущности. Третий uniform, ПОСЛЕ
-// MaterialBlock — чтобы не двигать его регистр. Зеркало VariantLayout из RenderCommandData.h.
-cbuffer VariantLayoutBlock : register(b2, space3) {
+// MaterialBlock — чтобы не двигать его регистр (b0 занят счётчиком светов, см. выше).
+// Зеркало VariantLayout из RenderCommandData.h.
+cbuffer VariantLayoutBlock : register(b3, space3) {
     uint4 slot_layout[MAX_SLOTS / 4];   // (base<<16)|(cell<<8)|count на слот
     uint  material_index;               // offset 48 — массив кончается на 16-байтной границе
 };

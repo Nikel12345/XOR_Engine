@@ -556,6 +556,14 @@ void Engine::InitDefaultShaders()
 		[](const PushConstantBinder& b, RP::ShadowPushData data) { b.PushFragment(data); });   // слот 0
 	shader_manager->CreatePushFunc<RP::DebugColliderPushData>("Wireframe",
 		[](const PushConstantBinder& b, RP::DebugColliderPushData data) { b.PushFragment(data); });   // fragment slot 0 -> b0, space3
+
+	// Счётчик источников света — ПЕРВЫЙ fragment-uniform (b0, space3) у каждой программы, чей fs
+	// включает лайтинг-базу: UVL/params/раскладка съезжают за ним сами (uvl_slot =
+	// binder.frag_count, см. RenderManager). Игровые программы на движковой базе регистрируют
+	// такой же пуш у себя (GameShaderSet / FractalShaderSet) — иначе их униформы уедут на слот ниже.
+	for (const char* lit_sp : { "Lit", "LitColor", "LitTransparent", "_Fallback" })
+		shader_manager->CreatePushFunc<RP::LightCountPushData>(lit_sp,
+			[](const PushConstantBinder& b, RP::LightCountPushData data) { b.PushFragment(data); });
 }
 
 void Engine::InitDefaultBufferUpdaters()
@@ -595,10 +603,10 @@ void Engine::InitPasses()
 		_SetDefaultCommonResources(engine_context, safe_f_u32(GetWidth()), safe_f_u32(GetHeight()));
 		SetDefaultCullingPass(engine_context);     // GPU-каллинг: out_pib до SHADOW_PASS (индекс 5)
 		SetDefaultShadowPCFRenderPass(engine_context, light_data_module);
-		SetDefaultMainRenderPass(engine_context);
+		SetDefaultMainRenderPass(engine_context, light_data_module);
 		SetDefaultAOPass(engine_context);           // SSAO по глубине main'а, применяется до тумана
 		//SetDefaultFogPass(engine_context);          // атмосфера по глубине main'а: ПОСЛЕ AO, до прозрачных
-		SetTransparentPass(engine_context);
+		SetTransparentPass(engine_context, light_data_module);
 		SetDebugColliderPass(engine_context);
 		SetDefaultBloomPass(engine_context);       // bloom от эмиссии (compute) + composite/tonemap в scene_hdr
 		SetUIPass(engine_context);                 // UI-оверлей (NDC-квады) в scene_hdr после bloom, до present

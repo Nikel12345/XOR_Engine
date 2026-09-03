@@ -10,7 +10,7 @@ LightDataModule::LightDataModule()
 {
 }
 
-uint32_t LightDataModule::CalculateLightSize(ObjectManager* om, SceneData* scene, uint32_t buffer_capacity)
+uint32_t LightDataModule::CalculateLightSize(ObjectManager* om, SceneData* scene)
 {
     total_size = 0;
 
@@ -38,10 +38,6 @@ uint32_t LightDataModule::CalculateLightSize(ObjectManager* om, SceneData* scene
             total_size += safe_u32(arr->size()) * sizeof(LightLayout);
         }
     );
-
-    // Заливаем не меньше, чем уже занимает буфер (см. заголовок): его размер — это и есть
-    // счётчик источников для шейдера, а ужиматься он не умеет. Хвост допишет нулями Store.
-    if (total_size < buffer_capacity) total_size = buffer_capacity;
 
     return total_size;
 }
@@ -164,13 +160,6 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
             bm->UploadToTransferBuffer(task, sizeof(LightLayout), &light_layout);
         });
 
-    // ХВОСТ — нулями. Задача заливки размером с весь буфер (CalculateLightSize), и незаписанные
-    // байты уехали бы на GPU как мусор из transfer-буфера, а прочитались бы как источники света:
-    // счётчик у шейдера — размер буфера. Нулевая запись безопасна и бесплатна — это SPOT с
-    // max_range 0, оба шейдера выходят на первом же условии (dist >= maxRange).
-    const LightLayout none{};
-    while (task->written_size + sizeof(LightLayout) <= task->size)
-        bm->UploadToTransferBuffer(task, sizeof(LightLayout), &none);
 }
 
 // Размер буфера LightCameras слота + СЛЕПОК его теневых камер (snapshots[slot]) одним
@@ -187,7 +176,25 @@ void LightDataModule::StampShadowCameras(ObjectManager* om, SceneData* scene, ui
 {
     std::vector<RenderSnap::ShadowCam>& cams = snapshots[slot].cams;
     cams.clear();   // capacity переживает кадры — аллокаций в steady state нет
+    uint32_t& num_lights = snapshots[slot].num_lights;
+    num_lights = 0;
     if (!scene) return;
+
+    // Счётчик ВСЕХ источников (не только теневых) — тем же перечислением и теми же фильтрами,
+    // что CalculateLightSize: это число записей в LIGHT_BUFFER слота, и его же получает
+    // фрагментник push-константой. Считаем архетипами — размеры колонок, без обхода строк.
+    om->ForEachArchetype<Positions, SpotLightComponent>(scene,
+        [&](ComponentArray<Positions, void>* posArr, ComponentArray<SpotLightComponent, void>*) {
+            num_lights += safe_u32(posArr->size());
+        });
+    om->ForEachArchetype<Positions, SphereLightComponent>(scene,
+        [&](ComponentArray<Positions, void>* posArr, ComponentArray<SphereLightComponent, void>*) {
+            num_lights += safe_u32(posArr->size());
+        });
+    om->ForEachArchetype<DirectLightComponent>(scene,
+        [&](ComponentArray<DirectLightComponent, void>* arr) {
+            num_lights += safe_u32(arr->size());
+        });
 
     om->ForEach<Positions, SpotLightComponent, ShadowCasterComponent>(scene,
         [&](SoAElement<Positions>, SpotLightComponent& light, ShadowCasterComponent) {

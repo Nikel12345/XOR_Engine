@@ -107,10 +107,9 @@ PSOutput main(PSInput input, bool isFrontFace : SV_IsFrontFace)
 
     float3 lightSum = float3(0.0, 0.0, 0.0);
 
-    uint lightCount, stride;
-    LightBlock.GetDimensions(lightCount, stride);
-
-    for (uint i = 0; i < lightCount; ++i)
+    // Счётчик — push-константа пролога (u_lightCount), а не размер LightBlock: буфер только
+    // растёт, и его хвост держит записи прошлых кадров (в т.ч. чужой сцены).
+    for (uint i = 0; i < u_lightCount; ++i)
     {
         Light  light        = LightBlock[i];
         int    type         = light.light_info.x;

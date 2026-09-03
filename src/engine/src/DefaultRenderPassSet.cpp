@@ -245,7 +245,7 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     g_pass_system.common_inited = true;
 }
 
-void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
+void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx, LightDataModule* ldm)
 {
     if (main_pass_inited) {
         SDL_Log("Default main render pass is already initialized.");
@@ -274,9 +274,13 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
 
     auto mainPass = pm->CreateRenderPass(
         MAIN_PASS,
-        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+        [pm, bm, ldm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
-        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
+        // Счётчик источников — из слепка РЕНДЕРИМОГО слота (как теневые камеры выше): рендер
+        // читает только слепки. Дальше его разбирают push-функции программ прохода.
+        if (LightCountPushData* st = rp.State<LightCountPushData>())
+            st->light_count = ldm->AskNumLights(pm->RenderFrame());
+        pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
     },
         std::move(main_rptd),
         20
@@ -296,6 +300,7 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx)
     mainPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_emission, 1);
     mainPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_ambient, 2);
     mainPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
+    SetPassState(mainPass, LightCountPushData{});   // покадровое поле, схемы у прохода нет
 
     main_pass_inited = true;
 }
@@ -349,7 +354,7 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
     debugPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 }
 
-void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
+void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx, LightDataModule* ldm)
 {
     PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
@@ -369,8 +374,11 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
 
     auto transparentPass = pm->CreateRenderPass(
         TRANSPARENT_PASS,
-        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+        [pm, bm, ldm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
+        // Счётчик источников слота — как в MAIN_PASS (лайтящие программы есть и здесь).
+        if (LightCountPushData* st = rp.State<LightCountPushData>())
+            st->light_count = ldm->AskNumLights(pm->RenderFrame());
         // Резолв ДО гарда: colorTargetInfos[0].texture заполняется из атласа только в
         // ResolveTargets (таргеты привязаны атласами, сырой хэндл на setup не пишется).
         // Гард до резолва зациклился бы: texture == nullptr → return → тело (и резолв в нём)
@@ -378,7 +386,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
         // RenderPassStandardBody идемпотентен и дёшев.
         rp.renderPassTexsData.ResolveTargets();
         if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
-        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
+        pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
     },
         std::move(transparent_rptd),
         22   // между MAIN_PASS (20) и DEBUG_PASS (25)
@@ -386,6 +394,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx)
 
     transparentPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr, 0);
     transparentPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
+    SetPassState(transparentPass, LightCountPushData{});
 }
 
 void DefaultRenderPassNamespace::SetUIPass(EngineContext* ctx)

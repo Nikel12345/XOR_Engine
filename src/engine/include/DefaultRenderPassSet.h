@@ -37,6 +37,19 @@ namespace DefaultRenderPassNamespace
     void SetDefaultShadowPCFRenderPass(EngineContext* ctx, LightDataModule* ldm);
     void SetDefaultShadowVSMRenderPass(EngineContext* ctx, LightDataModule* ldm);
 
+    // Число источников света в LIGHT_BUFFER слота — состояние MAIN/TRANSPARENT прохода, едет
+    // push-константой в его лайтящие программы (fragment slot 0 → b0, space3). Счётчик обязан
+    // приходить ЯВНО: размер буфера для этого не годится (он только растёт, см.
+    // LightDataModule.h), а рендер-поток берёт значение из слепка слота, не из ECS.
+    // КОНТРАКТ: программа, чей fs включает лайтинг-базу (main_pass.frag.hlsl / transparent.
+    // frag.hlsl), ОБЯЗАНА зарегистрировать пуш этой структуры (CreatePushFunc по имени sp) —
+    // он занимает b0, а UVL/params/раскладка съезжают следом (uvl_slot = binder.frag_count).
+    // Забыли — материальные униформы уедут на регистр ниже, это видно сразу.
+    struct alignas(16) LightCountPushData
+    {
+        Uint32 light_count;
+    };
+
     struct ShadowBlurUniform { uint32_t layerIndex; };
     struct DummyDispatchData {};
     void SetDefaultShadowBlurPass(EngineContext* ctx);
@@ -45,7 +58,9 @@ namespace DefaultRenderPassNamespace
     // Должна вызываться ПЕРЕД Set*Pass, которые их потребляют (main/transparent/debug).
     void _SetDefaultCommonResources(EngineContext* ctx, uint32_t width, uint32_t height);
 
-    void SetDefaultMainRenderPass(EngineContext* ctx);
+    // ldm — источник счётчика источников света слота (AskNumLights): проход кладёт его в своё
+    // состояние, откуда push-функции программ забирают его в b0 (см. LightCountPushData).
+    void SetDefaultMainRenderPass(EngineContext* ctx, LightDataModule* ldm);
     void SetDefaultMainRenderPass(EngineContext* ctx, SDL_GPUDevice* dev, SDL_Window* win);
 
     // Состояние DEBUG_PASS: цвет рамок коллайдеров. Тело прохода его не трогает — это чистая
@@ -54,7 +69,7 @@ namespace DefaultRenderPassNamespace
     inline const std::string DEBUG_COLLIDER_STATE = "DebugCollider";
     void SetDebugColliderPass(EngineContext* ctx);
 
-    void SetTransparentPass(EngineContext* ctx);
+    void SetTransparentPass(EngineContext* ctx, LightDataModule* ldm);   // ldm — см. SetDefaultMainRenderPass
 
     // UI-оверлей: рендер UI-энтити (NDC-квады) в scene_hdr ПОСЛЕ bloom, ДО present (не блумится).
     // Своя глубина (main_depth с CLEAR — z-пространство UI отдельное), __TextAtlas как глобалка.

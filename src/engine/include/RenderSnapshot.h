@@ -30,6 +30,11 @@ namespace RenderSnap {
 
     struct LightCams {
         std::vector<ShadowCam> cams;
+        // Число ИСТОЧНИКОВ (не камер) сцены слота — ровно столько записей залил в LIGHT_BUFFER
+        // этого слота StoreLightData того же prepare. Уезжает push-константой в лайтящие
+        // фрагментники: размер буфера счётчиком быть не может, он умеет только расти
+        // (EnsureBufferCapacity), см. LightDataModule.h.
+        uint32_t num_lights = 0;
     };
 
     // ── Плоская раскладка дерева батчей (двойник indirect_buffer[slot]) ──

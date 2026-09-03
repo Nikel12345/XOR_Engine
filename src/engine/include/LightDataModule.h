@@ -19,13 +19,12 @@ struct LightCamera {
 class LightDataModule {
 public:
     LightDataModule();
-    // ВАЖНО: шейдер берёт ЧИСЛО ИСТОЧНИКОВ ИЗ РАЗМЕРА БУФЕРА (LightBlock.GetDimensions в
-    // main_pass/transparent), а буфер умеет только расти (EnsureBufferCapacity). Значит писать
-    // надо ВЕСЬ буфер: buffer_capacity — его текущий размер для слота, размер заливки не меньше
-    // него, а хвост StoreLightData добивает нулями. Иначе сцена с меньшим числом источников
-    // (в пределе — совсем без света) продолжает освещаться светом ПРЕДЫДУЩЕЙ сцены: store при
-    // size==0 просто не вызывается, и в буфере остаются её байты.
-    uint32_t CalculateLightSize(ObjectManager* om, SceneData* scene, uint32_t buffer_capacity);
+    // Размер = ровно число источников сцены. Хвост буфера (он только растёт, ужать его
+    // EnsureBufferCapacity не умеет) остаётся с байтами прошлых кадров — и это НЕ страшно
+    // ровно потому, что счётчик едет шейдеру ЯВНО, push-константой из слепка (AskNumLights),
+    // а не выводится из размера буфера. Убери пуш — и сцена с меньшим числом источников
+    // (в пределе — без света вовсе) будет освещаться светом предыдущей сцены.
+    uint32_t CalculateLightSize(ObjectManager* om, SceneData* scene);
     void StoreLightData(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene);
 
     // Считает размер буфера LightCameras слота И пишет слепок его теневых камер
@@ -45,6 +44,9 @@ public:
     uint32_t AskNumLightCameras(uint8_t slot) const {
         return static_cast<uint32_t>(snapshots[slot].cams.size());
     }
+    // Счётчик источников для лайтящих фрагментников (RP::LightCountPushData): сколько записей
+    // лежит в LIGHT_BUFFER этого слота.
+    uint32_t AskNumLights(uint8_t slot) const { return snapshots[slot].num_lights; }
     const std::vector<RenderSnap::ShadowCam>& AskShadowCameras(uint8_t slot) const {
         return snapshots[slot].cams;
     }
