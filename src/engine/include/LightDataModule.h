@@ -19,7 +19,13 @@ struct LightCamera {
 class LightDataModule {
 public:
     LightDataModule();
-    uint32_t CalculateLightSize(ObjectManager* om, SceneData* scene);
+    // ВАЖНО: шейдер берёт ЧИСЛО ИСТОЧНИКОВ ИЗ РАЗМЕРА БУФЕРА (LightBlock.GetDimensions в
+    // main_pass/transparent), а буфер умеет только расти (EnsureBufferCapacity). Значит писать
+    // надо ВЕСЬ буфер: buffer_capacity — его текущий размер для слота, размер заливки не меньше
+    // него, а хвост StoreLightData добивает нулями. Иначе сцена с меньшим числом источников
+    // (в пределе — совсем без света) продолжает освещаться светом ПРЕДЫДУЩЕЙ сцены: store при
+    // size==0 просто не вызывается, и в буфере остаются её байты.
+    uint32_t CalculateLightSize(ObjectManager* om, SceneData* scene, uint32_t buffer_capacity);
     void StoreLightData(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene);
 
     // Считает размер буфера LightCameras слота И пишет слепок его теневых камер

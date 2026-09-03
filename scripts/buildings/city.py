@@ -21,8 +21,8 @@ from pathlib import Path
 
 from generate import MODEL_NAME, MODEL_COUNT, GRID, CELL, OUT_DIR
 
-CITY_X = 20                 # домов по X
-CITY_Y = 100                 # домов по Z (вторая ось СЕТКИ — это Z сцены, не Y)
+CITY_X = 16                 # домов по X
+CITY_Y = 16                 # домов по Z (вторая ось СЕТКИ — это Z сцены, не Y)
 
 # Шаг сетки: след здания = GRID x CELL, остальное — ширина улицы. Меньше следа ставить нельзя —
 # дома вложатся друг в друга.
@@ -37,7 +37,10 @@ SPACING = GRID * CELL + STREET
 AVENUE_X = 1
 AVENUE_Y = 1
 
-SCENE_DIR = Path(__file__).resolve().parents[2] / "src" / "game" / "saved_scene"
+# Рабочая папка игры и папка КОНКРЕТНОЙ сцены внутри её корня сцен: движок грузит
+# saved_scene/<имя сцены>, а не сам saved_scene (см. Engine::LoadScene).
+GAME_DIR = Path(__file__).resolve().parents[2] / "src" / "game"
+SCENE_DIR = GAME_DIR / "saved_scene" / "scene1"
 SCENE_NAME = "scene.json"
 
 # По материалу на сабмеш, порядок соответствует НОМЕРАМ сабмешей (wall, podium, tech, windows):
@@ -50,7 +53,7 @@ BUILDING_MATERIALS = ["building", "building_glass", "building_tech", "windows",
                       "tower", "telecom", "radiotower"]
 
 # Без направленного света город чёрный, без фона — на пустом свопчейне. Значения — из штатной
-# сцены game/saved_scene; ресурсы (материал/модель) движок не создаёт, они лежат в её манифестах.
+# сцены game/saved_scene/scene1; ресурсы (материал/модель) движок не создаёт, они лежат в её манифестах.
 SKYBOX_MATERIAL = "_skybox"
 SKYBOX_MODEL = "skybox_cube"
 LIGHT = collections.OrderedDict([
@@ -223,8 +226,8 @@ def sync_models():
         if not stem.exists():
             missing_files.append(name)
             continue
-        # Пути относительны РАБОЧЕЙ ПАПКЕ игры (src/game), а она же родитель saved_scene.
-        rel = OUT_DIR.relative_to(SCENE_DIR.parent).as_posix()
+        # Пути относительны РАБОЧЕЙ ПАПКЕ игры (src/game).
+        rel = OUT_DIR.relative_to(GAME_DIR).as_posix()
         want[name] = collections.OrderedDict([
             ("name", name),
             ("vertex", "%s/%s_v.bin" % (rel, name)),

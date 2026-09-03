@@ -312,7 +312,7 @@ void EngineContext::HideEntity(const SceneName& scene_name, Entity e, bool visib
 
 void EngineContext::SetActiveScene(const SceneName& name)
 {
-	object_manager->SetSceneState(name, true);
+	object_manager->SetActiveScene(name);   // исключительная: прочие сцены гаснут
 	batch_builder->SetDirtyBatches(true);
 }
 
@@ -342,16 +342,16 @@ void EngineContext::ClearScene(const SceneName& scene_name)
 	batch_builder->SetDirtyBatches(true);
 }
 
-void EngineContext::SaveScene(const SceneName& scene_name, const std::string& dir)
+void EngineContext::SaveScene(const SceneName& scene_name, const std::string& scenes_root)
 {
 	// Тонкий прокси: оркестрация по менеджерам (om + tm/mm/sm по этапам) — в Engine.
-	if (engine) engine->SaveScene(scene_name, dir);
+	if (engine) engine->SaveScene(scene_name, scenes_root);
 	else SDL_Log("SaveScene: engine back-pointer not set");
 }
 
-void EngineContext::LoadScene(const SceneName& scene_name, const std::string& dir)
+void EngineContext::LoadScene(const SceneName& scene_name, const std::string& scenes_root)
 {
-	if (engine) engine->LoadScene(scene_name, dir);
+	if (engine) engine->LoadScene(scene_name, scenes_root);
 	else SDL_Log("LoadScene: engine back-pointer not set");
 }
 

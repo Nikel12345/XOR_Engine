@@ -52,7 +52,7 @@ SDL_AppResult MyGame::MainInit()
 
     {
         // Только COMPUTE-программы: они держат указатели на буферы/атласы + dispatch_func, не
-        // сериализуются. CSD (culling/bloom) приезжают из saved_scene_fractal/shaders.json;
+        // сериализуются. CSD (culling/bloom) приезжают из saved_scene/scene_fractal/shaders.json;
         // csp хранит имя cs — резолв на сборке compute-пайплайна (после LoadScene).
         using namespace DefaultShaderProgramSet;
         SetBloomPrograms(ctx);
@@ -96,7 +96,7 @@ SDL_AppResult MyGame::MainInit()
     FractalShaderSet::RegisterShaderFuncs(ctx);
 
     objectManager->CreateScene(scene_name);
-    ctx->LoadScene(scene_name, "saved_" + scene_name);   // папка сцены (scene.json + ресурсы)
+    ctx->LoadScene(scene_name);   // папка сцены saved_scene/<имя> (scene.json + ресурсы)
 
     // ── Якорённые кубы (этапы 3-4). Модель — процедурный куб полу-размера 1, dont_save;
     // материал/sp — из манифестов сцены (iron_block/AnchorObject: штатный main-суржейс — свет

@@ -26,7 +26,10 @@ from PIL import Image
 
 
 # Per-channel default fill when a source path is None (0-255).
-DEFAULTS = {"r": 255, "g": 255, "b": 0, "a": 255}
+# Канон движка: отсутствующая карта — БЕЛАЯ, тогда getSurface отдаёт чистый фактор материала
+# (ao=1, roughness/metallic = факторы). Ноль в B означал бы «металла нет никогда», и фактор
+# metallic на материале переставал бы работать вовсе.
+DEFAULTS = {"r": 255, "g": 255, "b": 255, "a": 255}
 
 
 def load_channel(path, size, default, invert=False):

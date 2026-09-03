@@ -12,6 +12,8 @@
 #include "UI_ComponentEditor.h"
 #include "UI_Yoga.h"
 #include <set>
+#include <algorithm>
+#include <filesystem>
 
 using namespace ui;
 
@@ -23,6 +25,26 @@ using namespace ui;
 // сцены, + пересборка батчей).
 namespace {
     constexpr Entity kNoEntity = static_cast<Entity>(-1);
+
+    // ---- Список сцен = ПОДПАПКИ корня сцен (kScenesRoot) ----
+    // Имя папки и есть имя сцены (Engine::Save/LoadScene складывают путь из корня и имени),
+    // поэтому перечисление каталога — это готовый список сцен, без отдельного реестра-файла.
+    // Сканируем не каждый кадр: обход каталога — syscall'ы, а состав папок меняется редко
+    // (наш же Save или правка снаружи). Раз в секунду — и список сам подхватывает новое.
+    std::vector<std::string> g_scene_dirs;
+    double g_scene_dirs_time = -1.0;   // время последнего скана (ImGui::GetTime), <0 — не сканировали
+
+    void RescanSceneDirs()
+    {
+        g_scene_dirs.clear();
+        std::error_code ec;
+        for (const auto& e : std::filesystem::directory_iterator(kScenesRoot, ec)) {
+            if (e.is_directory(ec)) g_scene_dirs.push_back(e.path().filename().string());
+        }
+        // Порядок обхода каталога не определён — сортируем, чтобы строки не прыгали между кадрами.
+        std::sort(g_scene_dirs.begin(), g_scene_dirs.end());
+        g_scene_dirs_time = ImGui::GetTime();
+    }
 
     bool   g_ce_open   = false;      // форма развёрнута
     Entity g_ce_entity = kNoEntity;  // staging-черновик
@@ -196,21 +218,39 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
         return;
     }
 
-    // ---- Сцены (пока одна активная; список — задел) + Save/Load ----
+    // ---- Сцены: строка на каждую папку в корне сцен + Save/Load ----
     if (ImGui::CollapsingHeader("Scenes", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        SceneName active = om->GetActiveSceneName();
-        ImGui::Selectable(active.c_str(), true);   // активная сцена
+        const SceneName active = om->GetActiveSceneName();
+        if (g_scene_dirs_time < 0.0 || ImGui::GetTime() - g_scene_dirs_time > 1.0) RescanSceneDirs();
 
-        // Путь — ПАПКА сцены (scene.scene + файлы ресурсов внутри), см. Engine::Save/LoadScene.
-        if (ImGui::SmallButton("Save scene")) {
-            ctx->GetInputManager()->PushCommand(CommandId::SaveScene,
-                new SceneIOCmd{ active, "saved_scene" });
+        // Имя папки = имя сцены, поэтому в команду уходит оно, а не активная сцена: Load грузит
+        // ИМЕННО эту папку (движок сам её активирует), Save пишет одноимённую сцену — то есть
+        // осмысленно ровно для загруженной (иначе SaveScene сообщит, что сцены такой нет).
+        InputManager* im = ctx->GetInputManager();
+        for (const std::string& name : g_scene_dirs) {
+            ImGui::PushID(name.c_str());
+            if (ImGui::SmallButton("Load"))
+                im->PushCommand(CommandId::LoadScene, new SceneIOCmd{ name, kScenesRoot });
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Save"))
+                im->PushCommand(CommandId::SaveScene, new SceneIOCmd{ name, kScenesRoot });
+            ImGui::SameLine();
+            ImGui::Selectable(name.c_str(), name == active);
+            ImGui::PopID();
         }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Load scene")) {
-            ctx->GetInputManager()->PushCommand(CommandId::LoadScene,
-                new SceneIOCmd{ active, "saved_scene" });
+
+        // Активная сцена, у которой папки ещё нет (ни разу не сохранялась), иначе её нечем
+        // сохранить: список показывает каталог, а её там нет. Save заведёт папку по её имени.
+        if (std::find(g_scene_dirs.begin(), g_scene_dirs.end(), active) == g_scene_dirs.end()) {
+            ImGui::PushID(active.c_str());
+            if (ImGui::SmallButton("Save")) {
+                im->PushCommand(CommandId::SaveScene, new SceneIOCmd{ active, kScenesRoot });
+                g_scene_dirs_time = -1.0;   // папка вот-вот появится — пересканировать сразу
+            }
+            ImGui::SameLine();
+            ImGui::Selectable(active.c_str(), true);
+            ImGui::PopID();
         }
     }
 

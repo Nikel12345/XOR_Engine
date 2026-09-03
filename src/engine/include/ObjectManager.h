@@ -77,6 +77,12 @@ public:
     Entity CreateEntityFromSpecs(SceneData* scene, const std::vector<const ComponentSpec*>& specs);
 
 	void SetSceneState(const SceneName& scene_name, bool is_active);
+    // ИСКЛЮЧИТЕЛЬНАЯ активация: названная сцена становится активной, все прочие гасятся.
+    // Активная ровно одна по построению — на неё смотрят GetActiveScene, дата-модули и сборка
+    // батчей. SetSceneState(name, true) этого НЕ гарантирует (у SceneData is_active=true по
+    // умолчанию, т.е. новая сцена рождается активной): две активные — и GetActiveScene отдаёт
+    // произвольную из них. Переключение сцен ходит сюда.
+    void SetActiveScene(const SceneName& scene_name);
     SceneData* GetActiveScene();
     SceneName GetActiveSceneName();
     SceneData* GetScene(const SceneName& name);

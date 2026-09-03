@@ -101,6 +101,18 @@ void ObjectManager::SetSceneState(const SceneName& scene_name, bool is_active)
 	}
 }
 
+void ObjectManager::SetActiveScene(const SceneName& scene_name)
+{
+    auto it = scenes_data.find(scene_name);
+    if (it == scenes_data.end()) {
+        SDL_Log("SetActiveScene: scene '%s' not found", scene_name.c_str());
+        return;
+    }
+    // Гасим ВСЕ и зажигаем одну: инвариант «активная ровно одна» держится тут, а не у вызывающих
+    // (см. ObjectManager.h). Сцены наперечёт - линейный проход бесплатен.
+    for (auto& [name, scene] : scenes_data) scene->is_active = (name == scene_name);
+}
+
 SceneData* ObjectManager::GetActiveScene()
 {
     for (auto& [name, scene] : scenes_data) {

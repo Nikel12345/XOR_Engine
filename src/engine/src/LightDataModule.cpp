@@ -10,7 +10,7 @@ LightDataModule::LightDataModule()
 {
 }
 
-uint32_t LightDataModule::CalculateLightSize(ObjectManager* om, SceneData* scene)
+uint32_t LightDataModule::CalculateLightSize(ObjectManager* om, SceneData* scene, uint32_t buffer_capacity)
 {
     total_size = 0;
 
@@ -38,6 +38,10 @@ uint32_t LightDataModule::CalculateLightSize(ObjectManager* om, SceneData* scene
             total_size += safe_u32(arr->size()) * sizeof(LightLayout);
         }
     );
+
+    // Заливаем не меньше, чем уже занимает буфер (см. заголовок): его размер — это и есть
+    // счётчик источников для шейдера, а ужиматься он не умеет. Хвост допишет нулями Store.
+    if (total_size < buffer_capacity) total_size = buffer_capacity;
 
     return total_size;
 }
@@ -159,6 +163,14 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
             };
             bm->UploadToTransferBuffer(task, sizeof(LightLayout), &light_layout);
         });
+
+    // ХВОСТ — нулями. Задача заливки размером с весь буфер (CalculateLightSize), и незаписанные
+    // байты уехали бы на GPU как мусор из transfer-буфера, а прочитались бы как источники света:
+    // счётчик у шейдера — размер буфера. Нулевая запись безопасна и бесплатна — это SPOT с
+    // max_range 0, оба шейдера выходят на первом же условии (dist >= maxRange).
+    const LightLayout none{};
+    while (task->written_size + sizeof(LightLayout) <= task->size)
+        bm->UploadToTransferBuffer(task, sizeof(LightLayout), &none);
 }
 
 // Размер буфера LightCameras слота + СЛЕПОК его теневых камер (snapshots[slot]) одним

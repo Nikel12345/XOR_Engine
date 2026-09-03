@@ -31,6 +31,11 @@
 #include "ContactSystem.h"
 #include "DebugColliderSystem.h"
 
+// Стартовая сцена: имя ОДНО и то же для ECS и для файлов — папка сцены зовётся так же
+// (saved_scene/scene1, см. kScenesRoot). Литерал в одном месте: разъедься имя сцены с именем
+// папки — LoadScene молча грузил бы пустоту, а генератор навесился бы на чужую сцену.
+static const char* const kStartScene = "scene1M";
+
 Game::Game(Engine* engine)
 {
     game_state = GameState::MAIN_MENU;
@@ -56,7 +61,7 @@ Game::Game(Engine* engine)
 SDL_AppResult Game::MainInit()
 {
     RegisterGameComponents();   // ДО LoadScene: он резолвит компоненты по имени через реестр
-    objectManager->CreateScene("main_menu");
+    objectManager->CreateScene(kStartScene);
     Camera* camera = cameraManager->CreateCamera(width, height);
     cameraManager->SetActiveCamera(0);
 
@@ -65,11 +70,11 @@ SDL_AppResult Game::MainInit()
         glm::vec3(0.43f, -0.4f, -0.8f), // точка взгляда
         glm::vec3(0.0f, 1.0f, 0.0f)  // вектор вверх
     );
-    TextureAtlas* atlas = ctx->CreateTextureAtlas("albedo_atlas", TexturePresets::AlbedoAtlas(2048, 7, 5), DefaultSamplersNames::DEFAULT_SAMPLER);
+    TextureAtlas* atlas = ctx->CreateTextureAtlas("albedo_atlas", TexturePresets::AlbedoAtlas(2048, 8, 5), DefaultSamplersNames::DEFAULT_SAMPLER);
 	// Мипы обязательны: без них (а) POM-префильтр pomBias — no-op (нет грубых уровней), (б) нормаль
 	// не сглаживается (мерцание, см. заметку про red-shift). FullMipLevels включает мип-цепочку.
-	TextureAtlas* normal_atlas   = ctx->CreateTextureAtlas("normal_atlas",   TexturePresets::NormalAtlas(2048, 4, TexturePresets::FullMipLevels(2048)),   DefaultSamplersNames::DEFAULT_SAMPLER);
-	TextureAtlas* orm_atlas      = ctx->CreateTextureAtlas("orm_atlas",      TexturePresets::ORMAtlas(2048, 4), DefaultSamplersNames::DEFAULT_SAMPLER);
+	TextureAtlas* normal_atlas   = ctx->CreateTextureAtlas("normal_atlas",   TexturePresets::NormalAtlas(2048, 5, TexturePresets::FullMipLevels(2048)),   DefaultSamplersNames::DEFAULT_SAMPLER);
+	TextureAtlas* orm_atlas      = ctx->CreateTextureAtlas("orm_atlas",      TexturePresets::ORMAtlas(2048, 5), DefaultSamplersNames::DEFAULT_SAMPLER);
 	TextureAtlas* emissive_atlas = ctx->CreateTextureAtlas("emissive_atlas", TexturePresets::EmissiveAtlas(1024, 2), DefaultSamplersNames::DEFAULT_SAMPLER);
 
 
@@ -212,8 +217,8 @@ SDL_AppResult Game::MainInit()
         }
     }, AnchorShift::Keep, /*dont_save=*/true);
 
-    ctx->RegisterGenerator("main_menu", [this] { CreateDebugColliders(); });
-    ctx->LoadScene("main_menu", "saved_scene");   // папка сцены (scene.json + ресурсы внутри)
+    ctx->RegisterGenerator(kStartScene, [this] { CreateDebugColliders(); });
+    ctx->LoadScene(kStartScene);   // папка сцены saved_scene/scene1 (scene.json + ресурсы внутри)
 
     debug_collider_material = ctx->GetMaterialManager()->GetMaterial("debug_collider");
 
@@ -369,7 +374,7 @@ void Game::CreateDebugColliders()
         const char* model_name = (s.kind == ShapeKind::Box) ? "debug_box" : "debug_sphere";
         LocalMatrixProxy16 lm{};   // SoA-локаль: в CreateEntity едет как прокси (как PositionProxy16)
         for (int i = 0; i < 16; ++i) lm.m[i] = s.local[i];
-        ctx->CreateEntity("main_menu",
+        ctx->CreateEntity(kStartScene,
             MaterialComponent{ { MaterialRef{ "debug_collider" } } },
             ModelComponent{ model_name },
             PositionProxy16{},          // перезапишется композицией parent × local

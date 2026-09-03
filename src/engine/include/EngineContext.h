@@ -41,6 +41,12 @@ struct FontData;               // возвращаем указателем (к�
 class UI_Yoga;                 // держим указателем (создаёт Engine, садит сеттером)
 class Engine;
 
+// Корень сцен в рабочей папке игры — ПАПКА С ПАПКАМИ. Каждая подпапка — одна сцена, и её ИМЯ
+// есть имя сцены: Save/LoadScene складывают путь как scenes_root + "/" + scene_name, а список
+// сцен в редакторе — просто перечисление этого каталога. Литерал один на всех: разъедься UI и
+// загрузчик по разным корням — кнопка грузила бы не то, что показывает.
+inline constexpr const char* kScenesRoot = "saved_scene";
+
 class EngineContext {
 public:
 	EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* rm, BatchBuilder* bb, TextureLoader* tl);
@@ -152,11 +158,12 @@ public:
 	// Activating a scene swaps the whole entity set; force a full batch rebuild.
 	void SetActiveScene(const SceneName& name);
 
-	// Сохранение/загрузка СЦЕНЫ-ПАПКИ (dir = путь к папке): scene.scene (ECS) + файлы ресурсов
-	// рядом (по менеджерам, подключаются поэтапно). Тонкий прокси в Engine::Save/LoadScene —
-	// оркестрация по менеджерам (tm/mm/sm + om) живёт там; ctx лишь публичная точка входа.
-	void SaveScene(const SceneName& scene_name, const std::string& dir);
-	void LoadScene(const SceneName& scene_name, const std::string& dir);
+	// Сохранение/загрузка СЦЕНЫ-ПАПКИ: scene.json (ECS) + файлы ресурсов рядом (по менеджерам,
+	// подключаются поэтапно). scenes_root — КОРЕНЬ (см. kScenesRoot), сама папка сцены —
+	// scenes_root/scene_name. Тонкий прокси в Engine::Save/LoadScene — оркестрация по
+	// менеджерам (tm/mm/sm + om) живёт там; ctx лишь публичная точка входа.
+	void SaveScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
+	void LoadScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
 	void ExecuteGenerators();
 	// Сносит ВСЁ содержимое сцены (сущности/иерархию; генераторы переживают) и помечает
 	// батчи на полную пересборку. LoadScene вызывает его первым (replace-on-load).

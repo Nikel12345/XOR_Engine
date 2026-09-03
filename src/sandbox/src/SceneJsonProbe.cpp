@@ -18,7 +18,7 @@ static std::string ReadFileText(const char* path)
 
 int main(int argc, char** argv)
 {
-    const char* path = (argc > 1) ? argv[1] : "saved_scene/scene.json";
+    const char* path = (argc > 1) ? argv[1] : "saved_scene/scene1/scene.json";
     const std::string text = ReadFileText(path);
     if (text.empty()) { SDL_Log("Нет '%s' (рабочая директория должна быть src/game).", path); return 1; }
 

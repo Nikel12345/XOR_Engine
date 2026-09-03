@@ -128,12 +128,14 @@ public:
 	UI_Yoga* GetUIYoga() const { return ui_yoga; }
 
 
-    // Сохранение/загрузка сцены-папки (dir): scene.json (ECS через om) + файлы ресурсов рядом
-    // (tm/mm/sm — подключаются поэтапно). Публичная точка входа — ctx->Save/LoadScene (делегирует
-    // сюда): оркестрация по менеджерам — забота Engine, а не контекста. Порядок load:
+    // Сохранение/загрузка сцены-папки: scene.json (ECS через om) + файлы ресурсов рядом
+    // (tm/mm/sm — подключаются поэтапно). Папка сцены = scenes_root/scene_name (имя папки И ЕСТЬ
+    // имя сцены, см. kScenesRoot) — путь складывается тут, чтобы список папок в редакторе был
+    // готовым списком имён сцен. Публичная точка входа — ctx->Save/LoadScene (делегирует сюда):
+    // оркестрация по менеджерам — забота Engine, а не контекста. Порядок load:
     // ресурсы (merge-upsert) → ECS (replace-on-load) → фикс-ап указателей → пересборка батчей.
-    void SaveScene(const SceneName& scene_name, const std::string& dir);
-    void LoadScene(const SceneName& scene_name, const std::string& dir);
+    void SaveScene(const SceneName& scene_name, const std::string& scenes_root);
+    void LoadScene(const SceneName& scene_name, const std::string& scenes_root);
 
     void PrepareFunc(uint8_t idx);
 

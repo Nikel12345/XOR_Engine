@@ -44,9 +44,9 @@ fill = 1 — законченный шар с шаровым же вырезом
 Запуск (без параметров):
     python scene_gen.py      (или: py scene_gen.py)
 
-Результат пишется СРАЗУ в папку сцены игры: src/game/saved_scene/scene.json
-(движок грузит папку "saved_scene" из рабочей папки src/game, см. Game::MainInit →
-ctx->LoadScene("main_menu", "saved_scene")). Прочие манифесты в папке не трогаются.
+Результат пишется СРАЗУ в папку сцены игры: src/game/saved_scene/scene1M/scene.json
+(движок грузит папку "saved_scene/<имя сцены>" из рабочей папки src/game, см. Game::MainInit →
+ctx->LoadScene("scene1")). Прочие манифесты в папке не трогаются.
 """
 
 import os
@@ -131,8 +131,9 @@ DIRECT_LIGHT_POWER = 2.5
 LIGHT_CASCADE_COUNT = 3
 LIGHT_CASCADE_RATIO = 3.0
 
-# Папка сцены игры (относительно скрипта) и имя ECS-файла внутри неё.
-SCENE_DIR = os.path.join("..", "..", "src", "game", "saved_scene")
+# Папка сцены игры (относительно скрипта) и имя ECS-файла внутри неё. Сцена — это
+# подпапка корня сцен по её имени (saved_scene/<имя>), а не сам saved_scene.
+SCENE_DIR = os.path.join("..", "..", "src", "game", "saved_scene", "scene1M")
 OUTPUT_NAME = "scene.json"
 
 # Имена 16 колонок Transform (row-major 4x4; трансляция в w/d/h — индексы 3/7/11).
@@ -442,7 +443,7 @@ def main():
     out_path = os.path.join(out_dir, OUTPUT_NAME)
 
     if not os.path.isdir(out_dir):
-        raise SystemExit("Папки сцены нет: {}\n(ожидается src/game/saved_scene с манифестами ресурсов)".format(out_dir))
+        raise SystemExit("Папки сцены нет: {}\n(ожидается src/game/saved_scene/scene1M с манифестами ресурсов)".format(out_dir))
 
     text, used_models, sections = build_scene()
 

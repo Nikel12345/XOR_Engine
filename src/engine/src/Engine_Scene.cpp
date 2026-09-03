@@ -235,10 +235,14 @@ static ShaderProgramDescription ReadSpd(yyjson_val* obj) {
 	return d;
 }
 
-void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
+void Engine::SaveScene(const SceneName& scene_name, const std::string& scenes_root)
 {
 	SceneData* scene = object_manager->GetScene(scene_name);
 	if (!scene) { SDL_Log("SaveScene: scene '%s' not found", scene_name.c_str()); return; }
+
+	// Папку сцены складываем ЗДЕСЬ: имя папки = имя сцены (см. kScenesRoot). Вызывающий
+	// (кнопка редактора, игра) знает корень и имя — раскладку по каталогу знает движок.
+	const std::string dir = scenes_root + "/" + scene_name;
 
 	std::error_code ec;
 	std::filesystem::create_directories(dir, ec);   // папка сцены (уже существует — не ошибка)
@@ -465,12 +469,15 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& dir)
 	SDL_Log("SaveScene: wrote scene '%s' to '%s'", scene_name.c_str(), dir.c_str());
 }
 
-void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
+void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_root)
 {
 	// Рендер-поток встаёт на всю загрузку (см. Engine::scene_swap_mutex). На всю, а не только
 	// на ECS-своп: фазы манифестов перезаливают словари TextureManager/ModelManager/
 	// MaterialManager/ShaderManager, а панели редактора их перечисляют с рендер-потока.
 	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
+
+	// Папка сцены — scenes_root/scene_name (симметрично SaveScene).
+	const std::string dir = scenes_root + "/" + scene_name;
 
 	// ── Тайминг фаз загрузки (диагностика 5-секундной загрузки 100k). Load — событие
 	// разовое, поэтому не через кадровый Prof, а прямым SDL_Log сразу после. ──
@@ -795,7 +802,19 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 	std::vector<Entity> loaded;
 	{
 		const auto t_clear = Prof::Clock::now();
-		if (SceneData* prev = object_manager->GetScene(scene_name)) prev->clear();
+		// Одним запросом: GetScene на ещё не созданной сцене пишет в лог «not found» (первая
+		// загрузка — штатный путь, сцену заведёт om->LoadScene ниже), и второй такой же вызов
+		// удвоил бы это сообщение.
+		SceneData* target = object_manager->GetScene(scene_name);
+		if (target) target->clear();
+
+		// ПЕРЕКЛЮЧЕНИЕ сцен (грузим не ту, что сейчас активна): прежняя активная уходит целиком —
+		// сносим и её содержимое. Активная в движке ровно одна (на неё смотрят дата-модули,
+		// сборка батчей и редактор), так что оставленные сущности были бы невидимой копией сцены
+		// в памяти — на миллионе энтити это гигабайты. Генераторы сцены переживают clear.
+		if (SceneData* prev_active = object_manager->GetActiveScene(); prev_active && prev_active != target)
+			prev_active->clear();
+
 		clear_ms = Prof::MsSince(t_clear);
 
 		// ECS-часть: текст → сущности. Ссылки на ассеты (модель/материалы) — имена, ровно те же,
@@ -808,7 +827,10 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& dir)
 
 		SceneData* scene = object_manager->GetScene(scene_name);
 		if (scene) {
-			object_manager->SetSceneState(scene_name, true);
+			// ИСКЛЮЧИТЕЛЬНАЯ активация: прочие сцены гаснут. SetSceneState(name,true) оставлял бы
+			// активной ещё и предыдущую (у SceneData is_active=true по умолчанию), а GetActiveScene
+			// отдаёт первую попавшуюся активную — переключение сцен было бы лотереей.
+			object_manager->SetActiveScene(scene_name);
 
 			// UI — часть сцены и уходит вместе с ней: clear выше снёс его энтити, здесь сносим
 			// дерево. Раньше дерево переживало загрузку (живёт в UI_Yoga, не в ECS) — на экране

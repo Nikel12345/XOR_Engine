@@ -376,11 +376,11 @@ void Engine::InitDefaultResources()
 
 	// Фон сцены (скайбокс/фрактал) движковым дефолтом больше НЕ является: модель/шейдеры/материал/
 	// текстура — ресурсы сцены (манифесты папки сцены), сам фон — сущность в её scene.json.
-	// Классический скайбокс — src/game/saved_scene, фрактал — src/mygame/saved_scene_fractal.
+	// Классический скайбокс — src/game/saved_scene/scene1, фрактал — src/mygame/saved_scene/scene_fractal.
 }
 
 // Движковый набор шейдеров: вершинники/фрагментники/compute + render-программы, которыми рисуются
-// штатные проходы. Раньше он ехал в манифесте сцены (game/saved_scene/shaders.json) — то есть каждая
+// штатные проходы. Раньше он ехал в манифесте сцены (game/saved_scene/scene1/shaders.json) — то есть каждая
 // сцена возила КОПИЮ движковой инфраструктуры, а сцена без неё оставалась без базового рендера.
 // Теперь это дефолтные ресурсы, как quad/sphere/cube и default_albedo: создаются кодом на старте,
 // у всех dont_save (в shaders.json не пишутся и оттуда не грузятся).
@@ -597,7 +597,7 @@ void Engine::InitPasses()
 		SetDefaultShadowPCFRenderPass(engine_context, light_data_module);
 		SetDefaultMainRenderPass(engine_context);
 		SetDefaultAOPass(engine_context);           // SSAO по глубине main'а, применяется до тумана
-		SetDefaultFogPass(engine_context);          // атмосфера по глубине main'а: ПОСЛЕ AO, до прозрачных
+		//SetDefaultFogPass(engine_context);          // атмосфера по глубине main'а: ПОСЛЕ AO, до прозрачных
 		SetTransparentPass(engine_context);
 		SetDebugColliderPass(engine_context);
 		SetDefaultBloomPass(engine_context);       // bloom от эмиссии (compute) + composite/tonemap в scene_hdr
