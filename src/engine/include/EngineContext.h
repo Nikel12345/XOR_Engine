@@ -91,6 +91,20 @@ public:
 	// зовёт этот же метод (одна логика на оба входа).
 	void SetEntityTextureVariant(Entity e, uint32_t mat_index, TextureSlotRole role, uint32_t variant);
 
+	// Смена МОДЕЛИ живой сущности. Сеттером, а не записью в компонент, потому что это не одно
+	// поле, а три согласованных изменения: имя, длина MaterialComponent::materials (material_index
+	// сабмеша адресует именно её — лишние записи не адресуются ничем, недостающие не рисуются) и
+	// перевешивание в дереве батчей (другая модель = другой model-батч).
+	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА. С UI-потока — командой SetEntityModel, её хендлер зовёт этот же
+	// метод (одна логика на оба входа).
+	void ChangeModel(Entity e, const ModelName& model_name);
+
+	// Смена МАТЕРИАЛА одного сабмеша живой сущности (submesh — индекс в materials, он же
+	// material_index сабмеша модели). Материал определяет sp и атлас, то есть ключи шейдерного и
+	// текстурного батчей, — сущность переезжает в дереве, отсюда QueueUpdate внутри.
+	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА. С UI-потока — командой SetEntityMaterial.
+	void ChangeMaterial(Entity e, const MaterialName& material_name, uint32_t submesh = 0);
+
 	// Кроссменеджерская операция: растеризовать шрифт. Живёт на контексте (менеджеры не владеют
 	// друг другом — см. CLAUDE.md), передаёт TextureManager/BufferManager параметрами в FontManager.
 	FontData* CreateFont(const std::string& name, const char* path, float px, bool sdf = false);

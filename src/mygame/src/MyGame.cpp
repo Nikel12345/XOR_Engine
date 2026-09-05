@@ -329,11 +329,7 @@ SDL_AppResult MyGame::MainIterate()
             // получается прежний √3). Пер-осевое растяжение гизмо в отсев входит максимумом
             // (консервативно), а в правило размера — НЕ входит (см. MengerObjectScaleTick).
             // Модель у энтити — имя, поэтому ищем её в словаре: якорей десятки, поиск на тик копеечный.
-            const ModelData* model = nullptr;
-            if (!mc.name.empty()) {
-                auto it = modelManager->GetModels().find(mc.name);
-                if (it != modelManager->GetModels().end()) model = it->second.get();
-            }
+            const ModelData* model = modelManager->FindModel(mc.name);
             double r_model = 0.0;
             if (model)
                 for (const SubMeshData& sm : model->submeshes)

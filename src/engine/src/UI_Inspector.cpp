@@ -633,12 +633,10 @@ namespace {
             syncedFor = g_sel.name;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
             if (!g_sel.name.empty()) {
-                auto& models = ctx->GetModelManager()->GetModels();
-                auto it = models.find(g_sel.name);
-                if (it != models.end()) {
-                    std::snprintf(modelBuf, sizeof modelBuf, "%s", it->second->model_path.c_str());
-                    std::snprintf(indexBuf, sizeof indexBuf, "%s", it->second->index_path.c_str());
-                    anchorSel = it->second->anchor;
+                if (const ModelData* m = ctx->GetModelManager()->FindModel(g_sel.name)) {
+                    std::snprintf(modelBuf, sizeof modelBuf, "%s", m->model_path.c_str());
+                    std::snprintf(indexBuf, sizeof indexBuf, "%s", m->index_path.c_str());
+                    anchorSel = m->anchor;
                 }
             }
             else { modelBuf[0] = '\0'; indexBuf[0] = '\0'; }

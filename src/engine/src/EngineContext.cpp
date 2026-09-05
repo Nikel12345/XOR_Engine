@@ -230,6 +230,39 @@ void EngineContext::SetEntityTextureVariant(Entity e, uint32_t mat_index, Textur
 	else st.emplace_back(role, variant);
 }
 
+void EngineContext::ChangeModel(Entity e, const ModelName& model_name)
+{
+	SceneData* scene = object_manager ? object_manager->GetActiveScene() : nullptr;
+	if (!scene || !object_manager->Has<ModelComponent>(scene, e)) return;
+
+	object_manager->GetComponent<ModelComponent>(scene, e).name = model_name;
+
+	// Длина списка материалов = число сабмешей НОВОЙ модели. Резолв ТИХИЙ: неразрешённое имя
+	// здесь законно (ассет мог ещё не догрузиться) — о нём скажет BatchBuilder на сборке.
+	if (object_manager->Has<MaterialComponent>(scene, e)) {
+		const ModelData* model = model_manager->FindModel(model_name);
+		object_manager->GetComponent<MaterialComponent>(scene, e).materials.resize(
+			model ? model->submeshes.size() : 0);
+	}
+
+	batch_builder->QueueUpdate(e);
+}
+
+void EngineContext::ChangeMaterial(Entity e, const MaterialName& material_name, uint32_t submesh)
+{
+	SceneData* scene = object_manager ? object_manager->GetActiveScene() : nullptr;
+	if (!scene || !object_manager->Has<MaterialComponent>(scene, e)) return;
+	auto& mats = object_manager->GetComponent<MaterialComponent>(scene, e).materials;
+	if (submesh >= mats.size()) return;
+
+	mats[submesh].name = material_name;
+	// Состояния адресованы РОЛЯМИ прежнего материала — у нового набор ролей свой, и сохранённый
+	// номер варианта означал бы уже другую текстуру. Смена материала = его дефолтный вид.
+	mats[submesh].states.clear();
+
+	batch_builder->QueueUpdate(e);
+}
+
 FontData* EngineContext::CreateFont(const std::string& name, const char* path, float px, bool sdf)
 {
 	if (!font_manager) { SDL_Log("EngineContext::CreateFont: font_manager not set"); return nullptr; }

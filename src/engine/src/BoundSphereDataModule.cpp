@@ -67,12 +67,7 @@ void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, Ob
 	glm::vec4 memo_sphere(0.0f, 0.0f, 0.0f, -1.0f);
 	auto sphere_of = [&](const std::string& name) -> glm::vec4 {
 		if (memo_name && *memo_name == name) return memo_sphere;
-		const ModelData* model = nullptr;
-		if (mm && !name.empty()) {
-			const auto& models = mm->GetModels();   // не operator[]: тот логирует промах (см. BatchBuilder)
-			auto it = models.find(name);
-			if (it != models.end()) model = it->second.get();
-		}
+		const ModelData* model = mm ? mm->FindModel(name) : nullptr;
 		memo_sphere = ModelSphere(model);
 		memo_name   = &name;
 		return memo_sphere;

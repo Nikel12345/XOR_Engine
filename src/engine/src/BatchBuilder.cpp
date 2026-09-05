@@ -362,16 +362,11 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
     const MaterialComponent& material_component, const ModelComponent& model_component) {
 
     // Модель и материалы у энтити — ССЫЛКИ ПО ИМЕНИ (см. ModelComponent/MaterialComponent);
-    // резолвим здесь, на сборке, ровно как имена текстур/sp внутри материала ниже. Ищем прямо
-    // в словаре, а НЕ через ModelManager::operator[] / MaterialManager::GetMaterial: те логируют
-    // промах, а здесь вызов на КАЖДУЮ сущность — одно битое имя в сцене на 1М объектов дало бы
-    // миллион строк лога. О пропуске сообщают гарды ниже (по одной строке на сущность).
-    ModelData* model = nullptr;
-    if (mdm && !model_component.name.empty()) {
-        const auto& models = mdm->GetModels();
-        auto it = models.find(model_component.name);
-        if (it != models.end()) model = it->second.get();
-    }
+    // резолвим здесь, на сборке, ровно как имена текстур/sp внутри материала ниже. Тихим
+    // резолвом (FindModel), а НЕ через ModelManager::operator[] / MaterialManager::GetMaterial:
+    // те логируют промах, а здесь вызов на КАЖДУЮ сущность — одно битое имя в сцене на 1М
+    // объектов дало бы миллион строк лога. О пропуске сообщают гарды ниже (по строке на сущность).
+    ModelData* model = mdm ? mdm->FindModel(model_component.name) : nullptr;
 
     // Защита от неразрешённых ссылок: пустое/неизвестное имя (ассет удалён, переименован или
     // ещё не создан) даёт nullptr. Без гарда разыменование model->submeshes падает на сборке.

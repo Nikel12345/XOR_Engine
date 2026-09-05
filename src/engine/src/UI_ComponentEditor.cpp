@@ -251,9 +251,8 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
     if (!t.live()) {
         size_t sub_count = 0;
         if (auto* mdl_arr = arch.get_array<ModelComponent>()) {
-            const auto& models = t.ctx->GetModelManager()->GetModels();
-            auto mit = models.find((*mdl_arr)[row].name);
-            if (mit != models.end()) sub_count = mit->second->submeshes.size();
+            if (const ModelData* m = t.ctx->GetModelManager()->FindModel((*mdl_arr)[row].name))
+                sub_count = m->submeshes.size();
         }
         if (mats.materials.size() != sub_count) mats.materials.resize(sub_count);
     }

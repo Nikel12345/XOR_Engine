@@ -364,10 +364,7 @@ void Game::CreateDebugColliders()
     ModelManager* mm = ctx->GetModelManager();
     std::vector<DebugColliderSystem::DebugShape> shapes = DebugColliderSystem::CollectDebugShapes(
         *objectManager, scene,
-        [mm](const std::string& n) -> const ModelData* {
-            auto it = mm->GetModels().find(n);
-            return it != mm->GetModels().end() ? it->second.get() : nullptr;
-        });
+        [mm](const std::string& n) -> const ModelData* { return mm->FindModel(n); });
     if (shapes.empty()) return;
 
     for (const DebugColliderSystem::DebugShape& s : shapes) {

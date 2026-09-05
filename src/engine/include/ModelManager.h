@@ -123,6 +123,15 @@ public:
 	bool CheckDirtySpheres() const { return dirty_spheres; };
 	void CommitSpheres() { dirty_spheres = false; };
 	ModelData* operator[](const std::string& name);
+	// Тихий резолв имени: промах даёт nullptr и НИЧЕГО не логирует — в отличие от operator[].
+	// Нужен там, где промах ЗАКОНЕН (имя у энтити может быть ещё не загружено или уже снесено) или
+	// част: ModelComponent резолвится на КАЖДУЮ сущность при сборке батчей, и одно битое имя в
+	// сцене на 1М объектов дало бы миллион строк лога. Кто ждёт модель наверняка — берёт
+	// operator[], он про промах скажет.
+	ModelData* FindModel(const std::string& name) const {
+		auto it = models_data.find(name);
+		return it != models_data.end() ? it->second.get() : nullptr;
+	}
 	// Имя→модель (для UI-браузера ассетов: перечисление плиток). Владение не отдаём.
 	const std::unordered_map<std::string, std::unique_ptr<ModelData>>& GetModels() const { return models_data; }
 	~ModelManager();

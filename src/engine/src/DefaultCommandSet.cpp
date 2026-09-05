@@ -49,49 +49,24 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 			delete c;
 		});
 
-	// Model.name живой энтити (.Cmd(SetEntityModel)). Смена модели меняет и состав батчей, и
-	// число сабмешей — значит длину списка материалов: material_index сабмеша адресует именно
-	// его, лишние записи не адресуются ничем, недостающие не отрисуются. Поэтому имя, длина и
-	// перевешивание в дереве — одной операцией здесь, а не тремя правками из UI.
+	// Model.name живой энтити (.Cmd(SetEntityModel)) и один слот Material.materials (.Cmd(
+	// SetEntityMaterial), num = индекс сабмеша). Смена ресурса — не запись поля: у модели это ещё
+	// и длина списка материалов, у материала — сброс states, и обе перевешивают сущность в дереве
+	// батчей. Логика живёт на EngineContext (её же зовёт игровой код прямо из sim-потока), команда
+	// здесь — только транспорт с UI-потока: распаковать нагрузку и освободить её.
 	im.RegisterCommand(CommandId::SetEntityModel,
 		[](EngineContext* ctx, const void* data)
 		{
 			const FieldEditCmd* c = static_cast<const FieldEditCmd*>(data);
-			ObjectManager* om = ctx->GetObjectManager();
-			SceneData* scene = om->GetActiveScene();
-			if (scene && om->Has<ModelComponent>(scene, c->entity)) {
-				om->GetComponent<ModelComponent>(scene, c->entity).name = c->str;
-				if (om->Has<MaterialComponent>(scene, c->entity)) {
-					const auto& models = ctx->GetModelManager()->GetModels();
-					auto it = models.find(c->str);   // через карту: Get* логировал бы промах
-					om->GetComponent<MaterialComponent>(scene, c->entity).materials.resize(
-						it != models.end() ? it->second->submeshes.size() : 0);
-				}
-				ctx->GetBatchBuilder()->QueueUpdate(c->entity);
-			}
+			ctx->ChangeModel(c->entity, c->str);
 			delete c;
 		});
 
-	// Один слот Material.materials живой энтити (num = индекс сабмеша). Материал определяет sp и
-	// атлас, то есть ключи шейдерного и текстурного батчей — энтити переезжает в дереве.
 	im.RegisterCommand(CommandId::SetEntityMaterial,
 		[](EngineContext* ctx, const void* data)
 		{
 			const FieldEditCmd* c = static_cast<const FieldEditCmd*>(data);
-			ObjectManager* om = ctx->GetObjectManager();
-			SceneData* scene = om->GetActiveScene();
-			if (scene && om->Has<MaterialComponent>(scene, c->entity)) {
-				auto& mats = om->GetComponent<MaterialComponent>(scene, c->entity).materials;
-				const size_t k = static_cast<size_t>(c->num);
-				if (k < mats.size()) {
-					mats[k].name = c->str;
-					// Состояния адресованы РОЛЯМИ прежнего материала — у нового набор ролей свой,
-					// и сохранённый номер варианта означал бы уже другую текстуру. Сбрасываем:
-					// смена материала = его дефолтный вид.
-					mats[k].states.clear();
-					ctx->GetBatchBuilder()->QueueUpdate(c->entity);
-				}
-			}
+			ctx->ChangeMaterial(c->entity, c->str, safe_f_u32(static_cast<float>(c->num)));
 			delete c;
 		});
 
