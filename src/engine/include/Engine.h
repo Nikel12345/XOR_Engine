@@ -9,6 +9,7 @@
 #include <string>
 #include "config.h"
 #include "Aliases.h"
+#include "GraphicsConfig.h"   // по значению внутри TargetSizeInputs — forward-декларацией не обойтись
 
 // ТОЛЬКО forward-декларации: все члены — указатели, геттеры отдают указатели, полные
 // определения заголовку не нужны. Каждый cpp (движка и игры) сам инклюдит те менеджеры,
@@ -45,39 +46,35 @@ struct TransferBufferData;
 struct PrepassTimingReport;
 struct ImDrawData;
 
-// Размерное состояние движка, разделяемое потоками. ДВЕ НЕЗАВИСИМЫЕ величины (упаковка (w<<32)|h —
-// одна неделимая пара на атомик):
-//   render_size — ВНУТРЕННЕЕ разрешение таргетов (scene_hdr/depth/bloom). Меняет SIM-поток —
-//                 «полноценный ресайз» по кнопке игрового UI (команда). RENDER-поток читает и по
-//                 изменению зовёт ExecuteResizeInstructions (пересоздание таргетов).
-//   window_size — размер ОКНА. Меняет MAIN-поток (OnWindowResized, событие ОС). Свопчейн render-поток
-//                 берёт из acquire, present-блит растягивает render→окно. Таргеты этим НЕ пересоздаются.
-// Это разводит два разных события: смену окна (только презентация) и смену внутреннего разрешения игрой.
+// Единственный размер, который движок хранит и публикует между потоками: размер ОКНА — свойство
+// платформы (пишет MAIN-поток из события ОС, читают sim и render).
+// Внутреннего разрешения здесь НЕТ намеренно: оно производное от GraphicsConfig и этого размера,
+// и хранить его отдельно значило бы завести второй источник истины про одно и то же — он обязательно
+// разойдётся с настройками. Выводят его Engine::GetWidth/GetHeight прямо на месте.
+// Упаковка (w<<32)|h — чтобы пара менялась одним атомарным словом и не рвалась пополам.
 struct EngineSizeState {
-    std::atomic<uint64_t> render_size{ 0 };   // ЖЕЛАЕМОЕ внутреннее разрешение (пишет sim)
-    std::atomic<uint64_t> window_size{ 0 };   // размер окна (пишет main)
-    uint64_t applied_render = 0;              // ПРИМЕНЁННОЕ render_size — «прошлое» гейта; трогает ТОЛЬКО render-поток
+    std::atomic<uint64_t> window_size{ 0 };
 
     static uint64_t Pack(uint32_t w, uint32_t h) { return (static_cast<uint64_t>(w) << 32) | h; }
     static uint32_t W(uint64_t v) { return static_cast<uint32_t>(v >> 32); }
     static uint32_t H(uint64_t v) { return static_cast<uint32_t>(v & 0xFFFFFFFFu); }
 
-    // RENDER-поток: сравнивает ЖЕЛАЕМОЕ render_size со своим ПРОШЛЫМ (applied_render). Если изменилось —
-    // отмечает применённым, отдаёт (w,h) и true (пора пересоздать таргеты). Иначе false. Гейт целиком тут.
-    bool ConsumeRenderResize(uint32_t& w, uint32_t& h) {
-        const uint64_t want = render_size.load(std::memory_order_acquire);
-        if (want == applied_render || want == 0) return false;
-        applied_render = want;
-        w = W(want);  h = H(want);
-        return true;
-    }
-
-    // Единый источник истины для размеров как float (UI-раскладка/камера/создание таргетов читают render,
-    // презентация — window). Геттеры Engine делегируют СЮДА — отдельных размерных полей в движке нет.
-    float RenderW() const { return static_cast<float>(W(render_size.load(std::memory_order_relaxed))); }
-    float RenderH() const { return static_cast<float>(H(render_size.load(std::memory_order_relaxed))); }
     float WindowW() const { return static_cast<float>(W(window_size.load(std::memory_order_relaxed))); }
     float WindowH() const { return static_cast<float>(H(window_size.load(std::memory_order_relaxed))); }
+};
+
+// Всё, от чего зависят размеры экранных таргетов. Гейт RenderFunc сравнивает это ЦЕЛИКОМ: любое поле
+// конфига меняет вывод размеров ровно так же, как смена окна, и разделять два источника незачем.
+// Сравнение — сгенерированное компилятором, а не memcmp: memcmp прочитал бы ещё и байты выравнивания.
+//
+// Почему сравнение снимка, а не счётчик ревизий: ревизия делает ошибку ЛИПКОЙ. Совпала — и повода
+// пересчитать больше нет, даже если применено было не то. Снимок же расходится снова на следующем
+// кадре и сам себя чинит; заодно окно, внутреннее разрешение и конфиг идут одним путём.
+struct TargetSizeInputs {
+    GraphicsConfig cfg{};
+    uint32_t out_w = 0;   // размер НАЗНАЧЕНИЯ (свопчейн); сейчас это окно, у вида редактора будет панель
+    uint32_t out_h = 0;
+    bool operator==(const TargetSizeInputs&) const = default;
 };
 
 // Всё, что игра вправе решать про окно и свопчейн. Остальное параметром не является:
@@ -92,6 +89,10 @@ struct EngineConfig {
     SDL_GPUPresentMode present_mode = SDL_GPU_PRESENTMODE_MAILBOX;
     SDL_GPUSwapchainComposition composition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
     bool gpu_debug = true;
+    // Стартовые настройки графики — игра задаёт их здесь, а не правкой дефолтов в GraphicsConfig.h.
+    // Дальше они живут своей жизнью: движок кладёт копию на кучу, и менять их можно в рантайме
+    // через GetGraphicsConfig() (см. GraphicsConfig — владение и поток).
+    GraphicsConfig graphics{};
 };
 
 class Engine
@@ -166,21 +167,31 @@ public:
     // с sim-потока). Насос заметит на следующей итерации, максимум через SDL_Delay(16).
     void RequestQuit() { running.store(false, std::memory_order_relaxed); }
 
-    // ВНУТРЕННЕЕ (render) разрешение как float для UI-раскладки/камеры/первичного создания таргетов —
-    // читается ИЗ size_state_.render_size (единый источник истины, отдельных полей в движке нет). При
-    // «полноценном» ресайзе игрой (SetRenderResolution) эти геттеры сразу отражают новое значение.
-    float GetWidth()  const { return size_state_.RenderW(); }
-    float GetHeight() const { return size_state_.RenderH(); }
+    // ВНУТРЕННЕЕ (render) разрешение: выводится на месте из GraphicsConfig и размера окна — теми же
+    // функциями, что и размеры таргетов, поэтому разойтись с ними не может.
+    //
+    // Это ЗАПРОС, а не факт: сразу после правки конфига он опережает реальные размеры таргетов на
+    // один кадр (их пересоздаст гейт RenderFunc). Единственный потребитель — отношение сторон камеры,
+    // и оно от расхождения не страдает: обе стороны считаются одной формулой, так что их отношение
+    // у запроса и у факта совпадает всегда.
+    // Для того, где расхождение значимо — создание таргета, пересчёт пиксельных координат, — эта пара
+    // НЕ годится: применённые размеры знает только render-поток (applied_inputs_).
+    //
+    // Раскладка UI берёт НЕ это, а Window-пару: размер кнопки в пикселях задан относительно экрана,
+    // а не частоты сэмплирования (иначе при render != window весь UI съезжает в масштабе).
+    float GetWidth()  const { uint32_t w, h; ComputeRenderSize(w, h); return static_cast<float>(w); }
+    float GetHeight() const { uint32_t w, h; ComputeRenderSize(w, h); return static_cast<float>(h); }
     float GetWindowWidth()  const { return size_state_.WindowW(); }
     float GetWindowHeight() const { return size_state_.WindowH(); }
 
-    // Событие ОС (MAIN-поток): публикует новый размер ОКНА. Только презентация (свопчейн+блит) —
-    // таргеты НЕ пересоздаёт. render_w/h ПОКА не используются (смену внутреннего разрешения делает
-    // SetRenderResolution из sim, а не событие окна) — оставлены под будущую симметрию.
+    // Настройки графики. Живой указатель, а не копия: правка полей на месте — и есть способ их
+    // менять (см. GraphicsConfig — владение и поток). Гейт RenderFunc подхватит изменение сам.
+    GraphicsConfig* GetGraphicsConfig() const { return graphics_config; }
+
+    // Событие ОС (MAIN-поток): публикует новый размер ОКНА, и только его. Пересоздание таргетов из
+    // этого следует, но делает его гейт RenderFunc — окно там лишь один из входов наравне с конфигом.
+    // render_w/h не используются (SDL отдаёт их для HiDPI) — оставлены под будущую симметрию.
     void OnWindowResized(Sint32 window_w, Sint32 window_h, Sint32 render_w, Sint32 render_h);
-    // «Полноценный» ресайз (SIM-поток: игровой UI/команда) — сменить ВНУТРЕННЕЕ разрешение таргетов.
-    // RENDER-поток подхватит по изменению и пересоздаст таргеты. ЗАГОТОВКА: пока никто не зовёт.
-    void SetRenderResolution(uint32_t w, uint32_t h);
     ~Engine();
 
     const double targetUPS = 1000.0 / 60.0;
@@ -209,10 +220,22 @@ private:
     PrepassTimingReport PrepareFuncPrepassDepended_Original(uint8_t slot);
     PrepassTimingReport PrepareFuncPrepassDepended_Optimized(uint8_t slot);
 
-    // Размерное состояние движка ЦЕЛИКОМ (см. EngineSizeState): render_size (sim) / window_size (main) /
-    // applied_render (render-локальный «прошлый»). Удаление текстур вправе делать ТОЛЬКО render-поток →
-    // продьюсеры лишь ПУБЛИКУЮТ, а пересоздание таргетов исполняет RenderFunc по гейту ConsumeRenderResize.
+    // Размер окна (см. EngineSizeState). Удаление текстур вправе делать ТОЛЬКО render-поток, поэтому
+    // пересоздание таргетов исполняет RenderFunc по гейту ниже, а не тот, кто поменял размер.
     EngineSizeState size_state_;
+
+    // Внутреннее разрешение из конфига и размера окна. Общая половина GetWidth/GetHeight — чтобы
+    // вывод стоял в одном месте и оба геттера не разъехались.
+    void ComputeRenderSize(uint32_t& w, uint32_t& h) const {
+        const uint64_t win = size_state_.window_size.load(std::memory_order_relaxed);
+        GfxRenderTarget(*graphics_config, EngineSizeState::W(win), EngineSizeState::H(win), w, h);
+    }
+
+    // Желаемые размеры (запрос) — против применённых в size_state_ (факт). См. GraphicsConfig.
+    GraphicsConfig* graphics_config = nullptr;
+    // «Прошлое» гейта размеров: снимок входов, под которые таргеты уже пересозданы.
+    // Трогает ТОЛЬКО render-поток.
+    TargetSizeInputs applied_inputs_{};
 
     // Рендер-поток стоит на время загрузки сцены. НЕ противоречит компромиссу «редактор читает
     // живой ECS без замков» (см. RenderFunc): тот рассчитан на рваное ЗНАЧЕНИЕ — прочитать

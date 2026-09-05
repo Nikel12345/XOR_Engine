@@ -56,7 +56,9 @@ namespace DefaultRenderPassNamespace
 
     // PassSystem: общие ресурсы дефолтного набора проходов (разделяемый depth-таргет, его формат).
     // Должна вызываться ПЕРЕД Set*Pass, которые их потребляют (main/transparent/debug).
-    void _SetDefaultCommonResources(EngineContext* ctx, uint32_t width, uint32_t height);
+    // (out_w,out_h) — размер НАЗНАЧЕНИЯ (окно/свопчейн). Внутреннее разрешение и разрешения эффектов
+    // выводятся отсюда и из GraphicsConfig — теми же функциями, что и в инструкциях ресайза.
+    void _SetDefaultCommonResources(EngineContext* ctx, uint32_t out_w, uint32_t out_h);
 
     // ldm — источник счётчика источников света слота (AskNumLights): проход кладёт его в своё
     // состояние, откуда push-функции программ забирают его в b0 (см. LightCountPushData).

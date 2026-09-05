@@ -26,7 +26,10 @@ void Engine::PrepareFunc(uint8_t slot)
 {
 	buffer_manager->logic_index = slot;
 
-	ui_yoga->Emit(engine_context, GetWidth(), GetHeight());
+	// Раскладка UI — в пикселях ОКНА, а не внутреннего разрешения: размер кнопки задан относительно
+	// экрана, и при render != window деление на render съёжило бы (или раздуло) весь UI. Растеризуется
+	// он всё равно в scene_hdr, то есть суперсэмплинг краёв и текста достаётся ему даром.
+	ui_yoga->Emit(engine_context, GetWindowWidth(), GetWindowHeight());
 
 	if (Camera* cam = camera_manager->GetActiveCamera()) {
 		const float h = GetHeight();
@@ -281,9 +284,17 @@ bool Engine::RenderFunc(uint8_t slot)
 		return false;
 	}
 
-	uint32_t rw, rh;
-	if (size_state_.ConsumeRenderResize(rw, rh))
-		texture_manager->ExecuteResizeInstructions(rw, rh);
+	// Гейт размеров экранных таргетов. Сравнивается ВЕСЬ набор входов (размер назначения + конфиг
+	// целиком): любое поле конфига меняет вывод размеров так же, как смена окна. Размер назначения
+	// берём из свопчейна, а не из window_size, — это и есть то, во что бьёт present-блит.
+	//
+	// Снимок, а не счётчик ревизий: ревизия сделала бы ошибку липкой (совпала — и повода пересчитать
+	// больше нет), а расхождение снимка чинится само на следующем кадре.
+	const TargetSizeInputs want{ *graphics_config, w, h };
+	if (want != applied_inputs_) {
+		applied_inputs_ = want;
+		texture_manager->ExecuteResizeInstructions(w, h);
+	}
 	texture_manager->TrashTextures(slot_controller->RenderFencesDone());
 
 	pass_manager->SetSwapchain(tex, w, h);

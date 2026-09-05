@@ -50,30 +50,15 @@ using namespace ShaderBase;   // POSITION/UV/... в раскладке fallback-
 
 void Engine::OnWindowResized(Sint32 window_w, Sint32 window_h, Sint32 render_w, Sint32 render_h)
 {
-	// Обновляем ТОЛЬКО window-пару. render-пара (width/height) ФИКСИРОВАНА — ресурсы, UI и камера
-	// работают во внутреннем разрешении, а окно другого размера получает растянутую картинку финальным
-	// present-блитом. Поэтому здесь больше НЕ трогаем render-размеры, НЕ ресайзим таргеты и НЕ дёргаем
-	// UI (UI не перекладывается на ресайз окна — тянется блитом). Событие resized летит сотнями за drag,
-	// но теперь это дёшево: только запись двух чисел.
-	// Публикуем размер ОКНА для render-потока (свопчейн + present-блит). Таргеты этим НЕ трогаем:
-	// смена окна — только презентация, картинка растягивается блитом render→окно. Атомик коалесит
-	// поток resize-событий за drag.
-	size_state_.window_size.store(EngineSizeState::Pack(static_cast<uint32_t>(window_w), static_cast<uint32_t>(window_h)),
+	// Публикуем ТОЛЬКО размер окна: он свойство платформы и больше ничьё, а внутреннее разрешение —
+	// производное от него и GraphicsConfig, и хранить его отдельно значило бы завести второй источник
+	// истины. Пересоздание таргетов из этого следует, но делает его гейт RenderFunc: удалять текстуры
+	// вправе только render-поток. Событие resized летит сотнями за drag, но атомик коалесит поток,
+	// и дороже записи одного числа здесь ничего нет.
+	size_state_.window_size.store(EngineSizeState::Pack(safe_i_u32(window_w), safe_i_u32(window_h)),
 	                              std::memory_order_release);
-	// Будущая симметрия: публикация нового ВНУТРЕННЕГО разрешения (render_size) — пока вызывается тут.
-	size_state_.render_size.store(EngineSizeState::Pack(static_cast<uint32_t>(window_w), static_cast<uint32_t>(window_h)),
-		std::memory_order_release);
 
 	(void)render_w;  (void)render_h;
-}
-
-void Engine::SetRenderResolution(uint32_t w, uint32_t h)
-{
-	// ЗАГОТОВКА (пока никто не зовёт): игровой UI (sim-поток) публикует новое ВНУТРЕННЕЕ разрешение —
-	// render-поток подхватит по изменению render_size и пересоздаст таргеты (ExecuteResizeInstructions).
-	// Удалять текстуры здесь (в sim) нельзя — поэтому только публикация.
-	if (w == 0 || h == 0) return;
-	size_state_.render_size.store(EngineSizeState::Pack(w, h), std::memory_order_release);
 }
 
 bool Engine::InitPlatform(const EngineConfig& cfg)
@@ -152,16 +137,15 @@ Engine::Engine(const EngineConfig& cfg)
 	// Платформа ПЕРВЫМ делом: менеджеры принимают dev в конструкторах, без девайса создавать
 	// нечего. Отказ оставляет объект невалидным (init_ok=false) — dtor это учитывает.
 	if (!InitPlatform(cfg)) return;
-	const float width = safe_sint32_f(safe_u32t_i(cfg.width));
-	const float height = safe_sint32_f(safe_u32t_i(cfg.height));
-	// Стартовый размер (из конфига) кладём ТОЛЬКО в size_state_ — отдельных width/height в движке нет,
-	// геттеры GetWidth/GetHeight читают render_size оттуда (единый источник истины размеров).
-	// Экранные таргеты создаются в _SetDefaultCommonResources под этот стартовый размер, поэтому и
-	// render_size, и applied стартуют «уже применёнными» — первый НАСТОЯЩИЙ ресайз (render или window) их сдвинет.
-	const uint64_t start_size = EngineSizeState::Pack(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-	size_state_.render_size.store(start_size, std::memory_order_relaxed);
-	size_state_.window_size.store(start_size, std::memory_order_relaxed);
-	size_state_.applied_render = start_size;   // гейт стартует «уже применённым» (таргеты созданы под этот размер)
+	// Настройки графики — до любого создания таргетов и до первого GetWidth: из них выводятся размеры.
+	// Копия, а не ссылка на cfg: дальше их правят в рантайме, и переживать временный EngineConfig
+	// они обязаны.
+	graphics_config = new GraphicsConfig{ cfg.graphics };
+	// cfg задаёт размер ОКНА, и это единственный размер, который движок хранит: внутреннее разрешение
+	// из него и конфига выводится на месте (GetWidth/GetHeight, замыкания ресайза).
+	size_state_.window_size.store(EngineSizeState::Pack(cfg.width, cfg.height), std::memory_order_relaxed);
+	// Гейт стартует «уже применённым»: таргеты создаст _SetDefaultCommonResources под эти же входы.
+	applied_inputs_ = TargetSizeInputs{ *graphics_config, cfg.width, cfg.height };
 	transfer_manager = new TransferManager(dev);
 	queue_manager = new QueueManager(dev);
 	buffer_manager = new BufferManager(dev, transfer_manager);
@@ -196,6 +180,7 @@ Engine::Engine(const EngineConfig& cfg)
 	engine_context->SetFontManager(font_manager);   // кроссменеджерский CreateFont (см. CLAUDE.md)
 	engine_context->SetUIYoga(ui_yoga);   // игра берёт его отсюда для декларативной сборки UI
 	engine_context->SetEngine(this);   // делегирование Save/LoadScene (оркестрация сцены-папки)
+	engine_context->SetGraphicsConfig(graphics_config);   // замыкания ресайза выводят из него размеры
 	// Пул движковой раскладки — ПЕРВЫМ из всего, что связано с геометрией: он заводит буферы стримов
 	// и индексный, а заодно вешает их инструкции заливки. Всё дальнейшее (вершинники, объявляющие
 	// usage, и модели) уже ссылается на него по имени.
@@ -593,7 +578,9 @@ void Engine::InitPasses()
 	using namespace DefaultRenderPassNamespace;
 
 	{
-		_SetDefaultCommonResources(engine_context, safe_f_u32(GetWidth()), safe_f_u32(GetHeight()));
+		// Размер НАЗНАЧЕНИЯ (окно): внутреннее разрешение таргетов _SetDefaultCommonResources выведет
+		// из него и конфига сам — теми же функциями, что и замыкания ресайза.
+		_SetDefaultCommonResources(engine_context, safe_f_u32(GetWindowWidth()), safe_f_u32(GetWindowHeight()));
 		SetDefaultCullingPass(engine_context);     // GPU-каллинг: out_pib до SHADOW_PASS (индекс 5)
 		SetDefaultShadowPCFRenderPass(engine_context, light_data_module);
 		SetDefaultMainRenderPass(engine_context, light_data_module);
@@ -704,6 +691,7 @@ Engine::~Engine()
 	delete ui_data_module;
 	delete tex_state_data_module;
 	delete ui_yoga;   // YGNodeFreeRecursive дерева + YGConfigFree (в его dtor)
+	delete graphics_config;
 
 	// Платформу подняли мы (InitPlatform) — мы же её и рушим. Строго после менеджеров и ImGui:
 	// они держат ресурсы устройства, а release окна должен опережать уничтожение девайса.

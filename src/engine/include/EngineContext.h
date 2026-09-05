@@ -40,6 +40,7 @@ class FontManager;
 struct FontData;               // возвращаем указателем (как TextureHandle*/Material*)
 class UI_Yoga;                 // держим указателем (создаёт Engine, садит сеттером)
 class Engine;
+struct GraphicsConfig;         // держим указателем (создаёт Engine, садит сеттером)
 
 // Корень сцен в рабочей папке игры — ПАПКА С ПАПКАМИ. Каждая подпапка — одна сцена, и её ИМЯ
 // есть имя сцены: Save/LoadScene складывают путь как scenes_root + "/" + scene_name, а список
@@ -227,6 +228,12 @@ public:
 	// Бэк-поинтер на Engine — только для делегирования Save/LoadScene (оркестрация по менеджерам).
 	void SetEngine(Engine* e) { engine = e; }
 
+	// Настройки графики — отдельным указателем, а НЕ через Engine*: контекст раздаёт состояние, и
+	// бэк-поинтер на движок не должен становиться общим чёрным ходом ко всему подряд.
+	// Живой указатель (см. GraphicsConfig): потребители читают поля в момент использования.
+	void SetGraphicsConfig(GraphicsConfig* c) { graphics_config = c; }
+	GraphicsConfig* GetGraphicsConfig() const { return graphics_config; }
+
 private:
 	BufferManager* buffer_manager = nullptr;
 	TextureManager* texture_manager = nullptr;
@@ -245,6 +252,7 @@ private:
 	FontManager* font_manager = nullptr;   // см. SetFontManager (создаёт Engine)
 	UI_Yoga* ui_yoga = nullptr;   // см. SetUIYoga (создаёт Engine)
 	Engine* engine = nullptr;   // см. SetEngine
+	GraphicsConfig* graphics_config = nullptr;   // см. SetGraphicsConfig (владеет Engine)
 
 	GpuTaskContext* gpu_ctx = nullptr;   // указателем: заголовок не тянет GpuTaskContext.h
 };

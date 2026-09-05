@@ -112,6 +112,9 @@ public:
 	void QueueDeleteTexture(SDL_GPUTexture* texture);
 	void TrashTextures(uint64_t fences_done);
 
+	// (w,h) — размер НАЗНАЧЕНИЯ (свопчейн/панель), а не размер таргета: своё разрешение каждый таргет
+	// выводит сам, в замыкании (внутреннее оно, эффектное или доля пирамиды). Менеджер про домены не
+	// знает и знать не должен — он лишь раздаёт всем инструкциям одну исходную величину.
 	using TextureResizeFunc = std::function<void(TextureManager&, uint32_t w, uint32_t h)>;
 	void CreateResizeInstruction(const std::string& texture_name, TextureResizeFunc fn);
 	void ExecuteResizeInstructions(uint32_t w, uint32_t h);
