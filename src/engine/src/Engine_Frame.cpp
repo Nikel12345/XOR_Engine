@@ -276,6 +276,10 @@ bool Engine::RenderFunc(uint8_t slot)
 {
 	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
 
+	// Push, а не Add в конце: замер объемлет вложенные скоупы (execute_passes, imgui,
+	// submit_acquire_fence), и только открытый скоуп делает их детьми в отчёте. Ранний
+	// выход по свопчейну Pop не выполнит — стек чистит Frame() на границе итерации.
+	const size_t prof_render_cpu = Prof::Render().Push("render_cpu (RenderFunc: запись+submit)");
 	auto t_frame = Prof::Clock::now();
 	RenderCommandBuffer cb = queue_manager->GetRenderQueue().AcquireCommandBuffer();
 
@@ -341,7 +345,7 @@ bool Engine::RenderFunc(uint8_t slot)
 		slot_controller->SetRenderFence(slot, fence);
 	}
 
-	Prof::Render().Add("render_cpu (RenderFunc: запись+submit)", Prof::MsSince(t_frame));
+	Prof::Render().Pop(prof_render_cpu, Prof::MsSince(t_frame));
 	return true;
 }
 
@@ -369,13 +373,13 @@ void Engine::FenceFunc(uint8_t slot) {
 	auto now = Prof::Clock::now();
 	if (last_frame_done_valid) {
 		double period_ms = std::chrono::duration<double, std::milli>(now - last_frame_done_time).count();
-		Prof::Render().Add("frame_period (fence->fence = 1/FPS)", period_ms);
+		Prof::Render().Add("= frame_period (fence->fence = 1/FPS)", period_ms);
 	}
 	last_frame_done_time = now;
 	last_frame_done_valid = true;
 
-	Prof::Render().Add("gpu_frame (submit->fence, rabota GPU)", gpu_ms);
-	Prof::Render().Add("fence_wait (CPU-blok na GPU)", wait_ms);
+	Prof::Render().Add("= gpu_frame (submit->fence, rabota GPU)", gpu_ms);
+	Prof::Render().Add("= fence_wait (CPU-blok na GPU)", wait_ms);
 	PROF_FRAME(Render);
 }
 

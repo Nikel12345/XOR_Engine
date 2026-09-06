@@ -102,10 +102,14 @@ TransferBufferData* BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* c
             continue;
         }
         {
+            // Push/Pop, а не Add: замер ОБЪЕМЛЕТ чужие скоупы (size_fn и updater могут
+            // содержать свои PROF_SCOPE), и только открытый скоуп делает их детьми в
+            // отчёте. С Add они оказались бы соседями, а [other] родителя - отрицательным.
+            const char* nm = instr.buffer_data ? instr.buffer_data->debug_name.c_str() : "?";
+            const size_t ph = Prof::Sim().Push((std::string(nm) + " .size").c_str());
             auto t = Prof::Clock::now();
             task.size = instr.size_fn ? instr.size_fn() : 0;
-            const char* nm = instr.buffer_data ? instr.buffer_data->debug_name.c_str() : "?";
-            Prof::Sim().Add((std::string(nm) + " .size").c_str(), Prof::MsSince(t), task.size);
+            Prof::Sim().Pop(ph, Prof::MsSince(t), task.size);
         }
         task.additional_offset = instr.offset_fn ? instr.offset_fn() : 0;
         if (!instr.updater) {
@@ -129,10 +133,11 @@ TransferBufferData* BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* c
         auto& instr = target_instr_vector[i];
         auto& task = target_task_vector[i];
         if (instr.updater && task.size > 0) {
+            const char* nm = instr.buffer_data ? instr.buffer_data->debug_name.c_str() : "?";
+            const size_t ph = Prof::Sim().Push((std::string(nm) + " .store").c_str());
             auto t = Prof::Clock::now();
             instr.updater(cp, this, task);
-            const char* nm = instr.buffer_data ? instr.buffer_data->debug_name.c_str() : "?";
-            Prof::Sim().Add((std::string(nm) + " .store").c_str(), Prof::MsSince(t));
+            Prof::Sim().Pop(ph, Prof::MsSince(t));
         }
     }
     return tbd;

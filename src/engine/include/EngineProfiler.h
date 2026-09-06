@@ -44,12 +44,26 @@ public:
     // ms — время, bytes — опциональный размер (0 = не показывать столбец размера).
     void Add(const char* name, double ms, uint64_t bytes = 0);
 
+    // Открыть/закрыть вложенный замер. Родителя определяет НЕ имя, а стек открытых
+    // скоупов: PROF_SCOPE зовёт Push на входе и Pop на выходе, поэтому дерево в отчёте
+    // точное само собой и не зависит от того, сколько пробелов автор поставил в имени.
+    // Add() без Push (замеры, вызываемые напрямую) прикрепляется к скоупу, открытому в
+    // этот момент ЭТИМ ЖЕ ПОТОКОМ, — то есть туда, где он и выполняется.
+    //
+    // Стек — ПО ПОТОКУ (живёт в .cpp), и это не перестраховка: один экземпляр обслуживает
+    // несколько потоков. Prof::Render() пишут и render-поток (render_cpu и то, что внутри),
+    // и fence-поток (gpu_frame, fence_wait). С общим стеком замеры fence-потока становились
+    // детьми открытого render_cpu, и [other] уходил в минус на десятки миллисекунд.
+    size_t Push(const char* name);
+    void   Pop(size_t index, double ms, uint64_t bytes = 0);
+
     // Отметка конца кадра секции. Раз в ~report_period_ms реального времени — печать + сброс.
     void Frame();
 
 private:
     struct Slot {
         std::string name;
+        size_t   parent = (size_t)-1;   // индекс родителя в slots; -1 = корень
         double   sum_ms = 0.0;
         double   max_ms = 0.0;
         uint64_t calls = 0;
@@ -75,6 +89,8 @@ class FrameProfiler {
 public:
     FrameProfiler(const char* /*title*/, double /*report_period_ms*/) {}
     void Add(const char* /*name*/, double /*ms*/, uint64_t /*bytes*/ = 0) {}
+    size_t Push(const char* /*name*/) { return 0; }
+    void   Pop(size_t /*index*/, double /*ms*/, uint64_t /*bytes*/ = 0) {}
     void Frame() {}
 };
 
@@ -101,10 +117,12 @@ namespace Prof {
     // из него (в отличие от ручного Add в конце) — не оборачивать блоки с ранним выходом.
     struct ScopeTimer {
         FrameProfiler& p;
-        const char*    name;
+        size_t         idx;
         Clock::time_point t0;
-        ScopeTimer(FrameProfiler& prof, const char* n) : p(prof), name(n), t0(Clock::now()) {}
-        ~ScopeTimer() { p.Add(name, MsSince(t0)); }
+        // Push ДО отсчёта времени: он открывает скоуп, и всё замеренное внутри
+        // прикрепится к нему. Pop закрывает и записывает длительность.
+        ScopeTimer(FrameProfiler& prof, const char* n) : p(prof), idx(prof.Push(n)), t0(Clock::now()) {}
+        ~ScopeTimer() { p.Pop(idx, MsSince(t0)); }
         ScopeTimer(const ScopeTimer&) = delete;
         ScopeTimer& operator=(const ScopeTimer&) = delete;
     };
