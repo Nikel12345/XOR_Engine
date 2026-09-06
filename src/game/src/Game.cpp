@@ -599,6 +599,7 @@ void Game::SimulateGravity()
         for (const GravitySource& s : sources) {
             const float sx = s.x, sy = s.y, sz = s.z, gm = s.gm;
             const float hx = s.hx, hy = s.hy, hz = s.hz;
+            VEC_HOT("gravity_step");
             for (int i = 0; i < n; ++i) {
                 const float dx = sx - pw[i], dy = sy - pd[i], dz = sz - ph[i];
                 const float rr = dx * dx + dy * dy + dz * dz;
@@ -641,6 +642,7 @@ void Game::SimulateGravity()
         }
 
         // ── C ── позиции (wdh) скоростями (xyz)
+        VEC_HOT("integrate_positions");
         for (int i = 0; i < n; ++i) {
             pw[i] += vx[i] * kSimDt;
             pd[i] += vy[i] * kSimDt;

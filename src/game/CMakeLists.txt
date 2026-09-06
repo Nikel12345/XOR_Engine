@@ -14,6 +14,10 @@ target_include_directories(Game PRIVATE
 
 target_link_libraries(Game PRIVATE Engine Physics)
 
+# Вердикт векторизации по каждому циклу (info C5001/C5002). Стоит постоянно: цена нулевая
+# (только диагностика), а без него scripts/vec_check.py не может проверить метки VEC_HOT.
+target_compile_options(Game PRIVATE /Qvec-report:2)
+
 # PCH: std/SDL/glm (чистый PCH.h) + Engine.h (фасад движка). Правка заголовков движка
 # пересобирает PCH один раз, а TU игры дальше грузят его бинарно, а не парсят текст заново.
 # Именно PCH.h, а не PCH_Engine.h: последний доклеивает imgui.h, и игра получала бы его
