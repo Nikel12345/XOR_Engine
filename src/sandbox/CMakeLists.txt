@@ -3,7 +3,8 @@ add_executable(Sandbox)
 # Площадки для запуска подсистем движка по отдельности.
 # Каждый сценарий — свой .cpp; main решает, что именно запустить.
 set(SANDBOX_SRC
-    src/QueueThreadingProbe.cpp       # зонд: очереди под конвейером потоков движка (ThreadController+SlotController) — потокобезопасность
+    src/GravityVecProbe.cpp           # ЗОНД: векторизуется ли гравитационный шаг через ForEach (без интринсиков)
+    # src/QueueThreadingProbe.cpp       # зонд: очереди под конвейером потоков движка (ThreadController+SlotController) — потокобезопасность  (см. историю)
     # src/ShaderVramProbe.cpp         # зонд: цена резидентного шейдера — модуль/пайплайн, VRAM vs RAM (см. шапку файла)
     # src/TransferQueueProbe.cpp      # зонд: три очереди последовательно, без потоков (см. шапку файла)
     # src/CopyComputeBarrierProbe.cpp # зонд: порядок нескольких операций над одним буфером в одном cb, без fence (см. шапку файла)
@@ -26,6 +27,9 @@ target_include_directories(Sandbox PRIVATE
 )
 
 target_link_libraries(Sandbox PRIVATE Engine)
+
+# ЗОНД: вердикт автовекторизации по каждому циклу (info C5001/C5002 + код причины).
+target_compile_options(Sandbox PRIVATE /Qvec-report:2)
 
 # PCH: только std/SDL/glm — Sandbox дергает подсистемы точечно, Engine.h ему не нужен.
 target_precompile_headers(Sandbox PRIVATE

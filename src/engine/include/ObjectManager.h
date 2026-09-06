@@ -43,9 +43,23 @@ public:
     template<typename... Components>
     Entity CreateEntity(const std::string& scene_name, Components&&... comps);
 
+    // Колонки архетипа целиком, раз на архетип; цикл по сущностям пишет вызывающий.
+    // Форма для ГОРЯЧИХ проходов: только так тело можно сделать векторизуемым (поднять
+    // указатели колонок в локальные float* __restrict над циклом, обойтись без ветвлений).
+    // Две сигнатуры лямбды:
+    //   (ComponentArray<Ts>*...)                                колонки
+    //   (ComponentArray<Ts>*..., const std::vector<Entity>&)    колонки + entities архетипа
+    // Индекс в entities совпадает с индексом в колонках.
     template<typename ...Ts, typename Fn>
     void ForEachArchetype(SceneData* scene, Fn&& fn);
 
+    // Формы, выбор по сигнатуре лямбды:
+    //   (foreach_arg_t<Ts>...)          поэлементно; для SoA приходит SoAElement
+    //   (Entity, foreach_arg_t<Ts>...)  то же + id сущности
+    //   (Ts&...)                        все компоненты SoA -> колонки целиком, раз на архетип
+    // Поэлементные формы НЕ векторизуются: тело получает объект на каждую сущность, и
+    // расширять его нечем. Горячим проходам нужен ForEachArchetype - там цикл пишет сам
+    // вызывающий (см. комментарий у него).
     template<typename ...Ts, typename Fn>
     void ForEach(SceneData* scene, Fn&& fn);
 

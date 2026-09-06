@@ -502,6 +502,8 @@ void Game::MainMenu_Update()
 // кубы качаются через y == 0, как и положено наклонным орбитам.
 static constexpr float kSimDt    = 0.05f;
 static constexpr float kGravSoft = 1e-3f;   // защита от деления на ~0 у самого центра
+static constexpr float kGravSoft2 = kGravSoft * kGravSoft;   // зажим r2 значением, без ветки
+static constexpr float kBounceMaskGain = 1e6f;   // см. маску отскока в проходе A
 
 // Касание центра тяжести. Геометрии тут нет (у кубов сцены нет коллайдеров), поэтому
 // «столкнулись» = сущность вошла в осевую рамку источника: его габарит (AABB модели x масштаб,
@@ -556,87 +558,95 @@ void Game::SimulateGravity()
                                     hx * sx + kTouchMargin, hy * sy + kTouchMargin, hz * sz + kTouchMargin });
     });
 
-    // Проход 2 — притягиваемые. Обходим только сущности с Transform И Velocity (кубы). Прямым
-    // обходом архетипов, а не ForEach: правилу отскока нужен ID сущности (ChangeMaterial
-    // адресует именно её), а форма ForEach с Entity зовёт лямбду ПОЭЛЕМЕНТНО — на сотнях
-    // тысяч кубов это как раз тот тик, который терять нельзя. Здесь колонки берутся раз
-    // на архетип, как в all-SoA форме ForEach, а ID лежит рядом: индекс в arch.entities
-    // равен индексу в колонках (CreateEntity кладёт их в ногу).
-    // Позиция — трансляция матрицы: w = x, d = y, h = z (row-major, индексы 3/7/11).
+    // Проход 2 — притягиваемые. Три подпрохода вместо одного цикла, и это не украшение:
+    // цикл такой формы векторизуется только если в теле нет ни ветвлений, ни внутреннего
+    // цикла, а указатели колонок подняты в локальные __restrict. Замерено на 800k
+    // (sandbox/GravityVecProbe.cpp): прежняя форма 8.8 мс, эта 2.2-2.7.
+    //   A) по каждому источнику, векторный: скорость += ускорение (отскочившим — маской,
+    //      а не веткой) и глубина в рамке ЗАПИСЬЮ ЗНАЧЕНИЯ: условная запись флага
+    //      ломает векторизацию при любой ширине элемента, проверено;
+    //   B) скалярный по кандидатам: сам отскок и смена материала. Кандидатов единицы,
+    //      а сжатие в список не векторизуется никогда;
+    //   C) векторный: интеграция позиций.
+    // B перед C — чтобы отскочившая сущность в тот же тик поехала уже новой скоростью,
+    // как было в прежней однопроходной версии.
+    //
+    // Обход — ForEachArchetype: он отдаёт колонки целиком плюс entities архетипа (id нужен
+    // ChangeMaterial), а цикл по сущностям пишем сами. Поэлементная форма ForEach здесь не
+    // годится: она невекторизуема в принципе, тело получает объект на каждую сущность.
     const std::vector<GravitySource>& sources = gravity_sources;
-    for (auto& [sig, arch] : scene->archetypes) {
-        auto* pos_arr = arch.get_array<Positions>();
-        auto* vel_arr = arch.get_array<Velocities>();
-        if (!pos_arr || !vel_arr) continue;
+    objectManager->ForEachArchetype<Positions, Velocities>(scene,
+        [&](ComponentArray<Positions, void>* pos_arr, ComponentArray<Velocities, void>* vel_arr,
+            const std::vector<Entity>& ents)
+    {
         Positions&  P = pos_arr->data;
         Velocities& V = vel_arr->data;
-        const size_t n = P.w.size();
-        for (size_t i = 0; i < n; ++i) {
-            const float x = P.w[i];   // трансляция X
-            const float y = P.d[i];   // трансляция Y
-            const float z = P.h[i];   // трансляция Z
+        const int n = static_cast<int>(ents.size());
+        if (n == 0) return;
+        if (static_cast<int>(touch_depth.size()) < n) touch_depth.resize(n);
 
-            // Коснулись центра — скорость ЗАДАЁТСЯ (вверх или вниз, 50/50), а не изменяется, и
-            // гравитацию в этот тик не копим: иначе тот же кадр увёл бы заданную скорость обратно
-            // «Уже отскочил» — состояние, закодированное в САМОЙ скорости. Носитель — только vy:
-            // x/z теперь несут случайный разброс и опознавательным знаком быть не могут. Значение
-            // ±kBounceSpeed записано здесь же, а в этом состоянии скорость больше никто не трогает
-            // (гравитация отскочившему не считается), поэтому оно остаётся бит-в-бит тем же и
-            // точное сравнение float законно. Отдельный флаг был бы честнее, но его негде
-            // держать: новый компонент — структурная правка, а миграции архетипов в ECS нет.
-            const bool bouncing = (std::fabs(V.y[i]) == kBounceSpeed);
+        float* __restrict pw    = P.w.data();
+        float* __restrict pd    = P.d.data();
+        float* __restrict ph    = P.h.data();
+        float* __restrict vx    = V.x.data();
+        float* __restrict vy    = V.y.data();
+        float* __restrict vz    = V.z.data();
+        float* __restrict depth = touch_depth.data();
 
-            bool touched = false;
-            if (!bouncing) {
-                for (const GravitySource& s : sources) {
-                    if (std::fabs(s.x - x) <= s.hx &&
-                        std::fabs(s.y - y) <= s.hy &&
-                        std::fabs(s.z - z) <= s.hz) { touched = true; break; }
-                }
+        std::fill(depth, depth + n, std::numeric_limits<float>::max());
+
+        // ── A ── скорость и глубина в рамке
+        for (const GravitySource& s : sources) {
+            const float sx = s.x, sy = s.y, sz = s.z, gm = s.gm;
+            const float hx = s.hx, hy = s.hy, hz = s.hz;
+            for (int i = 0; i < n; ++i) {
+                const float dx = sx - pw[i], dy = sy - pd[i], dz = sz - ph[i];
+                const float rr = dx * dx + dy * dy + dz * dz;
+                const float r2 = rr < kGravSoft2 ? kGravSoft2 : rr;   // зажим = max, его векторизатор берёт
+                const float k  = gm / (r2 * std::sqrt(r2));
+
+                // Отскочившей гравитация не считается: множитель 0/1 вместо ветки. Почему
+                // вообще не считается — см. kBounceSpeed: 15 против gm=5000 у поверхности
+                // источника это далеко не вторая космическая, и объект бы просто завис.
+                const float t    = std::fabs(std::fabs(vy[i]) - kBounceSpeed) * kBounceMaskGain;
+                const float live = t < 1.0f ? t : 1.0f;   // именно min: бленд 0/1 не векторизуется
+                vx[i] += dx * k * kSimDt * live;
+                vy[i] += dy * k * kSimDt * live;
+                vz[i] += dz * k * kSimDt * live;
+
+                // Глубина: <= 0 ровно тогда, когда сущность внутри осевой рамки источника.
+                // Тернарники здесь законны, потому что все три сводятся к min/max — их
+                // векторизатор берёт. А вот общий бленд (cond ? 0 : 1) он расширять не
+                // умеет, поэтому маска отскока выше и записана как min (замерено).
+                const float ox = std::fabs(dx) - hx;
+                const float oy = std::fabs(dy) - hy;
+                const float oz = std::fabs(dz) - hz;
+                const float m1 = ox > oy ? ox : oy;
+                const float o  = m1 > oz ? m1 : oz;
+                const float d  = depth[i];
+                depth[i] = o < d ? o : d;
             }
-
-            if (bouncing) {
-                // Отскочившему НЕ считаем гравитацию — иначе он не улетает, а застревает.
-                // Арифметика: |vy| = 10 против gm = 5000 у поверхности источника (r ≈ 4.6) —
-                // вторая космическая там sqrt(2*gm/r) ≈ 47, то есть 10 не хватает и на метр:
-                // объект поднимается на ~0.2 юнита и падает обратно, качаясь внутри куба вечно.
-                // Раз скорость ЗАДАНА правилом, а не сложена из сил, — правило её и держит.
-            }
-            else if (touched) {
-                // Знак выбирается ОДИН раз, на входе в рамку: бросая монетку каждый тик, сущность
-                // топталась бы случайным блужданием вместо вылета по вертикали.
-                V.x[i] = g_bounce_spread(g_bounce_rng);
-                V.y[i] = (g_bounce_rng() & 1u) ? kBounceSpeed : -kBounceSpeed;
-                V.z[i] = g_bounce_spread(g_bounce_rng);
-
-                // Материал — по имени: саму ссылку, сброс вариантов и перевешивание в дереве
-                // батчей делает ChangeMaterial. Зовётся ОДИН раз на сущность: следующий тик
-                // она уже bouncing и в эту ветку не попадёт.
-                ctx->ChangeMaterial(arch.entities[i], kBounceMaterial);
-            }
-            else {
-                // Полу-неявный Эйлер: сначала скорость (ускорение к центру a = gm/r^2, направление
-                // (центр - позиция)/r), затем позиция — так орбита устойчивее.
-                float ax = 0.0f, ay = 0.0f, az = 0.0f;
-                for (const GravitySource& s : sources) {
-                    const float dx = s.x - x, dy = s.y - y, dz = s.z - z;
-                    const float r2 = dx * dx + dy * dy + dz * dz;
-                    const float r  = std::sqrt(r2);
-                    if (r <= kGravSoft) continue;
-                    const float k = s.gm / (r2 * r);   // gm/r^2, делённое на r — нормировка направления
-                    ax += dx * k; ay += dy * k; az += dz * k;
-                }
-                V.x[i] += ax * kSimDt;
-                V.y[i] += ay * kSimDt;
-                V.z[i] += az * kSimDt;
-            }
-
-            // Обновляем координаты позиции (wdh) скоростями (xyz).
-            P.w[i] += V.x[i] * kSimDt;
-            P.d[i] += V.y[i] * kSimDt;
-            P.h[i] += V.z[i] * kSimDt;
         }
-    }
+
+        // ── B ── кандидаты: знак выбирается один раз, на входе в рамку
+        for (int i = 0; i < n; ++i) {
+            if (depth[i] > 0.0f) continue;                          // вне всех рамок
+            if (std::fabs(vy[i]) == kBounceSpeed) continue;         // уже отскочил
+
+            vx[i] = g_bounce_spread(g_bounce_rng);
+            vy[i] = (g_bounce_rng() & 1u) ? kBounceSpeed : -kBounceSpeed;
+            vz[i] = g_bounce_spread(g_bounce_rng);
+
+            ctx->ChangeMaterial(ents[i], kBounceMaterial);
+        }
+
+        // ── C ── позиции (wdh) скоростями (xyz)
+        for (int i = 0; i < n; ++i) {
+            pw[i] += vx[i] * kSimDt;
+            pd[i] += vy[i] * kSimDt;
+            ph[i] += vz[i] * kSimDt;
+        }
+    });
 }
 
 void Game::MainMenu_Event(SDL_Event* event)

@@ -61,6 +61,12 @@ private:
 	struct GravitySource { float x, y, z, gm; float hx, hy, hz; };
 	std::vector<GravitySource> gravity_sources;
 
+	// Глубина сущности в рамках источников за тик (<= 0 — внутри). Переносное хранилище
+	// между подпроходами SimulateGravity: горячий цикл пишет её ЗНАЧЕНИЕМ, потому что
+	// условная запись флага ломает векторизацию. Член, а не локаль, — чтобы не
+	// перевыделять 800k float каждый тик.
+	std::vector<float> touch_depth;
+
 	float width;
 	float height;
 	float mouse_x = 0;

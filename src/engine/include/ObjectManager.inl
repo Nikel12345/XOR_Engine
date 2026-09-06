@@ -66,15 +66,36 @@ Entity ObjectManager::CreateEntity(const std::string& scene_name, Components&&..
 template<typename... Ts, typename Fn>
 void ObjectManager::ForEachArchetype(SceneData* scene, Fn&& fn) {
     if (!scene) return;
+
+    // Вторая форма: следом за колонками лямбда получает entities архетипа. Индекс в
+    // entities совпадает с индексом в колонках — CreateEntity кладёт сущность в
+    // arch.entities и её поля в колонки одним шагом, swap_remove снимает их вместе.
+    //
+    // Зачем. Горячему проходу нередко нужен id сущности (адресовать её командой,
+    // сменить материал), а получить его до сих пор можно было только поэлементной
+    // формой ForEach — и она невекторизуема в принципе: тело получает объект на
+    // каждую сущность, расширять его нечем. Здесь же цикл пишет сам вызывающий и
+    // может сделать его векторизуемым (замеры: sandbox/GravityVecProbe.cpp).
+    constexpr bool wants_entity_list =
+        std::is_invocable_v<std::decay_t<Fn>, ComponentArray<Ts>*..., const std::vector<Entity>&>;
+
     for (auto& [sig, arch] : scene->archetypes) {
         auto arrs = std::tuple{ arch.get_array<Ts>()... };
         bool all_present = std::apply([](auto*... arr) {
             return (... && (arr != nullptr));
             }, arrs);
         if (!all_present) continue;
-        std::apply([&](auto*... arr) {
-            fn(arr...);
-            }, arrs);
+
+        if constexpr (wants_entity_list) {
+            std::apply([&](auto*... arr) {
+                fn(arr..., arch.entities);
+                }, arrs);
+        }
+        else {
+            std::apply([&](auto*... arr) {
+                fn(arr...);
+                }, arrs);
+        }
     }
 }
 
