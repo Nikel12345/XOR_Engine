@@ -29,7 +29,10 @@ void Engine::PrepareFunc(uint8_t slot)
 	// Раскладка UI — в пикселях ОКНА, а не внутреннего разрешения: размер кнопки задан относительно
 	// экрана, и при render != window деление на render съёжило бы (или раздуло) весь UI. Растеризуется
 	// он всё равно в scene_hdr, то есть суперсэмплинг краёв и текста достаётся ему даром.
-	ui_yoga->Emit(engine_context, GetWindowWidth(), GetWindowHeight());
+	{
+		PROF_SCOPE(Sim, " ui_emit");
+		ui_yoga->Emit(engine_context, GetWindowWidth(), GetWindowHeight());
+	}
 
 	if (Camera* cam = camera_manager->GetActiveCamera()) {
 		const float h = GetHeight();
@@ -37,6 +40,7 @@ void Engine::PrepareFunc(uint8_t slot)
 	}
 
 	{
+		PROF_SCOPE(Sim, " trash+reclaim");
 		const uint64_t fences_done = slot_controller->RenderFencesDone();
 		buffer_manager->TrashBuffers(fences_done);
 		pipe_manager->TrashPipelines(fences_done, slot_controller->RequiredEpoch(), batch_builder->ComputeRebuildEpoch());
@@ -69,12 +73,15 @@ void Engine::PrepareFunc(uint8_t slot)
 			model_manager, material_manager, object_manager->GetActiveScene());
 	}
 
-	slot_controller->StampSlotEpoch(slot, batch_builder->RebuildEpoch());
+	{
+		PROF_SCOPE(Sim, " stamps (epoch/layout/shadow/regions)");
+		slot_controller->StampSlotEpoch(slot, batch_builder->RebuildEpoch());
 
-	batch_builder->StampLayoutSnapshot(slot);
-	light_data_module->StampShadowCameras(object_manager, object_manager->GetActiveScene(), slot);
+		batch_builder->StampLayoutSnapshot(slot);
+		light_data_module->StampShadowCameras(object_manager, object_manager->GetActiveScene(), slot);
 
-	pass_manager->StampRegions(slot, batch_builder->AskLayout(slot));
+		pass_manager->StampRegions(slot, batch_builder->AskLayout(slot));
+	}
 
 	{
 		PROF_SCOPE(Sim, " build_compute_batches");

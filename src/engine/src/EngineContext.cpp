@@ -245,6 +245,9 @@ void EngineContext::ChangeModel(Entity e, const ModelName& model_name)
 			model ? model->submeshes.size() : 0);
 	}
 
+	// Сфера сущности считается по МОДЕЛИ, а буфер bound-сфер гейтится этой ревизией, а не
+	// деревом батчей (см. ObjectManager::EntityRevision).
+	object_manager->BumpEntityRevision();
 	batch_builder->QueueUpdate(e);
 }
 

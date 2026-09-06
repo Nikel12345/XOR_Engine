@@ -120,8 +120,11 @@ public:
 	void ReclaimRanges();
 
 	bool CheckDirty() const;
-	bool CheckDirtySpheres() const { return dirty_spheres; };
-	void CommitSpheres() { dirty_spheres = false; };
+	// Монотонная ревизия ГЕОМЕТРИИ моделей: ++ на каждое (пере)создание модели, то есть на каждый
+	// пересчёт её сабмешей и bound-сфер. По ней вместе с ObjectManager::EntityRevision гейтится
+	// буфер bound-сфер: сфера сущности = функция её модели, и меняется она либо со сменой ссылки
+	// (там ревизия сущностей), либо с пересборкой самой модели (здесь).
+	uint64_t SpheresRevision() const { return spheres_revision; };
 	ModelData* operator[](const std::string& name);
 	// Тихий резолв имени: промах даёт nullptr и НИЧЕГО не логирует — в отличие от operator[].
 	// Нужен там, где промах ЗАКОНЕН (имя у энтити может быть ещё не загружено или уже снесено) или
@@ -204,5 +207,5 @@ private:
 	std::unordered_map<const GeometryPool*, PoolResidency>         residency;
 	GeometryPool* default_pool = nullptr;
 
-	bool dirty_spheres = true;
+	uint64_t spheres_revision = 0;   // см. SpheresRevision()
 };

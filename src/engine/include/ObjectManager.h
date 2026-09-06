@@ -94,6 +94,18 @@ public:
     bool CheckNewObjects() { return dirty_entity; };
     void NewObjectsCommit() { dirty_entity = false; };
 
+    // Монотонная ревизия СОСТАВА сущностей и их геометрических ссылок: ++ на создание/удаление
+    // сущности, загрузку и смену активной сцены, смену модели у сущности (BumpEntityRevision).
+    //
+    // Зачем отдельно от dirty_entity: тот флаг ПОТРЕБЛЯЕТСЯ (NewObjectsCommit в
+    // TransformDataModule), то есть обслуживает ровно одного читателя. Ревизию же сравнивают со
+    // своей запомненной копией сколько угодно потребителей и послотно — та же дисциплина, что у
+    // BatchBuilder::BatchesRevision.
+    uint64_t EntityRevision() const { return entity_revision; }
+    // Для правки СОДЕРЖИМОГО, которая меняет геометрию сущности без структурного изменения —
+    // сейчас это смена модели (EngineContext::ChangeModel).
+    void BumpEntityRevision() { ++entity_revision; }
+
     SceneData* operator[](const std::string& name);
 
 private:
@@ -102,6 +114,7 @@ private:
 
     std::unordered_map<SceneName, std::unique_ptr<SceneData>> scenes_data;
 	bool dirty_entity = false;
+	uint64_t entity_revision = 0;   // см. EntityRevision()
     // «Про отсутствие активной сцены уже сообщено». Оба геттера зовутся ДЕСЯТКИ раз за кадр
     // (один DefaultUpdateSet — около десяти), поэтому без этого состояние «сцены нет» топит себя
     // в собственном логе: сотни строк в секунду через SDL_Log на консоль ещё и роняют fps, и

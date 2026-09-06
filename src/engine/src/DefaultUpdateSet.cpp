@@ -239,7 +239,6 @@ void DefaultUpdateSet::SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSph
     }
     auto* bm = ctx.GetBufferManager();
     auto* om = ctx.GetObjectManager();
-    auto* bb = ctx.GetBatchBuilder();
     auto* mm = ctx.GetModelManager();   // резолвер имени модели у энтити (см. StoreSpheres)
 
     // Сферы по строкам трансформов для GPU-каллинга. Тот же gate-паттерн, что у PIB:
@@ -249,9 +248,17 @@ void DefaultUpdateSet::SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSph
     {
         bdm->StoreSpheres(bm, &task, om, mm);
     },
-        [om, bdm, bb, bm]() -> uint32_t
+        [om, bdm, bm, mm]() -> uint32_t
     {
-        return bdm->CalculateSphereSize(om, bb->BatchesRevision(), bm->logic_index.load());
+        // Гейт — СОСТАВ сущностей, а НЕ ревизия дерева батчей: сфера есть функция модели и места
+        // сущности в строках трансформов, от материала она не зависит никак. Смена материалов
+        // двигает дерево каждый тик — на старом гейте это перезаливало весь буфер сфер каждый
+        // тик (на 800k это 12.8 МБ и поиск модели по имени на каждую сущность).
+        // Вторым слагаемым — ревизия геометрии моделей: пересоздание модели в редакторе меняет
+        // её сабмеши и сферу, не трогая ECS. Обе монотонны, поэтому сумма меняется на любое из
+        // двух событий и никогда не возвращается к прежнему значению.
+        return bdm->CalculateSphereSize(om, om->EntityRevision() + mm->SpheresRevision(),
+            bm->logic_index.load());
     }
     );
     bound_sphere_update_intited = true;

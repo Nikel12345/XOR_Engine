@@ -381,7 +381,7 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
 
     _PushBatchEntry(res, ptr, vbase, vcount, ibase, icount);
     res.dirty = true;
-    dirty_spheres = true;
+    ++spheres_revision;
     return ptr;
 }
 
@@ -444,7 +444,7 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
 
     _PushBatchEntry(res, ptr, vbase, vcount, ibase, icount);
     res.dirty = true;
-    dirty_spheres = true;
+    ++spheres_revision;
     return ptr;
 }
 

@@ -88,6 +88,7 @@ void ObjectManager::DeleteEntity(SceneData* scene, Entity e) {
     // НЕ ставим dirty_batches — удаление идёт инкрементально через e_t_d, а не ребилдом.
     // Но трансформ-буфер ужался: помечаем, чтобы TransformDataModule пересчитал размер.
     dirty_entity = true;
+    ++entity_revision;
 }
 
 void ObjectManager::SetSceneState(const SceneName& scene_name, bool is_active)
@@ -111,6 +112,9 @@ void ObjectManager::SetActiveScene(const SceneName& scene_name)
     // Гасим ВСЕ и зажигаем одну: инвариант «активная ровно одна» держится тут, а не у вызывающих
     // (см. ObjectManager.h). Сцены наперечёт - линейный проход бесплатен.
     for (auto& [name, scene] : scenes_data) scene->is_active = (name == scene_name);
+    // Состав сущностей под обходами сменился целиком — буферы, гейтящиеся EntityRevision,
+    // перезальются.
+    ++entity_revision;
 }
 
 SceneData* ObjectManager::GetActiveScene()
@@ -402,6 +406,7 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
         SDL_Log("LoadScene: %u asset cells reference a missing dictionary entry - names dropped", pool.Misses());
 
     dirty_entity = true;
+    ++entity_revision;
     return created;
 }
 

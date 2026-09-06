@@ -5,6 +5,7 @@
 #include "BufferManager.h"
 #include "RenderCommandData.h"
 #include "RenderManager.h"
+#include "EngineProfiler.h"
 
 PIB_DataModule::PIB_DataModule()
 {
@@ -69,7 +70,11 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
     SceneData* scene = om->GetActiveScene();
     if (!scene) return;
 
-    BuildRowTable(scene);
+    if (const uint64_t rev = om->EntityRevision(); rev != row_table_revision) {
+        PROF_SCOPE(Sim, "     pib_row_table");
+        BuildRowTable(scene);
+        row_table_revision = rev;
+    }
 
     // Пишем ПРЯМО в transfer-буфер: промежуточный вектор на total_elements — лишняя аллокация
     // и лишний memcpy на мегабайты. Размер задан size-фазой (CalculatePIBSizes) по ТОМУ ЖЕ
@@ -78,6 +83,7 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
         bm->AcquireTransferWritePtr(task, total_elements * sizeof(uint32_t)));
     if (!dst) return;
 
+    PROF_SCOPE(Sim, "     pib_gather");
     uint32_t n = 0;
     for (RenderPassStep* rp : rm->GetOrderedRenderPasses())
         for (const auto& [_, sb] : rp->shader_batches)
@@ -99,8 +105,6 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
                             const uint32_t row = (entity < row_of.size()) ? row_of[entity] : kNoRow;
                             // Различаем эти два случая только ради лога — редкий путь, вне цикла
                             // по строкам таблицы он ничего не стоит.
-                            if (row == kNoRow && !scene->entity_to_archetype.count(entity))
-                                SDL_Log("StorePIB: entity %u not in scene (stale pib slot)", entity);
                             dst[n++] = row;
                         }
                     }

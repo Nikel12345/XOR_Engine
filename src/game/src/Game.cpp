@@ -22,6 +22,7 @@
 #include "FontManager.h"
 #include "UI_DataModule.h"
 #include "UI_Yoga.h"
+#include "EngineProfiler.h"
 #include "Engine.h"
 // Свой тип params регистрируется отсюда же одной записью, движок для этого не правится:
 //   ParamsSpecRegistry::Materials().Register(MakeParamsSpec<MyParams>("MyType", {...}));
@@ -34,7 +35,7 @@
 // Стартовая сцена: имя ОДНО и то же для ECS и для файлов — папка сцены зовётся так же
 // (saved_scene/scene1, см. kScenesRoot). Литерал в одном месте: разъедься имя сцены с именем
 // папки — LoadScene молча грузил бы пустоту, а генератор навесился бы на чужую сцену.
-static const char* const kStartScene = "scene2";
+static const char* const kStartScene = "scene1M";
 
 Game::Game(Engine* engine)
 {
@@ -502,8 +503,24 @@ void Game::MainMenu_Update()
 static constexpr float kSimDt    = 0.05f;
 static constexpr float kGravSoft = 1e-3f;   // защита от деления на ~0 у самого центра
 
+// Касание центра тяжести. Геометрии тут нет (у кубов сцены нет коллайдеров), поэтому
+// «столкнулись» = сущность вошла в осевую рамку источника: его габарит (AABB модели x масштаб,
+// считается в проходе 1) плюс запас ниже. Рамка ОСЕВАЯ и поворот источника не учитывает —
+// проверка задумана грубой.
+static constexpr float kTouchMargin = 3.0f;   // запас поверх габарита источника, юниты мира
+static constexpr float kBounceSpeed = 15.0f;   // |vy| после касания; боковая скорость гасится в 0
+static constexpr float kBounceSpread = 1.0f;   // разброс vx/vz после касания, юниты/с
+static const char* const kBounceMaterial = "jet";   // материал отскочившего (лежит в materials.json сцены)
+
+// Монетка отскока. Статик без синхронизации: SimulateGravity зовётся только из Game::MainMenu_Update,
+// то есть всегда с sim-потока. Seed фиксированный — прогон воспроизводим, а «настоящая»
+// случайность тут не нужна.
+static std::mt19937 g_bounce_rng{ 1337u };
+static std::uniform_real_distribution<float> g_bounce_spread(-kBounceSpread, kBounceSpread);
+
 void Game::SimulateGravity()
 {
+    PROF_SCOPE(Sim, "  simulate_gravity (Game)");
     SceneData* scene = objectManager->GetActiveScene();
     if (!scene) return;
 
@@ -512,47 +529,114 @@ void Game::SimulateGravity()
     // его поставила сцена (или редактор).
     gravity_sources.clear();
     objectManager->ForEach<Positions, GravityComponent>(scene,
-        [this](SoAElement<Positions> pos_el, GravityComponent& G)
+        [this, scene](Entity e, SoAElement<Positions> pos_el, GravityComponent& G)
     {
         Positions& P = pos_el.container();
         const size_t i = pos_el.i();
-        gravity_sources.push_back({ P.w[i], P.d[i], P.h[i], G.gm });
+
+        // Габарит источника в ЮНИТАХ МОДЕЛИ: объединение локальных AABB сабмешей вокруг origin
+        // (SubMeshData::aabb_*). Нет модели/имя не резолвится — габарит нулевой, останется голый
+        // kTouchMargin.
+        float hx = 0.0f, hy = 0.0f, hz = 0.0f;
+        if (objectManager->Has<ModelComponent>(scene, e)) {
+            const ModelData* m = modelManager->FindModel(objectManager->GetComponent<ModelComponent>(scene, e).name);
+            if (m) for (const SubMeshData& sm : m->submeshes) {
+                hx = std::max(hx, std::fabs(sm.aabb_center.x) + sm.aabb_half.x);
+                hy = std::max(hy, std::fabs(sm.aabb_center.y) + sm.aabb_half.y);
+                hz = std::max(hz, std::fabs(sm.aabb_center.z) + sm.aabb_half.z);
+            }
+        }
+        // Масштаб — длины столбцов 3x3 трансформа (row-major: столбец 0 = (x,a,e)): так он берётся
+        // и при повороте, а не только у осевой матрицы из генератора сцены.
+        const float sx = std::sqrt(P.x[i] * P.x[i] + P.a[i] * P.a[i] + P.e[i] * P.e[i]);
+        const float sy = std::sqrt(P.y[i] * P.y[i] + P.b[i] * P.b[i] + P.f[i] * P.f[i]);
+        const float sz = std::sqrt(P.z[i] * P.z[i] + P.c[i] * P.c[i] + P.g[i] * P.g[i]);
+
+        gravity_sources.push_back({ P.w[i], P.d[i], P.h[i], G.gm,
+                                    hx * sx + kTouchMargin, hy * sy + kTouchMargin, hz * sz + kTouchMargin });
     });
 
-    // Проход 2 — притягиваемые. Обходим только сущности с Transform И Velocity (кубы). Когда ВСЕ
-    // компоненты — SoA, ForEach отдаёт целые массивы один раз на архетип (не поэлементно).
+    // Проход 2 — притягиваемые. Обходим только сущности с Transform И Velocity (кубы). Прямым
+    // обходом архетипов, а не ForEach: правилу отскока нужен ID сущности (ChangeMaterial
+    // адресует именно её), а форма ForEach с Entity зовёт лямбду ПОЭЛЕМЕНТНО — на сотнях
+    // тысяч кубов это как раз тот тик, который терять нельзя. Здесь колонки берутся раз
+    // на архетип, как в all-SoA форме ForEach, а ID лежит рядом: индекс в arch.entities
+    // равен индексу в колонках (CreateEntity кладёт их в ногу).
     // Позиция — трансляция матрицы: w = x, d = y, h = z (row-major, индексы 3/7/11).
     const std::vector<GravitySource>& sources = gravity_sources;
-    objectManager->ForEach<Positions, Velocities>(scene,
-        [&sources](Positions& P, Velocities& V)
-    {
+    for (auto& [sig, arch] : scene->archetypes) {
+        auto* pos_arr = arch.get_array<Positions>();
+        auto* vel_arr = arch.get_array<Velocities>();
+        if (!pos_arr || !vel_arr) continue;
+        Positions&  P = pos_arr->data;
+        Velocities& V = vel_arr->data;
         const size_t n = P.w.size();
         for (size_t i = 0; i < n; ++i) {
             const float x = P.w[i];   // трансляция X
             const float y = P.d[i];   // трансляция Y
             const float z = P.h[i];   // трансляция Z
 
-            // Полу-неявный Эйлер: сначала скорость (ускорение к центру a = gm/r^2, направление
-            // (центр - позиция)/r), затем позиция — так орбита устойчивее.
-            float ax = 0.0f, ay = 0.0f, az = 0.0f;
-            for (const GravitySource& s : sources) {
-                const float dx = s.x - x, dy = s.y - y, dz = s.z - z;
-                const float r2 = dx * dx + dy * dy + dz * dz;
-                const float r  = std::sqrt(r2);
-                if (r <= kGravSoft) continue;
-                const float k = s.gm / (r2 * r);   // gm/r^2, делённое на r — нормировка направления
-                ax += dx * k; ay += dy * k; az += dz * k;
+            // Коснулись центра — скорость ЗАДАЁТСЯ (вверх или вниз, 50/50), а не изменяется, и
+            // гравитацию в этот тик не копим: иначе тот же кадр увёл бы заданную скорость обратно
+            // «Уже отскочил» — состояние, закодированное в САМОЙ скорости. Носитель — только vy:
+            // x/z теперь несут случайный разброс и опознавательным знаком быть не могут. Значение
+            // ±kBounceSpeed записано здесь же, а в этом состоянии скорость больше никто не трогает
+            // (гравитация отскочившему не считается), поэтому оно остаётся бит-в-бит тем же и
+            // точное сравнение float законно. Отдельный флаг был бы честнее, но его негде
+            // держать: новый компонент — структурная правка, а миграции архетипов в ECS нет.
+            const bool bouncing = (std::fabs(V.y[i]) == kBounceSpeed);
+
+            bool touched = false;
+            if (!bouncing) {
+                for (const GravitySource& s : sources) {
+                    if (std::fabs(s.x - x) <= s.hx &&
+                        std::fabs(s.y - y) <= s.hy &&
+                        std::fabs(s.z - z) <= s.hz) { touched = true; break; }
+                }
             }
-            V.x[i] += ax * kSimDt;
-            V.y[i] += ay * kSimDt;
-            V.z[i] += az * kSimDt;
+
+            if (bouncing) {
+                // Отскочившему НЕ считаем гравитацию — иначе он не улетает, а застревает.
+                // Арифметика: |vy| = 10 против gm = 5000 у поверхности источника (r ≈ 4.6) —
+                // вторая космическая там sqrt(2*gm/r) ≈ 47, то есть 10 не хватает и на метр:
+                // объект поднимается на ~0.2 юнита и падает обратно, качаясь внутри куба вечно.
+                // Раз скорость ЗАДАНА правилом, а не сложена из сил, — правило её и держит.
+            }
+            else if (touched) {
+                // Знак выбирается ОДИН раз, на входе в рамку: бросая монетку каждый тик, сущность
+                // топталась бы случайным блужданием вместо вылета по вертикали.
+                V.x[i] = g_bounce_spread(g_bounce_rng);
+                V.y[i] = (g_bounce_rng() & 1u) ? kBounceSpeed : -kBounceSpeed;
+                V.z[i] = g_bounce_spread(g_bounce_rng);
+
+                // Материал — по имени: саму ссылку, сброс вариантов и перевешивание в дереве
+                // батчей делает ChangeMaterial. Зовётся ОДИН раз на сущность: следующий тик
+                // она уже bouncing и в эту ветку не попадёт.
+                ctx->ChangeMaterial(arch.entities[i], kBounceMaterial);
+            }
+            else {
+                // Полу-неявный Эйлер: сначала скорость (ускорение к центру a = gm/r^2, направление
+                // (центр - позиция)/r), затем позиция — так орбита устойчивее.
+                float ax = 0.0f, ay = 0.0f, az = 0.0f;
+                for (const GravitySource& s : sources) {
+                    const float dx = s.x - x, dy = s.y - y, dz = s.z - z;
+                    const float r2 = dx * dx + dy * dy + dz * dz;
+                    const float r  = std::sqrt(r2);
+                    if (r <= kGravSoft) continue;
+                    const float k = s.gm / (r2 * r);   // gm/r^2, делённое на r — нормировка направления
+                    ax += dx * k; ay += dy * k; az += dz * k;
+                }
+                V.x[i] += ax * kSimDt;
+                V.y[i] += ay * kSimDt;
+                V.z[i] += az * kSimDt;
+            }
 
             // Обновляем координаты позиции (wdh) скоростями (xyz).
             P.w[i] += V.x[i] * kSimDt;
             P.d[i] += V.y[i] * kSimDt;
             P.h[i] += V.z[i] * kSimDt;
         }
-    });
+    }
 }
 
 void Game::MainMenu_Event(SDL_Event* event)

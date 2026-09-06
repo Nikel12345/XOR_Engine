@@ -24,7 +24,6 @@ using namespace BatchKeys;
 
 ModelBatchKey HashModelBatchKey(SubMeshData* submash) {
     if (!submash) {
-        SDL_Log("HashModelBatchKey: model is nullptr!");
         return 0xFFFFFFFFFFFFFFFFull;
     }
     ModelBatchKey key = 0;
@@ -88,7 +87,6 @@ MatSpKey HashMatSpResources(const ShaderProgram* sp, const std::vector<uint8_t>*
                             const uint32_t* slot_words,
                             const std::vector<const TextureHandle*>& block_handles) {
     if (!sp) {
-        SDL_Log("HashMatSpResources: shader program is nullptr!");
         return 0xFFFFFFFFFFFFFFFFull;
     }
     MatSpKey key = 0;
@@ -125,7 +123,6 @@ TextureBatchKey HashTextureBatchKey(MatSpKey res_key, uint32_t material_index) {
 AtlasBatchKey HashAtlasBatchKey(const ShaderProgram* sp,
                                 const std::vector<const TextureHandle*>& block_handles) {
     if (!sp) {
-        SDL_Log("HashAtlasBatchKey: shader program is nullptr!");
         return 0xFFFFFFFFFFFFFFFFull;
     }
     AtlasBatchKey key = 0;
@@ -144,7 +141,6 @@ AtlasBatchKey HashAtlasBatchKey(const ShaderProgram* sp,
 
 ShaderBatchKey HashShaderBatchKey(ShaderProgram* sp) {
     if (!sp) {
-        SDL_Log("HashShaderBatchKey: ShaderProgram is nullptr!");
         return 0xFFFFFFFFFFFFFFFFull;
     }
     ShaderBatchKey key = 0;
@@ -159,7 +155,6 @@ ShaderBatchKey HashShaderBatchKey(ShaderProgram* sp) {
 
 ShaderBatchKey HashShaderBatchKey(ComputeShaderProgram* sp) {
     if (!sp) {
-        SDL_Log("HashShaderBatchKey: ShaderProgram is nullptr!");
         return 0xFFFFFFFFFFFFFFFFull;
     }
     ShaderBatchKey key = 0;
@@ -246,13 +241,8 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
         // Ячейки секции состояний: порядок — ОДНО определение на весь движок
         // (CollectVariativeRoles в MaterialData.h), его же читает TextureStateDataModule при
         // заливке. Расходиться им нельзя — объекты молча покажут чужие варианты, поэтому цикл
-        // здесь не переписывается, а вызывается. Переполнение функция не логирует (у неё нет
-        // имени материала) — сообщение здесь, одна строка на материал.
+        // здесь не переписывается, а вызывается.
         const VariativeRoles cells = CollectVariativeRoles(*material);
-        if (cells.count >= MAX_VARIATIVE_SLOTS)
-            SDL_Log("BuildMaterialLayouts: material '%s' may have more variative slots than "
-                    "MAX_VARIATIVE_SLOTS (%u) - the rest show their default only (raise the constant)",
-                mat_name.c_str(), MAX_VARIATIVE_SLOTS);
 
         for (const SpBinding& binding : material->shader_programs) {
             const std::vector<uint8_t>* sp_params =
@@ -265,10 +255,6 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
             const MatSpKey memo = HashMatSpMemo(material, sp, sp_params);
             if (mat_sp_layouts.count(memo)) continue;   // две ячейки упали на одну sp с одним блобом
 
-            if (sp->required_slots.size() > MAX_SLOTS)
-                SDL_Log("BuildMaterialLayouts: sp '%s' declares %zu texture slots, MAX_SLOTS is %u - "
-                        "slots beyond it get no layout word and cannot be addressed (raise the constant)",
-                    sp->debug_name.c_str(), sp->required_slots.size(), MAX_SLOTS);
 
             MatSpLayout lay{};
             lay.bindable = true;
@@ -290,9 +276,6 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
                 TextureHandle* def = (names && !names->empty() && tm)
                     ? tm->GetTextureHandle((*names)[0]) : nullptr;
                 if (!def || !def->atlas) {
-                    SDL_Log("BuildMaterialLayouts: material '%s' has no resolvable texture for slot %d "
-                            "of sp '%s' - dummy is used", mat_name.c_str(), static_cast<int>(role),
-                        sp->debug_name.c_str());
                     def = dummy;
                 }
                 if (!def) { lay.bindable = false; break; }
@@ -315,12 +298,9 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
                     if (cells.role[c] == role) { cell = c; has_cell = true; break; }
 
                 if (has_cell) {
-                    if (lay.uvl.size() + names->size() - 1 > MAX_UVL_BLOCKS) {
-                        SDL_Log("BuildMaterialLayouts: material '%s' + sp '%s': UVL table would exceed "
-                                "MAX_UVL_BLOCKS (%u) - slot %d shows its default only (raise the constant)",
-                            mat_name.c_str(), sp->debug_name.c_str(), MAX_UVL_BLOCKS, static_cast<int>(role));
-                    }
-                    else for (size_t v = 1; v < names->size(); ++v) {
+                    // Слот, не влезающий в MAX_UVL_BLOCKS, показывает только свой дефолт.
+                    if (lay.uvl.size() + names->size() - 1 <= MAX_UVL_BLOCKS)
+                    for (size_t v = 1; v < names->size(); ++v) {
                         TextureHandle* h = tm ? tm->GetTextureHandle((*names)[v]) : nullptr;
                         if (!h || !h->atlas) continue;   // GetTextureHandle уже назвал промах в логе
                         lay.uvl.push_back(MakeUVL(h->texture_data));
@@ -342,9 +322,6 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
             }
 
             if (!lay.bindable) {
-                SDL_Log("BuildMaterialLayouts: material '%s' + sp '%s': a required slot has neither a "
-                        "texture nor a dummy - this sp draw is skipped for the material",
-                    mat_name.c_str(), sp->debug_name.c_str());
                 lay.uvl.clear();
                 lay.texture_binding.clear();
             }
@@ -371,18 +348,9 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
     // Защита от неразрешённых ссылок: пустое/неизвестное имя (ассет удалён, переименован или
     // ещё не создан) даёт nullptr. Без гарда разыменование model->submeshes падает на сборке.
     if (!model) {
-        SDL_Log("BatchBuilder: entity %u has null model - skipped (unresolved asset '%s'?)",
-            entity, model_component.name.c_str());
         return;
     }
 
-    // Сверка длин — ОДИН раз на сущность: внутри цикла она печатала строку на каждый сабмеш,
-    // и город на 3000 домов давал десятки тысяч строк за сборку.
-    if (material_component.materials.size() != model->submeshes.size()) {
-        SDL_Log("BulidBatches:: Submash and material sizes mismatch (entity %u, model '%s': %u materials, %u submeshes)",
-            entity, model_component.name.c_str(),
-            safe_u32(material_component.materials.size()), safe_u32(model->submeshes.size()));
-    }
 
     for (SubMeshData& submesh : model->submeshes)
     {
@@ -394,7 +362,6 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
         // Границы + промах имени материала (та же природа, что у модели выше).
         if (submesh.material_index >= material_component.materials.size()) {
-            SDL_Log("BatchBuilder: entity %u material_index out of range - skipped", entity);
             continue;
         }
         const std::string& material_name = material_component.materials[submesh.material_index].name;
@@ -405,8 +372,6 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             if (mit != materials.end()) material = mit->second.get();
         }
         if (!material) {
-            SDL_Log("BatchBuilder: entity %u has null material - skipped (unresolved asset '%s'?)",
-                entity, material_name.c_str());
             continue;
         }
 
@@ -425,7 +390,6 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             const ShaderName* resolved_name = &sp_name;
             if (!sp) {
                 // sp удалена → fallback ПО ИМЕНИ (резолвим как обычную sp; удалён и он → пустой рендер, без краша).
-                SDL_Log("BatchBuilder::Material references deleted shader program '%s' - using fallback", sp_name.c_str());
                 sp = (sm && !fallback_shader_name.empty()) ? sm->GetShaderProgram(fallback_shader_name) : nullptr;
                 if (!sp) continue;
                 resolved_name = &fallback_shader_name;
@@ -740,11 +704,7 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
         // Никакого внешнего знания для нумерации не нужно — счётчик просто свой на проход.
         uint32_t pass_cmd_index = 0;
 
-        // Счётчик формы дерева: draw = texture-батч (одна SDL_DrawGPUIndexedPrimitivesIndirect),
-        // cmd = model-батч (одна команда мультидроу внутри неё). Печатается ТОЛЬКО отсюда,
-        // то есть на изменение дерева, а не покадрово. Нужен, чтобы правка ключей была видна
-        // числом: лишний хэш в ключе дробит узлы, и это единственный симптом — картинка та же.
-        uint32_t pass_draws = 0, pass_cmds = 0;
+        uint32_t pass_cmds = 0;   // команд мультидроу в проходе (уходит в pass_list.num_commands)
 
         // Глобальные сэмплеры прохода (тень/env): резолвим СТАБИЛЬНЫЕ атласы в актуальные
         // SDL-биндинги ЗДЕСЬ, значениями в слепок — как это делает compute на диспатче. В цикле
@@ -753,7 +713,6 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
         pass_list.global_texture_bindings.reserve(rp->global_texture_bindings.size());
         for (TextureAtlas* atlas : rp->global_texture_bindings) {
             if (!atlas || !atlas->texture_binding.texture) {
-                SDL_Log("BatchBuilder: pass '%s' - global sampler atlas is null/has no GPU texture, skipped.", rp->debug_name.c_str());
                 continue;
             }
             pass_list.global_texture_bindings.push_back(atlas->texture_binding);
@@ -793,7 +752,6 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
                         offset += model_batch.instanceCount;
                         pass_cmd_index++;
                     }
-                    ++pass_draws;
                     pass_cmds += td.draw_count;
                     ag.draws.push_back(std::move(td));
                 }
@@ -801,10 +759,6 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
             }
             pass_list.shaders.push_back(std::move(sg));
         }
-        SDL_Log("[batch] pass '%s': draws=%u cmds=%u shaders=%zu instances=%u",
-            rp->debug_name.c_str(), pass_draws, pass_cmds,
-            rp->shader_batches.size(), offset - pass_list.first_instance);
-
         // Суммы прохода: из них StampRegions складывает размеры его региона (записей и команд
         // на камеру) и границы его сегмента во входном PIB для диапазона каллинга.
         pass_list.num_instances = offset - pass_list.first_instance;

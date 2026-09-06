@@ -58,6 +58,7 @@ Entity ObjectManager::CreateEntity(const std::string& scene_name, Components&&..
         scene->children[parent_id].push_back(e);
 
 	dirty_entity = true;
+	++entity_revision;
 
     return e;
 }
