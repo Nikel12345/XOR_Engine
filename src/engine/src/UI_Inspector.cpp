@@ -618,6 +618,56 @@ namespace {
         }
     }
 
+    // Подпись ступени диапазона (SubMeshSpan): пользователю нужен ПОРОГ В ПИКСЕЛЯХ, а хранится
+    // номер ступени. Отдаётся как format-строка слайдера: printf без %d печатает её как есть,
+    // поэтому ползунок ходит по 0..15, а подписан осмысленным числом. Буфер статический —
+    // указатель живёт ровно до конца вызова SliderInt, дальше ImGui подпись уже скопировал.
+    const char* SpanStepLabel(int step)
+    {
+        static char buf[24];
+        if (step <= 0) return "off";
+        std::snprintf(buf, sizeof buf, "%.4g px", 0.5 * std::exp2(double(step - 1)));
+        return buf;
+    }
+
+    // Диапазоны экранных размеров сабмешей выбранной модели. Правка МОМЕНТАЛЬНАЯ, как у params
+    // материала и state прохода: пишем поле на месте, без пересоздания модели. Пересоздавать
+    // тут нечего — геометрия не меняется, меняется только число, которое каллинг сравнивает с
+    // экранным радиусом; а recreate вдобавок перечитал бы .bin и обнулил бы остальные спаны.
+    // Доехать до GPU правке даёт ModelManager::SetSubmeshSpan (бампает ревизию, см. её там).
+    void ModelSpansEditor(EngineContext* ctx)
+    {
+        if (g_sel.name.empty()) return;
+        ModelManager* mm = ctx->GetModelManager();
+        ModelData* m = mm->FindModel(g_sel.name);
+        if (!m) return;
+
+        ImGui::SeparatorText("Screen size span");
+        if (m->submeshes.empty()) {
+            ImGui::TextDisabled("(model has no submeshes)");
+            return;
+        }
+        ImGui::TextDisabled("Порог = экранный РАДИУС всего объекта. off = границы нет.");
+
+        for (size_t i = 0; i < m->submeshes.size(); ++i) {
+            const SubMeshSpan cur = m->submeshes[i].screen_size_span;
+            int mn = cur.lod_min;
+            int mx = cur.lod_max;
+
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::Text("#%zu (mat %u)", i, m->submeshes[i].material_index);
+            ImGui::SameLine(120.0f);
+            ImGui::SetNextItemWidth(120.0f);
+            bool changed = ImGui::SliderInt("##min", &mn, 0, 15, SpanStepLabel(mn));
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(120.0f);
+            changed |= ImGui::SliderInt("##max", &mx, 0, 15, SpanStepLabel(mx));
+            ImGui::PopID();
+
+            if (changed) mm->SetSubmeshSpan(g_sel.name, i, { safe_i_u8(mn), safe_i_u8(mx) });
+        }
+    }
+
     // Форма создания/редактирования модели (аналог TextureEditor). Upsert = перезагрузка in-place
     // (ModelManager::LoadModelFromFile). Процедурные модели имеют пустые пути → форма пуста, а кнопка
     // (нужны оба пути) не активна — их создание только в коде.
@@ -685,6 +735,11 @@ namespace {
             ctx->GetInputManager()->PushCommand(CommandId::UpsertModel,
                 new UpsertModelCmd{ nameBuf, modelBuf, indexBuf, static_cast<uint32_t>(anchorSel) });
         ImGui::EndDisabled();
+
+        // Ниже кнопки намеренно: всё выше копится в буферах и коммитится «Recreate», а спаны
+        // пишутся сразу. Соседство разной механики в одной панели — повод разделить их визуально,
+        // а не смешать в общую форму.
+        ModelSpansEditor(ctx);
     }
 
     // Инспектор/создатель graphics-sp. Одна форма и для правки, и для создания (как текстуры/модели):

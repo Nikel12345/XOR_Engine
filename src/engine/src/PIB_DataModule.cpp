@@ -4,6 +4,7 @@
 #include "ObjectManager.h"
 #include "BufferManager.h"
 #include "RenderCommandData.h"
+#include "ModelData.h"
 #include "RenderManager.h"
 #include "EngineProfiler.h"
 
@@ -163,8 +164,14 @@ void PIB_DataModule::StoreEntityToCmd(BufferManager* bm, PassManager* rm, Upload
                 for (const auto& [_, tb] : ab.texture_batches)
                     for (const auto& [_, mb] : tb.model_batches) {
                         const size_t cnt = mb.pib_sub_buffer.size();
+                        // Диапазон сабмеша едет в свободных битах ТОГО ЖЕ слова: указатель на
+                        // сабмеш у батча уже есть, а отдельный буфер потребовал бы своей заливки и
+                        // своего гейта по ревизии ради пары сотен байт. Раскладка — PackLodRange.
+                        assert(cmd_idx <= kCmdIndexMask);
+                        const uint32_t word = cmd_idx |
+                            (mb.submesh ? PackLodRange(mb.submesh->screen_size_span) : 0u);
                         if (n + cnt <= e2c_elements) {   // страховка, см. StorePIB
-                            std::fill_n(dst + n, cnt, cmd_idx);
+                            std::fill_n(dst + n, cnt, word);
                             n += safe_u32(cnt);
                         }
                         cmd_idx++;

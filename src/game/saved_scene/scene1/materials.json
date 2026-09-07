@@ -10,6 +10,115 @@
             "textures": []
         },
         {
+            "name": "building",
+            "shaders": [
+                {
+                    "name": "LitTiled",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 1.0,
+                        "metallic": 0.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                }
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "textures": [
+                        "cyber"
+                    ]
+                },
+                {
+                    "role": "Normal",
+                    "textures": [
+                        "default_normal"
+                    ]
+                },
+                {
+                    "role": "ORM",
+                    "textures": [
+                        "default_orm"
+                    ]
+                },
+                {
+                    "role": "Emissive",
+                    "textures": [
+                        "default_emissive"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "signs_metal",
+            "shaders": [
+                {
+                    "name": "Lit",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 0.0,
+                        "metallic": 1.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                },
+                {
+                    "name": "ShadowCaster"
+                }
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "textures": [
+                        "signs_metal_albedo"
+                    ]
+                },
+                {
+                    "role": "Normal",
+                    "textures": [
+                        "signs_metal_normal"
+                    ]
+                },
+                {
+                    "role": "ORM",
+                    "textures": [
+                        "signs_metal_orm"
+                    ]
+                },
+                {
+                    "role": "Emissive",
+                    "textures": [
+                        "default_emissive"
+                    ]
+                }
+            ]
+        },
+        {
             "name": "debug_collider",
             "shaders": [
                 {
@@ -17,6 +126,112 @@
                 }
             ],
             "textures": []
+        },
+        {
+            "name": "tower",
+            "shaders": [
+                {
+                    "name": "Lit",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            0.23039215803146362,
+                            0.23039215803146362,
+                            0.23039215803146362,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.5784313678741455,
+                            0.5784313678741455,
+                            0.5784313678741455
+                        ],
+                        "emissiveStrength": 1.1480000019073486,
+                        "metallic": 0.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                }
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "textures": [
+                        "tower_albedo"
+                    ]
+                },
+                {
+                    "role": "Normal",
+                    "textures": [
+                        "tower_normal"
+                    ]
+                },
+                {
+                    "role": "ORM",
+                    "textures": [
+                        "tower_orm"
+                    ]
+                },
+                {
+                    "role": "Emissive",
+                    "textures": [
+                        "tower_emissive"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "building_tech",
+            "shaders": [
+                {
+                    "name": "LitTiled",
+                    "params_type": "Opaque",
+                    "params": {
+                        "baseColor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "emissive": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissiveStrength": 1.0,
+                        "metallic": 0.0,
+                        "roughness": 1.0,
+                        "heightScale": 0.0,
+                        "pomBias": 0.0
+                    }
+                }
+            ],
+            "textures": [
+                {
+                    "role": "Albedo",
+                    "textures": [
+                        "line"
+                    ]
+                },
+                {
+                    "role": "Normal",
+                    "textures": [
+                        "default_normal"
+                    ]
+                },
+                {
+                    "role": "ORM",
+                    "textures": [
+                        "default_orm"
+                    ]
+                },
+                {
+                    "role": "Emissive",
+                    "textures": [
+                        "default_emissive"
+                    ]
+                }
+            ]
         },
         {
             "name": "building_glass",
@@ -98,160 +313,57 @@
             ]
         },
         {
-            "name": "building",
-            "shaders": [
-                {
-                    "name": "LitTiled",
-                    "params_type": "Opaque",
-                    "params": {
-                        "baseColor": [
-                            1.0,
-                            1.0,
-                            1.0,
-                            1.0
-                        ],
-                        "emissive": [
-                            0.0,
-                            0.0,
-                            0.0
-                        ],
-                        "emissiveStrength": 1.0,
-                        "metallic": 0.0,
-                        "roughness": 1.0,
-                        "heightScale": 0.0,
-                        "pomBias": 0.0
-                    }
-                }
-            ],
-            "textures": [
-                {
-                    "role": "Albedo",
-                    "textures": [
-                        "cyber"
-                    ]
-                },
-                {
-                    "role": "Normal",
-                    "textures": [
-                        "default_normal"
-                    ]
-                },
-                {
-                    "role": "ORM",
-                    "textures": [
-                        "default_orm"
-                    ]
-                },
-                {
-                    "role": "Emissive",
-                    "textures": [
-                        "default_emissive"
-                    ]
-                }
-            ]
-        },
-        {
-            "name": "building_tech",
-            "shaders": [
-                {
-                    "name": "LitTiled",
-                    "params_type": "Opaque",
-                    "params": {
-                        "baseColor": [
-                            1.0,
-                            1.0,
-                            1.0,
-                            1.0
-                        ],
-                        "emissive": [
-                            0.0,
-                            0.0,
-                            0.0
-                        ],
-                        "emissiveStrength": 1.0,
-                        "metallic": 0.0,
-                        "roughness": 1.0,
-                        "heightScale": 0.0,
-                        "pomBias": 0.0
-                    }
-                }
-            ],
-            "textures": [
-                {
-                    "role": "Albedo",
-                    "textures": [
-                        "line"
-                    ]
-                },
-                {
-                    "role": "Normal",
-                    "textures": [
-                        "default_normal"
-                    ]
-                },
-                {
-                    "role": "ORM",
-                    "textures": [
-                        "default_orm"
-                    ]
-                },
-                {
-                    "role": "Emissive",
-                    "textures": [
-                        "default_emissive"
-                    ]
-                }
-            ]
-        },
-        {
-            "name": "tower",
+            "name": "signs_board",
             "shaders": [
                 {
                     "name": "Lit",
                     "params_type": "Opaque",
                     "params": {
                         "baseColor": [
-                            0.23039215803146362,
-                            0.23039215803146362,
-                            0.23039215803146362,
+                            1.0,
+                            1.0,
+                            1.0,
                             1.0
                         ],
                         "emissive": [
-                            0.5784313678741455,
-                            0.5784313678741455,
-                            0.5784313678741455
+                            0.06862747669219971,
+                            0.06862747669219971,
+                            0.06862747669219971
                         ],
-                        "emissiveStrength": 1.1480000019073486,
+                        "emissiveStrength": 1.055999994277954,
                         "metallic": 0.0,
                         "roughness": 1.0,
                         "heightScale": 0.0,
                         "pomBias": 0.0
                     }
+                },
+                {
+                    "name": "ShadowCaster"
                 }
             ],
             "textures": [
                 {
                     "role": "Albedo",
                     "textures": [
-                        "tower_albedo"
+                        "signs_board_albedo"
                     ]
                 },
                 {
                     "role": "Normal",
                     "textures": [
-                        "tower_normal"
+                        "signs_board_normal"
                     ]
                 },
                 {
                     "role": "ORM",
                     "textures": [
-                        "tower_orm"
+                        "signs_board_orm"
                     ]
                 },
                 {
                     "role": "Emissive",
                     "textures": [
-                        "tower_emissive"
+                        "default_emissive"
                     ]
                 }
             ]
@@ -358,118 +470,6 @@
                     "role": "ORM",
                     "textures": [
                         "radiotower_orm"
-                    ]
-                },
-                {
-                    "role": "Emissive",
-                    "textures": [
-                        "default_emissive"
-                    ]
-                }
-            ]
-        },
-        {
-            "name": "signs_board",
-            "shaders": [
-                {
-                    "name": "Lit",
-                    "params_type": "Opaque",
-                    "params": {
-                        "baseColor": [
-                            1.0,
-                            1.0,
-                            1.0,
-                            1.0
-                        ],
-                        "emissive": [
-                            0.06862747669219971,
-                            0.06862747669219971,
-                            0.06862747669219971
-                        ],
-                        "emissiveStrength": 1.055999994277954,
-                        "metallic": 0.0,
-                        "roughness": 1.0,
-                        "heightScale": 0.0,
-                        "pomBias": 0.0
-                    }
-                },
-                {
-                    "name": "ShadowCaster"
-                }
-            ],
-            "textures": [
-                {
-                    "role": "Albedo",
-                    "textures": [
-                        "signs_board_albedo"
-                    ]
-                },
-                {
-                    "role": "Normal",
-                    "textures": [
-                        "signs_board_normal"
-                    ]
-                },
-                {
-                    "role": "ORM",
-                    "textures": [
-                        "signs_board_orm"
-                    ]
-                },
-                {
-                    "role": "Emissive",
-                    "textures": [
-                        "default_emissive"
-                    ]
-                }
-            ]
-        },
-        {
-            "name": "signs_metal",
-            "shaders": [
-                {
-                    "name": "Lit",
-                    "params_type": "Opaque",
-                    "params": {
-                        "baseColor": [
-                            1.0,
-                            1.0,
-                            1.0,
-                            1.0
-                        ],
-                        "emissive": [
-                            0.0,
-                            0.0,
-                            0.0
-                        ],
-                        "emissiveStrength": 0.0,
-                        "metallic": 1.0,
-                        "roughness": 1.0,
-                        "heightScale": 0.0,
-                        "pomBias": 0.0
-                    }
-                },
-                {
-                    "name": "ShadowCaster"
-                }
-            ],
-            "textures": [
-                {
-                    "role": "Albedo",
-                    "textures": [
-                        "signs_metal_albedo"
-                    ]
-                },
-                {
-                    "role": "Normal",
-                    "textures": [
-                        "signs_metal_normal"
-                    ]
-                },
-                {
-                    "role": "ORM",
-                    "textures": [
-                        "signs_metal_orm"
                     ]
                 },
                 {

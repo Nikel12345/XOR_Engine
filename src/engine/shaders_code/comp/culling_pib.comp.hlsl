@@ -14,7 +14,7 @@
 // num_instances @4, first_instance @16 в команде.
 
 StructuredBuffer<int>     PIB          : register(t0, space0);   // запись -> строка трансформа (-1 = transformless, всегда видим)
-StructuredBuffer<uint>    EntityToCmd  : register(t1, space0);   // запись -> индекс команды k В СВОЕЙ ГРУППЕ
+StructuredBuffer<uint>    EntityToCmd  : register(t1, space0);   // запись -> команда k + диапазон сабмеша
 StructuredBuffer<float4>  BoundSpheres : register(t2, space0);   // по строкам: xyz центр (model), w радиус; w<0 — нет модели
 struct CameraData { float4x4 view; float4x4 proj; };
 StructuredBuffer<CameraData> Cameras   : register(t3, space0);   // буфер группы камер (биндится программой)
@@ -34,6 +34,18 @@ cbuffer CullParams : register(b0, space2) {
 };
 
 static const uint CMD_STRIDE = 20u;   // sizeof(SDL_GPUIndexedIndirectDrawCommand); num_instances@4, first_instance@16
+
+// Слово EntityToCmd: младшие 24 бита — индекс команды, старшие два ниббла — ступени диапазона
+// экранных размеров, на котором сабмеш записи рисуется. Раскладку задаёт PackLodRange в
+// ModelData.h (там же смысл поля), здесь только разбор.
+static const uint CMD_INDEX_MASK = 0x00FFFFFFu;
+
+// Ступень 0 = граница не задана, тогда отдаём unset (0 для нижней, +бесконечность для верхней) —
+// сабмеш без проставленного диапазона ведёт себя ровно как до появления поля.
+float LodBoundPx(uint level, float unset)
+{
+    return (level == 0u) ? unset : 0.5 * exp2(float(level - 1u));
+}
 
 // Радиус ограничивающей сферы в ПИКСЕЛЯХ приёмника. w клипа = расстояние вдоль оси взгляда
 // (для mul(M,v) это ровно dot(vp[3], p) — полный mul не нужен, берём одну строку), proj[1][1] —
@@ -81,7 +93,11 @@ void main(uint3 tid : SV_DispatchThreadID)
 
     int row = PIB[i];   // -1 = transformless (нет Positions): строки/сферы нет — видим всегда
 
-    uint k = EntityToCmd[i];   // индекс команды ЛОКАЛЬНЫЙ для прохода (см. StoreEntityToCmd)
+    uint word = EntityToCmd[i];
+    uint k    = word & CMD_INDEX_MASK;   // индекс команды ЛОКАЛЬНЫЙ для прохода (см. StoreEntityToCmd)
+    // Границы от камеры не зависят — разбираем до цикла по блокам.
+    float lod_min = LodBoundPx((word >> 24) & 0xFu, 0.0);
+    float lod_max = LodBoundPx((word >> 28) & 0xFu, 1e30);
 
     // Мировые центр/радиус — один раз (не зависят от камеры). w<0 → нет геометрии, видим всегда.
     // row<0 идёт тем же путём: сфера-заглушка w=-1 → безусловный скаттер во все блоки прохода
@@ -109,9 +125,15 @@ void main(uint3 tid : SV_DispatchThreadID)
         float4x4 vp = mul(Cameras[b].proj, Cameras[b].view);
         if (!SphereVisible(vp, center, radius)) continue;
 
-        // Отсев мелочи. При min_screen_radius_px == 0 условие ложно всегда (радиус >= 0), то есть
-        // выключенный порог не стоит ни одного лишнего сравнения на записи и не меняет поведение.
-        if (ScreenRadiusPx(vp, Cameras[b].proj, center, radius) < min_screen_radius_px) continue;
+        float px = ScreenRadiusPx(vp, Cameras[b].proj, center, radius);
+
+        // Отсев мелочи: глобальный порог прохода и собственная нижняя граница сабмеша — про разное
+        // (пыль против неразрешимой детали), поэтому они не заменяют друг друга, а складываются по
+        // максимуму. Оба выключены → условие ложно всегда (радиус >= 0), поведения не меняют.
+        if (px < max(min_screen_radius_px, lod_min)) continue;
+        // Верхняя граница — место, которое сабмеш уступает более грубому уровню: уровни модели идут
+        // соседними сабмешами с непересекающимися диапазонами, поэтому видимым остаётся ровно один.
+        if (px >= lod_max) continue;
 
         ScatterInto(b, k, row);
     }

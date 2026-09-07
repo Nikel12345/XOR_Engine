@@ -305,6 +305,15 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& scenes_ro
 			yyjson_mut_obj_add_strcpy(doc, e, "index",  m->index_path.c_str());
 			yyjson_mut_obj_add_int   (doc, e, "anchor", (int)m->anchor);
 			yyjson_mut_obj_add_strcpy(doc, e, "pool",   m->pool_name.c_str());
+			// Пара ступеней на сабмеш, в порядке сабмешей: позиция в массиве И ЕСТЬ адрес сабмеша,
+			// своего имени у него нет. Пишем всегда, даже когда всё нулевое, — иначе поле не из
+			// чего было бы править руками до появления UI.
+			yyjson_mut_val* span = yyjson_mut_obj_add_arr(doc, e, "screen_size_span");
+			for (const SubMeshData& sm : m->submeshes) {
+				yyjson_mut_val* pair = yyjson_mut_arr_add_arr(doc, span);
+				yyjson_mut_arr_add_int(doc, pair, sm.screen_size_span.lod_min);
+				yyjson_mut_arr_add_int(doc, pair, sm.screen_size_span.lod_max);
+			}
 			++saved;
 		}
 		yyjson_write_err werr;
@@ -541,8 +550,17 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 			entries.reserve(yyjson_arr_size(arr));
 			size_t idx, max; yyjson_val* m;
 			yyjson_arr_foreach(arr, idx, max, m) {
-				entries.push_back({ JsonStr(m, "name"), JsonStr(m, "vertex"), JsonStr(m, "index"),
-				                    (AnchorShift)JsonInt(m, "anchor", 0), JsonStr(m, "pool") });
+				SceneModelEntry entry{ JsonStr(m, "name"), JsonStr(m, "vertex"), JsonStr(m, "index"),
+				                       (AnchorShift)JsonInt(m, "anchor", 0), JsonStr(m, "pool") };
+				// Нет поля (сцена старше него) → пустой список → все сабмеши останутся с (0,0).
+				yyjson_val* span = yyjson_obj_get(m, "screen_size_span");
+				size_t si, smax; yyjson_val* pair;
+				yyjson_arr_foreach(span, si, smax, pair) {
+					entry.screen_size_span.push_back(
+						{ safe_i_u8((int)yyjson_get_int(yyjson_arr_get(pair, 0))),
+						  safe_i_u8((int)yyjson_get_int(yyjson_arr_get(pair, 1))) });
+				}
+				entries.push_back(std::move(entry));
 			}
 			yyjson_doc_free(doc);
 			const size_t loaded_n = model_manager->LoadSceneModels(entries);

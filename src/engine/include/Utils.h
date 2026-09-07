@@ -39,6 +39,12 @@ inline uint32_t safe_i_u32(int val) {
     return static_cast<uint32_t>(val);
 }
 
+inline uint8_t safe_i_u8(int val) {
+    assert(val >= 0);
+    assert(val <= static_cast<int>(std::numeric_limits<uint8_t>::max()));
+    return static_cast<uint8_t>(val);
+}
+
 inline float safe_sint32_f(Sint32 val) {
     return static_cast<float>(val);
 }

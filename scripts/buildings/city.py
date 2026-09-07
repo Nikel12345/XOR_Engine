@@ -19,10 +19,10 @@ import collections
 from bisect import bisect_right
 from pathlib import Path
 
-from generate import MODEL_NAME, MODEL_COUNT, GRID, CELL, OUT_DIR
+from generate import MODEL_NAME, MODEL_COUNT, GRID, CELL, OUT_DIR, SUBMESH_SLOTS
 
-CITY_X = 16                 # домов по X
-CITY_Y = 16                 # домов по Z (вторая ось СЕТКИ — это Z сцены, не Y)
+CITY_X = 100                 # домов по X
+CITY_Y = 20                 # домов по Z (вторая ось СЕТКИ — это Z сцены, не Y)
 
 # Шаг сетки: след здания = GRID x CELL, остальное — ширина улицы. Меньше следа ставить нельзя —
 # дома вложатся друг в друга.
@@ -66,6 +66,31 @@ LIGHT = collections.OrderedDict([
 
 BUILDING_ARCHETYPE = "Draw,Material,Model,Transform"
 MAT4_KEYS = ("x", "y", "z", "w", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l")
+
+
+def span_step(px):
+    """Ступень порога для screen_size_span: движок хранит НОМЕР ступени, а не пиксели.
+
+    Пара ступеней лежит в четырёх свободных битах слова EntityToCmd (ModelData.h::PackLodRange) —
+    числа в пикселях туда не влезет. Лесенка: 0 = границы нет, иначе порог = 0.5 * 2^(L-1) px."""
+    if px <= 0:
+        return 0
+    return int(round(math.log(px / 0.5, 2))) + 1
+
+
+# Экранный РАДИУС дома (не окна), ниже которого окна перестают рисоваться.
+WINDOW_HIDE_PX = 100.0
+
+# Диапазоны экранных размеров по сабмешам: {слот: (нижняя ступень, верхняя)}. Чего нет в словаре,
+# получает (0, 0) — «рисовать всегда».
+#
+# Окна выключаются вдали потому, что они НАКЛАДКА на сплошной фасад, а не вырез: убрать их можно
+# без дырок, а платит за них кадр дважды — квад далёкого окна субпиксельный (растеризатор всё
+# равно выдаёт квад 2x2, три лейна из четырёх в мусор) и вдобавок шейдит стену вторым слоем.
+# Слот берётся у generate.py, а не числом: раскладку слотов задаёт он.
+SUBMESH_SPANS = {SUBMESH_SLOTS["windows"]: (span_step(WINDOW_HIDE_PX), 0), SUBMESH_SLOTS["tower"]: (span_step(128), 0),
+                 SUBMESH_SLOTS["radiotower"]: (span_step(128), 0)}
+
 
 
 def submesh_count(model):
@@ -234,6 +259,10 @@ def sync_models():
             ("index", "%s/%s_i.bin" % (rel, name)),
             ("anchor", 0),
             ("pool", "PosUVNorm"),
+            # Пара на КАЖДЫЙ сабмеш и в его порядке: позиция в массиве и есть адрес сабмеша,
+            # своего имени у него нет. Длина — из .bin по той же причине, что и в submesh_count.
+            ("screen_size_span", [list(SUBMESH_SPANS.get(i, (0, 0)))
+                                  for i in range(submesh_count(name))]),
         ])
 
     generated = re.compile(r"^%s\d+$" % re.escape(MODEL_NAME))
@@ -246,7 +275,9 @@ def sync_models():
     added = [n for n in want if n not in had]
     dropped = sorted(had - set(want))
     out = ["models.json: %d building entries (added %d, dropped %d)"
-           % (len(want), len(added), len(dropped))]
+           % (len(want), len(added), len(dropped)),
+           "screen_size_span: submesh %d (windows) off below %g px"
+           % (SUBMESH_SLOTS["windows"], WINDOW_HIDE_PX)]
     if dropped:
         out.append("dropped stale: " + ", ".join(dropped))
     if missing_files:

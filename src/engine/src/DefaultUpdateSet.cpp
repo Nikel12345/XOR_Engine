@@ -217,16 +217,21 @@ void DefaultUpdateSet::SetDefaultEntityToCmdUpdater(EngineContext& ctx, PIB_Data
     auto* bm = ctx.GetBufferManager();
     auto* pm = ctx.GetPassManager();
     auto* bb = ctx.GetBatchBuilder();
+    auto* mm = ctx.GetModelManager();
 
-    // Гейт по ревизии батчей (меняется только со структурой), как у PIB.
+    // Гейт по ревизии батчей (меняется только со структурой), как у PIB, ПЛЮС ревизия диапазонов
+    // сабмешей: слово буфера несёт и индекс команды (от дерева), и спан (от модели), а правка
+    // спана дерево не трогает. Обе ревизии монотонны, поэтому сумма меняется на изменение любой —
+    // тот же приём, что у BoundSpheres (EntityRevision + SpheresRevision).
     bm->CreateUpdateInstruction(DEFAULT_ENTITY_TO_CMD_BUFFER,
         [pm, pib_dm](SDL_GPUCopyPass* cp, BufferManager* bm, UploadTask& task)
     {
         pib_dm->StoreEntityToCmd(bm, pm, &task);
     },
-        [pm, pib_dm, bb, bm]() -> uint32_t
+        [pm, pib_dm, bb, mm, bm]() -> uint32_t
     {
-        return pib_dm->CalculateEntityToCmd(pm, bb->BatchesRevision(), bm->logic_index.load());
+        return pib_dm->CalculateEntityToCmd(pm, bb->BatchesRevision() + mm->SpansRevision(),
+                                            bm->logic_index.load());
     }
     );
 }

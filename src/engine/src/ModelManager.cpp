@@ -248,6 +248,16 @@ void ModelManager::DeleteModel(const std::string& name)
     models_data.erase(it);
 }
 
+void ModelManager::SetSubmeshSpan(const std::string& name, size_t submesh, SubMeshSpan span)
+{
+    ModelData* m = FindModel(name);
+    if (!m || submesh >= m->submeshes.size()) return;
+    SubMeshSpan& dst = m->submeshes[submesh].screen_size_span;
+    if (dst.lod_min == span.lod_min && dst.lod_max == span.lod_max) return;
+    dst = span;
+    ++spans_revision;
+}
+
 size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries)
 {
     size_t loaded = 0;
@@ -262,7 +272,14 @@ size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries
         // в отложенный возврат и достаётся новой уже в этом кадре (ReclaimRanges идёт раньше
         // размещения). Битый файл при этом стирает прежнюю геометрию — та же цена, что у текстур.
         if (models_data.count(e.name)) DeleteModel(e.name);
-        if (CreateModel(e.name, e.vertex_path, e.index_path, e.anchor, pool)) ++loaded;
+        if (!CreateModel(e.name, e.vertex_path, e.index_path, e.anchor, pool)) continue;
+        ++loaded;
+        // Диапазоны кладутся ПОСЛЕ создания, а не параметром CreateModel: они не участвуют в
+        // построении геометрии (сабмеши/сферы уже посчитаны) и приходят не из .bin, а из манифеста.
+        ModelData* md = models_data.at(e.name).get();   // CreateModel только что отчитался успехом
+        const size_t n = std::min(e.screen_size_span.size(), md->submeshes.size());
+        for (size_t i = 0; i < n; ++i) md->submeshes[i].screen_size_span = e.screen_size_span[i];
+        ++spans_revision;
     }
     return loaded;
 }

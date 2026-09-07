@@ -7,6 +7,12 @@
             "conv": "AsIs"
         },
         {
+            "name": "signs_board_albedo",
+            "atlas": "albedo_atlas",
+            "path": "textures/assets/signs/signs_board_albedo.png",
+            "conv": "AsIs"
+        },
+        {
             "name": "new_car_glass",
             "atlas": "albedo_atlas",
             "path": "textures/assets/Tex_Glass.jpg",
@@ -16,6 +22,12 @@
             "name": "radiotower_normal",
             "atlas": "normal_atlas",
             "path": "textures/assets/telecom/radiotower_normal_h.png",
+            "conv": "AsIs"
+        },
+        {
+            "name": "signs_metal_normal",
+            "atlas": "normal_atlas",
+            "path": "textures/assets/signs/signs_metal_normal_h.png",
             "conv": "AsIs"
         },
         {
@@ -104,12 +116,6 @@
             "conv": "AsIs"
         },
         {
-            "name": "signs_board_albedo",
-            "atlas": "albedo_atlas",
-            "path": "textures/assets/signs/signs_board_albedo.png",
-            "conv": "AsIs"
-        },
-        {
             "name": "signs_board_normal",
             "atlas": "normal_atlas",
             "path": "textures/assets/signs/signs_board_normal_h.png",
@@ -125,12 +131,6 @@
             "name": "signs_metal_albedo",
             "atlas": "albedo_atlas",
             "path": "textures/assets/signs/signs_metal_albedo.png",
-            "conv": "AsIs"
-        },
-        {
-            "name": "signs_metal_normal",
-            "atlas": "normal_atlas",
-            "path": "textures/assets/signs/signs_metal_normal_h.png",
             "conv": "AsIs"
         },
         {
