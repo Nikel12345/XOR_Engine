@@ -510,6 +510,17 @@ void Engine::InitDefaultShaders()
 			"debug_collider_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
 			"debug_collider_fs", { }, { }, /*dont_save=*/true);
 	}
+	// Сплат ВЫКЛЮЧЕН вместе со своим проходом (см. Engine::Init). Держать sp живой нельзя:
+	// её render_pass_name указывал бы на незарегистрированный SPLAT_PASS, а PipeManager на такое
+	// ругается на каждой сборке пайплайна. Включать — вместе с SetDefaultSplatPass.
+	//
+	//	{
+	//		ShaderProgramDescription spd;
+	//		spd.BehavesAsOpaqueGeometry()->AsPointList();
+	//		engine_context->CreateShaderProgram("Splat", spd, RP::SPLAT_PASS,
+	//			"splat_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
+	//			"splat_fs", { }, { }, /*dont_save=*/true);
+	//	}
 	{
 		// Скайбокс: transformless (без Positions, PIB=-1) — из буферов ему нужна только камера.
 		// z=w в вершиннике даёт глубину РОВНО на клире, поэтому LESS не пройдёт — нужен LESS_OR_EQUAL.
@@ -586,6 +597,10 @@ void Engine::InitPasses()
 		SetDefaultMainRenderPass(engine_context, light_data_module);
 		SetDefaultAOPass(engine_context);           // SSAO по глубине main'а, применяется до тумана
 		//SetDefaultFogPass(engine_context);          // атмосфера по глубине main'а: ПОСЛЕ AO, до прозрачных
+		// SetDefaultSplatPass(engine_context);  ВЫКЛЮЧЕН: сплат — это терминальный уровень LOD, и
+		// строить его раньше самой LOD-цепочки оказалось преждевременно. Код прохода, шейдеры и
+		// перевёрнутый тест каллинга оставлены на месте; чтобы включить обратно, нужны эта строка,
+		// программа "Splat" ниже в InitDefaultShaders и её sp в списке материала.
 		SetTransparentPass(engine_context, light_data_module);
 		SetDebugColliderPass(engine_context);
 		SetDefaultBloomPass(engine_context);       // bloom от эмиссии (compute) + composite/tonemap в scene_hdr

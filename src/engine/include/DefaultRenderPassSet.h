@@ -9,6 +9,7 @@ namespace DefaultRenderPassNamespace
     inline constexpr const char* DEPTH_PASS = "_DefaultDepthRenderPass";
     inline constexpr const char* MAIN_PASS = "_DefaultMainRenderPass";
     inline constexpr const char* TRANSPARENT_PASS = "_DefaultTransparentRenderPass";
+    inline constexpr const char* SPLAT_PASS = "_DefaultSplatRenderPass";
     inline constexpr const char* DEBUG_PASS = "_DefaultDebugRenderPass";
     inline constexpr const char* PRESENT_PASS = "_DefaultPresentPass";
     inline constexpr const char* BLOOM_PASS = "_DefaultBloomPass";
@@ -204,14 +205,31 @@ namespace DefaultRenderPassNamespace
         // из региона), поэтому у состояния появилась схема CULLING_STATE. Он ОБЩИЙ на все программы
         // прохода, а применяет его только та, кому дали target_height (см. CreateCullingProgram): у теней
         // и UI своё разрешение, и «мелкое в пикселях» там значит не то же самое.
-        float    min_screen_radius_px = 0.0f;   // 0 = отсев выключен
+        float    min_screen_radius_px = 0.7f;   // 0 = отсев выключен
         uint32_t target_height = 0;             // высота цветового таргета прохода, px
+        // 1 = проход рисует то, что НИЖЕ нижней границы сабмеша (сплат), а не то, что внутри
+        // диапазона. Обе стороны получаются из ОДНОЙ пары ступеней, поэтому порог живёт в одном
+        // месте (SubMeshData::screen_size_span), а какую его сторону взять — решает проход:
+        // csp_cull_main рисует при px >= L, csp_cull_splat при px < L. Синхронизировать нечего.
+        uint32_t invert_span = 0;
     };
     // culling_clear.comp: обнуляет num_instances всех (камера,команда) перед scatter.
     struct alignas(16) CullingClearUniform {
         uint32_t total_slots;      // PassRegions::total_commands слота — все блоки всех проходов
     };
     void SetDefaultCullingPass(EngineContext* ctx);
+
+    // Сплат-проход: объекты, отсеянные из MAIN по экранному размеру, рисуются здесь одной точкой
+    // на объект. Не «маршрутизация» — у объекта ДВЕ записи (BatchBuilder заводит их по одной на sp
+    // материала, раскладывая по sp->render_pass_name), и два каллинга независимо решают каждый про
+    // свою, взаимно дополнительными тестами. Поэтому проходы ничего друг о друге не знают.
+    //
+    // Порядок 23: после MAIN (20) — нужна его глубина и его же таргеты по LOAD; после AO (21) —
+    // точка в один пиксель экранным AO не затеняется, а её всплеск в глубине дал бы SSAO ореол;
+    // до TRANSPARENT (24, сдвинут с 22 ради этого места) — сплаты непрозрачные, стекло обязано
+    // ложиться поверх. Глубину пишет, поэтому туман (27) достаётся ему сам, а bloom (26) увидит
+    // его эмиссию, когда та появится.
+    void SetDefaultSplatPass(EngineContext* ctx);
 
     inline const std::string CULLING_STATE = "CullingState";
 

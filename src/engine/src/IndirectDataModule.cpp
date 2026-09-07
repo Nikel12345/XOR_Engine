@@ -60,7 +60,8 @@ void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, Uploa
 					for (const auto& [_, texture_batch] : atlas_batch.texture_batches) {
 						for (const auto& [_, model_batch] : texture_batch.model_batches) {
 							SDL_GPUIndexedIndirectDrawCommand data;
-							data.num_indices = model_batch.submesh->indexCount;
+							data.num_indices = rp->override_index_count ? rp->override_index_count
+							                                            : model_batch.submesh->indexCount;
 							data.num_instances = 0;
 							data.first_index = model_batch.submesh->indexOffset;
 							data.vertex_offset = model_batch.submesh->vertexOffset;

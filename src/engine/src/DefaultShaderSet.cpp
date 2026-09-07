@@ -44,7 +44,8 @@ namespace {
     // меняет width/height внутри атласа, поэтому скопированное на setup число протухло бы.
     void CreateCullingProgram(EngineContext* ctx, ShaderManager* sm, PassManager* pm,
                               const std::string& program_name, const RenderPassName& pass_name,
-                              BufferDataName camera_buffer, TextureAtlas* screen_target = nullptr)
+                              BufferDataName camera_buffer, TextureAtlas* screen_target = nullptr,
+                              bool invert_span = false)
     {
         namespace RP = DefaultRenderPassNamespace;
         using namespace DefaultBuffersNames;
@@ -63,7 +64,7 @@ namespace {
             RP::CULLING_PASS, /*dont_save=*/true);
 
         sm->CreateComputePushInstruction<RP::CullingPibUniform>(program_name,
-            [pm, pass_ordinal, screen_target](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+            [pm, pass_ordinal, screen_target, invert_span](const PushConstantBinder& binder, RP::CullingPibUniform data) {
             const PassRegion region = RegionOfPass(pm, pass_ordinal, binder.frame);
             data.range_start = region.first_pib;
             data.range_count = region.pib;
@@ -75,6 +76,7 @@ namespace {
             // бы там совсем другой размер объекта. Кому таргет не дали — тому отсев выключен.
             if (screen_target) data.target_height = screen_target->height;
             else               data.min_screen_radius_px = 0.0f;
+            data.invert_span = invert_span ? 1u : 0u;
             binder.Push(data);
         });
 
@@ -176,6 +178,10 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx)
     TextureAtlas* scene_hdr = ctx->GetTextureAtlas(std::string("scene_hdr"));
     CreateCullingProgram(ctx, sm, pm, "csp_cull_shadow",      RP::SHADOW_PASS,      DEFAULT_LIGHT_CAMERA_BUFFER);
     CreateCullingProgram(ctx, sm, pm, "csp_cull_main",        RP::MAIN_PASS,        DEFAULT_CAMERA_BUFFER, scene_hdr);
+    // Сплат-программа выключена вместе со своим проходом (см. Engine::Init): без SPLAT_PASS
+    // RegionOfPass отдавал бы ей пустой регион. Сам механизм invert_span остаётся в шейдере и в
+    // CreateCullingProgram — включается этой одной строкой.
+    // CreateCullingProgram(ctx, sm, pm, "csp_cull_splat", RP::SPLAT_PASS, DEFAULT_CAMERA_BUFFER, scene_hdr, /*invert_span=*/true);
     CreateCullingProgram(ctx, sm, pm, "csp_cull_transparent", RP::TRANSPARENT_PASS, DEFAULT_CAMERA_BUFFER);
     CreateCullingProgram(ctx, sm, pm, "csp_cull_debug",       RP::DEBUG_PASS,       DEFAULT_CAMERA_BUFFER);
     CreateCullingProgram(ctx, sm, pm, "csp_cull_ui",          RP::UI_PASS,          DEFAULT_CAMERA_BUFFER);

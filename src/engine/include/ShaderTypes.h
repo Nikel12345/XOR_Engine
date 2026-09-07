@@ -185,6 +185,7 @@ struct ShaderProgramDescription
     ShaderProgramDescription* Wireframe() { fill_mode = SDL_GPU_FILLMODE_LINE; return this; }
     ShaderProgramDescription* Solid() { fill_mode = SDL_GPU_FILLMODE_FILL; return this; }
     ShaderProgramDescription* AsLineList() { primitive_type = SDL_GPU_PRIMITIVETYPE_LINELIST; return this; }
+    ShaderProgramDescription* AsPointList() { primitive_type = SDL_GPU_PRIMITIVETYPE_POINTLIST; return this; }
 };
 
 enum class TextureSlotRole {
