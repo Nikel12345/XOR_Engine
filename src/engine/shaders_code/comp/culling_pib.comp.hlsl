@@ -1,4 +1,4 @@
-// GPU-каллинг С КОМПАКТАЦИЕЙ. Одна ПРОГРАММА НА ПРОХОД с батчами: каждая биндит камерный
+// GPU-каллинг С КОМПАКТАЦИЕЙ (+ опциональный отсев по экранному размеру, см. CullParams). Одна ПРОГРАММА НА ПРОХОД с батчами: каждая биндит камерный
 // буфер своего прохода (Cameras) и обрабатывает его диапазон PIB-записей [range_start,
 // +range_count), раскидывая выживших по блокам его РЕГИОНА индиректа.
 //
@@ -24,14 +24,27 @@ RWStructuredBuffer<int> OutPib   : register(u0, space1);   // компактны
 RWByteAddressBuffer     Indirect : register(u1, space1);   // команды регионов: атомик num_instances + чтение first_instance
 
 cbuffer CullParams : register(b0, space2) {
-    uint range_start;      // первая PIB-запись, которую обрабатывает эта программа
-    uint range_count;      // сколько записей (= размер диспатча)
-    uint num_blocks;       // блоков региона; для блока b тестируется Cameras[b]
-    uint cmd_base;         // база региона прохода в индиректе, в командах
-    uint commands;         // команд на блок = страйд внутри региона
+    uint  range_start;         // первая PIB-запись, которую обрабатывает эта программа
+    uint  range_count;         // сколько записей (= размер диспатча)
+    uint  num_blocks;          // блоков региона; для блока b тестируется Cameras[b]
+    uint  cmd_base;            // база региона прохода в индиректе, в командах
+    uint  commands;            // команд на блок = страйд внутри региона
+    float min_screen_radius_px; // отсев по экранному размеру; 0 = выключен
+    uint  target_height;        // высота цветового таргета прохода, px
 };
 
 static const uint CMD_STRIDE = 20u;   // sizeof(SDL_GPUIndexedIndirectDrawCommand); num_instances@4, first_instance@16
+
+// Радиус ограничивающей сферы в ПИКСЕЛЯХ приёмника. w клипа = расстояние вдоль оси взгляда
+// (для mul(M,v) это ровно dot(vp[3], p) — полный mul не нужен, берём одну строку), proj[1][1] —
+// вертикальный фокус, а NDC по вертикали занимает 2 единицы на target_height пикселей.
+// Аппроксимация radius/w вместо radius/sqrt(w^2-r^2) точна ровно там, где нас это волнует:
+// у мелочи w >> r. Вызывать только для записей, ПРОШЕДШИХ фрустум — иначе w может быть <= 0.
+float ScreenRadiusPx(float4x4 vp, float4x4 proj, float3 center, float radius)
+{
+    float w = dot(vp[3], float4(center, 1.0));
+    return radius * proj[1][1] * (0.5 * float(target_height)) / max(w, 1e-4);
+}
 
 bool SphereVisible(float4x4 vp, float3 center, float radius)
 {
@@ -91,7 +104,15 @@ void main(uint3 tid : SV_DispatchThreadID)
 
     // Блоки региона: для b-го тестируем Cameras[b] (если у записи есть геометрия) и пишем в него.
     for (uint b = 0; b < num_blocks; ++b) {
-        bool vis = !has_geom || SphereVisible(mul(Cameras[b].proj, Cameras[b].view), center, radius);
-        if (vis) ScatterInto(b, k, row);
+        if (!has_geom) { ScatterInto(b, k, row); continue; }   // transformless — видим всегда
+
+        float4x4 vp = mul(Cameras[b].proj, Cameras[b].view);
+        if (!SphereVisible(vp, center, radius)) continue;
+
+        // Отсев мелочи. При min_screen_radius_px == 0 условие ложно всегда (радиус >= 0), то есть
+        // выключенный порог не стоит ни одного лишнего сравнения на записи и не меняет поведение.
+        if (ScreenRadiusPx(vp, Cameras[b].proj, center, radius) < min_screen_radius_px) continue;
+
+        ScatterInto(b, k, row);
     }
 }

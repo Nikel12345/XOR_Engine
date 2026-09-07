@@ -694,8 +694,16 @@ void DefaultRenderPassNamespace::SetDefaultCullingPass(EngineContext* ctx)
     },
         5
     );
-    // Хранилище без схемы: диапазоны и страйды каждая программа каллинга считает у себя из
-    // слепка раскладки (bb->AskLayout(slot)) — покадровые величины, не настройки.
-    SetPassState(culling, CullingPibUniform{});
+    // Диапазоны и страйды каждая программа каллинга считает у себя из слепка раскладки
+    // (bb->AskLayout(slot)) — покадровые величины, в схему им нельзя. Настройка ровно одна:
+    // порог отсева по экранному размеру, ради него схема и заведена.
+    {
+        using K = ParamsFieldKind;
+        ParamsSpecRegistry::Passes().Register(MakeParamsSpec<CullingPibUniform>(CULLING_STATE, {
+            ParamsFieldSpec::Num(PARAMS_FIELD(CullingPibUniform, min_screen_radius_px),
+                                 K::F32, 0.0f, 16.0f, 0.05f).Label("Cull below radius (px)"),
+        }));
+    }
+    SetPassState(culling, CULLING_STATE, CullingPibUniform{});
 }
 

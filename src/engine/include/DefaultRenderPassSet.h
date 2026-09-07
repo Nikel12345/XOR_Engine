@@ -195,12 +195,25 @@ namespace DefaultRenderPassNamespace
         uint32_t num_blocks;       // блоков региона; для блока b тестируется Cameras[b]
         uint32_t cmd_base;         // база региона группы в индиректе, в командах
         uint32_t commands;         // команд на камеру = страйд блока внутри региона
+        // Отсев по ЭКРАННОМУ РАЗМЕРУ: запись, чей радиус на экране меньше порога, не
+        // скаттерится вовсе — объект просто пропадает. Это ЗАМЕРНЫЙ режим: он показывает
+        // потолок выигрыша от будущего сплат-пути (субпиксельная геометрия рисуется точкой
+        // в компьюте вместо обычного конвейера), не рисуя мелочь вообще никак.
+        //
+        // Порог — единственное НАСТРОЕЧНОЕ поле блоба (остальные переписываются каждый кадр
+        // из региона), поэтому у состояния появилась схема CULLING_STATE. Он ОБЩИЙ на все программы
+        // прохода, а применяет его только та, кому дали target_height (см. CreateCullingProgram): у теней
+        // и UI своё разрешение, и «мелкое в пикселях» там значит не то же самое.
+        float    min_screen_radius_px = 0.0f;   // 0 = отсев выключен
+        uint32_t target_height = 0;             // высота цветового таргета прохода, px
     };
     // culling_clear.comp: обнуляет num_instances всех (камера,команда) перед scatter.
     struct alignas(16) CullingClearUniform {
         uint32_t total_slots;      // PassRegions::total_commands слота — все блоки всех проходов
     };
     void SetDefaultCullingPass(EngineContext* ctx);
+
+    inline const std::string CULLING_STATE = "CullingState";
 
     inline const std::string SHADOW_MOMENTS_ARRAY = "shadow_moments_array";
     inline const std::string SHADOW_MOMENTS_BLUR_TEMP = "shadow_moments_single_temp";

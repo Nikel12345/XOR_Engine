@@ -38,9 +38,13 @@ namespace {
     // Culling-программа ОДНОГО прохода. У всех проходов она одинакова кроме камерного буфера:
     // числа своего региона программа берёт из штампа PassManager по ординалу прохода, а сам
     // ординал стабилен (MainInit идёт после FillRenderPasses). Новый проход = ещё один вызов.
+    // screen_target — цветовой таргет прохода, по высоте которого меряется «мелкое в пикселях»;
+    // nullptr = проход в отсеве по экранному размеру не участвует (порог зануляется у него локально,
+    // хотя состояние прохода общее). Атлас держим УКАЗАТЕЛЕМ и читаем размер на исполнении: ресайз
+    // меняет width/height внутри атласа, поэтому скопированное на setup число протухло бы.
     void CreateCullingProgram(EngineContext* ctx, ShaderManager* sm, PassManager* pm,
                               const std::string& program_name, const RenderPassName& pass_name,
-                              BufferDataName camera_buffer)
+                              BufferDataName camera_buffer, TextureAtlas* screen_target = nullptr)
     {
         namespace RP = DefaultRenderPassNamespace;
         using namespace DefaultBuffersNames;
@@ -59,13 +63,18 @@ namespace {
             RP::CULLING_PASS, /*dont_save=*/true);
 
         sm->CreateComputePushInstruction<RP::CullingPibUniform>(program_name,
-            [pm, pass_ordinal](const PushConstantBinder& binder, RP::CullingPibUniform data) {
+            [pm, pass_ordinal, screen_target](const PushConstantBinder& binder, RP::CullingPibUniform data) {
             const PassRegion region = RegionOfPass(pm, pass_ordinal, binder.frame);
             data.range_start = region.first_pib;
             data.range_count = region.pib;
             data.num_blocks  = region.command_blocks_count;
             data.cmd_base    = region.cmd_base;
             data.commands    = region.commands;
+            // Порог приезжает из состояния прохода (одного на все программы каллинга), а вот
+            // применим он не всем: у теней и UI своё разрешение, и тот же порог в пикселях означал
+            // бы там совсем другой размер объекта. Кому таргет не дали — тому отсев выключен.
+            if (screen_target) data.target_height = screen_target->height;
+            else               data.min_screen_radius_px = 0.0f;
             binder.Push(data);
         });
 
@@ -162,8 +171,11 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx)
     });
 
     // Скаттер: программа НА ПРОХОД с батчами, отличаются только имя и камерный буфер.
+    // Отсев по экранному размеру включён ТОЛЬКО у MAIN: он один рисует непрозрачную массовку,
+    // ради замера которой режим и заведён, и мерить «мелкое» надо по его таргету (scene_hdr).
+    TextureAtlas* scene_hdr = ctx->GetTextureAtlas(std::string("scene_hdr"));
     CreateCullingProgram(ctx, sm, pm, "csp_cull_shadow",      RP::SHADOW_PASS,      DEFAULT_LIGHT_CAMERA_BUFFER);
-    CreateCullingProgram(ctx, sm, pm, "csp_cull_main",        RP::MAIN_PASS,        DEFAULT_CAMERA_BUFFER);
+    CreateCullingProgram(ctx, sm, pm, "csp_cull_main",        RP::MAIN_PASS,        DEFAULT_CAMERA_BUFFER, scene_hdr);
     CreateCullingProgram(ctx, sm, pm, "csp_cull_transparent", RP::TRANSPARENT_PASS, DEFAULT_CAMERA_BUFFER);
     CreateCullingProgram(ctx, sm, pm, "csp_cull_debug",       RP::DEBUG_PASS,       DEFAULT_CAMERA_BUFFER);
     CreateCullingProgram(ctx, sm, pm, "csp_cull_ui",          RP::UI_PASS,          DEFAULT_CAMERA_BUFFER);
