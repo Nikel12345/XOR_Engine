@@ -492,7 +492,10 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
             uint32_t slot_index = safe_u32(model_batch.pib_sub_buffer.size());
             model_batch.instanceCount++;
-            model_batch.pib_sub_buffer.push_back(entity);
+            // Строку не знаем и знать не можем: render_instance_base присваивается
+            // ПОЗЖЕ (RecalculateInstanceOffsets в конце обоих путей сборки). Помечаем
+            // незаполненной - StorePIB добьёт её при ближайшей заливке.
+            model_batch.pib_sub_buffer.push_back(uint64_t(entity) << 32 | kPibNoRow);
             entity_slots[entity].push_back({ &model_batch, slot_index });
 
         }
@@ -507,11 +510,11 @@ void BatchBuilder::RemoveEntityFromBatches(Entity entity)
 
     for (const PibSlot& slot : it->second) {
         ModelBatchData* model_batch = slot.model_batch;
-        std::vector<uint32_t>& pib = model_batch->pib_sub_buffer;
+        std::vector<uint64_t>& pib = model_batch->pib_sub_buffer;
         uint32_t last_index = safe_u32(pib.size()) - 1;
 
         if (slot.slot_index != last_index) {
-            Entity moved_entity = pib[last_index];
+            Entity moved_entity = static_cast<Entity>(pib[last_index] >> 32);
             pib[slot.slot_index] = moved_entity;
             // fix the moved entity's cached slot: {model_batch, last_index} -> slot_index
             for (PibSlot& moved_slot : entity_slots[moved_entity]) {
