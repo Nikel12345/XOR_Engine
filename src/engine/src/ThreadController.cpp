@@ -70,9 +70,8 @@ void ThreadController::StartThreads()
     running.store(true);
     game_n_prep_iter_thread = std::thread(&ThreadController::SimulationThread, this);
 
-    // ДИАГНОСТИКА (config.h): по флагам не поднимаем часть конвейера, чтобы замерить
-    // store без контеншена рендера/аплоада. Sim при этом не встаёт — frame skip
-    // переиспользует слоты (upload сам прокручивает слот в PrepareFuncPrepassUndepended).
+    // ДИАГНОСТИКА (config.h): часть конвейера не поднимается. Sim при этом не встаёт —
+    // незанятые слоты переиспользуются.
     if (!DISABLE_UPLOAD)
         upload_thread = std::thread(&ThreadController::UploadThread, this);
     compute_thread = std::thread(&ThreadController::ComputeThread, this);
@@ -93,7 +92,7 @@ ThreadController::~ThreadController()
 void ThreadController::Shutdown()
 {
     running.store(false);
-    // ДО join'ов: поток, стоящий на condvar слота, сам по себе выключения running не увидит.
+    // ДО join'ов: поток на condvar слота сам по себе выключения running не увидит.
     if (slot_controller)
         slot_controller->NotifyShutdown();
     if (game_n_prep_iter_thread.joinable())
@@ -119,12 +118,8 @@ void ThreadController::SimulationThread()
 
         ups_counter->start();
 
-        // UPS_priority=true: sim первичен — готовые, но не отрисованные кадры
-        // перезаписываются (frame skip), sim никогда не ждёт рендер.
-        // UPS_priority=false: рендер первичен — каждый подготовленный кадр обязан
-        // быть показан, sim блокируется и UPS проседает до темпа рендера.
-        // slot_wait: если тут большое время — sim голодает по свободным слотам,
-        // то есть узкое место в РЕНДЕРЕ, а не в подготовке кадра.
+        // slot_wait: большое время здесь = sim голодает по слотам, то есть узкое место
+        // в РЕНДЕРЕ, а не в подготовке кадра.
         uint8_t slot;
         {
             PROF_SCOPE(Sim, "slot_wait (ожидание свободного слота)");
@@ -134,8 +129,8 @@ void ThreadController::SimulationThread()
                 slot = slot_controller->WaitFreeSlotIndex(UPS_priority);
             }
         }
-        // Из ожидания могли выпустить остановкой, а не свободным слотом. Выходим ДО игрового
-        // колбэка: гонять ещё один тик игры на сносе конвейера незачем.
+        // Из ожидания могли выпустить остановкой, а не свободным слотом: выходим ДО
+        // игрового колбэка.
         if (!running.load(std::memory_order_relaxed))
             break;
 
@@ -167,9 +162,6 @@ void ThreadController::SimulationThread()
 }
 
 
-// Зеркало FenceThread для upload-fences: наблюдает за слотами UPLOADING и по
-// завершении загрузки промоутит их в PREPARED (это делает upload_callback).
-// Sim при этом свободен готовить следующий слот — латентность сабмита спрятана.
 void ThreadController::UploadThread()
 {
     while (running.load(std::memory_order_relaxed))
@@ -181,34 +173,23 @@ void ThreadController::UploadThread()
             if (!slot_controller->IsUploadingSlot(slot)) {
                 continue;
             }
-            // Fences ставятся ДО перевода в UPLOADING, но проверка защитная.
+            // Фенсы ставятся ДО перевода в UPLOADING — проверка защитная.
             if (slot_controller->GetSlotsData()[slot].upload.Empty()) {
                 continue;
             }
 
-            // upload_callback(slot) блокирующе ждёт upload-fence (kernel-wait),
-            // возвращает transfer-буферы в пул и зовёт SetSlotState(slot, PREPARED)
             upload_callback(slot);
             processed = true;
         }
 
         if (!processed)
         {
-            // Загрузок в полёте нет — опрашивать чаще нет смысла. Пока пайплайн
-            // полон, цикл сюда не попадает (стоит в kernel-wait, не спит).
+            // Пока конвейер полон, цикл сюда не попадает: стадия стоит в kernel-wait.
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
         }
     }
 }
 
-// Вычислительная стадия между загрузкой и рендером. Устройство ближе к рендеру, чем к
-// upload: сама берёт слот (WaitComputableSlot) и сама пишет команды, тогда как UploadThread
-// лишь сторожит чужие сабмиты. Отличие от рендера — нет fallback'а: пере-вычислять прошлый
-// слот бессмысленно, его результат уже лежит в его же буферах.
-//
-// Завершение работы GPU ловится fence'ом внутри колбэка, как и на других стадиях; сюда он
-// возвращается уже с готовым слотом и сам переводит его в COMPUTED. Колбэк ОБЯЗАТЕЛЕН, как и
-// у остальных стадий: пустая стадия — это пустая функция, а не отсутствие стадии.
 void ThreadController::ComputeThread()
 {
     while (running.load())
@@ -233,7 +214,7 @@ void ThreadController::RenderThread()
         auto frame_start = std::chrono::high_resolution_clock::now();
 
         uint8_t slot = slot_controller->WaitRenderableSlot(UPS_priority);
-        if (slot == INVALID_SLOT)   // останов (как в ComputeThread)
+        if (slot == INVALID_SLOT)   // останов
             break;
         fps_counter->start();
 
@@ -276,22 +257,17 @@ void ThreadController::FenceThread()
             if (!slot_controller->IsRenderingSlot(slot)) {
                 continue;
             }
-            // IS_RENDERING ставится при ВЫБОРЕ слота (WaitRenderableSlot), fence
-            // появляется позже — после сабмита. Пока его нет, ждать нечего.
+            // IS_RENDERING ставится при ВЫБОРЕ слота, фенс появляется после сабмита.
             if (slot_controller->GetSlotsData()[slot].render.Empty()) {
                 continue;
             }
 
-            // fence_callback(slot) блокирующе ждёт fence (kernel-wait, без опроса)
-            // и по готовности вызывает slot_controller->SetSlotState(slot, RENDERED)
             fence_callback(slot);
             processed = true;
         }
 
         if (!processed)
         {
-            // Ждать нечего (никто не рендерится или кадр ещё не сабмитнут) —
-            // опрашивать чаще нет смысла.
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }

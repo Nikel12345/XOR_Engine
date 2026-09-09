@@ -17,3 +17,4 @@ osd
 osd/
 src/game/saved_scene/scene1M/
 imgui.ini
+.idea/

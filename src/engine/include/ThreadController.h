@@ -25,17 +25,13 @@ public:
     void SetGameIterationCallback(GameIterCallback cb);
     void SetPrepareCallback(PrepareCallback cb);
     void SetUploadCallback(UploadCallback cb);
-    // Вычислительная стадия между загрузкой и рендером. Не задана — стадия просто отсутствует,
-    // и слот проезжает из PREPARED сразу в COMPUTED (см. ComputeThread).
     void SetComputeCallback(ComputeCallback cb);
     void SetRenderCallback(RenderCallback cb);
     void SetFenceCallback(FenceCallback cb);
 
     void StartThreads();
-    // Остановить и ПРИСОЕДИНИТЬ все потоки конвейера. Идемпотентен (повторный вызов —
-    // no-op по joinable), поэтому зовётся и явно (Engine::Run перед возвратом), и из dtor.
-    // Явный вызов обязателен там, где после цикла разрушается что-то, что держит sim-поток:
-    // игровой колбэк замкнут на объект игры, живущий у вызывающего Run().
+    // Идемпотентен, поэтому зовётся и явно, и из dtor. Явный вызов обязателен там, где после
+    // цикла разрушается что-то, что держит sim-поток: игровой колбэк замкнут на объект игры.
     void Shutdown();
     AvgRateCounter* fps_counter = nullptr;
     AvgRateCounter* ups_counter = nullptr;
