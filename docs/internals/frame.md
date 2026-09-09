@@ -117,7 +117,7 @@ pass_manager->StampRegions(slot, batch_builder->AskLayout(slot));// как эт�
 |---|---|---|
 | `RenderSnap::BatchLayout` | `BatchBuilder` | плоская раскладка дерева: проходы → шейдер-группы → атласы → дроу, плюс индирект-буфер раскладки |
 | `RenderSnap::LightCams` | `LightDataModule` | теневые камеры слота в порядке записи камерного буфера + число источников |
-| `PassRegions` | `PassManager` | регионы индиректа и out_pib на проход (единственная префиксная сумма в движке) |
+| `PassRegions` | `PassManager` | регионы индиректа и out_pib: сколько у прохода блоков и где они лежат |
 
 Синхронизации у слепков нет и не нужно: sim пишет слепок, пока владеет слотом (`RESERVED`),
 рендер читает после `PREPARED` — happens-before даёт сам жизненный цикл слота, ровно как у

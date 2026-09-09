@@ -102,8 +102,7 @@ XOR Engine — набор статических библиотек. Прило�
 ## Потоки и слоты
 
 `ThreadController` поднимает пять потоков: **Simulation** (итерация приложения +
-`Engine::PrepareFunc`) → **Upload** → **Compute** → **Render** → **Fence**. Compute-стадия
-необязательна: без колбэка слот проезжает её насквозь. Кадры едут по слотам,
+`Engine::PrepareFunc`) → **Upload** → **Compute** → **Render** → **Fence**. Кадры едут по слотам,
 `BUFFERING_LEVEL = 3` (`config.h`), раздаёт их `SlotController`; sim и render расцеплены — при
 нехватке GPU кадры пропускаются, симуляция не тормозит.
 
@@ -164,4 +163,5 @@ XOR Engine — набор статических библиотек. Прило�
 | Что и зачем изменено в SDL | `SDL_FORK.md` |
 | Как устроен кадр: слоты, слепки, гейты | `docs/internals/frame.md` |
 | Индирект, регионы проходов, GPU-каллинг | `docs/internals/culling.md` |
+| Как инстанс находит свои данные: строки, PIB, разреженные каналы | `docs/internals/instance-data.md` |
 | Переключаемые варианты текстур | `docs/internals/materials.md` |
