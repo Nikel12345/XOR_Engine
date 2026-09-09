@@ -111,7 +111,7 @@ set(ENGINEGPU_SRC
     src/ShaderManager_SPVLoad.cpp
     src/TextureManager.cpp
     src/PreviewPacker.cpp
-    src/RenderManager.cpp
+    src/PassManager.cpp
     src/RenderCommandData.cpp
     src/GpuTaskContext.cpp
     src/SparseRankChannel.cpp
@@ -130,7 +130,7 @@ set(ENGINEGPU_HDR
     include/TextureManager.h
     include/TextureData.h
     include/PreviewPacker.h
-    include/RenderManager.h
+    include/PassManager.h
     include/RenderCommandData.h
     include/GpuTaskContext.h
     include/SparseRankChannel.h
@@ -193,7 +193,6 @@ set(ENGINE_MANAGERS_SRC
 )
 set(ENGINE_MANAGERS_HDR
     include/CameraManager.h
-    include/Camera.h
     include/MaterialManager.h
     include/ModelManager.h
     include/GeometryPool.h

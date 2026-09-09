@@ -1,7 +1,7 @@
 ﻿#include "PCH.h"
 #include "PipeManager.h"
 #include "RenderCommandData.h"
-#include "RenderManager.h"   // PassManager: резолв прохода sp по имени
+#include "PassManager.h"   // PassManager: резолв прохода sp по имени
 #include "ShaderManager.h"
 
 

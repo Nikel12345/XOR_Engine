@@ -9,7 +9,7 @@
 #include "ModelManager.h"
 #include "ShaderManager.h"
 #include "InputManager.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "InputCommands.h"
 #include "ParamsSpec.h"
 #include <functional>

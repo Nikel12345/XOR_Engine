@@ -4,7 +4,7 @@
 // Engine.h теперь только forward-декларации — полные типы тянет этот TU.
 #include "BufferManager.h"
 #include "TransferManager.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "SlotController.h"
 
 //  A/B-СТЕНД префасса (PrepareFuncPrepassDepended): _Original vs _Optimized.

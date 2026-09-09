@@ -44,7 +44,7 @@ public:
 
 	void CreateComputeShader(const std::string& name, const char* path, const ShaderDefines& defines = {});
 	// ПОРЯДОК СОЗДАНИЯ ЗНАЧИМ: BuildComputeBatches обходит compute_shader_programs по порядку и
-	// складывает батчи в проход push_back'ом, а RenderManager исполняет их прямым обходом, без
+	// складывает батчи в проход push_back'ом, а PassManager исполняет их прямым обходом, без
 	// сортировки. Т.е. csp, созданная раньше, и исполняется раньше внутри своего прохода — на этом
 	// держится culling (csp_culling_clear обязан быть batch[0], иначе scatter видит ненулевые
 	// счётчики → дубли строк на больших сценах). Сериализация обязана сохранять порядок массива.

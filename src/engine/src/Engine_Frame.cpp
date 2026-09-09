@@ -8,7 +8,7 @@
 #include "ModelManager.h"   // ReclaimRanges — дренаж отложенных возвратов места в пулах
 #include "TransferManager.h"
 #include "SlotController.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "ObjectManager.h"
 #include "BatchBuilder.h"
 #include "EngineContext.h"

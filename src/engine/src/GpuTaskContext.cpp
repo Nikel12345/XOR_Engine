@@ -2,7 +2,7 @@
 #include "GpuTaskContext.h"
 #include "BufferManager.h"
 #include "ShaderManager.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "TextureManager.h"
 
 using namespace ShaderBase;

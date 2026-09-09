@@ -5,7 +5,7 @@
 #include "RenderSnapshot.h"
 #include "ObjectManager.h"
 #include "PipeManager.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "ShaderManager.h"
 #include "TextureManager.h"
 #include "BufferManager.h"
@@ -464,7 +464,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             if (texb_it == tex_map.end()) {
                 TextureBatchData new_texb{};
                 // Данные ЭТОЙ sp — и только они: узел, собранный для sp без params, никаких
-                // чужих байт не носит. Само РЕШЕНИЕ пушить остаётся за RenderManager (по числу
+                // чужих байт не носит. Само РЕШЕНИЕ пушить остаётся за PassManager (по числу
                 // fragment-uniform'ов шейдера), здесь — адресат.
                 new_texb.params = sp_params;
                 new_texb.texture_uvl = lay.uvl;

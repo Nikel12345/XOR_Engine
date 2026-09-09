@@ -19,7 +19,7 @@
 #include "ParamsSpec.h"
 #include "ComponentSerializer.h"
 #include "UI_ComponentEditor.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "UI_Yoga.h"
 #include "ImGuizmo.h"
 #include <glm/gtc/type_ptr.hpp>

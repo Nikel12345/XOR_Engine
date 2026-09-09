@@ -9,7 +9,7 @@
 #include "ParamsSpec.h"
 #include "ShaderManager.h"
 #include "PipeManager.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "BufferManager.h"
 #include "PositionStructure.h"
 #include "BatchBuilder.h"

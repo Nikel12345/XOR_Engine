@@ -1,6 +1,6 @@
 ﻿#include "DefaultRenderPassSet.h"
 #include "TextureManager.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "BufferManager.h"
 #include "TexturesPresets.h"
 #include "TextureSamplerPresets.h"

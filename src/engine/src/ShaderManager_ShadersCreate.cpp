@@ -438,7 +438,7 @@ FragmentShaderData ShaderManager::BuildFragmentShader(
     fs.source_path = dbg_name ? dbg_name : "";   // до ранних return — нужен редактору для ребилда
 
     // Рефлексия ВСЕГДА (дёшево, load-time): нужна для числа uniform-буферов (гейт пуша params
-    // в RenderManager) и для компиляции. Дедуп ниже только переиспользует готовый GPU-шейдер.
+    // в PassManager) и для компиляции. Дедуп ниже только переиспользует готовый GPU-шейдер.
     SDL_ShaderCross_GraphicsShaderMetadata* metadata =
         SDL_ShaderCross_ReflectGraphicsSPIRV(spv, spv_size, 0);
     if (!metadata) {

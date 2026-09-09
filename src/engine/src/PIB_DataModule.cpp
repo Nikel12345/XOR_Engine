@@ -5,7 +5,7 @@
 #include "BufferManager.h"
 #include "RenderCommandData.h"
 #include "ModelData.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "EngineProfiler.h"
 
 PIB_DataModule::PIB_DataModule()

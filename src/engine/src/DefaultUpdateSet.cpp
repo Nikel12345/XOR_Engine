@@ -5,7 +5,7 @@
 #include "BufferManager.h"
 #include "CameraManager.h"
 #include "ModelManager.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "LightDataModule.h"
 #include "PIB_DataModule.h"
 #include "TransformDataModule.h"

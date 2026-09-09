@@ -69,7 +69,7 @@
 #include "ShaderManager.h"
 #include "ShaderData.h"
 #include "ShaderTypes.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "RenderCommandData.h"
 #include "PipeManager.h"
 #include "BatchBuilder.h"

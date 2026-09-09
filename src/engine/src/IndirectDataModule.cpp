@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "IndirectDataModule.h"
 #include "BufferManager.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "RenderSnapshot.h"
 #include "ModelData.h"
 

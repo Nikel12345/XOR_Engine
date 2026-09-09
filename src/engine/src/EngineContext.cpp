@@ -3,7 +3,7 @@
 #include "EngineContext.h"
 #include "Engine.h"
 #include "TextureLoader.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "EngineProfiler.h"
 // Заголовок фасада держит менеджеры forward-декларациями — полные типы тянет этот TU.
 #include "GpuTaskContext.h"

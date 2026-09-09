@@ -8,7 +8,7 @@
 #include "ShaderManager.h"
 #include "PipeManager.h"
 #include "ModelManager.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "ObjectManager.h"
 #include "CameraManager.h"
 #include "SlotController.h"

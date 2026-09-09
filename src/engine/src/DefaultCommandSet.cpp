@@ -12,7 +12,7 @@
 #include "TextureManager.h"
 #include "ModelManager.h"
 #include "PipeManager.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "UI_Yoga.h"
 
 using namespace ShaderBase;   // VertexSemantic (pull в UpsertVertexShader)

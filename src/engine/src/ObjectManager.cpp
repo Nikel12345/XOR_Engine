@@ -10,7 +10,7 @@
 #include <cstdlib>
 #include <set>
 #include <unordered_map>
-// RenderManager.h/PipeManager.h не использовались — убраны, чтобы ECS-ядро
+// PassManager.h/PipeManager.h не использовались — убраны, чтобы ECS-ядро
 // (EngineEcs) не тянуло GPU-заголовки.
 
 SceneData* ObjectManager::CreateScene(const SceneName& name) {

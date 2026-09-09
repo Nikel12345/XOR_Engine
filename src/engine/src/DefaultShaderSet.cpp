@@ -11,7 +11,7 @@ using namespace ShaderBase;   // POSITION/UV/... в раскладках вер�
 #include "ShaderData.h"
 #include "ShaderManager.h"
 #include "ParamsSpec.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "BatchBuilder.h"
 #include "RenderSnapshot.h"
 

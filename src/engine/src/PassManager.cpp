@@ -1,5 +1,5 @@
 ﻿#include "PCH.h"
-#include "RenderManager.h"
+#include "PassManager.h"
 #include "BufferManager.h"
 #include "RenderSnapshot.h"
 // MaterialManager/PipeManager/ObjectManager/ModelData здесь не использовались — убраны,
@@ -406,7 +406,7 @@ RenderPassStep* PassManager::GetRenderPassStep(const RenderPassName& name)
 	if (it != render_steps.end()) {
 		return it->second.get();
 	}
-	SDL_Log("RenderManager::Render pass '%s' not found", name.c_str());
+	SDL_Log("PassManager::Render pass '%s' not found", name.c_str());
 	return nullptr;
 }
 
