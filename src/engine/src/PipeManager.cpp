@@ -10,43 +10,11 @@ PipeManager::PipeManager(SDL_GPUDevice* dev, SDL_Window* win) {
     this->dev = dev;
 }
 
-void PipeManager::TrashPipelines(uint64_t fences_done, uint64_t graphics_required_epoch, uint64_t compute_rebuild_epoch)
-{
-    // Дренаж на sim (пуш — команды, дренаж — prepare: один поток, без замков).
-    // Графика: армирование = планка эпох слотов ушла дальше эпохи инвалидации (рендер больше
-    // не покажет слоты со слепками, держащими этот указатель); затем стамп fences_done +
-    // BUFFERING_LEVEL добивает in-flight (fence одного queue сигналят в порядке сабмита).
-    // До армирования запись живёт сколько угодно — страховка от «sim не успел пере-prepare,
-    // а счётчик уже дотикал».
-    auto it = pipeline_trash.begin();
-    while (it != pipeline_trash.end()) {
-        if (graphics_required_epoch <= it->epoch) { ++it; continue; }                 // не армирован
-        if (it->ready_at == 0) { it->ready_at = fences_done + BUFFERING_LEVEL; ++it; continue; }
-        if (fences_done >= it->ready_at) {
-            SDL_ReleaseGPUGraphicsPipeline(dev, it->pipe);
-            it = pipeline_trash.erase(it);
-        }
-        else ++it;
-    }
-
-    // Compute: гейт — эпоха пересборок compute-дерева (после неё дерево держит новый указатель).
-    auto ct = compute_trash.begin();
-    while (ct != compute_trash.end()) {
-        if (compute_rebuild_epoch <= ct->epoch) { ++ct; continue; }
-        if (ct->ready_at == 0) { ct->ready_at = fences_done + BUFFERING_LEVEL; ++ct; continue; }
-        if (fences_done >= ct->ready_at) {
-            SDL_ReleaseGPUComputePipeline(dev, ct->pipe);
-            ct = compute_trash.erase(ct);
-        }
-        else ++ct;
-    }
-}
-
 void PipeManager::CreateGraphicsPiplenes(std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& shader_programs, ShaderManager* sm, PassManager* pass_manager)
 {
     for (auto& pair : shader_programs) {
         ShaderProgram* sp = pair.second.get();
-        SDL_GPUGraphicsPipeline* pipe = GetOrCreatePipeline(sp, sm, pass_manager);
+        auto pipe = GetOrCreatePipeline(sp, sm, pass_manager);
         if (!pipe) {
 			SDL_Log("Failed to create pipeline for shader program: %s", pair.first.c_str());
         }
@@ -57,29 +25,23 @@ void PipeManager::CreateComputePipelines(std::vector<ComputeProgramSlot>& comput
 {
     for (auto& slot : compute_shader_programs) {
         if (!slot.program) continue;
-		SDL_GPUComputePipeline* pipe = GetOrCreateComputePipeline(slot.program.get(), sm);
+		auto pipe = GetOrCreateComputePipeline(slot.program.get(), sm);
         if (!pipe) {
             SDL_Log("Failed to create compute pipeline for shader program: %s", slot.name.c_str());
 		}
     }
 }
 
-SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp, ShaderManager* sm, PassManager* pass_manager)
+std::shared_ptr<SDL_GPUGraphicsPipeline> PipeManager::GetOrCreatePipeline(ShaderProgram* sp, ShaderManager* sm, PassManager* pass_manager)
 {
-    auto it = graphics_pipelines.find(sp);
-    if (it != graphics_pipelines.end()) {
-		if (it->second == nullptr) {
-			SDL_Log("Pipeline for shader program '%s' is nullptr!", sp->debug_name.c_str());
-        }
-        return it->second;
-    }
+    if (sp->pipeline) return sp->pipeline;
 
     // Проход — по имени из sp: форматы целей прохода задают раскладку пайплайна, без него сборка
     // невозможна (в отличие от промаха буфера, который лишь сдвинет слот).
     RenderPassStep* pass = pass_manager ? pass_manager->GetRenderPassStep(sp->render_pass_name) : nullptr;
     if (!pass) {
         SDL_Log("Pipeline '%s': render pass '%s' not found", sp->debug_name.c_str(), sp->render_pass_name.c_str());
-        return nullptr;
+        return {};
     }
 
     // vs/fs — по имени из реестра ShaderManager (sp хранит только имена).
@@ -87,7 +49,7 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp, Sha
     FragmentShaderData* fsd = sm->GetFragmentShader(sp->fs_name);
     if (!vsd) SDL_Log("Pipeline '%s': vertex shader '%s' not found in registry", sp->debug_name.c_str(), sp->vs_name.c_str());
     if (!fsd) SDL_Log("Pipeline '%s': fragment shader '%s' not found in registry", sp->debug_name.c_str(), sp->fs_name.c_str());
-    if (!vsd || !fsd) return nullptr;
+    if (!vsd || !fsd) return {};
 
     SDL_GPUGraphicsPipelineCreateInfo pci;
     SDL_zero(pci);
@@ -165,26 +127,24 @@ SDL_GPUGraphicsPipeline* PipeManager::GetOrCreatePipeline(ShaderProgram* sp, Sha
             "Pipeline creation failed: %s",
             SDL_GetError()
         );
-        return nullptr;
+        return {};
     }
 
-    graphics_pipelines.emplace(sp, pipe);
-    return pipe;
+    SDL_GPUDevice* device = dev;
+    sp->pipeline = std::shared_ptr<SDL_GPUGraphicsPipeline>(pipe, [device](SDL_GPUGraphicsPipeline* p) {
+        SDL_ReleaseGPUGraphicsPipeline(device, p);
+    });
+    return sp->pipeline;
 }
 
-SDL_GPUComputePipeline* PipeManager::GetOrCreateComputePipeline(ComputeShaderProgram* sp, ShaderManager* sm)
+std::shared_ptr<SDL_GPUComputePipeline> PipeManager::GetOrCreateComputePipeline(ComputeShaderProgram* sp, ShaderManager* sm)
 {
-    auto it = compute_pipelines.find(sp);
-    if (it != compute_pipelines.end()) {
-        if (it->second == nullptr)
-            SDL_Log("Pipeline for compute shader program '%s' is nullptr!", sp->debug_name.c_str());
-        return it->second;
-    }
+    if (sp->pipeline) return sp->pipeline;
 
     ComputeShaderData* csd = sm->GetComputeShader(sp->cs_name);   // cs по имени из реестра
     if (!csd) {
         SDL_Log("Compute pipeline '%s': cs '%s' not found in registry", sp->debug_name.c_str(), sp->cs_name.c_str());
-        return nullptr;
+        return {};
     }
 
     SDL_GPUComputePipelineCreateInfo ci;
@@ -209,11 +169,16 @@ SDL_GPUComputePipeline* PipeManager::GetOrCreateComputePipeline(ComputeShaderPro
     ci.threadcount_z = csd->threadcount_z;
 
     SDL_GPUComputePipeline* pipeline = SDL_CreateGPUComputePipeline(dev, &ci);
-    if (!pipeline)
+    if (!pipeline) {
         SDL_Log("Failed to create compute pipeline '%s': %s", sp->debug_name.c_str(), SDL_GetError());
+        return {};
+    }
 
-    compute_pipelines.emplace(sp, pipeline);
-    return pipeline;
+    SDL_GPUDevice* device = dev;
+    sp->pipeline = std::shared_ptr<SDL_GPUComputePipeline>(pipeline, [device](SDL_GPUComputePipeline* p) {
+        SDL_ReleaseGPUComputePipeline(device, p);
+    });
+    return sp->pipeline;
 }
 
 SDL_GPUColorTargetDescription PipeManager::MakeDefaultColorTarget()
@@ -237,48 +202,19 @@ SDL_GPUColorTargetDescription PipeManager::MakeNoColorTarget() {
 	return ctd;
 }
 
-SDL_GPUGraphicsPipeline* PipeManager::GetGraphicPipeline(ShaderProgram* sp)
+std::shared_ptr<SDL_GPUGraphicsPipeline> PipeManager::GetGraphicPipeline(ShaderProgram* sp)
 {
-    auto it = graphics_pipelines.find(sp);
-    if (it != graphics_pipelines.end()) {
-        if (it->second == nullptr) {
-            SDL_Log("Pipeline for shader program '%s' is nullptr!", sp->debug_name.c_str());
-        }
-        return it->second;
-	}
-	SDL_Log("PipeManager::Graphic pipeline not found for given ShaderProgram!");
-	return nullptr;
+    if (!sp->pipeline)
+        SDL_Log("PipeManager::Graphic pipeline not built for shader program '%s'!", sp->debug_name.c_str());
+    return sp->pipeline;
 }
 
-SDL_GPUComputePipeline* PipeManager::GetComputePipeline(ComputeShaderProgram* sp)
+std::shared_ptr<SDL_GPUComputePipeline> PipeManager::GetComputePipeline(ComputeShaderProgram* sp)
 {
-    auto it = compute_pipelines.find(sp);
-    if (it != compute_pipelines.end()) {
-        if (it->second == nullptr) {
-            SDL_Log("Pipeline for compute shader program '%s' is nullptr!", sp->debug_name.c_str());
-			assert(it->second && "Compute pipeline should not be null here!");
-		}
-        return it->second;
-    }
-    SDL_Log("PipeManager::Compute pipeline not found for given ComputeShaderProgram!");
-	return nullptr;
+    if (!sp->pipeline)
+        SDL_Log("PipeManager::Compute pipeline not built for program '%s'!", sp->debug_name.c_str());
+    return sp->pipeline;
 }
 
-PipeManager::~PipeManager()
-{
-    for (auto& pending : pipeline_trash)   // дочищаем отложенные
-        if (pending.pipe) SDL_ReleaseGPUGraphicsPipeline(dev, pending.pipe);
-    pipeline_trash.clear();
-    for (auto& pending : compute_trash)
-        if (pending.pipe) SDL_ReleaseGPUComputePipeline(dev, pending.pipe);
-    compute_trash.clear();
 
-    for (auto& pair : graphics_pipelines)
-        if (pair.second) SDL_ReleaseGPUGraphicsPipeline(dev, pair.second);
-    graphics_pipelines.clear();
-
-    for (auto& pair : compute_pipelines)
-        if (pair.second) SDL_ReleaseGPUComputePipeline(dev, pair.second);
-    compute_pipelines.clear();
-}
 

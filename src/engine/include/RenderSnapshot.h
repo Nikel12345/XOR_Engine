@@ -58,7 +58,7 @@ namespace RenderSnap {
     };
 
     struct ShaderGroup {
-        SDL_GPUGraphicsPipeline* pipeline = nullptr;
+        std::shared_ptr<SDL_GPUGraphicsPipeline> pipeline;
         PushInstructions push_instructions;
         // Вершинные СТРИМЫ пула из объявления vs (порядок = слоты пайплайна). Пустой список =
         // резолв сорвался → draw пропускается (бинд не того стрима в слот = UB, не деградация).

@@ -63,10 +63,6 @@ public:
 	// SlotController клеймит ею слоты: после редкого ребилда рендер держит кадр, пока
 	// перестроенный слот не готов, вместо мерцания старой раскладкой indirect/out_pib.
 	uint64_t RebuildEpoch() const { return rebuild_epoch; }
-	// Эпоха пересборок COMPUTE-дерева (BuildComputeBatches). Атомик: пишет sim, читает
-	// FenceThread — гейт отложенного удаления compute-пайплайнов (PipeManager::TrashPipelines):
-	// после бампа дерево уже не держит старый указатель, остаётся дренаж in-flight кадров.
-	uint64_t ComputeRebuildEpoch() const { return compute_rebuild_epoch.load(std::memory_order_acquire); }
 	void SetDirtyBatches(bool state) { dirty_batches = state; };
 
 	// ── Слепок раскладки батчей (RenderSnap::BatchLayout) ──
@@ -140,6 +136,5 @@ private:
 
 	uint64_t batches_revision = 0;
 	uint64_t rebuild_epoch = 0;   // ++ только на полном ребилде (не на инкременте)
-	std::atomic<uint64_t> compute_rebuild_epoch{ 0 };   // ++ в конце BuildComputeBatches (см. геттер)
 	std::atomic<bool> dirty_batches{ true };
 };

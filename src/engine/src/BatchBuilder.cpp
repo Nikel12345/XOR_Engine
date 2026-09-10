@@ -800,7 +800,7 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
     for (auto& slot : sm->GetComputeShaderPrograms()) {
         ComputeShaderProgram* sp = slot.program.get();
         if (!sp) continue;
-        SDL_GPUComputePipeline* pipe = pm->GetComputePipeline(sp);
+        auto pipe = pm->GetComputePipeline(sp);
         if (!pipe) continue;
 
         // Пассы и препассы делят пространство имён (см. PassManager::CreateComputePass),
@@ -861,7 +861,4 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         cmp->shader_batches.push_back(std::move(new_batch));
     }
     sm->SetDirtyComputeBatches(false);
-    // Дерево пересобрано — старых указателей пайплайнов в нём больше нет. Бамп армирует
-    // отложенное удаление compute-пайплайнов (TrashPipelines дренирует in-flight и освобождает).
-    compute_rebuild_epoch.fetch_add(1, std::memory_order_release);
 }

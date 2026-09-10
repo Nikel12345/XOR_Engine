@@ -43,7 +43,6 @@ void Engine::PrepareFunc(uint8_t slot)
 		PROF_SCOPE(Sim, " trash+reclaim");
 		const uint64_t fences_done = slot_controller->RenderFencesDone();
 		buffer_manager->TrashBuffers(fences_done);
-		pipe_manager->TrashPipelines(fences_done, slot_controller->RequiredEpoch(), batch_builder->ComputeRebuildEpoch());
 		// Место снятых моделей — в разметку пула, пачкой. Фенса не ждёт (в отличие от двух строк
 		// выше): освобождается разметка, а не GPU-ресурс — та же дисциплина, что у регионов
 		// атласа. Обязано идти ДО размещения новой пачки, то есть до ExecuteUpdateInstructions.

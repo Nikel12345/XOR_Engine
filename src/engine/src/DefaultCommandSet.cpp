@@ -360,7 +360,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 		{
 			const RebuildShaderPipelineCmd* c = static_cast<const RebuildShaderPipelineCmd*>(data);
 			if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader)) {
-				ctx->GetPipeManager()->InvalidatePipeline(sp, ctx->GetBatchBuilder()->RebuildEpoch());
+				sp->pipeline.reset();
 				ctx->GetShaderManager()->SetDirtyGraphicsPipelines(true);   // CreateGraphicsPiplenes пересоздаст
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
@@ -374,8 +374,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 		{
 			const RebuildShaderPipelineCmd* c = static_cast<const RebuildShaderPipelineCmd*>(data);
 			if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader)) {
-				ctx->GetPipeManager()->InvalidatePipeline(sp, ctx->GetBatchBuilder()->RebuildEpoch());           // сперва пайплайн (кэш по sp*)
-				ctx->GetShaderManager()->DeleteShaderProgram(c->shader); // затем сам sp
+				ctx->GetShaderManager()->DeleteShaderProgram(c->shader);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 			delete c;
@@ -413,8 +412,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const std::string vsName = !c->vsName.empty() ? c->vsName : (old ? old->vs_name : std::string());
 			const std::string fsName = !c->fsName.empty() ? c->fsName : (old ? old->fs_name : std::string());
 
-			if (old) {   // правка: снять кэш пайплайна старой sp ДО её удаления (ключ кэша — sp*)
-				ctx->GetPipeManager()->InvalidatePipeline(old, ctx->GetBatchBuilder()->RebuildEpoch());
+			if (old) {
 				sm->DeleteShaderProgram(c->oldName);
 			}
 			// push-инструкции не переносим руками: CreateShaderProgram сам возьмёт код-байндинги из
@@ -438,7 +436,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const bool pass_exists = ctx->GetPassManager()->GetRenderPassStep(c->pass) != nullptr;
 			if (sp && pass_exists) {
 				sp->render_pass_name = c->pass;
-				ctx->GetPipeManager()->InvalidatePipeline(sp, ctx->GetBatchBuilder()->RebuildEpoch());
+				sp->pipeline.reset();
 				sm->SetDirtyGraphicsPipelines(true);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
@@ -458,7 +456,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 					c->pull, ctx->GetBufferManager(), c->defines);
 				for (auto& [sn, spp] : sm->GetShaderPrograms())   // пересобрать пайплайны sp на этом vs
 					if (spp->vs_name == c->name || spp->vs_name == c->oldName)
-						ctx->GetPipeManager()->InvalidatePipeline(spp.get(), ctx->GetBatchBuilder()->RebuildEpoch());
+						spp->pipeline.reset();
 				sm->SetDirtyGraphicsPipelines(true);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
@@ -475,7 +473,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 				sm->CreateFragmentShader(c->name, c->path.c_str(), c->defines);
 				for (auto& [sn, spp] : sm->GetShaderPrograms())
 					if (spp->fs_name == c->name || spp->fs_name == c->oldName)
-						ctx->GetPipeManager()->InvalidatePipeline(spp.get(), ctx->GetBatchBuilder()->RebuildEpoch());
+						spp->pipeline.reset();
 				sm->SetDirtyGraphicsPipelines(true);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
@@ -492,7 +490,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 				sm->CreateComputeShader(c->name, c->path.c_str(), c->defines);
 				for (auto& slot : sm->GetComputeShaderPrograms())
 					if (slot.program && (slot.program->cs_name == c->name || slot.program->cs_name == c->oldName))
-						ctx->GetPipeManager()->InvalidateComputePipeline(slot.program.get(), ctx->GetBatchBuilder()->ComputeRebuildEpoch());
+						slot.program->pipeline.reset();
 				sm->SetDirtyComputePipelines(true);
 				sm->SetDirtyComputeBatches(true);
 			}

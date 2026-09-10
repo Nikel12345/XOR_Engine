@@ -66,9 +66,6 @@ public:
 
     void StampSlotEpoch(uint8_t slot, uint64_t epoch);
 
-    // Дренаж трэша пайплайнов ждёт, пока планка уйдёт дальше эпохи инвалидации.
-    uint64_t RequiredEpoch() { std::lock_guard<std::mutex> lk(mutex_); return required_epoch_; }
-
     // Счётчик вместо замков: очереди трэша остаются однопоточными.
     void NotifyRenderFenceDone() { render_fences_done_.fetch_add(1, std::memory_order_release); }
     uint64_t RenderFencesDone() const { return render_fences_done_.load(std::memory_order_acquire); }

@@ -249,7 +249,7 @@ int main(int, char**)
         if (!vb || !vb->Static.buffer) { SDL_Log("BakePending не создал вершинный буфер."); return 1; }
 
         pipes.CreateGraphicsPiplenes(sm.GetShaderPrograms(), &sm, &pm);
-        *pipeline_slot = pipes.GetGraphicPipeline(sp);
+        *pipeline_slot = pipes.GetGraphicPipeline(sp).get();
         if (!*pipeline_slot) { SDL_Log("Графический пайплайн не собрался."); return 1; }
         pipes.CreateComputePipelines(sm.GetComputeShaderPrograms(), &sm);
         pm.FillRenderPasses();

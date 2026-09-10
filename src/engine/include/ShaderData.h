@@ -116,6 +116,13 @@ struct ShaderProgram {
     // вторым источником истины про то же самое — и её пришлось бы синхронизировать на каждом
     // пересоздании программы.
 	ShaderProgramDescription spd;   // ПО ЗНАЧЕНИЮ: параметры пайплайна живут в самом sp (не в словаре)
+    // Пустой = ещё не собран или сброшен правкой spd/шейдера; соберёт CreateGraphicsPiplenes.
+    // Ссылку держат ещё и слепки раскладки, поэтому пайплайн переживает удаление своей sp ровно
+    // столько, сколько его может забиндить уже подготовленный слот. Дренаж по фенсам ему не нужен:
+    // последнюю ссылку роняет sim на штампе нового слепка, а слот достаётся ему только после того,
+    // как FenceThread снял IS_RENDERING (плюс last_rendering_slot из выдачи исключён), — GPU к
+    // этому моменту с пайплайном закончил.
+    std::shared_ptr<SDL_GPUGraphicsPipeline> pipeline;
     // Проход — ССЫЛКА ПО ИМЕНИ, как vs_name/fs_name и буферы. Резолв в RenderPassStep* делают
     // потребители (PipeManager на сборке пайплайна, BatchBuilder на сборке батча), получая
     // PassManager параметром. Указатель здесь держать нельзя: имя обязано пережить сериализацию,
@@ -151,6 +158,8 @@ struct ComputeShaderProgram {
     // ShaderManager под её ИМЕНЕМ, сборка compute-батчей резолвит их оттуда (см. ShaderProgram).
 
     ComputePassName compute_pass_name;   // ссылка по имени, см. ShaderProgram::render_pass_name
+
+    std::shared_ptr<SDL_GPUComputePipeline> pipeline;   // см. ShaderProgram::pipeline
 
     bool dont_save = false;   // см. ShaderProgram::dont_save
 

@@ -324,7 +324,7 @@ void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassS
 			rw_textures.data(), safe_u32(rw_textures.size()),
 			storage_buffer_bindings.data(), safe_u32(storage_buffer_bindings.size()));
 
-		SDL_BindGPUComputePipeline(cmp, shader_batch.pipeline);
+		SDL_BindGPUComputePipeline(cmp, shader_batch.pipeline.get());
 		if (!shader_batch.texture_binding.empty()) {
 			std::vector<SDL_GPUTextureSamplerBinding> samplers;
 			samplers.reserve(shader_batch.texture_binding.size());
@@ -457,7 +457,7 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 	int draw_calls = 0;
 	for (const RenderSnap::ShaderGroup& shader_batch : pass_list.shaders)
 	{
-		SDL_BindGPUGraphicsPipeline(rp, shader_batch.pipeline);
+		SDL_BindGPUGraphicsPipeline(rp, shader_batch.pipeline.get());
 		SDL_BindGPUFragmentSamplers(rp, 0, global_samplers.data(), global_sampler_count);
 
 		// Вершинные стримы — список из объявления vs (слепок), порядок = слоты пайплайна.

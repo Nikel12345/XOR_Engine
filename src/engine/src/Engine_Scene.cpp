@@ -583,15 +583,15 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 			yyjson_val* root = yyjson_doc_get_root(doc);
 			size_t idx, max; yyjson_val* e;
 
-			// Инвалидация пайплайнов sp, ссылающихся на перезагруженный SD (как в Upsert*Shader):
-			// иначе sp удержал бы пайплайн, собранный из старых данных шейдера.
+			// Пайплайны sp, ссылающихся на перезагруженный SD, сбрасываем: иначе sp удержал бы
+			// пайплайн, собранный из старых данных шейдера.
 			auto invalidate_vs = [&](const std::string& n) {
 				for (auto& [sn, sp] : sm->GetShaderPrograms())
-					if (sp->vs_name == n) pipe_manager->InvalidatePipeline(sp.get(), batch_builder->RebuildEpoch());
+					if (sp->vs_name == n) sp->pipeline.reset();
 			};
 			auto invalidate_fs = [&](const std::string& n) {
 				for (auto& [sn, sp] : sm->GetShaderPrograms())
-					if (sp->fs_name == n) pipe_manager->InvalidatePipeline(sp.get(), batch_builder->RebuildEpoch());
+					if (sp->fs_name == n) sp->pipeline.reset();
 			};
 
 			if (yyjson_val* arr = yyjson_obj_get(root, "vertex_shaders")) {
@@ -656,12 +656,11 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 					}
 					const ShaderProgramDescription spd = ReadSpd(yyjson_obj_get(e, "spd"));
 
-					// Merge-upsert: занятое имя = delete+create (кэш пайплайна по sp* — снять ДО).
-					// push-инструкции НЕ переносим: их вернёт реестр код-байндингов по имени (внутри
-					// CreateShaderProgram) — перенос со старой sp ломался бы на переименовании.
+					// Merge-upsert: занятое имя = delete+create. push-инструкции НЕ переносим: их
+					// вернёт реестр код-байндингов по имени (внутри CreateShaderProgram) — перенос
+					// со старой sp ломался бы на переименовании.
 					auto& progs = sm->GetShaderPrograms();
 					if (auto it = progs.find(name); it != progs.end()) {
-						pipe_manager->InvalidatePipeline(it->second.get(), batch_builder->RebuildEpoch());
 						sm->DeleteShaderProgram(name);
 					}
 					sm->CreateShaderProgram(name, spd, pass, vs, vbufs, fs, fbufs, slots, buffer_manager);
@@ -672,14 +671,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 			//    имени переставил бы пересозданную программу в конец вектора. Сносим только
 			//    сериализуемые (dont_save == false) — кодовые/движковые переживают загрузку, как
 			//    и прочие ресурсы, которых нет в манифесте.
-			//    Пайплайны снимаем ДО сноса: кэш PipeManager ключуется по csp*, а объекты умрут.
-			//    Удаление отложенное (compute_trash + эпоха compute-дерева) — кадры in-flight целы.
-			{
-				for (auto& slot : sm->GetComputeShaderPrograms())
-					if (slot.program && !slot.program->dont_save)
-						pipe_manager->InvalidateComputePipeline(slot.program.get(), batch_builder->ComputeRebuildEpoch());
-				sm->ClearSavableComputeShaderPrograms();
-			}
+			sm->ClearSavableComputeShaderPrograms();
 			if (yyjson_val* arr = yyjson_obj_get(root, "compute_shader_programs")) {
 				size_t made = 0, total = 0;
 				yyjson_arr_foreach(arr, idx, max, e) {

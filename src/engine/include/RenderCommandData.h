@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <vector>
 #include <unordered_map>
+#include <memory>
 #include <SDL3/SDL_gpu.h>
 #include "Aliases.h"
 #include "MaterialData.h"
@@ -118,7 +119,7 @@ struct ShaderBatchData {
 	BufferData* indexBuffer = nullptr;
     std::vector<BufferData*> vertexStorageBuffers;
     std::vector<BufferData*> fragmentStorageBuffers;
-    SDL_GPUGraphicsPipeline* pipeline = nullptr;
+    std::shared_ptr<SDL_GPUGraphicsPipeline> pipeline;
 };
 
 struct RenderPassTexturesInfo {
@@ -234,7 +235,7 @@ struct ComputeShaderBatchData {
     uint32_t threadcount_x = 1;
     uint32_t threadcount_y = 1;
     uint32_t threadcount_z = 1;
-    SDL_GPUComputePipeline* pipeline = nullptr;
+    std::shared_ptr<SDL_GPUComputePipeline> pipeline;
 };
 
 struct ComputePassStep {
