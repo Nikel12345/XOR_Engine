@@ -6,6 +6,7 @@
 #include "Aliases.h"
 #include "MaterialData.h"
 #include "TextureData.h"
+#include "ModelData.h"   // SubMeshSpan в SubMeshDraw — по значению
 
 struct SubMeshData;
 struct BufferData;
@@ -19,6 +20,19 @@ class PassManager;
 // Строки трансформа нет: сущность transformless (её vs строит позицию сам) либо запись
 // ещё не заполнена. Оба случая обрабатываются одинаково - см. StorePIB.
 inline constexpr uint32_t kPibNoRow = 0xFFFFFFFFu;
+
+// Размещение сабмеша в буферах пула — ровно то, что уходит в indirect-команду, плюс диапазон
+// экранных размеров для слова LOD. Отдельно от SubMeshData по той же причине, по какой UVL_Block
+// отдельно от TextureData: сфера, AABB и счётчики вершин в кадр не едут.
+// Инвариант тот же, что у texture_uvl: значения копируются на сборке батча, поэтому смена
+// размещения ЖИВОЙ модели обязана триггерить пересборку батчей. Копия корректна потому, что
+// размещение финализирует ModelManager::PackModels ДО сборки дерева.
+struct SubMeshDraw {
+    uint32_t index_count = 0;
+    uint32_t index_offset = 0;
+    uint32_t vertex_offset = 0;
+    SubMeshSpan screen_size_span{};
+};
 
 struct ModelBatchData {
     // Запись PIB: сущность в старшей половине, её строка трансформа - в младшей.
@@ -36,7 +50,7 @@ struct ModelBatchData {
     std::vector<uint64_t> pib_sub_buffer;
     uint32_t firstInstance = 0;
     uint32_t instanceCount = 0;
-    SubMeshData* submesh = nullptr;
+    SubMeshDraw submesh;
 };
 
 

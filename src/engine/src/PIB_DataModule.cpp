@@ -168,8 +168,7 @@ void PIB_DataModule::StoreEntityToCmd(BufferManager* bm, PassManager* rm, Upload
                         // сабмеш у батча уже есть, а отдельный буфер потребовал бы своей заливки и
                         // своего гейта по ревизии ради пары сотен байт. Раскладка — PackLodRange.
                         assert(cmd_idx <= kCmdIndexMask);
-                        const uint32_t word = cmd_idx |
-                            (mb.submesh ? PackLodRange(mb.submesh->screen_size_span) : 0u);
+                        const uint32_t word = cmd_idx | PackLodRange(mb.submesh.screen_size_span);
                         if (n + cnt <= e2c_elements) {   // страховка, см. StorePIB
                             std::fill_n(dst + n, cnt, word);
                             n += safe_u32(cnt);

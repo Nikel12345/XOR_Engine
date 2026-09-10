@@ -634,7 +634,8 @@ namespace {
     // материала и state прохода: пишем поле на месте, без пересоздания модели. Пересоздавать
     // тут нечего — геометрия не меняется, меняется только число, которое каллинг сравнивает с
     // экранным радиусом; а recreate вдобавок перечитал бы .bin и обнулил бы остальные спаны.
-    // Доехать до GPU правке даёт ModelManager::SetSubmeshSpan (бампает ревизию, см. её там).
+    // Батч держит КОПИЮ диапазона (ModelBatchData::submesh), поэтому правка обязана пересобрать
+    // дерево — тот же инвариант, что у texture_uvl.
     void ModelSpansEditor(EngineContext* ctx)
     {
         if (g_sel.name.empty()) return;
@@ -664,7 +665,10 @@ namespace {
             changed |= ImGui::SliderInt("##max", &mx, 0, 15, SpanStepLabel(mx));
             ImGui::PopID();
 
-            if (changed) mm->SetSubmeshSpan(g_sel.name, i, { safe_i_u8(mn), safe_i_u8(mx) });
+            if (changed) {
+                mm->SetSubmeshSpan(g_sel.name, i, { safe_i_u8(mn), safe_i_u8(mx) });
+                ctx->GetBatchBuilder()->SetDirtyBatches(true);
+            }
         }
     }
 

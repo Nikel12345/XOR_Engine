@@ -255,7 +255,6 @@ void ModelManager::SetSubmeshSpan(const std::string& name, size_t submesh, SubMe
     SubMeshSpan& dst = m->submeshes[submesh].screen_size_span;
     if (dst.lod_min == span.lod_min && dst.lod_max == span.lod_max) return;
     dst = span;
-    ++spans_revision;
 }
 
 size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries)
@@ -279,7 +278,6 @@ size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries
         ModelData* md = models_data.at(e.name).get();   // CreateModel только что отчитался успехом
         const size_t n = std::min(e.screen_size_span.size(), md->submeshes.size());
         for (size_t i = 0; i < n; ++i) md->submeshes[i].screen_size_span = e.screen_size_span[i];
-        ++spans_revision;
     }
     return loaded;
 }
@@ -499,6 +497,29 @@ uint32_t ModelManager::GetIndexBaseOffset(const GeometryPool* pool)
     return (res && res->batch_allocated) ? res->batch_index.first * safe_u32(sizeof(Uint32)) : 0;
 }
 
+void ModelManager::PackModels()
+{
+    for (auto& [pool, res] : residency) {
+        if (res.batch_placed) continue;
+        _EnsureBatchAllocation(pool);
+        if (!res.batch_allocated) continue;
+
+        for (const BatchEntry& e : res.batch) {
+            if (!e.model) continue;
+            // Смещения сабмешей приходят из BuildSubmeshes стейджинг-относительными: абсолютная
+            // база — начало выданного пачке диапазона, и известна она только здесь.
+            for (SubMeshData& s : e.model->submeshes) {
+                s.vertexOffset += res.batch_verts.first;
+                s.indexOffset += res.batch_index.first;
+            }
+            // Место модели — чтобы вернуть его аллокатору при следующей перезагрузке.
+            e.model->vertex_range = { res.batch_verts.first + e.vbase, e.vcount };
+            e.model->index_range = { res.batch_index.first + e.ibase, e.icount };
+        }
+        res.batch_placed = true;
+    }
+}
+
 void ModelManager::_EnsureBatchAllocation(const GeometryPool* pool)
 {
     PoolResidency& res = _Residency(pool);
@@ -573,25 +594,11 @@ void ModelManager::UploadModelIndexBuffer(BufferManager* bm, UploadTask* task, c
     uint32_t ibytes = safe_u32(res.staging_indices.size() * sizeof(Uint32));
     bm->UploadToTransferBuffer(task, ibytes, res.staging_indices.data());
 
-    // Индексный апдейтер идёт последним (после ВСЕХ стрим-заливок ЭТОГО пула) — финализируем цикл.
-    // База пачки теперь известна И залита, поэтому здесь и только здесь смещения сабмешей
-    // переводятся из стейджинг-относительных в абсолютные. Батч-дерево держит УКАЗАТЕЛИ на
-    // SubMeshData, так что правка на месте видна уже собранным батчам; а индиректы читают
-    // submesh->indexOffset в своём апдейтере, зарегистрированном ПОЗЖЕ этого — значит порядок фаз
-    // сам гарантирует, что они увидят уже абсолютные.
-    _EnsureBatchAllocation(pool);
-    for (const BatchEntry& e : res.batch) {
-        if (!e.model) continue;
-        for (SubMeshData& s : e.model->submeshes) {
-            s.vertexOffset += res.batch_verts.first;
-            s.indexOffset += res.batch_index.first;
-        }
-        // Место модели — чтобы вернуть его аллокатору при следующей перезагрузке.
-        e.model->vertex_range = { res.batch_verts.first + e.vbase, e.vcount };
-        e.model->index_range = { res.batch_index.first + e.ibase, e.icount };
-    }
+    // Индексный апдейтер идёт последним (после ВСЕХ стрим-заливок ЭТОГО пула) — закрываем цикл.
+    // Размещение к этому моменту уже сделал PackModels.
     res.batch.clear();
     res.batch_allocated = false;
+    res.batch_placed = false;
     res.batch_verts = {};
     res.batch_index = {};
 

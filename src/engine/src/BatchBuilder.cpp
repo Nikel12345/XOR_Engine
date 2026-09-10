@@ -22,12 +22,11 @@ using namespace ShaderBase;   // вершинные типы/семантики
 
 using namespace BatchKeys;
 
-ModelBatchKey HashModelBatchKey(SubMeshData* submash) {
-    if (!submash) {
-        return 0xFFFFFFFFFFFFFFFFull;
-    }
-    ModelBatchKey key = 0;
-    key ^= reinterpret_cast<ModelBatchKey>(submash);
+// Ключ узла — ИМЯ модели и номер сабмеша, а не адрес SubMeshData: батч держит копию размещения
+// по значению, а адрес не переживает пересоздание модели (и по нему нечего искать заново).
+ModelBatchKey HashModelBatchKey(const std::string& model_name, uint32_t submesh_index) {
+    ModelBatchKey key = std::hash<std::string>{}(model_name);
+    key ^= static_cast<ModelBatchKey>(submesh_index) + 0x9e3779b97f4a7c15ull + (key << 6) + (key >> 2);
 
     key ^= key >> 33;
     key *= 0xff51afd7ed558ccd;
@@ -352,8 +351,10 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
     }
 
 
+    uint32_t submesh_index = 0;
     for (SubMeshData& submesh : model->submeshes)
     {
+        const uint32_t si = submesh_index++;
         // Сабмеш без индексов рисовать нечем, но узел батча он заводил полноценный: свою
         // индирект-команду с num_indices == 0 И СВОИ ИНСТАНСЫ в out_pib, которые кулинг честно
         // обрабатывает. Пустые слоты — норма (модель обязана нести все номера сабмешей, иначе
@@ -475,14 +476,15 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             }
 
             TextureBatchData& tex_batch = tex_map[tex_key];
-            ModelBatchKey model_key = HashModelBatchKey(&submesh);
+            ModelBatchKey model_key = HashModelBatchKey(model_component.name, si);
 
             auto& model_map = tex_batch.model_batches;
             auto model_it = model_map.find(model_key);
             if (model_it == model_map.end())
             {
                 ModelBatchData new_model{};
-                new_model.submesh = &submesh;
+                new_model.submesh = { submesh.indexCount, submesh.indexOffset,
+                                      submesh.vertexOffset, submesh.screen_size_span };
                 new_model.instanceCount = 0;
                 new_model.pib_sub_buffer.reserve(16);
                 model_map[model_key] = std::move(new_model);

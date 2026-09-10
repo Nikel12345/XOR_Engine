@@ -228,10 +228,9 @@ void DefaultUpdateSet::SetDefaultEntityToCmdUpdater(EngineContext& ctx, PIB_Data
     {
         pib_dm->StoreEntityToCmd(bm, pm, &task);
     },
-        [pm, pib_dm, bb, mm, bm]() -> uint32_t
+        [pm, pib_dm, bb, bm]() -> uint32_t
     {
-        return pib_dm->CalculateEntityToCmd(pm, bb->BatchesRevision() + mm->SpansRevision(),
-                                            bm->logic_index.load());
+        return pib_dm->CalculateEntityToCmd(pm, bb->BatchesRevision(), bm->logic_index.load());
     }
     );
 }
