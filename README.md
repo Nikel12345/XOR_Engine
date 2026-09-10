@@ -57,6 +57,14 @@ pip install -r requirements.txt
 ```
 ---
 
+## Documentation
+
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — build targets, roles inside the engine, extension
+seams, threading model, and where to read next. Deeper notes on individual subsystems live in
+[`docs/internals/`](docs/internals). Written in Russian.
+
+---
+
 ## License
 
 No license defined yet. All rights reserved.
