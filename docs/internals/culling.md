@@ -6,7 +6,8 @@
 входные буферы и раскладку, а после стадии ничего не читает обратно.
 
 Слоты, слепки и стадии кадра — в [`frame.md`](frame.md); что такое PIB, `out_pib` и строка
-трансформа — в [`instance-data.md`](instance-data.md).
+трансформа — в [`instance-data.md`](instance-data.md); откуда берутся сами команды —
+в [`batches.md`](batches.md).
 
 ---
 
