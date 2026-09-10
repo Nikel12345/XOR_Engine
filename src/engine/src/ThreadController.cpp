@@ -70,8 +70,7 @@ void ThreadController::StartThreads()
     running.store(true);
     game_n_prep_iter_thread = std::thread(&ThreadController::SimulationThread, this);
 
-    // ДИАГНОСТИКА (config.h): часть конвейера не поднимается. Sim при этом не встаёт —
-    // незанятые слоты переиспользуются.
+    // Для дебага
     if (!DISABLE_UPLOAD)
         upload_thread = std::thread(&ThreadController::UploadThread, this);
     compute_thread = std::thread(&ThreadController::ComputeThread, this);
@@ -118,8 +117,6 @@ void ThreadController::SimulationThread()
 
         ups_counter->start();
 
-        // slot_wait: большое время здесь = sim голодает по слотам, то есть узкое место
-        // в РЕНДЕРЕ, а не в подготовке кадра.
         uint8_t slot;
         {
             PROF_SCOPE(Sim, "slot_wait (ожидание свободного слота)");
@@ -129,8 +126,7 @@ void ThreadController::SimulationThread()
                 slot = slot_controller->WaitFreeSlotIndex(UPS_priority);
             }
         }
-        // Из ожидания могли выпустить остановкой, а не свободным слотом: выходим ДО
-        // игрового колбэка.
+
         if (!running.load(std::memory_order_relaxed))
             break;
 
@@ -257,7 +253,6 @@ void ThreadController::FenceThread()
             if (!slot_controller->IsRenderingSlot(slot)) {
                 continue;
             }
-            // IS_RENDERING ставится при ВЫБОРЕ слота, фенс появляется после сабмита.
             if (slot_controller->GetSlotsData()[slot].render.Empty()) {
                 continue;
             }

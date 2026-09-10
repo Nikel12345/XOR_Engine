@@ -82,7 +82,7 @@ public:
 private:
     SlotData slots_data[BUFFERING_LEVEL];
 
-    uint8_t last_rendering_slot;   // последний ОТПРАВЛЕННЫЙ на рендер, не «завершённый»
+    uint8_t last_rendering_slot;
 
     uint8_t  next_free_slot_index = 0;
     uint64_t prepared_seq = 0;

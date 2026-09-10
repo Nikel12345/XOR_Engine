@@ -16,8 +16,6 @@ SlotController::~SlotController() = default;
 
 uint8_t SlotController::AcquireFreeSlotUnsafe(bool allow_frame_skip)
 {
-    // Жертва при skip'е выбирается по frame_id через ОБА готовых состояния: предпочесть
-    // PREPARED ради экономии вложенной работы нельзя, порядок кадров важнее.
     uint8_t oldest_ready = INVALID_SLOT;
 
     for (uint8_t offset = 0; offset < BUFFERING_LEVEL; ++offset) {
@@ -141,7 +139,6 @@ uint8_t SlotController::GetRenderableFallbackUnsafe()
     return lr;
 }
 
-// last_rendering_slot здесь не трогаем: fallback — понятие рендера.
 void SlotController::MarkComputingUnsafe(uint8_t slot)
 {
     slots_data[slot].flags = static_cast<uint8_t>(
@@ -342,7 +339,6 @@ void SlotController::StampSlotEpoch(uint8_t slot, uint64_t epoch)
 
     std::lock_guard<std::mutex> lock(mutex_);
     slots_data[slot].epoch = epoch;
-    // Будить никого не надо: планка лишь СУЖАЕТ множество отдаваемых кадров.
     if (epoch > required_epoch_)
         required_epoch_ = epoch;
 }
