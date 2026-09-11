@@ -102,9 +102,9 @@ struct ShaderBatchData {
 inline constexpr uint32_t MAX_COLOR_TARGETS = 8;
 
 struct ColorTarget {
-    SDL_GPUColorTargetInfo info{};                                   // рантайм-привязка: текстура, clear, слой
-    SDL_GPUTextureFormat   format = SDL_GPU_TEXTUREFORMAT_INVALID;   // для построения пайплайна
-    TextureAtlas*          atlas = nullptr;                          // источник текстуры, резолвится на исполнении
+    SDL_GPUColorTargetInfo info{}; 
+    SDL_GPUTextureFormat   format = SDL_GPU_TEXTUREFORMAT_INVALID;
+    TextureAtlas*          atlas = nullptr;
 };
 
 struct RenderPassTexturesInfo {
@@ -117,50 +117,40 @@ struct RenderPassTexturesInfo {
     void ResolveTargets();
 
     void SetColorTargetInfoLayer(uint32_t layer, uint32_t index = 0) { color_targets[index].info.layer_or_depth_plane = layer; };
-    // SDL хочет непрерывный массив info — собирается на исполнении, возвращается число таргетов.
     uint32_t CollectColorTargetInfos(SDL_GPUColorTargetInfo* out, uint32_t capacity) const;
 
     std::vector<ColorTarget> color_targets;
     SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUDepthStencilTargetInfo depthTargetInfo{};
     TextureAtlas*      depth_atlas = nullptr;
+private:
 };
 
 struct RenderPassStep {
     RenderPassTexturesInfo renderPassTexsData;
     std::unordered_map<BatchKeys::ShaderBatchKey, ShaderBatchData> shader_batches;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function;
-    // Глобальные сэмплеры прохода (тень, env-куб) в слотах ДО батчевых. Держим атласы, а не
-    // готовые биндинги, по той же причине, что и таргеты. ЗАПОЛНЯТЬ ТОЛЬКО ЧЕРЕЗ SetGlobalTextures:
-    // он же копит атласам флаг SAMPLER.
+
     std::vector<TextureAtlas*> global_texture_bindings;
     void SetGlobalTextures(std::vector<TextureAtlas*> atlases);
 
     // Сколько индексов рисует КАЖДАЯ команда прохода; 0 = сколько у сабмеша. Ненулевое нужно
     // проходам, рисующим по одному примитиву на инстанс: сплат ставит 1, иначе он дал бы точку
     // НА ИНДЕКС. Свойство прохода, а не sp: команды собирает обход проходов.
+    // !!! ПЕРЕДЕЛАТЬ С НОРМАЛЬНЫМИ LOD'АМИ!!!
     uint32_t override_index_count = 0;
 
-    // Состояние прохода: тело прохода пишет сюда свои поля и отдаёт указатель вниз, а push-функции
-    // программ собирают из него свои cbuffer'ы. От локальной переменной отличается тем, что
-    // переживает кадр, — поэтому поля, которые тело не переписывает, редактор показывает как
-    // настройки прохода. Схема — по имени в ParamsSpecRegistry::Passes().
     // ПОТОКИ: пишет render-поток (тело прохода) и он же UI — UI рисуется внутри RenderFunc.
     std::vector<uint8_t> state;
     std::string          state_type;
-    // nullptr = состояния не заводили или оно меньше T: рассинхрон объявления и использования.
     template<class T> T* State() {
         return state.size() >= sizeof(T) ? reinterpret_cast<T*>(state.data()) : nullptr;
     }
     std::string debug_name;
     int pass_index = -1;
-    // Индекс прохода в RenderSnap::BatchLayout::passes. Стабилен после старта.
     uint32_t ordinal = 0;
 };
 
-// Блит-проход целиком ДАННЫЕ, без функтора: из лямбды не вывести usage-флаги, а блиту они нужны
-// как никому (SDL требует SAMPLER у src и COLOR_TARGET у dst). Нужно несколько блитов — заводи
-// несколько проходов. src/dst — атласы: текстуру внутри подменяют ресайз и смена свопчейна.
 struct BlitPassStep {
     TextureAtlas* src = nullptr;
     TextureAtlas* dst = nullptr;
@@ -181,13 +171,12 @@ struct ComputeRWStorageTextureRef {
 struct ComputeShaderBatchData {
     PushInstructions push_instructions;
     std::function<void(DispatchSizeBinder&, const void*)> dispatch_func = {};
-    // Разные точки бинда: ro идут set=0 (SDL_BindGPUComputeStorageBuffers), rw — set=1
-    // (объявляются при старте compute-пасса).
     std::vector<BufferData*> ro_storage_buffers;
     std::vector<BufferData*> rw_storage_buffers;
     std::vector<TextureAtlas*> ro_storage_textures;
     std::vector<ComputeRWStorageTextureRef> rw_storage_textures;
     std::vector<TextureAtlas*> texture_binding;
+    // Задаётся диспатч функцией если требуется не дефолтное значение
     uint32_t threadcount_x = 1;
     uint32_t threadcount_y = 1;
     uint32_t threadcount_z = 1;
@@ -197,7 +186,6 @@ struct ComputeShaderBatchData {
 struct ComputePassStep {
     std::vector<ComputeShaderBatchData> shader_batches;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function;
-    // Состояние прохода — см. RenderPassStep::state.
     std::vector<uint8_t> state;
     std::string          state_type;
     template<class T> T* State() {
