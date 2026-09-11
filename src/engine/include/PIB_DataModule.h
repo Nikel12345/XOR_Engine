@@ -10,8 +10,6 @@ struct SceneData;
 struct UploadTask;
 
 
-// Размер 0 из size-функции = заливка не зовётся вовсе (см. BufferManager), поэтому гейт по
-// ревизии выражен возвратом нуля.
 class PIB_DataModule
 {
 public:
@@ -26,8 +24,6 @@ private:
     uint32_t ComputeElementCount(PassManager* pm) const;
 
     void BuildRowTable(SceneData* scene);
-    // row_of действительна, пока EntityRevision не сдвинулась; она же решает, надо ли
-    // перезаписывать строки, закэшированные в записях PIB.
     uint64_t row_table_revision = ~0ull;
     std::vector<uint32_t> row_of;
 

@@ -59,7 +59,7 @@ void PIB_DataModule::BuildRowTable(SceneData* scene)
         const size_t   n    = arch.entities.size();
         for (size_t i = 0; i < n; ++i) {
             const Entity e = arch.entities[i];
-            if (e < row_of.size()) row_of[e] = base + safe_u32(i);   // id вне таблицы = не из этой сцены
+            if (e < row_of.size()) row_of[e] = base + safe_u32(i);
         }
     }
 }
@@ -69,8 +69,6 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
     SceneData* scene = om->GetActiveScene();
     if (!scene) return;
 
-    // Перезаписываются ВСЕ строки, включая нетронутые правкой: swap_remove в архетипе переносит
-    // чужую сущность на освободившийся индекс, и её строка меняется без всякой команды.
     const uint64_t rev = om->EntityRevision();
     const bool refresh = (rev != row_table_revision);
     if (refresh) {
@@ -84,19 +82,17 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
     if (!dst) return;
 
     PROF_SCOPE(Sim, "     pib_gather");
-    // Заливка ПИШЕТ в дерево: заполненная строка остаётся в записи до следующей смены состава.
-    // Дерево приватно для sim, на нём же идёт заливка, а запись идемпотентна — повтор по слотам
-    // буферизации безвреден.
+    // Заливка ПИШЕТ в дерево (кэш строки в записи): дерево приватно для sim, на нём же идёт
+    // заливка, а запись идемпотентна — повтор по слотам буферизации безвреден.
     uint32_t n = 0;
     for (RenderPassStep* rp : rm->GetOrderedRenderPasses())
         for (auto& [_, sb] : rp->shader_batches)
             for (auto& [_, ab] : sb.atlases_batches)
                 for (auto& [_, tb] : ab.texture_batches)
                     for (auto& [_, mb] : tb.model_batches) {
-                        // Страховка от расхождения size-фазы и этого обхода.
                         if (n + mb.pib_sub_buffer.size() > total_elements) continue;
                         for (uint64_t& rec : mb.pib_sub_buffer) {
-                            uint32_t row = static_cast<uint32_t>(rec);   // младшая половина = строка
+                            uint32_t row = static_cast<uint32_t>(rec);
                             if (refresh || row == kPibNoRow) {
                                 const Entity e = static_cast<Entity>(rec >> 32);
                                 row = (e < row_of.size()) ? row_of[e] : kPibNoRow;
@@ -111,8 +107,6 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
                                 assert(row == ((e < row_of.size()) ? row_of[e] : kPibNoRow));
                             }
 #endif
-                            // Запись с kPibNoRow остаётся «незаполненной» и переспрашивается
-                            // каждую заливку: таких сущностей единицы, отдельный сентинел им не нужен.
                             dst[n++] = row;
                         }
                     }
