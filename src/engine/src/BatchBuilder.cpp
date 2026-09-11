@@ -16,14 +16,13 @@
 #include "TextureData.h"
 #include <unordered_set>
 
-using namespace BatchKeys;    // ключи батчей — локально для TU (в заголовках квалифицированы)
-using namespace ShaderBase;   // вершинные типы/семантики
-
+using namespace BatchKeys;
+using namespace ShaderBase;
 
 using namespace BatchKeys;
 
-// Ключ узла — ИМЯ модели и номер сабмеша, а не адрес SubMeshData: батч держит копию размещения
-// по значению, а адрес не переживает пересоздание модели (и по нему нечего искать заново).
+// Ключ узла — имя модели и номер сабмеша: адрес SubMeshData не переживает пересоздание модели,
+// а батч и так держит копию размещения.
 ModelBatchKey HashModelBatchKey(const std::string& model_name, uint32_t submesh_index) {
     ModelBatchKey key = std::hash<std::string>{}(model_name);
     key ^= static_cast<ModelBatchKey>(submesh_index) + 0x9e3779b97f4a7c15ull + (key << 6) + (key >> 2);
@@ -37,7 +36,6 @@ ModelBatchKey HashModelBatchKey(const std::string& model_name, uint32_t submesh_
     return key;
 }
 
-// Финальное перемешивание (murmur3 fmix64) — общий хвост всех ключей ниже.
 static inline uint64_t MixKey(uint64_t key) {
     key ^= key >> 33;
     key *= 0xff51afd7ed558ccd;
@@ -47,10 +45,8 @@ static inline uint64_t MixKey(uint64_t key) {
     return key;
 }
 
-// Ключ ПАМЯТКИ предпрохода: идентичность пары (материал, sp) плюс блоб ЭТОЙ sp. Блоб в ключе,
-// потому что две ячейки одного материала могут отрезолвиться в ОДНУ sp (обе упали на fallback),
-// а данные у них разные — памятка обязана их различать, иначе вторая получила бы пуш первой.
-// Это НЕ ключ батча: узлы дерева ключуются ресурсами (HashMatSpResources), а не адресами.
+// Ключ ПАМЯТКИ предпрохода, а не узла дерева: две ячейки одного материала могут отрезолвиться
+// в одну sp (обе упали на фолбэк), а блобы у них разные.
 MatSpKey HashMatSpMemo(const Material* mat, const ShaderProgram* sp,
                        const std::vector<uint8_t>* params) {
     MatSpKey key = reinterpret_cast<MatSpKey>(mat);
@@ -58,30 +54,10 @@ MatSpKey HashMatSpMemo(const Material* mat, const ShaderProgram* sp,
     return MixKey(key ^ reinterpret_cast<MatSpKey>(params));
 }
 
-// Ключ texture-батча = РЕСУРСЫ, которые потребляет ИМЕННО ЭТА sp, и ничего сверх того:
-//   • ВСЕ текстуры её required_slots — не только дефолт слота, но и его варианты (хэндлы:
-//     тот же атлас, но другой UVL — уже другой узел);
-//   • адресация этой таблицы (слова slot_layout: base/cell/count);
-//   • адрес блоба params ЭТОЙ sp (идентичность, не содержимое).
-// Материал целиком в ключ не входит: sp, которая от материала не берёт ничего (ShadowCaster,
-// Wireframe), не различает материалы вовсе — все они дают ей один узел, один draw и одну
-// команду индиректа. Раньше ключом был адрес материала, и теневой проход дробился по нему же.
-//
-// ПРАВИЛО: всё, что уходит в ПУШ, обязано входить сюда. Ключ не содержит идентичности материала,
-// поэтому два разных материала схлопываются в один узел — и если их таблицы или адресация
-// различаются, второй получит пуш первого (нормалка сэмплится как альбедо, без строки в логе).
-// Отсюда и варианты, и слова адресации в ключе.
-//
-// Хэндлы приходят СПИСКОМ, а не резолвятся заново по именам: ключ обязан совпадать с таблицей
-// поблочно, а правила подстановки (промах варианта — выкинуть, промах дефолта — dummy) живут в
-// сборке таблицы. Повторить их здесь = завести вторую копию правила, которая разойдётся.
-// Порядок блоков в списке = порядок блоков в uvl.
-//
-// Почему params по АДРЕСУ, а не по содержимому: правка байт в инспекторе (ползунок цвета) не
-// должна менять ключ, иначе дерево батчей пересобиралось бы покадрово. Адрес блоба стабилен —
-// он в куче и переживает реаллокацию ячеек (см. SpBinding::params).
-// Пустой блоб = «параметров нет» → в ключ не вносится (ClearMaterialParams гасит байты,
-// не освобождая память).
+// ПРАВИЛО: всё, что уходит в пуш этой sp, обязано входить в ключ. Идентичности материала в ключе
+// нет, поэтому два материала законно схлопываются в один узел — и при разошедшихся таблицах второй
+// получил бы пуш первого, без краша и без строки в логе. Отсюда в ключе и варианты, и слова
+// адресации. params входит АДРЕСОМ: правка байт ползунком не должна пересобирать дерево покадрово.
 MatSpKey HashMatSpResources(const ShaderProgram* sp, const std::vector<uint8_t>* params,
                             const uint32_t* slot_words,
                             const std::vector<const TextureHandle*>& block_handles) {
@@ -91,8 +67,7 @@ MatSpKey HashMatSpResources(const ShaderProgram* sp, const std::vector<uint8_t>*
     MatSpKey key = 0;
     const size_t slot_count = std::min<size_t>(sp->required_slots.size(), MAX_SLOTS);
     for (size_t s = 0; s < slot_count; ++s) {
-        // Роль и её адресация — в ключ ВСЕГДА, в т.ч. когда текстуры нет: «нет текстуры» —
-        // такое же состояние узла, как конкретный хэндл (батч соберёт сюда dummy).
+        // Роль и её адресация идут в ключ всегда: «текстуры нет» — такое же состояние узла.
         key += static_cast<MatSpKey>(sp->required_slots[s]) + 0x9e3779b97f4a7c15ull;
         key ^= static_cast<MatSpKey>(slot_words[s]);
         key *= 0xff51afd7ed558ccd;
@@ -107,18 +82,12 @@ MatSpKey HashMatSpResources(const ShaderProgram* sp, const std::vector<uint8_t>*
     return MixKey(key);
 }
 
-// Вторая половина ключа texture-батча — единственное, что зависит от СУЩНОСТИ: каким по счёту
-// материалом этот батч идёт у неё. Номер уходит в пуш (смещение секции состояний считается как
-// material_index * MAX_VARIATIVE_SLOTS), значит по правилу выше обязан быть в ключе.
-// Дробление ограничено максимальным числом сабмешей у модели, а не числом материалов в сцене.
 TextureBatchKey HashTextureBatchKey(MatSpKey res_key, uint32_t material_index) {
     return MixKey(res_key ^ (static_cast<TextureBatchKey>(material_index) + 0x9e3779b97f4a7c15ull));
 }
 
-// Ключ atlas-батча = АТЛАСЫ слотов, то есть ровно то, что биндится сэмплерами. Атласы ВСЕХ
-// блоков, а не только дефолтов: инвариант «все варианты слота в одном атласе» — варнинг, а не
-// отказ (см. EngineContext::CreateMaterial), и при его нарушении вариант ≥1 иначе молча
-// сэмплился бы из чужого атласа. От material_index не зависит вовсе.
+// Атласы ВСЕХ блоков, включая варианты: «все варианты слота в одном атласе» — предупреждение на
+// создании материала, а не отказ, и иначе вариант сэмплился бы из чужого атласа молча.
 AtlasBatchKey HashAtlasBatchKey(const ShaderProgram* sp,
                                 const std::vector<const TextureHandle*>& block_handles) {
     if (!sp) {
@@ -173,8 +142,6 @@ BatchBuilder::BatchBuilder()
 void BatchBuilder::SetDummyTexture(const std::string& name, TextureManager* tm)
 {
     dummy_texture_name = name;
-    // Сбор usage-флагов: dummy подставляется в слот материала (BuildBatches) → биндится сэмплером.
-    // Своего материала у него нет, поэтому SAMPLER его атласу собирается тут, а не в MaterialManager.
     if (!tm) return;
     const auto& handles = tm->GetTextureHandles();
     auto it = handles.find(name);
@@ -182,8 +149,6 @@ void BatchBuilder::SetDummyTexture(const std::string& name, TextureManager* tm)
     TextureAtlas* atlas = it->second->atlas;
     if (!atlas) return;
 
-    // Та же диагностика, что в MaterialManager::CollectSamplerUsage: опоздавшая декларация —
-    // атлас уже СОЗДАН без SAMPLER, бинд упадёт абортом без имени ресурса (проверка ДО доливки).
     if (atlas->texture_binding.texture && !(atlas->tci.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
             "USAGE VIOLATION: dummy texture '%s' lives in atlas '%s', whose GPU texture was ALREADY "
@@ -193,7 +158,8 @@ void BatchBuilder::SetDummyTexture(const std::string& name, TextureManager* tm)
             name.c_str(), atlas->debug_name.c_str());
     }
 
-    atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;   // декларация: dummy биндится сэмплером
+    // Своего материала у dummy нет, поэтому SAMPLER его атласу объявляем здесь.
+    atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 }
 
 void BatchBuilder::QueueCreate(Entity entity)
@@ -219,41 +185,32 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
     mat_sp_layouts.clear();
     if (!mtm || !sm) return;
 
-    // Dummy и fallback-sp — ПО ИМЕНИ, через карту (Get* логировал бы промах). Резолвим один раз
-    // на весь предпроход: это те же подстановки, что раньше делались на каждой сущности.
     TextureHandle* dummy = nullptr;
     if (tm && !dummy_texture_name.empty()) {
         auto dit = tm->GetTextureHandles().find(dummy_texture_name);
         if (dit != tm->GetTextureHandles().end()) dummy = dit->second.get();
     }
-    if (dummy && !dummy->atlas) dummy = nullptr;   // без атласа он ничего не заменяет
+    if (dummy && !dummy->atlas) dummy = nullptr;
     ShaderProgram* fallback = fallback_shader_name.empty() ? nullptr : sm->GetShaderProgram(fallback_shader_name);
 
-    // Хэндлы блоков текущей таблицы — переиспользуемый буфер, чтобы предпроход не аллоцировал
-    // на каждую пару.
     std::vector<const TextureHandle*> block_handles;
 
     for (const auto& [mat_name, mat_owner] : mtm->GetMaterials()) {
         Material* material = mat_owner.get();
         if (!material) continue;
 
-        // Ячейки секции состояний: порядок — ОДНО определение на весь движок
-        // (CollectVariativeRoles в MaterialData.h), его же читает TextureStateDataModule при
-        // заливке. Расходиться им нельзя — объекты молча покажут чужие варианты, поэтому цикл
-        // здесь не переписывается, а вызывается.
+        // Порядок ячеек — одно определение на движок: его же читает TextureStateDataModule.
         const VariativeRoles cells = CollectVariativeRoles(*material);
 
         for (const SpBinding& binding : material->shader_programs) {
             const std::vector<uint8_t>* sp_params =
                 (binding.params && !binding.params->empty()) ? binding.params.get() : nullptr;
-            // Промах имени sp → fallback, как в AddEntityToBatches (там же и лог о промахе).
             ShaderProgram* sp = sm->GetShaderProgram(binding.sp);
             if (!sp) sp = fallback;
             if (!sp) continue;
 
             const MatSpKey memo = HashMatSpMemo(material, sp, sp_params);
-            if (mat_sp_layouts.count(memo)) continue;   // две ячейки упали на одну sp с одним блобом
-
+            if (mat_sp_layouts.count(memo)) continue;
 
             MatSpLayout lay{};
             lay.bindable = true;
@@ -267,52 +224,42 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
                 const std::vector<TextureName>* names =
                     (it != material->textures.end()) ? &it->second : nullptr;
 
-                const uint32_t base = safe_u32(lay.uvl.size());   // таблица сгруппирована по слотам
+                const uint32_t base = safe_u32(lay.uvl.size());
 
-                // ── Дефолт слота (вариант 0) ── Место в таблице сохраняет ВСЕГДА: на нём стоит
-                // base следующих слотов. Промах имени подменяется dummy; нет и его — sp у этого
-                // материала не рисуется вовсе (пустой рендер вместо мёртвого хэндла).
                 TextureHandle* def = (names && !names->empty() && tm)
                     ? tm->GetTextureHandle((*names)[0]) : nullptr;
+                // Место дефолта в таблице сохраняется всегда: на нём стоит base следующих слотов.
                 if (!def || !def->atlas) {
                     def = dummy;
                 }
                 if (!def) { lay.bindable = false; break; }
 
-                lay.uvl.push_back(MakeUVL(def->texture_data));   // КОПИЯ значения (см. инвариант в TextureBatchData)
+                lay.uvl.push_back(MakeUVL(def->texture_data));
                 block_handles.push_back(def);
-                // Бинд слота — атлас его ДЕФОЛТА: варианты обязаны лежать там же (варнинг на
-                // создании материала), поэтому один Texture2DArray на слот покрывает их все.
                 lay.texture_binding.push_back(def->atlas->texture_binding);
 
-                // ── Варианты (1..N) ── Неразрешимое имя в таблицу НЕ попадает и count не растёт:
-                // иначе base всех последующих слотов разъехался бы с реальной таблицей.
                 uint32_t count = 1;
                 uint32_t cell = 0;
-                // Ячейка есть только у роли, попавшей в нумерацию выше; гард MAX_VARIATIVE_SLOTS
-                // мог её срезать — тогда слот остаётся невариативным и показывает дефолт.
-                // has_cell ⇒ names непуст и в нём больше одного имени: cells строились из него же.
                 bool has_cell = false;
                 for (uint32_t c = 0; c < cells.count; ++c)
                     if (cells.role[c] == role) { cell = c; has_cell = true; break; }
 
                 if (has_cell) {
-                    // Слот, не влезающий в MAX_UVL_BLOCKS, показывает только свой дефолт.
                     if (lay.uvl.size() + names->size() - 1 <= MAX_UVL_BLOCKS)
                     for (size_t v = 1; v < names->size(); ++v) {
                         TextureHandle* h = tm ? tm->GetTextureHandle((*names)[v]) : nullptr;
-                        if (!h || !h->atlas) continue;   // GetTextureHandle уже назвал промах в логе
+                        // Неразрешимый вариант в таблицу не попадает, и счётчик вариантов не
+                        // растёт: иначе base последующих слотов разъехался бы с реальной таблицей.
+                        if (!h || !h->atlas) continue;
                         lay.uvl.push_back(MakeUVL(h->texture_data));
                         block_handles.push_back(h);
                         ++count;
                     }
                 }
-                if (count == 1) cell = 0;   // невариативный слот ячейку не занимает
-                else            lay.variative = true;   // узел реально читает состояние (см. MatSpLayout::variative)
+                if (count == 1) cell = 0;
+                else            lay.variative = true;
 
-                // Материал БЕЗ вариантов обязан давать сегодняшнюю таблицу байт-в-байт: один
-                // блок на слот, base[s] == s. Вырождение в прежнее поведение — главное свойство
-                // раскладки, и ловится оно тут одной строкой (в Release её нет).
+                // Материал без вариантов обязан давать прежнюю плотную таблицу: base[s] == s.
                 assert((cells.count != 0 || (count == 1 && base == safe_u32(s)))
                     && "BuildMaterialLayouts: material without variants must yield the legacy UVL table");
 
@@ -337,31 +284,22 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
     ModelManager* mdm, MaterialManager* mtm,
     const MaterialComponent& material_component, const ModelComponent& model_component) {
 
-    // Модель и материалы у энтити — ССЫЛКИ ПО ИМЕНИ (см. ModelComponent/MaterialComponent);
-    // резолвим здесь, на сборке, ровно как имена текстур/sp внутри материала ниже. Тихим
-    // резолвом (FindModel), а НЕ через ModelManager::operator[] / MaterialManager::GetMaterial:
-    // те логируют промах, а здесь вызов на КАЖДУЮ сущность — одно битое имя в сцене на 1М
-    // объектов дало бы миллион строк лога. О пропуске сообщают гарды ниже (по строке на сущность).
+    // Резолв ТИХИЙ (FindModel, а не логирующий operator[]): он идёт на КАЖДУЮ сущность, и одно
+    // битое имя в сцене на миллион объектов дало бы миллион строк лога.
     ModelData* model = mdm ? mdm->FindModel(model_component.name) : nullptr;
 
-    // Защита от неразрешённых ссылок: пустое/неизвестное имя (ассет удалён, переименован или
-    // ещё не создан) даёт nullptr. Без гарда разыменование model->submeshes падает на сборке.
     if (!model) {
         return;
     }
-
 
     uint32_t submesh_index = 0;
     for (SubMeshData& submesh : model->submeshes)
     {
         const uint32_t si = submesh_index++;
-        // Сабмеш без индексов рисовать нечем, но узел батча он заводил полноценный: свою
-        // индирект-команду с num_indices == 0 И СВОИ ИНСТАНСЫ в out_pib, которые кулинг честно
-        // обрабатывает. Пустые слоты — норма (модель обязана нести все номера сабмешей, иначе
-        // сдвинется адресация материалов), поэтому отсекаем их здесь, до узла.
+        // Модель обязана нести все номера сабмешей (иначе съедет адресация материалов), поэтому
+        // пустой сабмеш — норма. Узла ему не заводим: он стоил бы своей команды и своих инстансов.
         if (submesh.indexCount == 0) continue;
 
-        // Границы + промах имени материала (та же природа, что у модели выше).
         if (submesh.material_index >= material_component.materials.size()) {
             continue;
         }
@@ -379,18 +317,13 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
         for (const SpBinding& binding : material->shader_programs)
         {
             const ShaderName& sp_name = binding.sp;
-            // Блоб этой sp: пустой (или отсутствующий) = она params не читает — ни пуша, ни ключа.
             const std::vector<uint8_t>* sp_params =
                 (binding.params && !binding.params->empty()) ? binding.params.get() : nullptr;
-            // name-based ссылка: имя sp → указатель на сборке батча. Промах (sp удалена) → fallback-sp
-            // (аналог textureless), а если и его нет — пропуск.
             ShaderProgram* sp = sm ? sm->GetShaderProgram(sp_name) : nullptr;
-            // Имя РЕАЛЬНО взятой программы: на fallback-ветке оно отличается от запрошенного, а по
-            // нему резолвятся push-инструкции (реестр ключуется именем) — с чужим именем fallback
-            // получил бы чужие пуши, то есть чужую нумерацию слотов.
+            // Имя РЕАЛЬНО взятой программы: по нему резолвятся push-инструкции, и на фолбэк-ветке
+            // с запрошенным именем программа получила бы чужие пуши.
             const ShaderName* resolved_name = &sp_name;
             if (!sp) {
-                // sp удалена → fallback ПО ИМЕНИ (резолвим как обычную sp; удалён и он → пустой рендер, без краша).
                 sp = (sm && !fallback_shader_name.empty()) ? sm->GetShaderProgram(fallback_shader_name) : nullptr;
                 if (!sp) continue;
                 resolved_name = &fallback_shader_name;
@@ -404,11 +337,8 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             if (it == shader_map.end())
             {
                 ShaderBatchData new_batch{};
-                new_batch.push_instructions = sm->CollectPushInstructions(*resolved_name);   // реестр — владелец, тут резолв
+                new_batch.push_instructions = sm->CollectPushInstructions(*resolved_name);
                 new_batch.pipeline = pm->GetGraphicPipeline(sp);
-                // Буферы sp — по имени (BufferDataName = ключ реестра); резолвим в BufferData* здесь
-                // (как имена текстур/sp выше) через GetBufferData. Ненайденное имя пропускаем — слот
-                // бинда сдвинется, но висячего указателя не будет.
                 auto resolve_buffers = [bm](const std::vector<BufferDataName>& names) {
                     std::vector<BufferData*> out; out.reserve(names.size());
                     for (BufferDataName n : names)
@@ -417,12 +347,8 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
                 };
                 new_batch.vertexStorageBuffers   = resolve_buffers(sp->vertex_shader_buffer_names);
                 new_batch.fragmentStorageBuffers = resolve_buffers(sp->fragment_shader_buffer_names);
-                // Вершинные СТРИМЫ пула — из объявления вершинника (vs.vertex_buffer_names,
-                // порядок = слоты пайплайна). Резолв здесь же; пустой список = vs не найден или
-                // стрим-имя протухло → бинд-шаг пропустит draw (сдвиг слота = UB).
-                // Индексный буфер — принадлежность ПУЛА: у одного пула он один, и vs запомнил его
-                // на создании. Читаем поле, а не ищем пул: реестр пулов живёт в ModelManager,
-                // которого у сборки батча нет и быть не должно.
+                // Индексный буфер — принадлежность пула, и вершинник запомнил его на создании:
+                // реестра пулов (ModelManager) у сборки батча нет и быть не должно.
                 if (VertexShaderData* vsd = sm->GetVertexShader(sp->vs_name)) {
                     new_batch.vertexBuffers = resolve_buffers(vsd->vertex_buffer_names);
                     if (vsd->index_buffer)
@@ -433,15 +359,10 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
             ShaderBatchData& sb = shader_map[sp_key];
 
-            // Пер-материальная половина батча — из памятки предпрохода (BuildMaterialLayouts):
-            // таблица UVL, её адресация, бинды атласов и обе половины ключей уже посчитаны, и
-            // резолвить имена текстур на каждую сущность больше не нужно. Промах = материал/sp
-            // появились после предпрохода (тот идёт в начале того же UpdateRenderBatches) —
-            // такого быть не должно, но узел без раскладки собирать нечем.
             auto lay_it = mat_sp_layouts.find(HashMatSpMemo(material, sp, sp_params));
             if (lay_it == mat_sp_layouts.end()) continue;
             const MatSpLayout& lay = lay_it->second;
-            if (!lay.bindable) continue;   // причину назвал предпроход, по строке на материал
+            if (!lay.bindable) continue;
 
             auto& atlas_map = sb.atlases_batches;
             auto atlas_it = atlas_map.find(lay.atlas_key);
@@ -454,9 +375,8 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
             AtlasBatchData& atlas_batch = atlas_map[lay.atlas_key];
 
-            // Единственное, что зависит от сущности: каким по счёту материалом идёт этот батч.
-            // Невариативному узлу он не нужен — гард count > 1 не пустит чтение состояния, —
-            // поэтому там он равен нулю и в ключ ничего не вносит: узел не дробится по сабмешам.
+            // Номер материала нужен только узлу с вариантами: иначе он дробил бы узел по номеру
+            // сабмеша, ничего не меняя в пуше.
             const uint32_t material_index = lay.variative ? submesh.material_index : 0u;
             TextureBatchKey tex_key = HashTextureBatchKey(lay.res_key, material_index);
 
@@ -464,9 +384,6 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             auto texb_it = tex_map.find(tex_key);
             if (texb_it == tex_map.end()) {
                 TextureBatchData new_texb{};
-                // Данные ЭТОЙ sp — и только они: узел, собранный для sp без params, никаких
-                // чужих байт не носит. Само РЕШЕНИЕ пушить остаётся за PassManager (по числу
-                // fragment-uniform'ов шейдера), здесь — адресат.
                 new_texb.params = sp_params;
                 new_texb.texture_uvl = lay.uvl;
                 std::copy(std::begin(lay.slot), std::end(lay.slot), std::begin(new_texb.variant_layout.slot));
@@ -494,9 +411,8 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
             uint32_t slot_index = safe_u32(model_batch.pib_sub_buffer.size());
             model_batch.instanceCount++;
-            // Строку не знаем и знать не можем: render_instance_base присваивается
-            // ПОЗЖЕ (RecalculateInstanceOffsets в конце обоих путей сборки). Помечаем
-            // незаполненной - StorePIB добьёт её при ближайшей заливке.
+            // Строка ещё не известна: базы архетипов раздаёт RecalculateInstanceOffsets в конце
+            // сборки, а саму строку добьёт ближайшая заливка PIB.
             model_batch.pib_sub_buffer.push_back(uint64_t(entity) << 32 | kPibNoRow);
             entity_slots[entity].push_back({ &model_batch, slot_index });
 
@@ -518,7 +434,6 @@ void BatchBuilder::RemoveEntityFromBatches(Entity entity)
         if (slot.slot_index != last_index) {
             Entity moved_entity = static_cast<Entity>(pib[last_index] >> 32);
             pib[slot.slot_index] = moved_entity;
-            // fix the moved entity's cached slot: {model_batch, last_index} -> slot_index
             for (PibSlot& moved_slot : entity_slots[moved_entity]) {
                 if (moved_slot.model_batch == model_batch && moved_slot.slot_index == last_index) {
                     moved_slot.slot_index = slot.slot_index;
@@ -536,28 +451,19 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
     TextureManager* tm, ShaderManager* sm, BufferManager* bm,
     ModelManager* mdm, MaterialManager* mtm, SceneData* scene)
 {
-    // Нет активной сцены — собирать нечего, дерево батчей остаётся пустым (кадр рисуется чёрным).
-    // МОЛЧА: зовётся каждый кадр, и лог тут давал сотни строк в секунду об одном и том же, забивая
-    // и настоящую диагностику, и консоль. О самом состоянии один раз сообщает ObjectManager::
-    // GetActiveScene — там же, где оно возникает.
     if (!scene) return;
 
-    // Either a full rebuild (scene activation) or an incremental delta — never
-    // both. exchange(false) consumes the rebuild request atomically.
-    // Замок дерева больше не нужен: рендер живое дерево не читает (рисует по слепку
-    // раскладки слота — см. FinalizeOffsets/AskLayout), дерево приватно для sim.
-    // Предпроход — ДО развилки: AddEntityToBatches общая для полной пересборки и инкремента,
-    // и обе стороны читают памятку. Материалов десятки, поэтому полный обход дешевле ветки
-    // «есть ли уже в памятке» в цикле на миллион сущностей; на инкрементальном пути таблица
-    // соберётся и умрёт вместе с вызовом — бесполезно, но и бесплатно.
+    // Предпроход ДО развилки: AddEntityToBatches общая для полной пересборки и инкремента, и обе
+    // стороны читают памятку.
     BuildMaterialLayouts(tm, sm, mtm);
 
     bool changed = false;
     if (dirty_batches.exchange(false)) {
         BuildRenderBatches(pm, pass_manager, om, tm, sm, bm, mdm, mtm, scene);
         FinalizeOffsets(pass_manager, bm);
-        // Полная пересборка переклеила ВСЮ раскладку (indirect_command_index, firstInstance).
-        // Бампим эпоху — слоты, залитые под старой раскладкой, рендер больше не покажет.
+        // Полная пересборка идёт в том же кадре, в котором место снесённых ресурсов возвращается
+        // аллокатору, поэтому слоты в полёте держат уже переиспользованные координаты — эпоха их
+        // отсекает (см. docs/internals/frame.md).
         ++rebuild_epoch;
         changed = true;
     }
@@ -571,12 +477,10 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
     }
 }
 
-// Assigns render_instance_base on every renderable archetype (prefix sum of entity counts).
-// Must be called after any structural change to keep Entity->row mapping consistent.
+// Отбор архетипов и их порядок обязаны совпадать с TransformDataModule: строка трансформа =
+// база архетипа + индекс сущности в нём.
 inline void RecalculateInstanceOffsets(SceneData* scene)
 {
-    // Должно отбирать ТЕ ЖЕ архетипы и в том же порядке, что TransformDataModule
-    // (инвариант «строка трансформа = render_instance_base + индекс в архетипе»).
     uint32_t base = 0;
     for (auto& [sig, arch] : scene->archetypes) {
         if (arch.get_array<DrawComponent>() &&
@@ -596,26 +500,22 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
     }
     entity_slots.clear();
 
-    // A full rebuild reflects the current ECS state, which already accounts for
-    // any queued create/delete. Discard the delta under the lock so it does not
-    // leak into the next incremental pass.
     {
         std::lock_guard<std::mutex> lock(delta_mutex);
+        // Полная пересборка и так отражает текущий ECS: дельту гасим, чтобы она не протекла
+        // в следующий инкремент.
         entities_to_create.clear();
         entities_to_delete.clear();
         entities_to_update.clear();
     }
 
-    // Отбор по маркеру DrawComponent — Positions НЕ требуется (тот же критерий, что в
-    // ApplyIncremental). Transformless-дровабл (напр. скайбокс: его VS строит позицию из
-    // камеры) батчится как все, но строки трансформа не имеет — StorePIB пишет ему -1,
-    // каллинг скаттерит такую запись безусловно. Геометрия/материал не часть сигнатуры —
-    // тянем через Has/GetComponent.
+    // Отбор по маркеру DrawComponent, Positions НЕ требуется: transformless-дровабл (скайбокс
+    // строит позицию из камеры) батчится как все, просто строки у него нет.
     om->ForEach<DrawComponent>(
         scene,
         [&](Entity entity, const DrawComponent& draw)
     {
-        if (!draw.visible) return;  // скрытые (выключенные в UI debug-рамки) в дерево не идут
+        if (!draw.visible) return;
         if (!om->Has<ModelComponent>(scene, entity) || !om->Has<MaterialComponent>(scene, entity))
             return;
         const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
@@ -631,8 +531,6 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
     TextureManager* tm, ShaderManager* sm, BufferManager* bm,
     ModelManager* mdm, MaterialManager* mtm, SceneData* scene)
 {
-    // Atomically take + clear the queues, then work on the local copies outside
-    // the lock so we never hold delta_mutex while mutating the batch tree.
     std::vector<Entity> creates, deletes, updates;
     {
         std::lock_guard<std::mutex> lock(delta_mutex);
@@ -642,8 +540,6 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
     }
     if (creates.empty() && deletes.empty() && updates.empty()) return false;
 
-    // Add-сторона общая для create и update: отбор рисуемого — тот же, что в BuildRenderBatches
-    // (есть модель и материал; есть DrawComponent и он visible — флаг источник истины).
     auto add_if_drawable = [&](Entity entity) {
         if (!om->Has<ModelComponent>(scene, entity) || !om->Has<MaterialComponent>(scene, entity))
             return;
@@ -654,25 +550,19 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
         AddEntityToBatches(entity, pm, pass_manager, tm, sm, bm, mdm, mtm, material_component, model_component);
     };
 
-    // Перевесить — ПЕРВЫМИ и в обход обоих гардов create-стороны: энтити жива, просто её место
-    // в дереве изменилось. Снять со старых слотов и добавить по текущим компонентам. Порядок
-    // важен: после этого она уже в дереве, поэтому парный QueueCreate (если он был) погасится
-    // гардом идемпотентности, а парный QueueDelete отработает ниже и уберёт её целиком.
+    // «Перевесить» — первыми: после этого энтити уже в дереве, поэтому парный QueueCreate погасит
+    // гард идемпотентности, а парный QueueDelete отработает ниже и уберёт её целиком.
     for (Entity entity : updates) {
         RemoveEntityFromBatches(entity);
         add_if_drawable(entity);
     }
 
-    // An entity created AND deleted in the same frame is dropped from the add
-    // side (its components are already gone from ECS). RemoveEntityFromBatches is
-    // a no-op for it, so it never reaches the batch tree.
+    // Созданная И удалённая в одном кадре с add-стороны выпадает: её компонентов в ECS уже нет.
     std::unordered_set<Entity> deleted_set(deletes.begin(), deletes.end());
 
     for (Entity entity : creates) {
         if (deleted_set.count(entity)) continue;
-        // Идемпотентность: видимость тыкают повторно (в отличие от одноразового
-        // создания энтити). Если энтити уже в дереве — повторный AddEntityToBatches
-        // наплодил бы дубликаты слотов в PIB. «Show» уже видимого — просто no-op.
+        // Видимость тыкают повторно, и повторный Add наплодил бы дубликаты слотов в PIB.
         if (entity_slots.count(entity)) continue;
         add_if_drawable(entity);
     }
@@ -688,14 +578,10 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
 {
     uint32_t offset = 0;
 
-    // Одним обходом: проставляем офсеты в ДЕРЕВЕ (его читают sim-модули — indirect/PIB
-    // при заливке буферов) и строим НОВУЮ версию СЛЕПКА раскладки (RenderSnap::BatchLayout) —
-    // значения-двойник дерева для рендера. Слоты получают её в StampLayoutSnapshot: рендер
-    // слота k рисует ровно по раскладке, под которую залит его indirect_buffer[k].
+    // Один обход делает обе вещи: проставляет офсеты в ДЕРЕВЕ (по нему идут заливки) и строит
+    // новую версию СЛЕПКА для рендера — так они не могут разъехаться.
     auto layout = std::make_shared<RenderSnap::BatchLayout>();
     layout->passes.reserve(pass_manager->GetOrderedRenderPasses().size());
-    // Индирект-буфер раскладки — свойство всей раскладки (сквозная нумерация команд), резолв
-    // здесь: цикл отрисовки не лазит в реестр по имени на каждый texture batch.
     layout->indirectBuffer = bm->GetBufferData(DefaultBuffersNames::DEFAULT_INDIRECT_BUFFER);
 
     for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses())
@@ -704,18 +590,15 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
         pass_list.first_instance = offset;
         pass_list.shaders.reserve(rp->shader_batches.size());
 
-        // Индекс команды в слепке — ЛОКАЛЬНЫЙ для прохода: регион прохода в индиректе содержит
-        // только его команды, и дроу адресует их от базы своего региона (см. culling_fix.md).
-        // Никакого внешнего знания для нумерации не нужно — счётчик просто свой на проход.
+        // Нумерация команд ЛОКАЛЬНА для прохода: его регион содержит только его команды
+        // (см. docs/internals/culling.md).
         uint32_t pass_cmd_index = 0;
 
-        uint32_t pass_cmds = 0;   // команд мультидроу в проходе (уходит в pass_list.num_commands)
+        uint32_t pass_cmds = 0;
 
-        // Глобальные сэмплеры прохода (тень/env): резолвим СТАБИЛЬНЫЕ атласы в актуальные
-        // SDL-биндинги ЗДЕСЬ, значениями в слепок — как это делает compute на диспатче. В цикле
-        // отрисовки резолвить нечего: по шейдер-батчам прохода значение постоянно. Атлас без
-        // GPU-текстуры пропускаем (иначе забиндили бы null и сдвинули слоты батчевых сэмплеров).
         pass_list.global_texture_bindings.reserve(rp->global_texture_bindings.size());
+        // Атлас без GPU-текстуры пропускаем: иначе забиндили бы null и сдвинули слоты батчевых
+        // сэмплеров.
         for (TextureAtlas* atlas : rp->global_texture_bindings) {
             if (!atlas || !atlas->texture_binding.texture) {
                 continue;
@@ -747,7 +630,7 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
                     RenderSnap::TextureDraw td;
                     td.texture_uvl = texture_batch.texture_uvl;
                     td.variant_layout = texture_batch.variant_layout;
-                    td.params = texture_batch.params;   // невладеющий, адрес стабилен (см. RenderSnapshot.h)
+                    td.params = texture_batch.params;
                     td.indirect_command_index = pass_cmd_index;
                     td.draw_count = safe_u32(texture_batch.model_batches.size());
 
@@ -764,8 +647,6 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
             }
             pass_list.shaders.push_back(std::move(sg));
         }
-        // Суммы прохода: из них StampRegions складывает размеры его региона (записей и команд
-        // на камеру) и границы его сегмента во входном PIB для диапазона каллинга.
         pass_list.num_instances = offset - pass_list.first_instance;
         pass_list.num_commands = pass_cmds;
         layout->passes.push_back(std::move(pass_list));
@@ -773,9 +654,6 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
     current_layout = std::move(layout);
 }
 
-// Слепок раскладки слоту — O(1). Зовётся в PrepareFunc СРАЗУ после UpdateRenderBatches,
-// до заливки буферов слота: всё, что prepare зальёт (indirect/PIB/out_pib), соответствует
-// именно этой версии раскладки.
 void BatchBuilder::StampLayoutSnapshot(uint8_t slot)
 {
     slot_layouts[slot] = current_layout;
@@ -783,15 +661,11 @@ void BatchBuilder::StampLayoutSnapshot(uint8_t slot)
 
 void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm,
     BufferManager* bm, TextureManager* tm) {
-    // Батчи ПЕРСИСТЕНТНЫ: пересобираем только при создании compute-программ (флаг), не каждый кадр.
-    // Батч хранит СТАБИЛЬНЫЕ TextureAtlas* (не снапшот SDL_GPUTexture*), а резолв в актуальные
-    // биндинги — в ComputePassStandardBody. Поэтому ресайз (пересоздание текстур) ребилда НЕ требует.
+    // Батчи ПЕРСИСТЕНТНЫ: пересобираются только на создание compute-программ. Замка нет, потому
+    // что все программы создаются на инициализации, до старта потоков; появится создание в
+    // рантайме — список придётся отдавать версией через shared_ptr, как BatchLayout.
     if (!sm || !sm->IsDirtyComputeBatches()) return;
 
-    // Без замка: пересборка случается только при СОЗДАНИИ compute-программ, а все программы
-    // создаются на инициализации, до старта потоков — параллельного рендера ещё нет.
-    // (Если программы когда-то начнут создаваться в рантайме — список нужно будет отдавать
-    // версией через shared_ptr, как BatchLayout.)
     for (auto& rp : pass_manager->GetOrderedComputePasses()) {
         rp->shader_batches.clear();
     }
@@ -805,14 +679,12 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         auto pipe = pm->GetComputePipeline(sp);
         if (!pipe) continue;
 
-        // Пассы и препассы делят пространство имён (см. PassManager::CreateComputePass),
-        // поэтому «сначала пасс, иначе препасс» однозначно.
         ComputePassStep* cmp = pass_manager->GetComputePassStep(sp->compute_pass_name);
+        // Пассы и препассы делят пространство имён (см. PassManager::CreateComputePass), поэтому
+        // перебор «сначала пасс, потом препасс» однозначен.
         if (!cmp) cmp = pass_manager->GetComputePrepassStep(sp->compute_pass_name);
         if (!cmp) continue;
 
-        // Резолв имён в указатели — ЗДЕСЬ (csp хранит только имена, чтобы сериализоваться).
-        // Промах = пропуск ресурса, а не пропуск программы: слоты бинда съедут, поэтому громко логируем.
         auto resolve_buffers = [&](const std::vector<BufferDataName>& names, const char* kind) {
             std::vector<BufferData*> out;
             out.reserve(names.size());
@@ -839,8 +711,6 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         new_batch.rw_storage_buffers = resolve_buffers(sp->rw_storage_buffer_names, "rw");
         new_batch.ro_storage_buffers = resolve_buffers(sp->ro_storage_buffer_names, "ro");
 
-        // Атласы СТАБИЛЬНЫ (резолв SDL_GPUTexture* — позже, в ComputePassStandardBody): ресайз
-        // пересоздаёт текстуру внутри того же TextureAtlas, указатель на обёртку переживает его.
         new_batch.rw_storage_textures.reserve(sp->rw_storage_textures.size());
         for (const auto& d : sp->rw_storage_textures) {
             TextureAtlas* a = tm ? tm->GetTextureAtlas(d.texture_atlas) : nullptr;
@@ -848,11 +718,11 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
             new_batch.rw_storage_textures.push_back({ a, d.mip_level, d.layer });
         }
         new_batch.ro_storage_textures = resolve_atlases(sp->ro_storage_texture_names, "ro");
-        new_batch.texture_binding     = resolve_atlases(sp->texture_sampler_names, "sampler");   // даёт texture+sampler
+        new_batch.texture_binding     = resolve_atlases(sp->texture_sampler_names, "sampler");
         new_batch.push_instructions = sm->CollectComputePushInstructions(slot.name);
         new_batch.dispatch_func = sm->GetDispatchInstruction(slot.name);
 
-        ComputeShaderData* csd = sm->GetComputeShader(sp->cs_name);   // cs по имени из реестра
+        ComputeShaderData* csd = sm->GetComputeShader(sp->cs_name);
         if (!csd)
             SDL_Log("BuildComputeBatches '%s': compute shader '%s' not found in registry - dispatch falls back to 1x1x1",
                 slot.name.c_str(), sp->cs_name.c_str());
