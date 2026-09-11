@@ -2,8 +2,6 @@
 #include "PassManager.h"
 #include "BufferManager.h"
 #include "RenderSnapshot.h"
-// MaterialManager/PipeManager/ObjectManager/ModelData здесь не использовались — убраны,
-// чтобы PassManager не тянул render/model/object на уровне линковки (нужно для EngineGpu).
 
 PassManager::PassManager() {}
 
@@ -41,6 +39,11 @@ ComputePassStep* PassManager::CreateComputePass(const ComputePassName& name, std
 		SDL_Log("PassManager::CreateComputePass: Compute pass with name '%s' already exists.", name.c_str());
 		return it_pass->second.get();
 	}
+	// Пассы и препассы лежат в разных реестрах, но делят ОДНО пространство имён: программа
+	// называет свой проход одним именем (ComputeShaderProgram::compute_pass_name, приходит
+	// параметром EngineContext::CreateComputeShaderProgram), а BatchBuilder на сборке ищет его
+	// сначала среди пассов, потом среди препассов. Одноимённые увели бы программу в чужой вид
+	// прохода — молча, потому что оба вида валидны.
 	auto it_prepass = compute_prepass_steps.find(name);
 	if (it_prepass != compute_prepass_steps.end()) {
 		SDL_Log("PassManager::CreateComputePass: A compute prepass with name '%s' already exists. Cannot create a pass with the same name.", name.c_str());
@@ -98,16 +101,11 @@ BlitPassStep* PassManager::CreateBlitPass(const BlitPassName& name, TextureAtlas
 		SDL_Log("PassManager::CreateBlitPass: Blit pass with name '%s' already exists.", name.c_str());
 		return it_blit->second.get();
 	}
-	// Имя прохода — общее пространство: sp/UI ищут проход по имени, дубль между видами
-	// сделал бы поиск неоднозначным.
 	if (render_steps.count(name) || compute_steps.count(name) || compute_prepass_steps.count(name)) {
 		SDL_Log("PassManager::CreateBlitPass: A pass with name '%s' already exists (render/compute). Cannot create a blit pass with the same name.", name.c_str());
 		return nullptr;
 	}
 
-	// Декларация usage: SDL требует у источника блита SAMPLER, у назначения — COLOR_TARGET
-	// (проверено зондом sandbox/BlitUsageProbe.cpp; в докстрингах SDL этого нет).
-	// Свопчейн-атлас движок не создаёт — флаги ему безразличны, но union'у это не мешает.
 	src->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 	dst->tci.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 
@@ -184,15 +182,9 @@ void PassManager::FillRenderPasses()
 		return a->pass_index < b->pass_index;
 	});
 
-	// Ordinal = индекс прохода в BatchLayout::passes (слепок строится обходом ordered_passes
-	// в этом же порядке). Ставится один раз — проходы после старта не добавляются.
-	// Блит-проходы сюда НЕ входят: батчей у них нет, рисовать в них нечем.
 	for (size_t i = 0; i < ordered_passes.size(); ++i)
 		ordered_passes[i]->ordinal = safe_u32(i);
 
-	// Единый порядок кадра. Push'им render → compute → blit, затем СТАБИЛЬНАЯ сортировка:
-	// при равном pass_index сохраняется этот же приоритет (раньше ExecutePassesSteps давала
-	// render'у идти первым на равенстве — поведение сохранено).
 	ordered_execution.clear();
 	ordered_execution.reserve(ordered_passes.size() + ordered_compute_steps.size() + ordered_blit_steps.size());
 	for (RenderPassStep* rp : ordered_passes)         ordered_execution.push_back({ rp->pass_index, rp });
@@ -208,7 +200,6 @@ void PassManager::FillRenderPasses()
 
 void PassManager::ExecutePassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_frame)
 {
-	// Порядок слит один раз в FillRenderPasses (ordered_execution) — здесь просто идём по нему.
 	for (const OrderedStep& step : ordered_execution) {
 		std::visit([&](auto* pass) {
 			using T = std::remove_pointer_t<decltype(pass)>;
@@ -223,11 +214,8 @@ void PassManager::BlitPassStandardBody(SDL_GPUCommandBuffer* cb, BlitPassStep& b
 {
 	if (!bp.src || !bp.dst) return;
 
-	// Текстуры резолвим ЗДЕСЬ, а не на создании: у HDR-таргетов её подменяет ресайз, у
-	// свопчейн-атласа — каждый кадр (Engine::RenderFunc). Указатели на сами атласы стабильны.
 	SDL_GPUTexture* src_tex = bp.src->texture_binding.texture;
 	SDL_GPUTexture* dst_tex = bp.dst->texture_binding.texture;
-	// dst — свопчейн, а кадр без свопчейна: текстуры нет → блит пропускаем (это не ошибка).
 	if (!src_tex || !dst_tex) return;
 	if (bp.src->width == 0 || bp.src->height == 0 || bp.dst->width == 0 || bp.dst->height == 0) return;
 
@@ -235,8 +223,8 @@ void PassManager::BlitPassStandardBody(SDL_GPUCommandBuffer* cb, BlitPassStep& b
 	bi.source.texture = src_tex;
 	bi.source.mip_level = bp.src_mip;
 	bi.source.layer_or_depth_plane = bp.src_layer;
-	bi.source.w = bp.src->width;    // размеры — у КАЖДОГО свои (src из атласа, dst из свопчейна):
-	bi.source.h = bp.src->height;   // совпадать они не обязаны, blit сам масштабирует и конвертирует формат
+	bi.source.w = bp.src->width;
+	bi.source.h = bp.src->height;
 	bi.destination.texture = dst_tex;
 	bi.destination.w = bp.dst->width;
 	bi.destination.h = bp.dst->height;
@@ -255,14 +243,10 @@ void PassManager::ExecutePrepassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_f
 
 void PassManager::RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass_step, BufferManager* bm, uint32_t region_index, const void* push_data_raw)
 {
-	// Блок (проход, region_index) в индиректе: база региона плюс страйд блока.
 	const PassRegions& stamped = AskRegions(render_frame);
 	uint32_t first_command = 0;
 	if (render_pass_step->ordinal < stamped.per_pass.size()) {
 		const PassRegion& region = stamped.per_pass[render_pass_step->ordinal];
-		// Тело рисует больше блоков, чем проход заказал инструкцией счёта регионов: смещение
-		// уедет в регион соседа. Дроу НЕ отменяем — иначе рассинхрон выглядит как «просто не
-		// рисуется», и его ищут не там; пусть он виден и в логе, и на экране.
 		if (region_index >= region.command_blocks_count) {
 			SDL_Log("RenderPassStandardBody: pass '%s' draws block %u, but its region count instruction asked for %u - the draw reads a neighbour region",
 				render_pass_step->debug_name.c_str(), region_index, region.command_blocks_count);
@@ -272,7 +256,6 @@ void PassManager::RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassSte
 	const uint32_t additional_offset = first_command * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand));
 
 	auto& tex_data = render_pass_step->renderPassTexsData;
-	// Атласы/shared-depth → актуальные текстуры (создаёт бейк, подменяет ресайз).
 
 	SDL_GPURenderPass* rp = nullptr;
 	rp = SDL_BeginGPURenderPass(cb,
@@ -295,7 +278,7 @@ void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassS
 		glm::uvec3 elements{ 1, 1, 1 };
 		if (shader_batch.dispatch_func) {
 			DispatchSizeBinder dispatch_binder{};
-			dispatch_binder.frame = pass_frame;   // ключ пер-слотовых слепков для Ask*(frame)
+			dispatch_binder.frame = pass_frame;
 			shader_batch.dispatch_func(dispatch_binder, dispatch_data_raw);
 			elements = dispatch_binder.element_count;
 		}
@@ -303,7 +286,6 @@ void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassS
 		if (elements.x == 0 || elements.y == 0 || elements.z == 0) continue;
 
 		{
-			// Группы draw'а у compute нет — в контексте только состояние прохода и кадровый слот.
 			const PushInput push_in{ push_data_raw, nullptr, pass_frame };
 			for (const PushInstruction& pi : shader_batch.push_instructions)
 				pi.fn(PushConstantBinder{ cb, pi.stage, pi.uniform_slot, pass_frame }, push_in);
@@ -312,9 +294,6 @@ void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassS
 		std::vector<SDL_GPUStorageBufferReadWriteBinding> storage_buffer_bindings =
 			bm->BuildBindGPUComputeRWBuffers(shader_batch.rw_storage_buffers, pass_frame);
 
-		// Резолвим СТАБИЛЬНЫЕ атласы в актуальные SDL-биндинги ЗДЕСЬ (на момент диспатча): после
-		// ресайза атлас уже держит новую текстуру, поэтому батч пересобирать не нужно. SDL копирует
-		// массивы при вызове, поэтому локальные временные векторы безопасны.
 		std::vector<SDL_GPUStorageTextureReadWriteBinding> rw_textures;
 		rw_textures.reserve(shader_batch.rw_storage_textures.size());
 		for (const auto& r : shader_batch.rw_storage_textures)
@@ -367,7 +346,6 @@ void PassManager::StampRegions(uint8_t slot, const RenderSnap::BatchLayout* layo
 
 	stamped.per_pass.resize(layout->passes.size());
 
-	// Размеры прохода — из его строки слепка; блоков по умолчанию один (обычный проход).
 	for (uint32_t i = 0; i < stamped.per_pass.size(); ++i) {
 		const RenderSnap::PassDrawList& pass_list = layout->passes[i];
 		PassRegion& region = stamped.per_pass[i];
@@ -377,8 +355,6 @@ void PassManager::StampRegions(uint8_t slot, const RenderSnap::BatchLayout* layo
 		region.first_pib = pass_list.first_instance;
 	}
 
-	// Проходы, у которых блоков не один, говорят это сами. Инструкция ключуется ИМЕНЕМ прохода
-	// (ключ реестра), поэтому резолвим через реестр: промах = ошибка конфигурации, он залогирует.
 	for (const auto& [name, count_fn] : region_count_instructions) {
 		if (!count_fn) continue;
 		RenderPassStep* rp = GetRenderPassStep(name);
@@ -386,7 +362,6 @@ void PassManager::StampRegions(uint8_t slot, const RenderSnap::BatchLayout* layo
 		stamped.per_pass[rp->ordinal].command_blocks_count = count_fn(slot);
 	}
 
-	// Границы — ТОЛЬКО здесь: покрытие непересекающееся по построению, что бы ни вернули счётчики.
 	uint32_t cmd_base = 0;
 	uint32_t pib_base = 0;
 	for (PassRegion& region : stamped.per_pass) {
@@ -433,24 +408,17 @@ PassManager::~PassManager()
 	render_steps.clear();
 }
 
-// Рисует по СЛЕПКУ раскладки рендеримого слота (render_layout), не по живому дереву:
-// офсеты/uvl/draw_count гарантированно соответствуют indirect_buffer[render_frame],
-// залитому тем же prepare, а sim может свободно перестраивать дерево параллельно.
 inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPURenderPass* rp, const RenderPassStep& render_pass_step, BufferManager* bm, uint32_t additional_offset, const void* push_data_raw)
 {
 	if (!render_layout || render_pass_step.ordinal >= render_layout->passes.size()) return;
 	const RenderSnap::PassDrawList& pass_list = render_layout->passes[render_pass_step.ordinal];
 
-	// Индирект-буфер раскладки — из слепка (BufferData* отрезолвлен в FinalizeOffsets); здесь
-	// только пер-кадровый хэндл. Нет буфера — рисовать нечем (все дроу этого слепка — indirect).
 	SDL_GPUBuffer* indirect_buf = bm->_GetGPUBufferForFrame(render_layout->indirectBuffer, render_frame);
 	if (!indirect_buf) {
 		SDL_Log("ExecuteRenderBatches: indirect buffer is missing - pass draw list skipped");
 		return;
 	}
 
-	// Глобальные сэмплеры прохода — из СЛЕПКА (отрезолвлены на сборке батча), не из живого
-	// прохода: их GPU-текстуры могут пересоздаваться, а рендер обязан видеть согласованный слот.
 	const std::vector<SDL_GPUTextureSamplerBinding>& global_samplers = pass_list.global_texture_bindings;
 	const uint32_t global_sampler_count = safe_u32(global_samplers.size());
 
@@ -460,14 +428,10 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 		SDL_BindGPUGraphicsPipeline(rp, shader_batch.pipeline.get());
 		SDL_BindGPUFragmentSamplers(rp, 0, global_samplers.data(), global_sampler_count);
 
-		// Вершинные стримы — список из объявления vs (слепок), порядок = слоты пайплайна.
-		// Сбой бинда = ПРОПУСК шейдер-батча целиком: пайплайн ждёт в слоте k страйд стрима k,
-		// рисовать с несбинженными/сдвинутыми слотами — UB, а не деградация.
 		if (!bm->BindGPUVertexBuffers(rp, shader_batch.vertexBuffers)) {
 			SDL_Log("ExecuteRenderBatches: vertex stream bind failed - shader batch skipped");
 			continue;
 		}
-		// Индексный буфер пула батча — из слепка (та же дисциплина, что у стримов).
 		if (!bm->BindGPUIndexBuffer(rp, shader_batch.indexBuffer, 0)) {
 			SDL_Log("ExecuteRenderBatches: index buffer bind failed - shader batch skipped");
 			continue;
@@ -476,24 +440,15 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 		if (!shader_batch.vertexStorageBuffers.empty()) {
 			bm->BindGPUVertexStorageBuffers(rp, 0, shader_batch.vertexStorageBuffers, render_frame);
 		}
-		else {
-		}
 		if (!shader_batch.fragmentStorageBuffers.empty()) {
 			bm->BindGPUFragmentStorageBuffers(rp, 0, shader_batch.fragmentStorageBuffers, render_frame);
-		}
-		else {
 		}
 
 		for (const RenderSnap::AtlasGroup& atlas_batch : shader_batch.atlases) {
 			if (!atlas_batch.texture_binding.empty()) {
-				// Батчевые сэмплеры идут ПОСЛЕ глобальных — база слота = их число.
 				SDL_BindGPUFragmentSamplers(rp, global_sampler_count, atlas_batch.texture_binding.data(), safe_u32(atlas_batch.texture_binding.size()));
 			}
 			for (const RenderSnap::TextureDraw& texture_batch : atlas_batch.draws) {
-				// Инструкции программы — на КАЖДУЮ группу: их источники данных разные (состояние
-				// прохода одно на проход, uvl/params/раскладка — свои у каждой группы), а слот у
-				// каждой фиксирован, так что повтор ничего не сдвигает. Цена — memcpy на блок,
-				// перевязку дескрипторов эти draw'ы всё равно уже платят за движковые блоки.
 				const PushInput push_in{ push_data_raw, &texture_batch, render_frame };
 				for (const PushInstruction& pi : shader_batch.push_instructions)
 					pi.fn(PushConstantBinder{ cb, pi.stage, pi.uniform_slot, render_frame }, push_in);
@@ -505,7 +460,6 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 					texture_batch.draw_count
 				);
 				draw_calls++;
-
 
 			}
 		}
