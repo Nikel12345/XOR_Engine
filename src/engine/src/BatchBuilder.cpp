@@ -19,10 +19,7 @@
 using namespace BatchKeys;
 using namespace ShaderBase;
 
-using namespace BatchKeys;
 
-// Ключ узла — имя модели и номер сабмеша: адрес SubMeshData не переживает пересоздание модели,
-// а батч и так держит копию размещения.
 ModelBatchKey HashModelBatchKey(const std::string& model_name, uint32_t submesh_index) {
     ModelBatchKey key = std::hash<std::string>{}(model_name);
     key ^= static_cast<ModelBatchKey>(submesh_index) + 0x9e3779b97f4a7c15ull + (key << 6) + (key >> 2);
@@ -54,10 +51,6 @@ MatSpKey HashMatSpMemo(const Material* mat, const ShaderProgram* sp,
     return MixKey(key ^ reinterpret_cast<MatSpKey>(params));
 }
 
-// ПРАВИЛО: всё, что уходит в пуш этой sp, обязано входить в ключ. Идентичности материала в ключе
-// нет, поэтому два материала законно схлопываются в один узел — и при разошедшихся таблицах второй
-// получил бы пуш первого, без краша и без строки в логе. Отсюда в ключе и варианты, и слова
-// адресации. params входит АДРЕСОМ: правка байт ползунком не должна пересобирать дерево покадрово.
 MatSpKey HashMatSpResources(const ShaderProgram* sp, const std::vector<uint8_t>* params,
                             const uint32_t* slot_words,
                             const std::vector<const TextureHandle*>& block_handles) {
@@ -86,8 +79,6 @@ TextureBatchKey HashTextureBatchKey(MatSpKey res_key, uint32_t material_index) {
     return MixKey(res_key ^ (static_cast<TextureBatchKey>(material_index) + 0x9e3779b97f4a7c15ull));
 }
 
-// Атласы ВСЕХ блоков, включая варианты: «все варианты слота в одном атласе» — предупреждение на
-// создании материала, а не отказ, и иначе вариант сэмплился бы из чужого атласа молча.
 AtlasBatchKey HashAtlasBatchKey(const ShaderProgram* sp,
                                 const std::vector<const TextureHandle*>& block_handles) {
     if (!sp) {
@@ -296,8 +287,6 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
     for (SubMeshData& submesh : model->submeshes)
     {
         const uint32_t si = submesh_index++;
-        // Модель обязана нести все номера сабмешей (иначе съедет адресация материалов), поэтому
-        // пустой сабмеш — норма. Узла ему не заводим: он стоил бы своей команды и своих инстансов.
         if (submesh.indexCount == 0) continue;
 
         if (submesh.material_index >= material_component.materials.size()) {
@@ -347,8 +336,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
                 };
                 new_batch.vertexStorageBuffers   = resolve_buffers(sp->vertex_shader_buffer_names);
                 new_batch.fragmentStorageBuffers = resolve_buffers(sp->fragment_shader_buffer_names);
-                // Индексный буфер — принадлежность пула, и вершинник запомнил его на создании:
-                // реестра пулов (ModelManager) у сборки батча нет и быть не должно.
+
                 if (VertexShaderData* vsd = sm->GetVertexShader(sp->vs_name)) {
                     new_batch.vertexBuffers = resolve_buffers(vsd->vertex_buffer_names);
                     if (vsd->index_buffer)
@@ -461,9 +449,6 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
     if (dirty_batches.exchange(false)) {
         BuildRenderBatches(pm, pass_manager, om, tm, sm, bm, mdm, mtm, scene);
         FinalizeOffsets(pass_manager, bm);
-        // Полная пересборка идёт в том же кадре, в котором место снесённых ресурсов возвращается
-        // аллокатору, поэтому слоты в полёте держат уже переиспользованные координаты — эпоха их
-        // отсекает (см. docs/internals/frame.md).
         ++rebuild_epoch;
         changed = true;
     }
@@ -502,8 +487,7 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
 
     {
         std::lock_guard<std::mutex> lock(delta_mutex);
-        // Полная пересборка и так отражает текущий ECS: дельту гасим, чтобы она не протекла
-        // в следующий инкремент.
+
         entities_to_create.clear();
         entities_to_delete.clear();
         entities_to_update.clear();
@@ -578,8 +562,6 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
 {
     uint32_t offset = 0;
 
-    // Один обход делает обе вещи: проставляет офсеты в ДЕРЕВЕ (по нему идут заливки) и строит
-    // новую версию СЛЕПКА для рендера — так они не могут разъехаться.
     auto layout = std::make_shared<RenderSnap::BatchLayout>();
     layout->passes.reserve(pass_manager->GetOrderedRenderPasses().size());
     layout->indirectBuffer = bm->GetBufferData(DefaultBuffersNames::DEFAULT_INDIRECT_BUFFER);
@@ -597,10 +579,10 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
         uint32_t pass_cmds = 0;
 
         pass_list.global_texture_bindings.reserve(rp->global_texture_bindings.size());
-        // Атлас без GPU-текстуры пропускаем: иначе забиндили бы null и сдвинули слоты батчевых
-        // сэмплеров.
+
         for (TextureAtlas* atlas : rp->global_texture_bindings) {
             if (!atlas || !atlas->texture_binding.texture) {
+                SDL_Log("BatchBuilder::FinalizeOffsets missing GPU texture in pass global_texture_bindings");
                 continue;
             }
             pass_list.global_texture_bindings.push_back(atlas->texture_binding);

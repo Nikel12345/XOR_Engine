@@ -5,51 +5,39 @@
 #include <memory>
 #include <functional>
 #include <SDL3/SDL_gpu.h>
-// UVL_Block/VariantLayout лежат в слепке ЗНАЧЕНИЯМИ (рендер копирует их в пуш) — нужен полный тип.
 #include "RenderCommandData.h"
 
 struct BufferData;
 struct PushConstantBinder;
 
-// Пер-слотовые CPU-слепки «что рисуем», которые sim готовит для рендер-потока ВМЕСТЕ с
-// GPU-буферами слота (та же фаза prepare, тот же слот). Рендер читает только их через
-// Ask*(slot) — живые ECS/дерево батчей ему запрещены. Синхронизация не нужна: sim пишет
-// слепок, пока владеет слотом (RESERVED), рендер читает после PREPARED — happens-before
-// даёт жизненный цикл слота (SlotController), ровно как у GPU-буферов.
-// Типы — чистые данные без логики; владельцы массивов [BUFFERING_LEVEL] — сами модули.
+// Пер-слотовые слепки «что рисуем»: sim готовит их в той же фазе и для того же слота, что и
+// GPU-буферы. Замков нет и не нужно — sim пишет слепок, пока владеет слотом, рендер читает после
+// того, как слот стал готовым, и happens-before даёт сам жизненный цикл слота (SlotController).
 namespace RenderSnap {
 
-    // Одна теневая камера = один слой теневого атласа. Порядок в cams — порядок записи
-    // LIGHT_CAMERA_BUFFER (spot → sphere×6 → direct-каскады): индекс = camera_index,
-    // совпадение с буфером гарантировано тем, что слепок пишет тот же модуль в тот же prepare.
+    // Порядок в cams = порядок записи LIGHT_CAMERA_BUFFER, поэтому индекс здесь и есть
+    // camera_index. Совпадение держится тем, что буфер и слепок пишет один модуль в один prepare.
     struct ShadowCam {
-        float   max_range = 0.0f;    // far камеры (spot/sphere: GetMaxDistance, direct: CascadeFar)
-        uint8_t is_ortho = 0;        // 1 — directional (ortho), см. ShadowPushData
-        uint8_t needs_render = 0;    // светокомпонентный needsUpdate на момент prepare
+        float   max_range = 0.0f;
+        uint8_t is_ortho = 0;
+        uint8_t needs_render = 0;
     };
 
     struct LightCams {
         std::vector<ShadowCam> cams;
-        // Число ИСТОЧНИКОВ (не камер) сцены слота — ровно столько записей залил в LIGHT_BUFFER
-        // этого слота StoreLightData того же prepare. Уезжает push-константой в лайтящие
-        // фрагментники: размер буфера счётчиком быть не может, он умеет только расти
-        // (EnsureBufferCapacity), см. LightDataModule.h.
+        // Число ИСТОЧНИКОВ, а не камер. Размером буфера его заменить нельзя: буфер умеет только
+        // расти и переживает сцену с бо́льшим числом светов.
         uint32_t num_lights = 0;
     };
 
-    // ── Плоская раскладка дерева батчей (двойник indirect_buffer[slot]) ──
-    // Иерархия зеркалит дерево (shader → atlas → texture), но значениями: рендер записывает
-    // команды слота ровно по той раскладке, по которой prepare залил его индирект.
-
     struct TextureDraw {
-        std::vector<UVL_Block> texture_uvl;             // копия для пуша uniform'а UVL
-        // Адресация той же таблицы (значением, как и она сама): рендер читает только слепок.
+        std::vector<UVL_Block> texture_uvl;
         VariantLayout variant_layout;
-        // Невладеющий указатель на живой Material::params (адрес стабилен — как в дереве).
-        // Содержимое UI может править на лету; это осознанно (мгновенный отклик слайдеров).
+        // Невладеющий указатель в живой Material: содержимое UI правит на лету, под рендером —
+        // это осознанный размен на мгновенный отклик слайдеров.
         const std::vector<uint8_t>* params = nullptr;
-        uint32_t indirect_command_index = 0;            // первая команда мультидроу, индекс ЛОКАЛЬНЫЙ для прохода
-        uint32_t draw_count = 0;                        // число команд (= model_batches)
+        uint32_t indirect_command_index = 0;   // первая команда мультидроу, ЛОКАЛЬНЫЙ индекс прохода
+        uint32_t draw_count = 0;
     };
 
     struct AtlasGroup {
@@ -60,11 +48,9 @@ namespace RenderSnap {
     struct ShaderGroup {
         std::shared_ptr<SDL_GPUGraphicsPipeline> pipeline;
         PushInstructions push_instructions;
-        // Вершинные СТРИМЫ пула из объявления vs (порядок = слоты пайплайна). Пустой список =
-        // резолв сорвался → draw пропускается (бинд не того стрима в слот = UB, не деградация).
+        // Пустой список (или nullptr у индексного) = резолв имени сорвался, и весь шейдер-батч
+        // пропускается: бинд не того стрима в слот пайплайна — UB, а не деградация картинки.
         std::vector<BufferData*> vertexBuffers;
-        // Индексный буфер пула, которому принадлежат стримы (у одного пула — один; резолв на
-        // сборке батча). nullptr = резолв сорвался → draw пропускается, как у стримов.
         BufferData* indexBuffer = nullptr;
         std::vector<BufferData*> vertexStorageBuffers;
         std::vector<BufferData*> fragmentStorageBuffers;
@@ -73,24 +59,17 @@ namespace RenderSnap {
 
     struct PassDrawList {
         std::vector<ShaderGroup> shaders;
-        // Глобальные сэмплеры прохода (тень, env-куб), УЖЕ отрезолвленные в SDL-биндинги на
-        // сборке батча. В самом RenderPassStep они лежат как TextureAtlas* (стабильные
-        // указатели): GPU-текстуру атласа могут пересоздать, и держать её копию с момента
-        // setup нельзя — протухнет. Резолв здесь, а не в цикле отрисовки: значение постоянно
-        // по всем шейдер-батчам прохода, а рендер обязан читать только слепок.
+        // Уже отрезолвленные биндинги: GPU-текстуру атласа могут пересоздать, поэтому копию,
+        // снятую на setup, держать нельзя.
         std::vector<SDL_GPUTextureSamplerBinding> global_texture_bindings;
-        uint32_t first_instance = 0;   // PIB-офсет начала прохода (сквозная нумерация FinalizeOffsets)
-        uint32_t num_instances = 0;    // сумма инстансов прохода
-        uint32_t num_commands = 0;     // сумма команд прохода (model-батчей)
+        uint32_t first_instance = 0;   // начало сегмента прохода во ВХОДНОМ PIB
+        uint32_t num_instances = 0;
+        uint32_t num_commands = 0;
     };
 
-    // Immutable после сборки; слоты шарят через shared_ptr (пересборка — только при
-    // изменении дерева, стамп слота — присваивание указателя, O(1)).
+    // Неизменяема после сборки, слоты делят её через shared_ptr.
     struct BatchLayout {
-        std::vector<PassDrawList> passes;   // индекс = RenderPassStep::ordinal (порядок ordered_passes)
-        // Индирект-буфер раскладки: GPU-двойник её команд. Один на всю раскладку (регионы
-        // проходов лежат в нём подряд), поэтому свойство раскладки, а не батча. Резолв на
-        // сборке — в цикле отрисовки остаётся пер-кадровый _GetGPUBufferForFrame, без лукапа.
+        std::vector<PassDrawList> passes;   // индекс = RenderPassStep::ordinal
         BufferData* indirectBuffer = nullptr;
     };
 

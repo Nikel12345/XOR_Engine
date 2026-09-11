@@ -6,7 +6,7 @@
 #include "Aliases.h"
 #include "MaterialData.h"
 #include "TextureData.h"
-#include "ModelData.h"   // SubMeshSpan в SubMeshDraw — по значению
+#include "ModelData.h"
 
 struct SubMeshData;
 struct BufferData;
@@ -15,18 +15,14 @@ struct TextureAtlas;
 
 class PassManager;
 
-// BatchKeys НЕ вливается в глобал директивой — ключи квалифицированы явно.
-
-// Строки трансформа нет: сущность transformless (её vs строит позицию сам) либо запись
-// ещё не заполнена. Оба случая обрабатываются одинаково - см. StorePIB.
+// Строки трансформа нет: сущность transformless (её vs строит позицию сам) либо запись ещё не
+// заполнена. Оба случая читаются одинаково.
 inline constexpr uint32_t kPibNoRow = 0xFFFFFFFFu;
 
-// Размещение сабмеша в буферах пула — ровно то, что уходит в indirect-команду, плюс диапазон
-// экранных размеров для слова LOD. Отдельно от SubMeshData по той же причине, по какой UVL_Block
-// отдельно от TextureData: сфера, AABB и счётчики вершин в кадр не едут.
-// Инвариант тот же, что у texture_uvl: значения копируются на сборке батча, поэтому смена
-// размещения ЖИВОЙ модели обязана триггерить пересборку батчей. Копия корректна потому, что
-// размещение финализирует ModelManager::PackModels ДО сборки дерева.
+// Размещение сабмеша — ровно то, что уходит в indirect-команду, плюс диапазон экранных размеров
+// для слова LOD. Батч копирует его ЗНАЧЕНИЯМИ, поэтому смена размещения живой модели обязана
+// пересобрать батчи; копия корректна, потому что ModelManager::PackModels финализирует размещение
+// до сборки дерева.
 struct SubMeshDraw {
     uint32_t index_count = 0;
     uint32_t index_offset = 0;
@@ -35,29 +31,16 @@ struct SubMeshDraw {
 };
 
 struct ModelBatchData {
-    // Запись PIB: сущность в старшей половине, её строка трансформа - в младшей.
-    //
-    // Зачем вместе. Сущность здесь - ИДЕНТИЧНОСТЬ: RemoveEntityFromBatches снимает запись
-    // swap-remove'ом и должна знать, КТО переехал, чтобы починить entity_slots. Строка же -
-    // производная координата (render_instance_base архетипа + индекс в нём), и добывать её
-    // на каждой заливке значило 800k случайных чтений таблицы. Поэтому строка кэшируется
-    // прямо в записи, а не выводится заново.
-    //
-    // Почему один элемент, а не два вектора: тогда каждый swap-remove/pop_back пришлось бы
-    // дублировать, и вторая половина рано или поздно разъехалась бы с первой. Здесь
-    // расходиться нечему - вся арифметика индексов работает с записью целиком и не знает,
-    // что элемент стал шире.
+    // Запись PIB: сущность в старшей половине, её строка трансформа — в младшей. Сущность нужна
+    // как ИДЕНТИЧНОСТЬ (swap-remove обязан знать, кто переехал, чтобы починить entity_slots),
+    // строка — как кэш координаты. Один элемент, а не два вектора: тогда swap-remove пришлось бы
+    // дублировать, и половины рано или поздно разъехались бы.
     std::vector<uint64_t> pib_sub_buffer;
     uint32_t firstInstance = 0;
     uint32_t instanceCount = 0;
     SubMeshDraw submesh;
 };
 
-
-// UVL батча — то, что пушится fragment-uniform'ом материала (в шейдере это uint4, см.
-// material_api.hlsl). Отдельно от TextureData: та — CPU-запись о размещении в атласе и на GPU
-// не едет, поэтому её поля (число слоёв и прочая бухгалтерия упаковщика) сюда не просачиваются.
-// У глиф-буфера своя раскладка со своим смыслом четвёртого слова — см. GlyphUVL в FontManager.h.
 struct alignas(16) UVL_Block {
     uint32_t uv_packed_offset = 0;
     uint32_t uv_packed_scale = 0;
@@ -68,55 +51,40 @@ inline UVL_Block MakeUVL(const TextureData& td) {
     return { td.uv_packed_offset, td.uv_packed_scale, td.layer };
 }
 
-// Как адресовать таблицу texture_uvl: по слову на текстурный слот шейдера + номер материала.
-// Пушится fragment-uniform'ом рядом с самой таблицей, поэтому ЦЕЛИКОМ входит в ключ
-// texture-батча (после 3e47d7b ключ не содержит идентичности материала — разные материалы
-// схлопываются в один узел и получили бы чужой пуш).
+// Как адресовать таблицу texture_uvl. Зеркало cbuffer'а в material_api.hlsl, поэтому раскладка
+// слова — контракт с шейдером:
+//   (base << 16) | (cell << 8) | count
+//   base  — индекс ПЕРВОГО блока слота в таблице (индекс блока слота s НЕ равен s);
+//   cell  — ячейка секции состояний, осмысленна только при count > 1;
+//   count — сколько у слота вариантов.
 struct VariantLayout {
-    // (base << 16) | (cell << 8) | count на слот:
-    //   base  — индекс ПЕРВОГО блока слота в texture_uvl (таблица сгруппирована по слотам,
-    //           внутри группы [0] — дефолт). Индекс блока слота s НЕ равен s — только через base;
-    //   cell  — ячейка секции состояний под этот слот (осмысленна только при count > 1);
-    //   count — сколько у слота вариантов (1 = слот невариативен, состояние не читается).
-    // Порядок слотов = ShaderProgram::required_slots — тот же, по которому собран texture_uvl.
     uint32_t slot[MAX_SLOTS] = {};
-    // Каким по счёту этот материал идёт у сущности (= submesh.material_index): смещение секции
-    // в элементе считается как material_index * MAX_VARIATIVE_SLOTS.
     uint32_t material_index = 0;
 };
 
 struct TextureBatchData {
     std::unordered_map<BatchKeys::ModelBatchKey, ModelBatchData> model_batches;
-	// UVL хранится ЗНАЧЕНИЯМИ (не указателями): непрерывный блок → прямой пуш в Execute
-	// без per-draw сбора разбросанных указателей. Инвариант: значения копируются при
-	// сборке батча, поэтому смена UVL ЖИВОЙ текстуры (репак/компактизация атласа) ОБЯЗАНА
-	// триггерить BuildRenderBatches. Добавление/удаление текстур этого не нарушают: чужие
-	// UVL не двигаются, а батч удаляемой текстуры и так пересобирается.
+	// Значениями, а не указателями: непрерывный блок уходит в пуш как есть. Инвариант — смена UVL
+	// ЖИВОЙ текстуры (репак атласа) обязана пересобрать дерево; добавление и удаление текстур его
+	// не нарушают.
 	std::vector<UVL_Block> texture_uvl;
-    VariantLayout variant_layout;   // как адресовать texture_uvl (см. выше)
+    VariantLayout variant_layout;
     uint32_t indirect_command_index = 0;
-    const std::vector<uint8_t>* params = nullptr;   // → &Material::params (невладеющий; адрес стабилен; alpha и пр. факторы внутри)
+    const std::vector<uint8_t>* params = nullptr;
 };
 
-// ПЕР-МАТЕРИАЛЬНАЯ половина texture/atlas-батча: всё, что батч берёт из пары (материал, sp) и
-// что от сущности не зависит ВОВСЕ. Считается предпроходом BatchBuilder::BuildMaterialLayouts —
-// один раз на пару вместо четырёх обходов required_slots с резолвом имён НА КАЖДУЮ сущность.
-// От сущности зависит ровно одно — material_index, и он домешивается в ключ на месте.
+// Пер-материальная половина узла: всё, что батч берёт из пары (материал, sp) и от сущности не
+// зависит. Считается предпроходом один раз на пару, а не на каждую сущность.
 struct MatSpLayout {
-    std::vector<UVL_Block>                    uvl;              // таблица целиком (слоты подряд, внутри слота дефолт первым)
-    std::vector<SDL_GPUTextureSamplerBinding> texture_binding;  // атласы слотов, порядок = required_slots
-    uint32_t                slot[MAX_SLOTS] = {};               // слова VariantLayout::slot
-    BatchKeys::MatSpKey     res_key = 0;                        // ресурсный вклад в ключ texture-батча
-    BatchKeys::AtlasBatchKey atlas_key = 0;                     // от material_index не зависит — берётся как есть
-    // false = слот не собрать (нет текстуры и нет dummy) → sp у этого материала не рисуется.
-    // Логируется ЗДЕСЬ, один раз на материал, а не миллион раз на сущностях.
+    std::vector<UVL_Block>                    uvl;
+    std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
+    uint32_t                slot[MAX_SLOTS] = {};
+    BatchKeys::MatSpKey     res_key = 0;
+    BatchKeys::AtlasBatchKey atlas_key = 0;
     bool                    bindable = false;
-    // Есть ли у ЭТОЙ sp хоть один слот с вариантами (count > 1). Если нет — гард count > 1 в
-    // шейдере не пускает ни одно чтение состояния, значит material_index в этом узле не читается
-    // ВООБЩЕ, и вносить его в ключ незачем. Разница не косметическая: без этого гейта узел, в
-    // котором все материалы схлопнулись (ShadowCaster — ни params, ни различий по текстурам),
-    // дробился бы по номеру сабмеша, и теневой проход давал бы 6 draw'ов вместо одного.
-    // Сцена без вариантов при этом остаётся байт-в-байт прежним деревом.
+    // Есть ли у sp хоть один слот с вариантами. Если нет, шейдер состояние не читает вовсе,
+    // поэтому material_index в ключ узла не идёт — иначе узел, в котором схлопнулись все материалы
+    // (ShadowCaster), дробился бы по номеру сабмеша и давал дроу на каждый.
     bool                    variative = false;
 };
 
@@ -129,7 +97,6 @@ struct ShaderBatchData {
     PushInstructions push_instructions;
     std::unordered_map<BatchKeys::AtlasBatchKey, AtlasBatchData> atlases_batches;
 	std::vector<BufferData*> vertexBuffers;
-	// Индексный буфер пула, которому принадлежат стримы vs (у одного пула — один).
 	BufferData* indexBuffer = nullptr;
     std::vector<BufferData*> vertexStorageBuffers;
     std::vector<BufferData*> fragmentStorageBuffers;
@@ -137,29 +104,23 @@ struct ShaderBatchData {
 };
 
 struct RenderPassTexturesInfo {
-    // append-only: КАЖДЫЙ вызов добавляет новый color target (MRT). Один вызов → один таргет,
-    // два вызова → два выхода фрагментного шейдера (location 0,1) за один проход геометрии.
+    // append-only: каждый вызов добавляет НОВЫЙ color target, то есть ещё один выход фрагментника
+    // (MRT), а не переписывает прежний.
     void CreateColorTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_FColor color, SDL_GPUTextureFormat format);
     void CreateDepthTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_GPUTextureFormat format);
-    // Таргеты задаются АТЛАСАМИ, не сырыми SDL_GPUTexture*: GPU-текстуры на момент объявления
-    // прохода ещё не существует (её создаёт бейк), а ресайз её подменяет. Резолв — на исполнении
-    // (ResolveTargets), поэтому ни бейк, ни ресайз не требуют переназначать таргеты по проходам.
+    // Таргеты задаются АТЛАСАМИ: GPU-текстуры на момент объявления прохода ещё нет (её создаёт
+    // бейк), а ресайз её подменяет. Резолв — на исполнении.
     void SetColorTexture(TextureAtlas* atlas, uint32_t index = 0);
     void SetDepthTexture(TextureAtlas* atlas);
-    // Атласы → colorTargetInfos[i].texture / depthTargetInfo.texture.
     void ResolveTargets();
 
     void SetColorTargetInfoLayer(uint32_t layer, uint32_t index = 0) { colorTargetInfos[index].layer_or_depth_plane = layer; };
-    // Параллельные массивы: colorTargetInfos[i] — рантайм-привязка (texture/clear/layer),
-    // color_formats[i] — формат таргета i для построения пайплайна (PipeManager),
-    // color_atlases[i] — ИСТОЧНИК текстуры таргета i (резолв в ResolveTargets).
-    // Размер = число MRT-выходов.
+    // Параллельные массивы по числу MRT-выходов: привязка, формат для пайплайна, источник.
     std::vector<SDL_GPUColorTargetInfo> colorTargetInfos;
     std::vector<SDL_GPUTextureFormat>   color_formats;
     std::vector<TextureAtlas*>          color_atlases;
     SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUDepthStencilTargetInfo depthTargetInfo{};
-    // Источник depth: атлас (или nullptr — проход без depth). depth-таргет — обычный TextureAtlas.
     TextureAtlas*      depth_atlas = nullptr;
 };
 
@@ -167,68 +128,45 @@ struct RenderPassStep {
     RenderPassTexturesInfo renderPassTexsData;
     std::unordered_map<BatchKeys::ShaderBatchKey, ShaderBatchData> shader_batches;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function;
-    // Глобальные сэмплеры прохода (слоты 0..N-1 фрагментного шейдера, ДО батчевых): тень, env-куб.
-    // Держим АТЛАСЫ, а не готовые SDL_GPUTextureSamplerBinding: указатель на атлас стабилен, а
-    // GPU-текстуру внутри могут пересоздать — копия биндинга, снятая на setup, протухнет (и под
-    // отложенной инициализацией GPU-ресурсов её на setup ещё попросту нет). Резолв в SDL-биндинги —
-    // на сборке батча, в слепок (RenderSnap::PassDrawList::global_texture_bindings). Ровно тот же
-    // приём, что у compute (ComputeShaderBatchData::texture_binding) и у BlitPassStep.
-    // Роль однозначна — SDL_BindGPUFragmentSamplers, т.е. для каждого атласа это SAMPLER.
-    // ЗАПОЛНЯТЬ ТОЛЬКО ЧЕРЕЗ SetGlobalTextures — он же собирает флаг в атласы.
+    // Глобальные сэмплеры прохода (тень, env-куб) в слотах ДО батчевых. Держим атласы, а не
+    // готовые биндинги, по той же причине, что и таргеты. ЗАПОЛНЯТЬ ТОЛЬКО ЧЕРЕЗ SetGlobalTextures:
+    // он же копит атласам флаг SAMPLER.
     std::vector<TextureAtlas*> global_texture_bindings;
-    // Единственная точка записи global_texture_bindings: ставит атласы и копит им SAMPLER.
     void SetGlobalTextures(std::vector<TextureAtlas*> atlases);
 
-    // Сколько индексов рисует КАЖДАЯ команда прохода; 0 = столько, сколько у сабмеша (обычный
-    // случай, весь меш). Ненулевое значение нужно проходам, которые рисуют не геометрию объекта,
-    // а по одному примитиву на инстанс: сплат-проход ставит 1, его вершинник геометрию не читает
-    // и строит позицию из строки трансформа. Без этого поля сплат нарисовал бы по точке НА ИНДЕКС,
-    // то есть 36 примитивов на куб — хуже, чем 12 треугольников, ради которых всё затевалось.
-    // Свойство именно ПРОХОДА, а не sp: команду собирает StoreIndirect, обходящий проходы.
+    // Сколько индексов рисует КАЖДАЯ команда прохода; 0 = сколько у сабмеша. Ненулевое нужно
+    // проходам, рисующим по одному примитиву на инстанс: сплат ставит 1, иначе он дал бы точку
+    // НА ИНДЕКС. Свойство прохода, а не sp: команды собирает обход проходов.
     uint32_t override_index_count = 0;
-    // ТОЛЬКО для UI (дропдаун прохода у sp) и логов. В логике не использовать: sp хранит имя
-    // прохода сама (render_pass_name) — см. правило про debug_name в CLAUDE.md.
 
-    // ── Состояние прохода ──
-    // То, что раньше было ЛОКАЛЬНОЙ структурой в теле прохода: тело пишет свои поля сюда и
-    // отдаёт указатель на блоб вниз (push_data_raw), а push-функции программ собирают из него
-    // свои cbuffer'ы. Разница с локальной переменной ровно одна — хранилище ПЕРЕЖИВАЕТ кадр,
-    // поэтому его можно показать редактору: поля, которые тело не переписывает, и есть настройки
-    // прохода. Схема — по имени в ParamsSpecRegistry::Passes() (ставит SetPassState).
-    // ПОТОКИ: пишет render-поток (тело прохода) и он же UI (UI рисуется внутри RenderFunc).
+    // Состояние прохода: тело прохода пишет сюда свои поля и отдаёт указатель вниз, а push-функции
+    // программ собирают из него свои cbuffer'ы. От локальной переменной отличается тем, что
+    // переживает кадр, — поэтому поля, которые тело не переписывает, редактор показывает как
+    // настройки прохода. Схема — по имени в ParamsSpecRegistry::Passes().
+    // ПОТОКИ: пишет render-поток (тело прохода) и он же UI — UI рисуется внутри RenderFunc.
     std::vector<uint8_t> state;
     std::string          state_type;
-    // Типизированный доступ тела прохода к своему же блобу. nullptr — если состояние не заводили
-    // или его размер меньше T: это рассинхрон объявления и использования, а не штатный случай.
+    // nullptr = состояния не заводили или оно меньше T: рассинхрон объявления и использования.
     template<class T> T* State() {
         return state.size() >= sizeof(T) ? reinterpret_cast<T*>(state.data()) : nullptr;
     }
     std::string debug_name;
     int pass_index = -1;
-    // Порядковый номер в ordered_passes (ставит FillRenderPasses) — индекс прохода в
-    // RenderSnap::BatchLayout::passes. Стабилен после старта.
+    // Индекс прохода в RenderSnap::BatchLayout::passes. Стабилен после старта.
     uint32_t ordinal = 0;
 };
 
-
-// Блит-проход: ОДИН блит src→dst, целиком ДАННЫЕ (без render_function). Функтора здесь нет
-// намеренно: усложни его до лямбды — и вывод usage-флагов снова станет невозможен (внутрь
-// std::function не заглянуть), а блит ЕДИНСТВЕННАЯ операция вне шейдерных биндов, которой
-// флаги реально нужны: SDL требует SAMPLER у src и COLOR_TARGET у dst (проверено зондом,
-// sandbox/BlitUsageProbe.cpp; в докстрингах SDL этого нет). Нужно несколько блитов — заводи
-// несколько проходов, порядок задаёт pass_index.
-//
-// src/dst — TextureAtlas* (НЕ SDL_GPUTexture*): указатель на атлас стабилен, а текстуру внутри
-// подменяют (ResizeSceneHDRTargets пересоздаёт HDR-таргеты; свопчейн-атлас PassManager'а меняет
-// её каждый кадр). Поэтому шаг переживает и ресайз, и смену свопчейна без перепривязки.
+// Блит-проход целиком ДАННЫЕ, без функтора: из лямбды не вывести usage-флаги, а блиту они нужны
+// как никому (SDL требует SAMPLER у src и COLOR_TARGET у dst). Нужно несколько блитов — заводи
+// несколько проходов. src/dst — атласы: текстуру внутри подменяют ресайз и смена свопчейна.
 struct BlitPassStep {
     TextureAtlas* src = nullptr;
-    TextureAtlas* dst = nullptr;   // может быть свопчейн-атлас (PassManager::GetSwapchainAtlas)
+    TextureAtlas* dst = nullptr;
     uint32_t src_mip = 0;
     uint32_t src_layer = 0;
     SDL_GPUFilter filter = SDL_GPU_FILTER_NEAREST;
     SDL_GPULoadOp load_op = SDL_GPU_LOADOP_DONT_CARE;
-    std::string debug_name;   // ТОЛЬКО для UI/логов (см. CLAUDE.md)
+    std::string debug_name;
     int pass_index = -1;
 };
 
@@ -241,8 +179,10 @@ struct ComputeRWStorageTextureRef {
 struct ComputeShaderBatchData {
     PushInstructions push_instructions;
     std::function<void(DispatchSizeBinder&, const void*)> dispatch_func = {};
-    std::vector<BufferData*> ro_storage_buffers; // set=0, SDL_BindGPUComputeStorageBuffers
-    std::vector<BufferData*> rw_storage_buffers; // set=1, SDL_BeginGPUComputePass
+    // Разные точки бинда: ro идут set=0 (SDL_BindGPUComputeStorageBuffers), rw — set=1
+    // (объявляются при старте compute-пасса).
+    std::vector<BufferData*> ro_storage_buffers;
+    std::vector<BufferData*> rw_storage_buffers;
     std::vector<TextureAtlas*> ro_storage_textures;
     std::vector<ComputeRWStorageTextureRef> rw_storage_textures;
     std::vector<TextureAtlas*> texture_binding;
@@ -255,25 +195,12 @@ struct ComputeShaderBatchData {
 struct ComputePassStep {
     std::vector<ComputeShaderBatchData> shader_batches;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function;
-    // ТОЛЬКО для UI/логов (см. CLAUDE.md): csp хранит имя прохода сама (compute_pass_name).
-    // NB про резолв по этому имени: пространство имён у пассов и препассов ОБЩЕЕ —
-    // CreateComputePass/CreateComputePrepass отказывают, если имя занято в соседнем реестре,
-    // поэтому «сначала пасс, иначе препасс» однозначно.
-    // ── Состояние прохода ──
-    // То, что раньше было ЛОКАЛЬНОЙ структурой в теле прохода: тело пишет свои поля сюда и
-    // отдаёт указатель на блоб вниз (push_data_raw), а push-функции программ собирают из него
-    // свои cbuffer'ы. Разница с локальной переменной ровно одна — хранилище ПЕРЕЖИВАЕТ кадр,
-    // поэтому его можно показать редактору: поля, которые тело не переписывает, и есть настройки
-    // прохода. Схема — по имени в ParamsSpecRegistry::Passes() (ставит SetPassState).
-    // ПОТОКИ: пишет render-поток (тело прохода) и он же UI (UI рисуется внутри RenderFunc).
+    // Состояние прохода — см. RenderPassStep::state.
     std::vector<uint8_t> state;
     std::string          state_type;
-    // Типизированный доступ тела прохода к своему же блобу. nullptr — если состояние не заводили
-    // или его размер меньше T: это рассинхрон объявления и использования, а не штатный случай.
     template<class T> T* State() {
         return state.size() >= sizeof(T) ? reinterpret_cast<T*>(state.data()) : nullptr;
     }
     std::string debug_name;
     int pass_index = -1;
 };
-

@@ -26,8 +26,6 @@ static bool SameRegions(const PassRegions& a, const PassRegions& b)
 
 uint32_t IndirectDataModule::CalculateIndirectSize(const PassRegions& regions, uint64_t revision, uint8_t slot)
 {
-	// Гейт из двух вещей: команды зависят от ревизии батчей, а их размещение — от раскладки
-	// регионов, которая меняется и без неё (добавили теневой свет, сняли ShadowCaster).
 	if (revision == last_revision[slot] && SameRegions(regions, last_regions[slot])) return 0;
 	last_revision[slot] = revision;
 	last_regions[slot] = regions;
@@ -49,8 +47,6 @@ void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, Uploa
 		const RenderPassStep* rp = ordered[pass_i];
 
 		for (uint32_t b = 0; b < reg.command_blocks_count; ++b) {
-			// Смещение от начала сегмента НАКАПЛИВАЕМ: то же число получилось бы вычитанием базы
-			// из firstInstance, но беззнаковое вычитание при рассинхроне молчит.
 			uint32_t local_fi = 0;
 
 			for (const auto& [_, shader_batch] : rp->shader_batches) {
