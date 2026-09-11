@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <bit>
 #include <vector>
 #include <unordered_map>
 #include <memory>
@@ -26,8 +27,6 @@ struct SubMeshDraw {
     SubMeshSpan screen_size_span{};
 };
 
-// Сущность здесь — ИДЕНТИЧНОСТЬ: swap-remove обязан знать, кто переехал, чтобы починить
-// entity_slots. Строка — кэш координаты, её добивает заливка PIB.
 struct PibRecord {
     uint32_t entity = 0;
     uint32_t row = kPibNoRow;
@@ -50,16 +49,20 @@ inline UVL_Block MakeUVL(const TextureData& td) {
     return { td.uv_packed_offset, td.uv_packed_scale, td.layer };
 }
 
-// base — индекс ПЕРВОГО блока слота в таблице (индекс блока слота s НЕ равен s), cell — ячейка
-// секции состояний (осмысленна при count > 1), count — сколько у слота вариантов. Разбирает слово
-// TexIndex в material_api.hlsl.
-inline constexpr uint32_t MakeSlotWord(uint32_t base, uint32_t cell, uint32_t count) {
-    return (base << 16) | (cell << 8) | count;
-}
+// Адресация слота в таблице texture_uvl. Поля объявлены от МЛАДШЕГО байта: в памяти получается
+// ровно то слово, которое разбирает TexIndex в material_api.hlsl.
+struct SlotWord {
+    uint8_t  count = 0;
+    uint8_t  cell  = 0;   // ячейка секции состояний; осмысленна при count > 1
+    uint16_t base  = 0;   // индекс ПЕРВОГО блока слота в таблице: индекс блока слота s НЕ равен s
+};
+static_assert(std::endian::native == std::endian::little,
+              "SlotWord ложится в GPU-слово побайтно");
+static_assert(sizeof(SlotWord) == sizeof(uint32_t) && alignof(SlotWord) <= alignof(uint32_t));
 
 // Как адресовать таблицу texture_uvl; зеркало cbuffer'а в material_api.hlsl.
 struct VariantLayout {
-    uint32_t slot[MAX_SLOTS] = {};
+    SlotWord slot[MAX_SLOTS] = {};
     uint32_t material_index = 0;
 };
 
@@ -79,7 +82,7 @@ struct TextureBatchData {
 struct MatSpLayout {
     std::vector<UVL_Block>                    uvl;
     std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
-    uint32_t                slot[MAX_SLOTS] = {};
+    SlotWord                slot[MAX_SLOTS] = {};
     BatchKeys::MatSpKey     res_key = 0;
     BatchKeys::AtlasBatchKey atlas_key = 0;
     bool                    bindable = false;

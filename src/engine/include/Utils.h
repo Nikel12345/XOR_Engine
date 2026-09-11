@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cassert>
 #include <limits>
 #include <cstddef>
@@ -43,6 +43,16 @@ inline uint8_t safe_i_u8(int val) {
     assert(val >= 0);
     assert(val <= static_cast<int>(std::numeric_limits<uint8_t>::max()));
     return static_cast<uint8_t>(val);
+}
+
+inline uint8_t safe_u32_u8(uint32_t val) {
+    assert(val <= std::numeric_limits<uint8_t>::max());
+    return static_cast<uint8_t>(val);
+}
+
+inline uint16_t safe_u32_u16(uint32_t val) {
+    assert(val <= std::numeric_limits<uint16_t>::max());
+    return static_cast<uint16_t>(val);
 }
 
 inline float safe_sint32_f(Sint32 val) {

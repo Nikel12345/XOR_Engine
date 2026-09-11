@@ -52,7 +52,7 @@ MatSpKey HashMatSpMemo(const Material* mat, const ShaderProgram* sp,
 }
 
 MatSpKey HashMatSpResources(const ShaderProgram* sp, const std::vector<uint8_t>* params,
-                            const uint32_t* slot_words,
+                            const SlotWord* slot_words,
                             const std::vector<const TextureHandle*>& block_handles) {
     if (!sp) {
         return 0xFFFFFFFFFFFFFFFFull;
@@ -62,7 +62,9 @@ MatSpKey HashMatSpResources(const ShaderProgram* sp, const std::vector<uint8_t>*
     for (size_t s = 0; s < slot_count; ++s) {
         // Роль и её адресация идут в ключ всегда: «текстуры нет» — такое же состояние узла.
         key += static_cast<MatSpKey>(sp->required_slots[s]) + 0x9e3779b97f4a7c15ull;
-        key ^= static_cast<MatSpKey>(slot_words[s]);
+        key ^= static_cast<MatSpKey>(slot_words[s].base)
+             | (static_cast<MatSpKey>(slot_words[s].cell) << 16)
+             | (static_cast<MatSpKey>(slot_words[s].count) << 24);
         key *= 0xff51afd7ed558ccd;
         key ^= key >> 29;
     }
@@ -255,7 +257,7 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
                     && "BuildMaterialLayouts: material without variants must yield the legacy UVL table");
 
                 if (s < MAX_SLOTS)
-                    lay.slot[s] = MakeSlotWord(base, cell, count);
+                    lay.slot[s] = { safe_u32_u8(count), safe_u32_u8(cell), safe_u32_u16(base) };
             }
 
             if (!lay.bindable) {
