@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 //  Sandbox: полная череда ТРЁХ очередей на одном буфере.
 //
 //    фаза 1  КОПИРОВАЛЬНАЯ   заливает вершины треугольника
@@ -205,11 +205,11 @@ int main(int, char**)
             // штатное рисует ИНСТАНСНЫМ ИНДИРЕКТОМ по слепку батчей, а у зонда ни моделей,
             // ни инстансов, ни каллинга нет — и заводить их ради треугольника незачем.
             rp.renderPassTexsData.ResolveTargets();
-            if (!rp.renderPassTexsData.colorTargetInfos[0].texture) return;   // кадра нет
+            if (rp.renderPassTexsData.color_targets.empty() || !rp.renderPassTexsData.color_targets[0].info.texture) return;   // кадра нет
 
-            SDL_GPURenderPass* sdl_rp = SDL_BeginGPURenderPass(
-                cb, rp.renderPassTexsData.colorTargetInfos.data(),
-                (Uint32)rp.renderPassTexsData.colorTargetInfos.size(), nullptr);
+            SDL_GPUColorTargetInfo color_infos[MAX_COLOR_TARGETS];
+            const Uint32 color_count = rp.renderPassTexsData.CollectColorTargetInfos(color_infos, MAX_COLOR_TARGETS);
+            SDL_GPURenderPass* sdl_rp = SDL_BeginGPURenderPass(cb, color_infos, color_count, nullptr);
 
             BufferData* vb = bm.GetBufferData(GeometryStreams::VERTEX_POS_BUFFER);
             if (*pipeline_slot && vb && vb->Static.buffer) {

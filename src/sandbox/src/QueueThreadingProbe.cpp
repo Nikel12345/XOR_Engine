@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 //  Sandbox: очереди под НАСТОЯЩИМ конвейером потоков движка.
 //
 //  Одно­поточный зонд (TransferQueueProbe.cpp) доказал маршрутизацию: заливка на
@@ -171,11 +171,11 @@ int main(int, char**)
             [&bm, VPOS, pipeline_slot](SDL_GPUCommandBuffer* cb, PassManager* p, RenderPassStep& rp)
         {
             rp.renderPassTexsData.ResolveTargets();
-            if (!rp.renderPassTexsData.colorTargetInfos[0].texture) return;
+            if (rp.renderPassTexsData.color_targets.empty() || !rp.renderPassTexsData.color_targets[0].info.texture) return;
 
-            SDL_GPURenderPass* sdl_rp = SDL_BeginGPURenderPass(
-                cb, rp.renderPassTexsData.colorTargetInfos.data(),
-                (Uint32)rp.renderPassTexsData.colorTargetInfos.size(), nullptr);
+            SDL_GPUColorTargetInfo color_infos[MAX_COLOR_TARGETS];
+            const Uint32 color_count = rp.renderPassTexsData.CollectColorTargetInfos(color_infos, MAX_COLOR_TARGETS);
+            SDL_GPURenderPass* sdl_rp = SDL_BeginGPURenderPass(cb, color_infos, color_count, nullptr);
 
             BufferData* vb = bm.GetBufferData(VPOS);
             if (*pipeline_slot && vb && vb->Static.buffer) {

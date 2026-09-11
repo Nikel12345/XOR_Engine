@@ -360,7 +360,7 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
         // атласами, texture заполняет только ResolveTargets). Старый комментарий про свопчейн
         // протух: цвет — scene_hdr, привязан в setup.
         rp.renderPassTexsData.ResolveTargets();
-        if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
+        if (rp.renderPassTexsData.color_targets.empty() || !rp.renderPassTexsData.color_targets[0].info.texture) return;
         // Цвет рамок прокидываем как push_data_raw — его читает push_func дебаг-шейдера
         // (fragment slot 0). Другие программы к этому пассу не привязаны.
         pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
@@ -410,7 +410,7 @@ void DefaultRenderPassNamespace::SetDefaultSplatPass(EngineContext* ctx)
         // Резолв ДО гарда — иначе вечный пропуск (таргеты привязаны атласами, texture заполняет
         // только ResolveTargets); та же причина, что у DEBUG_PASS.
         rp.renderPassTexsData.ResolveTargets();
-        if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
+        if (rp.renderPassTexsData.color_targets.empty() || !rp.renderPassTexsData.color_targets[0].info.texture) return;
         pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
     },
         std::move(splat_rptd),
@@ -457,7 +457,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx, LightDat
         // никогда не выполняются → проход пропускается ВЕЧНО. Повторный резолв в
         // RenderPassStandardBody идемпотентен и дёшев.
         rp.renderPassTexsData.ResolveTargets();
-        if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
+        if (rp.renderPassTexsData.color_targets.empty() || !rp.renderPassTexsData.color_targets[0].info.texture) return;
         pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
     },
         std::move(transparent_rptd),
@@ -492,7 +492,7 @@ void DefaultRenderPassNamespace::SetUIPass(EngineContext* ctx)
         [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
         rp.renderPassTexsData.ResolveTargets();
-        if (rp.renderPassTexsData.colorTargetInfos.empty() || !rp.renderPassTexsData.colorTargetInfos[0].texture) return;
+        if (rp.renderPassTexsData.color_targets.empty() || !rp.renderPassTexsData.color_targets[0].info.texture) return;
         pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
     },
         std::move(ui_rptd),

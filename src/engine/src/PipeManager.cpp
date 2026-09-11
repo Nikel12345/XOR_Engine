@@ -78,10 +78,11 @@ std::shared_ptr<SDL_GPUGraphicsPipeline> PipeManager::GetOrCreatePipeline(Shader
     pci.depth_stencil_state.compare_op = sp->spd.depth_compare_op;
 
 
-    const auto& color_formats = pass->renderPassTexsData.color_formats;
+    const auto& color_targets = pass->renderPassTexsData.color_targets;
     std::vector<SDL_GPUColorTargetDescription> ctds;
-    ctds.reserve(color_formats.size());
-    for (SDL_GPUTextureFormat fmt : color_formats) {
+    ctds.reserve(color_targets.size());
+    for (const ColorTarget& target : color_targets) {
+        const SDL_GPUTextureFormat fmt = target.format;
         SDL_GPUColorTargetDescription ctd;
         if (fmt != SDL_GPU_TEXTUREFORMAT_INVALID) {
             SDL_zero(ctd);

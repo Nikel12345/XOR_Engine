@@ -80,10 +80,6 @@ struct MatSpLayout {
     BatchKeys::MatSpKey     res_key = 0;
     BatchKeys::AtlasBatchKey atlas_key = 0;
     bool                    bindable = false;
-    // Есть ли у sp хоть один слот с count > 1. Поле CPU-шное, шейдер его не видит: у него свой
-    // гейт на каждом слоте. Но если вариативных слотов нет, ни одно чтение состояния там не
-    // пройдёт, значит material_index не используется и в ключ узла не идёт — иначе узел, в котором
-    // схлопнулись все материалы (ShadowCaster), дробился бы по номеру сабмеша.
     bool                    variative = false;
 };
 
@@ -102,22 +98,29 @@ struct ShaderBatchData {
     std::shared_ptr<SDL_GPUGraphicsPipeline> pipeline;
 };
 
+// Потолок SDL (MAX_COLOR_TARGET_BINDINGS в его исходниках).
+inline constexpr uint32_t MAX_COLOR_TARGETS = 8;
+
+struct ColorTarget {
+    SDL_GPUColorTargetInfo info{};                                   // рантайм-привязка: текстура, clear, слой
+    SDL_GPUTextureFormat   format = SDL_GPU_TEXTUREFORMAT_INVALID;   // для построения пайплайна
+    TextureAtlas*          atlas = nullptr;                          // источник текстуры, резолвится на исполнении
+};
+
 struct RenderPassTexturesInfo {
     // append-only: каждый вызов добавляет НОВЫЙ color target, то есть ещё один выход фрагментника
-    // (MRT), а не переписывает прежний.
     void CreateColorTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_FColor color, SDL_GPUTextureFormat format);
     void CreateDepthTextureInfo(SDL_GPULoadOp load_op, SDL_GPUStoreOp store_op, SDL_GPUTextureFormat format);
-    // Таргеты задаются АТЛАСАМИ: GPU-текстуры на момент объявления прохода ещё нет (её создаёт
-    // бейк), а ресайз её подменяет. Резолв — на исполнении.
+
     void SetColorTexture(TextureAtlas* atlas, uint32_t index = 0);
     void SetDepthTexture(TextureAtlas* atlas);
     void ResolveTargets();
 
-    void SetColorTargetInfoLayer(uint32_t layer, uint32_t index = 0) { colorTargetInfos[index].layer_or_depth_plane = layer; };
-    // Параллельные массивы по числу MRT-выходов: привязка, формат для пайплайна, источник.
-    std::vector<SDL_GPUColorTargetInfo> colorTargetInfos;
-    std::vector<SDL_GPUTextureFormat>   color_formats;
-    std::vector<TextureAtlas*>          color_atlases;
+    void SetColorTargetInfoLayer(uint32_t layer, uint32_t index = 0) { color_targets[index].info.layer_or_depth_plane = layer; };
+    // SDL хочет непрерывный массив info — собирается на исполнении, возвращается число таргетов.
+    uint32_t CollectColorTargetInfos(SDL_GPUColorTargetInfo* out, uint32_t capacity) const;
+
+    std::vector<ColorTarget> color_targets;
     SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUDepthStencilTargetInfo depthTargetInfo{};
     TextureAtlas*      depth_atlas = nullptr;
