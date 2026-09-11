@@ -42,8 +42,6 @@ void Engine::PrepareFunc(uint8_t slot)
 		PROF_SCOPE(Sim, " trash+reclaim");
 		const uint64_t fences_done = slot_controller->RenderFencesDone();
 		buffer_manager->TrashBuffers(fences_done);
-		// Обязано идти ДО размещения новой пачки: только так перезагруженная модель садится в
-		// освободившееся от неё же место. Фенса не ждёт — освобождается разметка, а не ресурс.
 		model_manager->ReclaimRanges();
 	}
 
@@ -157,6 +155,8 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 		slot_controller->PushUploadFence(slot, upload_cb.SubmitAndAcquireFence());
 	}
 
+	// Запись идёт на графическую очередь, так что fence этого CB стопит поток рендера
+	// Контролируется гейтом
 	if (texture_manager->IsDirty()) {
 		PROF_SCOPE(Sim, "  tex_upload (upload+mips+preview)");
 		RenderCommandBuffer tex_cb = queue_manager->GetRenderQueue().AcquireCommandBuffer();
