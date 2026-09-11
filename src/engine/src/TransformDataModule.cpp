@@ -69,7 +69,9 @@ static inline void MulMat4InPlace(float* lhs, const float* rhs)
 
 void TransformDataModule::UpdateLocalTransforms(ObjectManager* om, SceneData* scene)
 {
-    if (om->CheckNewObjects()) {
+    const uint64_t rev = om->EntityRevision();
+    if (rev != links_revision_) {
+        links_revision_ = rev;
         local_links_.clear();
         om->ForEach<Positions, ParentComponent, LocalMatrices>(scene,
             [&](SoAElement<Positions> pos_el, ParentComponent& parentComp, SoAElement<LocalMatrices> local_el)
@@ -85,7 +87,6 @@ void TransformDataModule::UpdateLocalTransforms(ObjectManager* om, SceneData* sc
                 pos_el.soa, local_el.soa, &parentPosArr->data,
                 pos_el.index, local_el.index, idx_it->second });
         });
-        om->NewObjectsCommit();
     }
 
     for (const LocalXformLink& r : local_links_) {
@@ -104,9 +105,11 @@ void TransformDataModule::UpdateLocalTransforms(ObjectManager* om, SceneData* sc
 
 uint32_t TransformDataModule::CalculateTransformSize(ObjectManager* om, SceneData* scene)
 {
-    if (!om->CheckNewObjects()) {
+    const uint64_t rev = om->EntityRevision();
+    if (rev == size_revision_) {
         return total_size;
     }
+    size_revision_ = rev;
     total_size = 0;
 
     om->ForEachArchetype<Positions, DrawComponent>(

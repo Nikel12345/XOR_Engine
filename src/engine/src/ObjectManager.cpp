@@ -86,8 +86,6 @@ void ObjectManager::DeleteEntity(SceneData* scene, Entity e) {
     scene->entity_to_archetype.erase(e);
 
     // НЕ ставим dirty_batches — удаление идёт инкрементально через e_t_d, а не ребилдом.
-    // Но трансформ-буфер ужался: помечаем, чтобы TransformDataModule пересчитал размер.
-    dirty_entity = true;
     ++entity_revision;
 }
 
@@ -405,7 +403,6 @@ std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const 
     if (pool.Misses())
         SDL_Log("LoadScene: %u asset cells reference a missing dictionary entry - names dropped", pool.Misses());
 
-    dirty_entity = true;
     ++entity_revision;
     return created;
 }

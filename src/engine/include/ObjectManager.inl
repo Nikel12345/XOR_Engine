@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "ObjectManager.h"
 #include <type_traits>
 
@@ -57,7 +57,6 @@ Entity ObjectManager::CreateEntity(const std::string& scene_name, Components&&..
     if (has_parent)
         scene->children[parent_id].push_back(e);
 
-	dirty_entity = true;
 	++entity_revision;
 
     return e;
