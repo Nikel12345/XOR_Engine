@@ -1,4 +1,4 @@
-# XOR Engine
+﻿# XOR Engine
 
 A C++ 3D/2D game engine built on [SDL3 GPU](https://wiki.libsdl.org/SDL3/CategoryGPU). Strict ECS architecture. Cross-platform via SDL3: Windows, Linux, macOS.
 
@@ -61,7 +61,7 @@ pip install -r requirements.txt
 
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — build targets, roles inside the engine, extension
 seams, threading model, and where to read next. Deeper notes on individual subsystems live in
-[`docs/internals/`](docs/internals). Written in Russian.
+[`docs/render-pipeline/`](docs/render-pipeline). Written in Russian.
 
 ---
 
