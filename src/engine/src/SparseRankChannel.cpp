@@ -3,8 +3,7 @@
 #include "Utils.h"
 #include "BufferManager.h"
 
-// Пачками, а не поэлементно: заливка по слову стоила 14.0 мс на домене 800k против 1.3 мс
-// (замер, Release).
+
 static constexpr size_t FLUSH_WORDS = 4096;
 
 void StoreSparseRank(BufferManager* bm, UploadTask* task, uint32_t rows,

@@ -1,11 +1,11 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "QueueManager.h"
 #include "Engine.h"
 #include "EngineProfiler.h"
 #include "BufferManager.h"
 #include "TextureManager.h"
 #include "PipeManager.h"
-#include "ModelManager.h"   // ReclaimRanges — дренаж отложенных возвратов места в пулах
+#include "ModelManager.h"
 #include "TransferManager.h"
 #include "SlotController.h"
 #include "PassManager.h"
@@ -20,15 +20,14 @@
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
-#include "LightDataModule.h"   // фаза слепков: StampShadowCameras
+#include "LightDataModule.h"
 
 void Engine::PrepareFunc(uint8_t slot)
 {
 	buffer_manager->logic_index = slot;
 
-	// Раскладка UI — в пикселях ОКНА, а не внутреннего разрешения: размер кнопки задан относительно
-	// экрана, и при render != window деление на render съёжило бы (или раздуло) весь UI. Растеризуется
-	// он всё равно в scene_hdr, то есть суперсэмплинг краёв и текста достаётся ему даром.
+	// Раскладка UI — в пикселях ОКНА: размер элемента задан относительно экрана, и при
+	// render != window внутреннее разрешение съёжило бы или раздуло весь UI.
 	{
 		PROF_SCOPE(Sim, " ui_emit");
 		ui_yoga->Emit(engine_context, GetWindowWidth(), GetWindowHeight());
@@ -43,9 +42,8 @@ void Engine::PrepareFunc(uint8_t slot)
 		PROF_SCOPE(Sim, " trash+reclaim");
 		const uint64_t fences_done = slot_controller->RenderFencesDone();
 		buffer_manager->TrashBuffers(fences_done);
-		// Место снятых моделей — в разметку пула, пачкой. Фенса не ждёт (в отличие от двух строк
-		// выше): освобождается разметка, а не GPU-ресурс — та же дисциплина, что у регионов
-		// атласа. Обязано идти ДО размещения новой пачки, то есть до ExecuteUpdateInstructions.
+		// Обязано идти ДО размещения новой пачки: только так перезагруженная модель садится в
+		// освободившееся от неё же место. Фенса не ждёт — освобождается разметка, а не ресурс.
 		model_manager->ReclaimRanges();
 	}
 
@@ -126,9 +124,8 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 		cp.End();
 		cb.Cancel();
 		transfer_manager->ReleaseTB(tbd);
-		// Текстуры дренируем и здесь: задачи ставятся в PackAtlases независимо от флага, и без
-		// забора векторы задач растут без границ. Схема та же, что у буферов выше — команды
-		// пишем, cb отменяем, TB возвращаем сразу (fence не нужен).
+		// Текстурные задачи ставятся в PackAtlases независимо от этой ветки, и без забора их
+		// векторы растут без границ.
 		{
 			RenderCommandBuffer tex_cb = queue_manager->GetRenderQueue().AcquireCommandBuffer();
 			TextureCopyPass tex_cp = tex_cb.BeginTextureCopyPass();
@@ -191,8 +188,6 @@ void Engine::UploadFunc(uint8_t slot)
 		SDL_ReleaseGPUFence(dev, sd.upload.items[i]);
 	sd.upload.Clear();
 
-	// Оба TB стадии: буферный (копировальная очередь) и текстурный (графическая). Fences обоих
-	// только что отработали общим wait_all, значит GPU дочитал и тот и другой.
 	auto t_rel = Prof::Clock::now();
 	transfer_manager->ReleaseTB(pending_upload_tbs[slot]);
 	pending_upload_tbs[slot] = nullptr;
@@ -280,9 +275,7 @@ bool Engine::RenderFunc(uint8_t slot)
 {
 	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
 
-	// Push, а не Add в конце: замер объемлет вложенные скоупы (execute_passes, imgui,
-	// submit_acquire_fence), и только открытый скоуп делает их детьми в отчёте. Ранний
-	// выход по свопчейну Pop не выполнит — стек чистит Frame() на границе итерации.
+	// Ранний выход по свопчейну Pop не выполнит — стек чистит Frame() на границе итерации.
 	const size_t prof_render_cpu = Prof::Render().Push("render_cpu (RenderFunc: запись+submit)");
 	auto t_frame = Prof::Clock::now();
 	RenderCommandBuffer cb = queue_manager->GetRenderQueue().AcquireCommandBuffer();
@@ -299,12 +292,7 @@ bool Engine::RenderFunc(uint8_t slot)
 		return false;
 	}
 
-	// Гейт размеров экранных таргетов. Сравнивается ВЕСЬ набор входов (размер назначения + конфиг
-	// целиком): любое поле конфига меняет вывод размеров так же, как смена окна. Размер назначения
-	// берём из свопчейна, а не из window_size, — это и есть то, во что бьёт present-блит.
-	//
-	// Снимок, а не счётчик ревизий: ревизия сделала бы ошибку липкой (совпала — и повода пересчитать
-	// больше нет), а расхождение снимка чинится само на следующем кадре.
+	// Размер назначения берём из свопчейна: в него и бьёт present-блит.
 	const TargetSizeInputs want{ *graphics_config, w, h };
 	if (want != applied_inputs_) {
 		applied_inputs_ = want;
