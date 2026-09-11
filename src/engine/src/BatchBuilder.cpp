@@ -255,7 +255,7 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
                     && "BuildMaterialLayouts: material without variants must yield the legacy UVL table");
 
                 if (s < MAX_SLOTS)
-                    lay.slot[s] = (base << 16) | (cell << 8) | count;
+                    lay.slot[s] = MakeSlotWord(base, cell, count);
             }
 
             if (!lay.bindable) {
@@ -401,7 +401,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             model_batch.instanceCount++;
             // Строка ещё не известна: базы архетипов раздаёт RecalculateInstanceOffsets в конце
             // сборки, а саму строку добьёт ближайшая заливка PIB.
-            model_batch.pib_sub_buffer.push_back(uint64_t(entity) << 32 | kPibNoRow);
+            model_batch.pib_sub_buffer.push_back({ entity, kPibNoRow });
             entity_slots[entity].push_back({ &model_batch, slot_index });
 
         }
@@ -416,12 +416,12 @@ void BatchBuilder::RemoveEntityFromBatches(Entity entity)
 
     for (const PibSlot& slot : it->second) {
         ModelBatchData* model_batch = slot.model_batch;
-        std::vector<uint64_t>& pib = model_batch->pib_sub_buffer;
+        std::vector<PibRecord>& pib = model_batch->pib_sub_buffer;
         uint32_t last_index = safe_u32(pib.size()) - 1;
 
         if (slot.slot_index != last_index) {
-            Entity moved_entity = static_cast<Entity>(pib[last_index] >> 32);
-            pib[slot.slot_index] = moved_entity;
+            Entity moved_entity = pib[last_index].entity;
+            pib[slot.slot_index] = pib[last_index];
             for (PibSlot& moved_slot : entity_slots[moved_entity]) {
                 if (moved_slot.model_batch == model_batch && moved_slot.slot_index == last_index) {
                     moved_slot.slot_index = slot.slot_index;

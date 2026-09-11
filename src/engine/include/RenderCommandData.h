@@ -19,10 +19,6 @@ class PassManager;
 // заполнена. Оба случая читаются одинаково.
 inline constexpr uint32_t kPibNoRow = 0xFFFFFFFFu;
 
-// Размещение сабмеша — ровно то, что уходит в indirect-команду, плюс диапазон экранных размеров
-// для слова LOD. Батч копирует его ЗНАЧЕНИЯМИ, поэтому смена размещения живой модели обязана
-// пересобрать батчи; копия корректна, потому что ModelManager::PackModels финализирует размещение
-// до сборки дерева.
 struct SubMeshDraw {
     uint32_t index_count = 0;
     uint32_t index_offset = 0;
@@ -30,12 +26,15 @@ struct SubMeshDraw {
     SubMeshSpan screen_size_span{};
 };
 
+// Сущность здесь — ИДЕНТИЧНОСТЬ: swap-remove обязан знать, кто переехал, чтобы починить
+// entity_slots. Строка — кэш координаты, её добивает заливка PIB.
+struct PibRecord {
+    uint32_t entity = 0;
+    uint32_t row = kPibNoRow;
+};
+
 struct ModelBatchData {
-    // Запись PIB: сущность в старшей половине, её строка трансформа — в младшей. Сущность нужна
-    // как ИДЕНТИЧНОСТЬ (swap-remove обязан знать, кто переехал, чтобы починить entity_slots),
-    // строка — как кэш координаты. Один элемент, а не два вектора: тогда swap-remove пришлось бы
-    // дублировать, и половины рано или поздно разъехались бы.
-    std::vector<uint64_t> pib_sub_buffer;
+    std::vector<PibRecord> pib_sub_buffer;
     uint32_t firstInstance = 0;
     uint32_t instanceCount = 0;
     SubMeshDraw submesh;
@@ -51,12 +50,14 @@ inline UVL_Block MakeUVL(const TextureData& td) {
     return { td.uv_packed_offset, td.uv_packed_scale, td.layer };
 }
 
-// Как адресовать таблицу texture_uvl. Зеркало cbuffer'а в material_api.hlsl, поэтому раскладка
-// слова — контракт с шейдером:
-//   (base << 16) | (cell << 8) | count
-//   base  — индекс ПЕРВОГО блока слота в таблице (индекс блока слота s НЕ равен s);
-//   cell  — ячейка секции состояний, осмысленна только при count > 1;
-//   count — сколько у слота вариантов.
+// base — индекс ПЕРВОГО блока слота в таблице (индекс блока слота s НЕ равен s), cell — ячейка
+// секции состояний (осмысленна при count > 1), count — сколько у слота вариантов. Разбирает слово
+// TexIndex в material_api.hlsl.
+inline constexpr uint32_t MakeSlotWord(uint32_t base, uint32_t cell, uint32_t count) {
+    return (base << 16) | (cell << 8) | count;
+}
+
+// Как адресовать таблицу texture_uvl; зеркало cbuffer'а в material_api.hlsl.
 struct VariantLayout {
     uint32_t slot[MAX_SLOTS] = {};
     uint32_t material_index = 0;

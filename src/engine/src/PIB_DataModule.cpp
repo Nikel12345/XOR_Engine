@@ -91,23 +91,19 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
                 for (auto& [_, tb] : ab.texture_batches)
                     for (auto& [_, mb] : tb.model_batches) {
                         if (n + mb.pib_sub_buffer.size() > total_elements) continue;
-                        for (uint64_t& rec : mb.pib_sub_buffer) {
-                            uint32_t row = static_cast<uint32_t>(rec);
-                            if (refresh || row == kPibNoRow) {
-                                const Entity e = static_cast<Entity>(rec >> 32);
-                                row = (e < row_of.size()) ? row_of[e] : kPibNoRow;
-                                rec = static_cast<uint64_t>(e) << 32 | row;
+                        for (PibRecord& rec : mb.pib_sub_buffer) {
+                            if (refresh || rec.row == kPibNoRow) {
+                                rec.row = (rec.entity < row_of.size()) ? row_of[rec.entity] : kPibNoRow;
                             }
 #ifndef NDEBUG
                             else {
                                 // Расхождение кэша с таблицей = состав сущностей изменился без
                                 // ++entity_revision. Наяву это не краш, а чужая матрица у одного
                                 // объекта из миллиона.
-                                const Entity e = static_cast<Entity>(rec >> 32);
-                                assert(row == ((e < row_of.size()) ? row_of[e] : kPibNoRow));
+                                assert(rec.row == ((rec.entity < row_of.size()) ? row_of[rec.entity] : kPibNoRow));
                             }
 #endif
-                            dst[n++] = row;
+                            dst[n++] = rec.row;
                         }
                     }
 }
@@ -137,8 +133,7 @@ void PIB_DataModule::StoreEntityToCmd(BufferManager* bm, PassManager* rm, Upload
                 for (const auto& [_, tb] : ab.texture_batches)
                     for (const auto& [_, mb] : tb.model_batches) {
                         const size_t cnt = mb.pib_sub_buffer.size();
-                        assert(cmd_idx <= kCmdIndexMask);
-                        const uint32_t word = cmd_idx | PackLodRange(mb.submesh.screen_size_span);
+                        const uint32_t word = MakeEntityToCmdWord(cmd_idx, mb.submesh.screen_size_span);
                         if (n + cnt <= e2c_elements) {
                             std::fill_n(dst + n, cnt, word);
                             n += safe_u32(cnt);

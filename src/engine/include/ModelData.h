@@ -1,7 +1,8 @@
-#pragma once
+﻿#pragma once
 #include <vector>
 #include <string>
 #include <functional>
+#include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <SDL3/SDL_stdinc.h>
@@ -61,13 +62,13 @@ struct SubMeshData {
     SubMeshSpan screen_size_span;   // см. объявление типа
 };
 
-// Слово буфера EntityToCmd: младшие 24 бита — индекс команды, старшие два ниббла — ступени
-// диапазона сабмеша. ЕДИНСТВЕННЫЙ источник истины о раскладке; вторая её половина — разбор в
-// culling_pib.comp.hlsl. Обе ступени нулевые (сабмеш без проставленного диапазона) дают ровно
-// прежнее слово, поэтому поле можно не заполнять — поведение не меняется.
+// Слово буфера EntityToCmd; разбирает его culling_pib.comp.hlsl. Незаполненный диапазон даёт
+// нулевые ступени, то есть слово из одного индекса команды.
 inline constexpr uint32_t kCmdIndexMask = 0x00FFFFFFu;
-inline constexpr uint32_t PackLodRange(SubMeshSpan span) {
-    return (static_cast<uint32_t>(span.lod_min & 0xFu) << 24)
+inline uint32_t MakeEntityToCmdWord(uint32_t cmd_index, SubMeshSpan span) {
+    assert(cmd_index <= kCmdIndexMask);
+    return (cmd_index & kCmdIndexMask)
+         | (static_cast<uint32_t>(span.lod_min & 0xFu) << 24)
          | (static_cast<uint32_t>(span.lod_max & 0xFu) << 28);
 }
 
