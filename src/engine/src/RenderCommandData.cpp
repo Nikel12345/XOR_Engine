@@ -40,7 +40,6 @@ void RenderPassTexturesInfo::SetColorTexture(TextureAtlas* atlas, uint32_t index
 {
 	if (index < color_targets.size())
 		color_targets[index].atlas = atlas;
-	// Декларация usage (по ней создаётся GPU-текстура): ресурс копит роль там, где на него сослались.
 	if (atlas) atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 }
 
@@ -53,14 +52,10 @@ void RenderPassTexturesInfo::SetDepthTexture(TextureAtlas* atlas)
 void RenderPassStep::SetGlobalTextures(std::vector<TextureAtlas*> atlases)
 {
 	global_texture_bindings = std::move(atlases);
-	// Роль однозначна: поле потребляется ровно одним SDL_BindGPUFragmentSamplers.
 	for (TextureAtlas* atlas : global_texture_bindings)
 		if (atlas) atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 }
 
-// Атласы → актуальные SDL-текстуры. Зовётся на ИСПОЛНЕНИИ (RenderPassStandardBody), а не на setup:
-// GPU-текстуру таргета создаёт бейк (её ещё нет в момент объявления прохода) и подменяет ресайз.
-// Держать копию SDL_GPUTexture* в проходе поэтому нельзя — протухнет.
 void RenderPassTexturesInfo::ResolveTargets()
 {
 	for (ColorTarget& target : color_targets) {
