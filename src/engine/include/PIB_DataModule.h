@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstdint>
 #include <vector>
 #include "config.h"
@@ -10,9 +10,8 @@ struct SceneData;
 struct UploadTask;
 
 
-// Dirty по ревизии батчей живёт в модуле, но модуль НЕ знает о BatchBuilder:
-// ревизию передаёт вызывающая сторона числом (header-развязка — правка BatchBuilder.h
-// не пересобирает этот TU). Возврат 0 при неизменной ревизии => store не вызовется.
+// Размер 0 из size-функции = заливка не зовётся вовсе (см. BufferManager), поэтому гейт по
+// ревизии выражен возвратом нуля.
 class PIB_DataModule
 {
 public:
@@ -20,34 +19,20 @@ public:
     uint32_t CalculatePIBSizes(PassManager* pm, uint64_t revision, uint8_t slot);
     void StorePIB(BufferManager* bm, PassManager* pm, UploadTask* task, ObjectManager* om);
 
-    // entity -> индекс команды (model_batch) В СВОЁМ ПРОХОДЕ, по одному uint на PIB-запись,
-    // в том же обходе, что PIB. scatter-каллинг по нему находит команду записи в регионе своего
-    // прохода. Гейт по ревизии батчей (меняется только со структурой).
     uint32_t CalculateEntityToCmd(PassManager* pm, uint64_t revision, uint8_t slot);
     void StoreEntityToCmd(BufferManager* bm, PassManager* pm, UploadTask* task);
 
 private:
     uint32_t ComputeElementCount(PassManager* pm) const;
 
-    // Плоская таблица entity → строка трансформа, ОДИН последовательный проход по архетипам
-    // на заливку. PIB идёт в порядке батч-дерева (произвольный относительно ECS), поэтому
-    // строку надо уметь брать по entity: раньше это были два поиска в unordered_map НА КАЖДУЮ
-    // запись — на 1М объектов это миллионы промахов кэша и заливка PIB на сотни мс (× слоты).
-    // Таблица переводит их в один индексный доступ в плоский массив. Действительна ровно
-    // пока EntityRevision не изменилась (см. row_table_revision) — на неё же опирается
-    // Debug-сверка кэшированных строк в StorePIB.
     void BuildRowTable(SceneData* scene);
-    // Ревизия состава сущностей, под которую построена row_of. Таблица «сущность -> строка
-    // трансформа» зависит ТОЛЬКО от набора сущностей и порядка архетипов, а StorePIB зовётся на
-    // каждое изменение дерева батчей — то есть на каждую смену материала. Она же решает, надо ли
+    // row_of действительна, пока EntityRevision не сдвинулась; она же решает, надо ли
     // перезаписывать строки, закэшированные в записях PIB.
     uint64_t row_table_revision = ~0ull;
-
     std::vector<uint32_t> row_of;
 
     uint32_t total_elements = 0;
     uint32_t e2c_elements = 0;
-    // Per-slot счётчики ревизий: у каждого из BUFFERING_LEVEL буферов своя ревизия.
     uint64_t pib_last_revision[BUFFERING_LEVEL];
     uint64_t e2c_last_revision[BUFFERING_LEVEL];
 };
