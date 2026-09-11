@@ -1,12 +1,10 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "SparseRankChannel.h"
 #include "Utils.h"
 #include "BufferManager.h"
 
-// Сколько слов копится в локальном буфере до сброса в трансфер. Вызов заливки несёт проверки
-// таска и границ буфера-назначения, и платить их поэлементно дорого (ЗАМЕРЕНО на домене 800k,
-// Release: поэлементно 14.0 мс против 1.3 мс пачками). Буфер ОГРАНИЧЕННЫЙ и локальный — это не
-// CPU-отражение буфера.
+// Пачками, а не поэлементно: заливка по слову стоила 14.0 мс на домене 800k против 1.3 мс
+// (замер, Release).
 static constexpr size_t FLUSH_WORDS = 4096;
 
 void StoreSparseRank(BufferManager* bm, UploadTask* task, uint32_t rows,

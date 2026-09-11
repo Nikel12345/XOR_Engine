@@ -7,8 +7,7 @@
 #include "MaterialData.h"
 #include "SparseRankChannel.h"
 
-// Секция есть у КАЖДОГО материала, даже без вариативных ролей: шейдер считает смещение как
-// material_index * MAX_VARIATIVE_SLOTS, и пропуск сдвинул бы все последующие.
+
 static inline uint32_t ElementCells(const MaterialComponent& mc)
 {
 	return safe_u32(mc.materials.size()) * MAX_VARIATIVE_SLOTS;
@@ -20,9 +19,6 @@ TextureStateDataModule::TextureStateDataModule()
 	for (uint64_t& r : last_index_revision) r = ~0ull;
 }
 
-// Два обхода вместо построчного Has<>: тот задаёт вопрос СУЩНОСТИ и стоит 128 мс на 800k против
-// 1.3 мс (замер, Release). Связывает обходы указатель на колонку Positions — у ForEachArchetype и
-// ForEach это один и тот же адрес.
 uint32_t TextureStateDataModule::CalculateRankSize(ObjectManager* om, SceneData* scene, uint64_t revision, uint8_t slot)
 {
 	if (revision == last_rank_revision[slot]) return 0;
@@ -78,7 +74,6 @@ void TextureStateDataModule::StoreIndex(BufferManager* bm, UploadTask* task)
 	bm->UploadToTransferBuffer(task, safe_u32(hit_ofs_.size() * sizeof(uint32_t)), hit_ofs_.data());
 }
 
-// Без гейта: домен отфильтрован тегом на входе в ForEach и стоит 0.001 мс на 800k (замер).
 uint32_t TextureStateDataModule::CalculateStateSize(ObjectManager* om, SceneData* scene)
 {
 	uint32_t cells = 0;
@@ -94,8 +89,6 @@ uint32_t TextureStateDataModule::CalculateStateSize(ObjectManager* om, SceneData
 void TextureStateDataModule::StoreState(BufferManager* bm, UploadTask* task, ObjectManager* om,
 	SceneData* scene, MaterialManager* mtm)
 {
-	// Абсолютного смещения эта фаза не знает: секции дописываются подряд, курсором служит сам
-	// аппенд UploadToTransferBuffer.
 	om->ForEach<Positions, DrawComponent, MaterialComponent, TextureStateComponent>(scene,
 		[&](SoAElement<Positions>, DrawComponent&, MaterialComponent& mc, TextureStateComponent&)
 	{

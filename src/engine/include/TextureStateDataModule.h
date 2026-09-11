@@ -25,7 +25,6 @@ public:
 	                    MaterialManager* mtm);
 
 private:
-	// Носители по ВОЗРАСТАНИЮ строки — иначе rank перестаёт быть бегущей суммой.
 	std::vector<uint32_t> hit_rows_;
 	std::vector<uint32_t> hit_ofs_;
 	uint32_t rows_ = 0;
