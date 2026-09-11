@@ -49,18 +49,17 @@ inline UVL_Block MakeUVL(const TextureData& td) {
     return { td.uv_packed_offset, td.uv_packed_scale, td.layer };
 }
 
-// Адресация слота в таблице texture_uvl. Поля объявлены от МЛАДШЕГО байта: в памяти получается
-// ровно то слово, которое разбирает TexIndex в material_api.hlsl.
+// Должно совпадать с material_api.hlsl.
 struct SlotWord {
     uint8_t  count = 0;
-    uint8_t  cell  = 0;   // ячейка секции состояний; осмысленна при count > 1
-    uint16_t base  = 0;   // индекс ПЕРВОГО блока слота в таблице: индекс блока слота s НЕ равен s
+    uint8_t  cell  = 0;
+    uint16_t base  = 0;
 };
 static_assert(std::endian::native == std::endian::little,
               "SlotWord ложится в GPU-слово побайтно");
 static_assert(sizeof(SlotWord) == sizeof(uint32_t) && alignof(SlotWord) <= alignof(uint32_t));
 
-// Как адресовать таблицу texture_uvl; зеркало cbuffer'а в material_api.hlsl.
+// Должно совпадать с material_api.hlsl.
 struct VariantLayout {
     SlotWord slot[MAX_SLOTS] = {};
     uint32_t material_index = 0;
@@ -68,17 +67,12 @@ struct VariantLayout {
 
 struct TextureBatchData {
     std::unordered_map<BatchKeys::ModelBatchKey, ModelBatchData> model_batches;
-	// Значениями, а не указателями: непрерывный блок уходит в пуш как есть. Инвариант — смена UVL
-	// ЖИВОЙ текстуры (репак атласа) обязана пересобрать дерево; добавление и удаление текстур его
-	// не нарушают.
 	std::vector<UVL_Block> texture_uvl;
     VariantLayout variant_layout;
     uint32_t indirect_command_index = 0;
     const std::vector<uint8_t>* params = nullptr;
 };
 
-// Пер-материальная половина узла: всё, что батч берёт из пары (материал, sp) и от сущности не
-// зависит. Считается предпроходом один раз на пару, а не на каждую сущность.
 struct MatSpLayout {
     std::vector<UVL_Block>                    uvl;
     std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
@@ -86,9 +80,10 @@ struct MatSpLayout {
     BatchKeys::MatSpKey     res_key = 0;
     BatchKeys::AtlasBatchKey atlas_key = 0;
     bool                    bindable = false;
-    // Есть ли у sp хоть один слот с вариантами. Если нет, шейдер состояние не читает вовсе,
-    // поэтому material_index в ключ узла не идёт — иначе узел, в котором схлопнулись все материалы
-    // (ShadowCaster), дробился бы по номеру сабмеша и давал дроу на каждый.
+    // Есть ли у sp хоть один слот с count > 1. Поле CPU-шное, шейдер его не видит: у него свой
+    // гейт на каждом слоте. Но если вариативных слотов нет, ни одно чтение состояния там не
+    // пройдёт, значит material_index не используется и в ключ узла не идёт — иначе узел, в котором
+    // схлопнулись все материалы (ShadowCaster), дробился бы по номеру сабмеша.
     bool                    variative = false;
 };
 
