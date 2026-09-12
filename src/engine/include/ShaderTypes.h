@@ -74,8 +74,6 @@ private:
 
 using PushFunc = std::function<void(const struct PushConstantBinder&, const struct PushInput&)>;
 
-// Слот назначен позицией инструкции в списке своей стадии и обязан совпасть с register(bN)
-// в шейдере (docs/shaders/programs.md).
 struct PushInstruction {
     PushStage stage = PushStage::Fragment;
     Uint32    uniform_slot = 0;
@@ -142,14 +140,15 @@ struct ShaderProgramDescription
 };
 
 enum class TextureSlotRole {
-    // Порядок ролей ЗДЕСЬ на бинды не влияет: их порядок задаёт ShaderProgram::required_slots.
     Albedo,
     Normal,
-    ORM,                     // упаковка: R=AO, G=Roughness, B=Metallic (одна текстура, один UVL)
+    ORM,
     Emissive,
     MetallicRoughness = ORM,
 
     // Роли без семантики: движок биндит по ним хэндл, а сэмплеры под них объявляет сам пролог.
+    // Разрыв в нумерации — резерв под новые well-known роли: номер уезжает в сцену ЧИСЛОМ
+    // (states у MaterialComponent), и вставка роли выше переадресовала бы Custom* у старых сцен.
     Custom0 = 1000,
     Custom1,
     Custom2,
