@@ -17,12 +17,10 @@ class ShaderManager
 public:
 	ShaderManager(SDL_GPUDevice* device);
 	// Повтор с тем же именем перезаписывает запись реестра.
-	// Побочный эффект: выбранным стримам пула декларируется usage VERTEX, индексному — INDEX.
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const GeometryPool* pool,
 	                        const std::vector<ShaderBase::VertexSemantic>& pull, BufferManager* bm, const ShaderDefines& defines = {});
 	void CreateFragmentShader(const std::string& name, const char* path, const ShaderDefines& defines = {});
 
-	// Побочный эффект: буферам программы декларируется usage GRAPHICS_STORAGE_READ.
 	ShaderProgram* CreateShaderProgram(
 		const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& render_pass_name,
 		const std::string& vs_name, std::vector<BufferDataName> vertex_shader_buffer_names,
@@ -30,8 +28,7 @@ public:
 		const std::vector<TextureSlotRole>& texture_slots, BufferManager* bm);
 
 	void CreateComputeShader(const std::string& name, const char* path, const ShaderDefines& defines = {});
-	// ПОРЯДОК СОЗДАНИЯ = порядок исполнения внутри прохода (docs/shaders/programs.md), и
-	// сериализация обязана его сохранять. Побочный эффект: буферам и атласам декларируется usage.
+
 	ComputeShaderProgram* CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
 		std::vector<BufferDataName> rw_storage_buffers,
 		std::vector<BufferDataName> ro_storage_buffers,
@@ -83,7 +80,6 @@ public:
 	ComputeShaderData CreateComputeShaderFromSPV(const char* spv_path);
 
 	ShaderProgram* GetShaderProgram(const ShaderName& name);
-	// Пайплайн вызывающий обязан освободить ДО вызова: кэш PipeManager ключуется по sp*.
 	void DeleteShaderProgram(const std::string& name) { shader_programs.erase(name); }
 
 	ComputeShaderProgram* GetComputeShaderProgram(const std::string& name);
@@ -115,7 +111,6 @@ public:
 	}
 
 
-	// Реестр ТИПОВ пушей (docs/shaders/programs.md): тип объявляет шейдер маркером //@push.
 	struct PushKind {
 		PushStage stage;
 		PushFunc  fn;
@@ -131,8 +126,6 @@ public:
 	PushInstructions CollectComputePushInstructions(const std::string& csp_name) const;
 	DispatchFunc     GetDispatchInstruction(const std::string& csp_name) const;
 
-	// Инструкции без программы («функция есть, шейдера нет») — законное состояние: сцена могла не
-	// привезти свой sp. Отчёт идёт в лог, чтобы состояние не было молчаливым.
 	void ReportOrphanCodeBindings();
 
 	std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& GetShaderPrograms() { return shader_programs; }
@@ -142,8 +135,6 @@ public:
 	void SetDirtyGraphicsPipelines(bool dirty) { dirty_graphics_pipelines = dirty; }
 	bool IsDirtyComputePipelines() const { return dirty_compute_pipelines; }
 	void SetDirtyComputePipelines(bool dirty) { dirty_compute_pipelines = dirty; }
-	// Флаг батчей отделён от флага пайплайнов, иначе CreateComputePipelines гасил бы dirty раньше,
-	// чем до него доберётся BuildComputeBatches.
 	bool IsDirtyComputeBatches() const { return dirty_compute_batches; }
 	void SetDirtyComputeBatches(bool dirty) { dirty_compute_batches = dirty; }
 
@@ -168,7 +159,6 @@ private:
 	                          const ShaderDefines& defines,
 	                          std::vector<std::string>* out_push_kinds = nullptr);
 
-	// Дедуп GPU-шейдеров по хэшу SPIR-V: одинаковый байткод — один SDL_GPUShader на всех владельцев.
 	std::shared_ptr<SDL_GPUShader> LookupGpuShader(uint64_t key) const;
 	std::shared_ptr<SDL_GPUShader> RegisterGpuShader(uint64_t key, SDL_GPUShader* raw);
 
@@ -190,14 +180,9 @@ private:
 	// Записи переживают пересоздание программ: на них никто не ссылается, принадлежность — имя.
 	std::vector<ShaderPushInstruction> push_instructions_;
 	std::vector<ShaderPushInstruction> compute_push_instructions_;
-	// Диспатч РОВНО ОДИН на программу, поэтому словарь с перезаписью: вектор молча взял бы
-	// последнюю запись.
 	std::unordered_map<std::string, DispatchFunc> dispatch_instructions_;
 
 	std::unordered_map<uint64_t, std::weak_ptr<SDL_GPUShader>> gpu_shaders;
-	// Токен живости: делитер шейдера освобождает ресурс, только пока жив менеджер (а с ним device).
-	// Гасится в ~ShaderManager ПОСЛЕ shader_programs.
-	std::shared_ptr<int> shader_alive_ = std::make_shared<int>(0);
 
 	bool dirty_graphics_pipelines = true;
 	bool dirty_compute_pipelines = true;

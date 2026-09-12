@@ -344,11 +344,9 @@ std::shared_ptr<SDL_GPUShader> ShaderManager::LookupGpuShader(uint64_t key) cons
 
 std::shared_ptr<SDL_GPUShader> ShaderManager::RegisterGpuShader(uint64_t key, SDL_GPUShader* raw)
 {
-    // Делитер работает, только пока жив токен менеджера (а с ним device): поздний релиз —
-    // no-op, ресурс добьёт уничтожение device.
     std::shared_ptr<SDL_GPUShader> sh(raw,
-        [dev = dev, token = std::weak_ptr<int>(shader_alive_)](SDL_GPUShader* s) {
-            if (s && !token.expired()) SDL_ReleaseGPUShader(dev, s);
+        [dev = dev](SDL_GPUShader* s) {
+            if (s) SDL_ReleaseGPUShader(dev, s);
         });
     gpu_shaders[key] = sh;
     return sh;

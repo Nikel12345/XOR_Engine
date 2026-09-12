@@ -253,8 +253,6 @@ ShaderManager::DispatchFunc ShaderManager::GetDispatchInstruction(const std::str
 
 void ShaderManager::ReportOrphanCodeBindings()
 {
-    // set: push и dispatch — разные реестры, и без него csp без программы попадала бы в отчёт
-    // дважды.
     std::set<std::string> orphans;
     auto check_named = [&orphans](const auto& instructions, auto&& lookup) {
         for (const auto& instr : instructions)
@@ -344,13 +342,12 @@ ComputeShaderProgram* ShaderManager::GetComputeShaderProgram(const std::string& 
 
 ShaderManager::~ShaderManager()
 {
-	// Явного SDL_ReleaseGPUShader здесь нет: шарящийся vs словил бы double-free, а по refcount
-	// он освободится сам на clear() ниже.
     for (auto& [n, cs] : compute_shaders) {
         if (cs.spv_code) SDL_free(cs.spv_code);
 	}
-	shader_programs.clear();   // device ещё жив
-	shader_alive_.reset();     // токен гасим ПОСЛЕ: поздние релизы (статик vs на выходе) → no-op
+	// Явного SDL_ReleaseGPUShader нет: шарящийся vs словил бы double-free. Шейдеры отпускают
+	// реестры при разрушении членов — device к этому моменту ещё жив (см. ~Engine).
+	shader_programs.clear();
 	SDL_ShaderCross_Quit();
 }
 
