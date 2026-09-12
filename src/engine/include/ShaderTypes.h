@@ -47,15 +47,14 @@ enum class PushStage : uint8_t { Vertex, Fragment, Compute };
 struct PushInput {
     const void*                    pass_state = nullptr;
     const RenderSnap::TextureDraw* draw       = nullptr;
-    uint8_t                        frame      = 0;
 };
 
 struct PushConstantBinder {
     SDL_GPUCommandBuffer* cb = nullptr;
     PushStage stage = PushStage::Fragment;
     Uint32    uniform_slot = 0;
-    // Кадровый слот для Ask*(frame). Дублирует PushInput::frame, потому что типизированному
-    // функтору достаётся только его состояние прохода, а PushInput он не видит.
+    // Кадровый слот для Ask*(frame): типизированному функтору достаётся только состояние
+    // прохода, поэтому слот приходит биндером.
     uint8_t   frame = 0;
 
     template<typename T> void Push(const T& d) const { PushRaw(&d, sizeof(T)); }

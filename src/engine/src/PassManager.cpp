@@ -286,7 +286,7 @@ void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassS
 		if (elements.x == 0 || elements.y == 0 || elements.z == 0) continue;
 
 		{
-			const PushInput push_in{ push_data_raw, nullptr, pass_frame };
+			const PushInput push_in{ push_data_raw, nullptr };
 			for (const PushInstruction& pi : shader_batch.push_instructions)
 				pi.fn(PushConstantBinder{ cb, pi.stage, pi.uniform_slot, pass_frame }, push_in);
 		}
@@ -449,7 +449,7 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 				SDL_BindGPUFragmentSamplers(rp, global_sampler_count, atlas_batch.texture_binding.data(), safe_u32(atlas_batch.texture_binding.size()));
 			}
 			for (const RenderSnap::TextureDraw& texture_batch : atlas_batch.draws) {
-				const PushInput push_in{ push_data_raw, &texture_batch, render_frame };
+				const PushInput push_in{ push_data_raw, &texture_batch };
 				for (const PushInstruction& pi : shader_batch.push_instructions)
 					pi.fn(PushConstantBinder{ cb, pi.stage, pi.uniform_slot, render_frame }, push_in);
 
