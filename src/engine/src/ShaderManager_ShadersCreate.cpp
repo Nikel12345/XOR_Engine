@@ -15,15 +15,12 @@ inline uint64_t HashBytes(const uint8_t* data, size_t size) {
     return hash;
 }
 
-// FNV-1a, продолжаемый: домешивает байты в уже накопленный hash (а не начинает с нуля).
 static inline void FnvMix(uint64_t& hash, const uint8_t* data, size_t size) {
     for (size_t i = 0; i < size; ++i) { hash ^= data[i]; hash *= 1099511628211ULL; }
 }
 
-// Канонизация набора дефайнов: сортировка по имени + отсев безымянных. Порядок задаёт КЛЮЧ
-// КЭША, поэтому канон обязателен — иначе перестановка двух дефайнов на вызове (или порядок
-// полей в shaders.json) давала бы другой .spv-файл при том же результате компиляции. Дубли
-// имён не схлопываем: препроцессор сам возьмёт последний, а лишний .spv — не ошибка.
+// Канон обязателен: набор входит в ключ кэша, и перестановка двух дефайнов на вызове давала бы
+// другой файл кэша при том же результате компиляции.
 static std::vector<ShaderDefine> NormalizeDefines(const ShaderDefines& in)
 {
     std::vector<ShaderDefine> out;
@@ -37,17 +34,12 @@ static std::vector<ShaderDefine> NormalizeDefines(const ShaderDefines& in)
     return out;
 }
 
-// Рекурсивно домешивает в hash содержимое файла и всех его #include "..." . Инклуды движка
-// пишутся root-relative и резолвятся от include_dir (как делает сам SDL_ShaderCross при
-// компиляции). visited защищает от циклов (наш сканер не видит include-guard'ы) и от
-// повторного учёта файла, включённого из нескольких мест. Так правка ЛЮБОГО файла по цепочке
-// инклудов меняет хэш → кэш .spv корректно инвалидируется (раньше хэшировался только верхний файл).
+// visited защищает от циклов (сканер не видит include-guard'ы) и от повторного учёта файла,
+// включённого из нескольких мест.
 //
-// ТОТ ЖЕ обход собирает маркеры типовых пушей (//@push <тип>) — даром, файлы уже читаются.
-// Директивы и маркеры разбираются В ПОРЯДКЕ СМЕЩЕНИЙ, поэтому markers выходит в порядке
-// РАЗВЁРНУТОГО текста: маркер до #include попадёт раньше маркеров включаемого файла, после —
-// позже. Именно этот порядок и есть порядок cbuffer'ов в шейдере. Хэш при этом мешается как
-// раньше (файл целиком, потом дети) — ключ кэша не меняется, старые .spv остаются валидны.
+// Тем же обходом снимаются маркеры типовых пушей: директивы и маркеры разбираются В ПОРЯДКЕ
+// СМЕЩЕНИЙ, поэтому markers выходит в порядке развёрнутого текста — он же порядок слотов
+// (docs/shaders/programs.md).
 static void HashIncludesRecursive(uint64_t& hash, const std::string& path,
     const char* include_dir, std::unordered_set<std::string>& visited,
     std::vector<std::string>* markers = nullptr)
@@ -56,7 +48,7 @@ static void HashIncludesRecursive(uint64_t& hash, const std::string& path,
 
     size_t size = 0;
     char* data = (char*)SDL_LoadFile(path.c_str(), &size);
-    if (!data) return;   // файл не найден — пропускаем; реальную ошибку выдаст компиляция
+    if (!data) return;
     FnvMix(hash, (const uint8_t*)data, size);
 
     static constexpr std::string_view kMarker = "//@push";
@@ -68,7 +60,6 @@ static void HashIncludesRecursive(uint64_t& hash, const std::string& path,
         if (inc == std::string_view::npos && mark == std::string_view::npos) break;
 
         if (mark < inc) {
-            // //@push <тип> — тип до конца строки, из [A-Za-z0-9_]. Пустой = маркер без имени.
             size_t k = mark + kMarker.size();
             const size_t nl = sv.find('\n', k);
             const size_t line_end = (nl == std::string_view::npos) ? sv.size() : nl;
@@ -83,7 +74,6 @@ static void HashIncludesRecursive(uint64_t& hash, const std::string& path,
 
         size_t q1 = sv.find('"', inc + 8);
         size_t nl = sv.find('\n', inc + 8);
-        // Кавычка обязана быть на той же строке, что и #include — иначе это не директива.
         if (q1 == std::string_view::npos || (nl != std::string_view::npos && q1 > nl)) { pos = inc + 8; continue; }
         size_t q2 = sv.find('"', q1 + 1);
         if (q2 == std::string_view::npos) break;
@@ -96,7 +86,6 @@ static void HashIncludesRecursive(uint64_t& hash, const std::string& path,
 
 std::string ShaderManager::BuildCachePath(const char* source_path, uint64_t hash) const
 {
-    // Имя файла без пути
     const char* filename = source_path;
     for (const char* p = source_path; *p; ++p) {
         if (*p == '/' || *p == '\\') filename = p + 1;
@@ -125,7 +114,7 @@ void ShaderManager::ReadVertexAttributes(
 			}
 
             SDL_GPUVertexAttribute attr{};
-            attr.location = (Uint32)sem;   // = [[vk::location]] в шейдере
+            attr.location = (Uint32)sem;
             attr.buffer_slot = slot;
             attr.format = a->format;
             attr.offset = a->offset; 
@@ -133,7 +122,7 @@ void ShaderManager::ReadVertexAttributes(
         }
         SDL_GPUVertexBufferDescription vb{};
         vb.slot = slot;
-        vb.pitch = g.format->stride;          // настоящий sizeof
+        vb.pitch = g.format->stride;
         vb.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX; vb.instance_step_rate = 0;
         vs.vbs.push_back(vb);
         ++slot;
@@ -154,25 +143,18 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
         return nullptr;
     }
 
-    // === Хэш: верхний файл + рекурсивно все его #include + платформа/GPU/тулчейн ===
     const SDL_GPUShaderFormat supported = SDL_GetGPUShaderFormats(dev);
-    const char* include_dir = "../engine/shaders_code";   // один источник истины (см. ниже hlsl_info)
+    const char* include_dir = "../engine/shaders_code";
 
-    // Раньше хэшировался ТОЛЬКО верхний файл (src) → правки инклудов (база/прологи) кэш не
-    // сбрасывали и грузился устаревший .spv. Теперь обходим всю цепочку #include.
     uint64_t hash = 14695981039346656037ULL;
     {
         std::unordered_set<std::string> visited;
-        // Тем же обходом снимаем маркеры типовых пушей — ДО возможного выхода по кэш-хиту:
-        // объявленные типы должны быть известны и когда .spv взят готовым.
+        // Маркеры снимаются ДО возможного выхода по кэш-хиту: типы должны быть известны и когда
+        // .spv взят готовым.
         HashIncludesRecursive(hash, hlsl_path, include_dir, visited, out_push_kinds);
     }
 
-    // Дефайны — часть исходника с точки зрения компилятора, значит и часть ключа кэша: без них
-    // два варианта одного .hlsl (MAX_LIGHTS=4 и =8) дали бы ОДНО имя файла кэша, и второй молча
-    // получил бы чужой байткод. Разделители обязательны — иначе {"AB",""} и {"A","B"} дают один
-    // поток байт. Набор приходит УЖЕ канонизированным (NormalizeDefines), поэтому перестановка
-    // на вызове хэш не меняет.
+    // Разделители обязательны: иначе {"AB",""} и {"A","B"} дают один поток байт.
     for (const ShaderDefine& d : defines) {
         FnvMix(hash, (const uint8_t*)d.name.data(), d.name.size());
         FnvMix(hash, (const uint8_t*)"=", 1);
@@ -180,28 +162,21 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
         FnvMix(hash, (const uint8_t*)"\n", 1);
     }
 
-    // GPU-формат (DXIL / MSL / SPIRV) — чтобы при смене видеокарты/ОС кэш пересобрался.
     hash ^= (uint64_t)supported;
-    hash *= 1099511628211ULL;   // чтобы изменение формата сильно меняло хэш
+    hash *= 1099511628211ULL;
 
-    // Версия ТУЛЧЕЙНА. Именно она решает: в кэше лежит SPIR-V, выданный DXC внутри shadercross,
-    // поэтому при неизменном исходнике байткод меняет ровно обновление shadercross — без этого
-    // ключа грузился бы .spv от прежнего компилятора. Версия компилтайм (заголовки, с которыми
-    // собрались), рантайм-геттера у shadercross нет.
+    // В кэше лежит SPIR-V от DXC внутри shadercross, поэтому при неизменном исходнике байткод
+    // меняет ровно обновление shadercross. Версия компилтайм: рантайм-геттера у него нет.
     const uint32_t toolchain_ver = SDL_SHADERCROSS_MAJOR_VERSION * 1000000u
                                  + SDL_SHADERCROSS_MINOR_VERSION * 1000u
                                  + SDL_SHADERCROSS_MICRO_VERSION;
     FnvMix(hash, (const uint8_t*)&toolchain_ver, sizeof(toolchain_ver));
 
-    // Устройство и версия драйвера (SDL 3.4, SDL_GetGPUDeviceProperties). На сам SPIR-V драйвер
-    // НЕ влияет — он его лишь потребляет на сборке пайплайна; ключ расширен консервативно, чтобы
-    // смена GPU или обновление драйвера гарантированно давали свежую компиляцию. Цена промаха —
-    // одна перекомпиляция на старте. Строки домешиваем целиком: их формат не специфицирован
-    // (см. докстринг SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING), разбирать на части нельзя.
+    // На сам SPIR-V драйвер не влияет: ключ расширен консервативно, цена промаха — одна
+    // перекомпиляция на старте. Строки домешиваем целиком, их формат не специфицирован.
     if (const SDL_PropertiesID gpu_props = SDL_GetGPUDeviceProperties(dev)) {
-        // Печатаем ОДИН раз на процесс (а не на каждый шейдер): это состав ключа, он неизменен.
-        // Смысл лога — видеть, что свойства реально непусты: пустые строки домешали бы ноль байт,
-        // и расширение ключа молча стало бы пустышкой.
+        // Лог нужен, чтобы видеть непустые свойства: пустые строки домешали бы ноль байт, и
+        // расширение ключа молча стало бы пустышкой.
         static bool logged = false;
         const uint64_t before = hash;
         for (const char* key : { SDL_PROP_GPU_DEVICE_NAME_STRING,
@@ -233,10 +208,8 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     hlsl_info.entrypoint = "main";
     hlsl_info.shader_stage = stage;
     hlsl_info.include_dir = include_dir;
-    // API требует массив, ЗАВЕРШЁННЫЙ полностью нулевой записью (SDL_shadercross.h:129).
-    // const_cast — поля структуры объявлены char*, хотя shadercross их только читает.
-    // Пустое значение отдаём как NULL, а не как "": это разные вещи для компилятора
-    // (-D NAME даёт 1, -D NAME= даёт пустую подстановку).
+    // API требует массив, ЗАВЕРШЁННЫЙ полностью нулевой записью. Пустое значение отдаётся как
+    // NULL: -D NAME даёт 1, а -D NAME= даёт пустую подстановку.
     std::vector<SDL_ShaderCross_HLSL_Define> hlsl_defines;
     if (!defines.empty()) {
         hlsl_defines.reserve(defines.size() + 1);
@@ -278,11 +251,9 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
             "CreateVertexShader '%s': no geometry pool - shader NOT created.", name.c_str());
         return;
     }
-    // Семантики → стримы: пул отдаёт их в каноническом порядке слотов и схлопывает те, что живут
-    // вместе (NORMAL+TANGENT — один стрим). Слот получает ВСЕ семантики своего стрима: лишние
-    // атрибуты валидны (HLSL может их не читать), а обратное — чтение необъявленного — ловит
-    // рефлексия в BuildVertexShader. Пустой резолв = отказ ЦЕЛИКОМ: пайплайн без вершинных слотов
-    // читал бы мусор.
+    // Пул отдаёт стримы в каноническом порядке слотов и схлопывает живущие вместе (NORMAL+TANGENT
+    // — один стрим). Слот получает ВСЕ семантики своего стрима: лишние атрибуты валидны, а чтение
+    // необъявленного ловит рефлексия. Пустой резолв = отказ целиком.
     const std::vector<const GeometryPool::Stream*> streams = pool->StreamsForSemantics(pull);
     if (streams.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -300,29 +271,28 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
         slot_pull.reserve(stream->format->attrs.size());
         for (const auto& a : stream->format->attrs) slot_pull.push_back(a.semantic);
         bindings.push_back({ stream->format, std::move(slot_pull) });
-        canonical_names.push_back(stream->buffer_name);   // строка живёт в пуле — ключ реестра валиден
+        canonical_names.push_back(stream->buffer_name);
     }
 
-    // Компилируем ТЕМ ЖЕ набором, что ляжет в рецепт: иначе ключ кэша и сохранённый шейдер
-    // разошлись бы, и следующая загрузка сцены собрала бы другой .spv.
+    // Компилируем ТЕМ ЖЕ набором, что ляжет в рецепт: иначе следующая загрузка сцены собрала бы
+    // другой .spv.
     std::vector<ShaderDefine> norm = NormalizeDefines(defines);
 
     size_t n = 0;
     std::vector<std::string> push_kinds;
     Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_VERTEX, n, norm, &push_kinds);
     if (!spv) return;
-    VertexShaderData vs = BuildVertexShader(spv, n, hlsl_path, bindings);   // в реестр по имени
+    VertexShaderData vs = BuildVertexShader(spv, n, hlsl_path, bindings);
     SDL_free(spv);
     vs.defines = std::move(norm);
     vs.push_kinds = std::move(push_kinds);
 
     vs.vertex_buffer_names = std::move(canonical_names);
     vs.pool_name = pool->Name();
-    vs.index_buffer = pool->IndexBuffer();   // у пула он один — резолвим тут, сборке батча хватит поля
+    vs.index_buffer = pool->IndexBuffer();
 
-    // Декларация usage (по ней буферы и СОЗДАЮТСЯ — см. BufferData.h): выбор стримов здесь =
-    // «эти буфера биндятся вершинными», а заодно «дроу этим vs индексируются из индексного
-    // буфера ИХ пула». До этого момента буферы пула зарегистрированы, но VRAM не занимают.
+    // Декларация usage, по ней буферы и создаются: до этого момента буферы пула зарегистрированы,
+    // но VRAM не занимают.
     if (bm) {
         for (BufferDataName canon : vs.vertex_buffer_names)
             if (BufferData* bd = bm->GetBufferData(canon))
@@ -336,7 +306,7 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
 
 void ShaderManager::CreateFragmentShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines)
 {
-    std::vector<ShaderDefine> norm = NormalizeDefines(defines);   // см. CreateVertexShader
+    std::vector<ShaderDefine> norm = NormalizeDefines(defines);
     size_t n = 0;
     std::vector<std::string> push_kinds;
     Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT, n, norm, &push_kinds);
@@ -345,12 +315,12 @@ void ShaderManager::CreateFragmentShader(const std::string& name, const char* hl
     SDL_free(spv);
     fs.defines = std::move(norm);
     fs.push_kinds = std::move(push_kinds);
-    fragment_shaders[name] = std::move(fs);   // в реестр по имени
+    fragment_shaders[name] = std::move(fs);
 }
 
 void ShaderManager::CreateComputeShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines)
 {
-    std::vector<ShaderDefine> norm = NormalizeDefines(defines);   // см. CreateVertexShader
+    std::vector<ShaderDefine> norm = NormalizeDefines(defines);
     size_t n = 0;
     std::vector<std::string> push_kinds;
     Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_COMPUTE, n, norm, &push_kinds);
@@ -358,7 +328,7 @@ void ShaderManager::CreateComputeShader(const std::string& name, const char* hls
     // Реестр владеет сырым spv_code — при перезаписи имени старый освобождаем (иначе течёт).
     auto it = compute_shaders.find(name);
     if (it != compute_shaders.end() && it->second.spv_code) SDL_free(it->second.spv_code);
-    ComputeShaderData cs = BuildComputeShader(spv, n, hlsl_path);   // владение spv уходит в реестр
+    ComputeShaderData cs = BuildComputeShader(spv, n, hlsl_path);
     cs.defines = std::move(norm);
     cs.push_kinds = std::move(push_kinds);
     compute_shaders[name] = std::move(cs);
@@ -368,20 +338,19 @@ std::shared_ptr<SDL_GPUShader> ShaderManager::LookupGpuShader(uint64_t key) cons
 {
     auto it = gpu_shaders.find(key);
     if (it != gpu_shaders.end())
-        if (auto live = it->second.lock()) return live;   // живой дубль → переиспользуем
+        if (auto live = it->second.lock()) return live;
     return nullptr;
 }
 
 std::shared_ptr<SDL_GPUShader> ShaderManager::RegisterGpuShader(uint64_t key, SDL_GPUShader* raw)
 {
-    // Делитер освобождает GPU-шейдер при refcount→0, но ТОЛЬКО пока жив токен менеджера (а с
-    // ним device). Поздний релиз (статик-копия vs на выходе из программы) → no-op, ресурс
-    // добьёт уничтожение device. Так избегаем SDL_ReleaseGPUShader по мёртвому device.
+    // Делитер работает, только пока жив токен менеджера (а с ним device): поздний релиз —
+    // no-op, ресурс добьёт уничтожение device.
     std::shared_ptr<SDL_GPUShader> sh(raw,
         [dev = dev, token = std::weak_ptr<int>(shader_alive_)](SDL_GPUShader* s) {
             if (s && !token.expired()) SDL_ReleaseGPUShader(dev, s);
         });
-    gpu_shaders[key] = sh;   // weak-индекс для дедупа
+    gpu_shaders[key] = sh;
     return sh;
 }
 
@@ -390,12 +359,11 @@ VertexShaderData ShaderManager::BuildVertexShader(
     const std::vector<VertexBufferBinding>& bindings)
 {
     VertexShaderData vs{};
-    ReadVertexAttributes(bindings, vs);   // раскладка из VertexFormat, рефлексия не нужна
-    // Путь + bindings сохраняем ДО ранних return (дедуп-кэш ниже) — нужны редактору для ребилда.
+    ReadVertexAttributes(bindings, vs);
+    // Путь и bindings сохраняем ДО ранних return: они нужны редактору для ребилда.
     vs.source_path = dbg_name ? dbg_name : "";
     vs.bindings = bindings;
 
-    // Дедуп: одинаковый SPIR-V → один GPU-шейдер на всех владельцев (refcount через shared_ptr).
     const uint64_t key = HashBytes(spv, spv_size) ^ (uint64_t)SDL_SHADERCROSS_SHADERSTAGE_VERTEX;
     if (auto cached = LookupGpuShader(key)) { vs.shader_data.shader = cached; return vs; }
 
@@ -435,10 +403,9 @@ FragmentShaderData ShaderManager::BuildFragmentShader(
     const Uint8* spv, size_t spv_size, const char* dbg_name)
 {
     FragmentShaderData fs{};
-    fs.source_path = dbg_name ? dbg_name : "";   // до ранних return — нужен редактору для ребилда
+    fs.source_path = dbg_name ? dbg_name : "";
 
-    // Рефлексия ВСЕГДА (дёшево, load-time): нужна для числа uniform-буферов (гейт пуша params
-    // в PassManager) и для компиляции. Дедуп ниже только переиспользует готовый GPU-шейдер.
+    // Рефлексия нужна и при дедупе: число uniform-буферов читает сверка push-инструкций.
     SDL_ShaderCross_GraphicsShaderMetadata* metadata =
         SDL_ShaderCross_ReflectGraphicsSPIRV(spv, spv_size, 0);
     if (!metadata) {
@@ -468,13 +435,12 @@ FragmentShaderData ShaderManager::BuildFragmentShader(
     return fs;
 }
 
-// spv передаётся во владение ComputeShaderData (пайплайн строится позже)
 ComputeShaderData ShaderManager::BuildComputeShader(Uint8* spv, size_t spv_size, const char* dbg_name)
 {
     ComputeShaderData cs{};
     cs.spv_code = spv;
     cs.spv_size = spv_size;
-    cs.source_path = dbg_name ? dbg_name : "";   // рецепт для перекомпиляции/сериализации (см. VS/FS)
+    cs.source_path = dbg_name ? dbg_name : "";
 
     SDL_ShaderCross_ComputePipelineMetadata* metadata =
         SDL_ShaderCross_ReflectComputeSPIRV(spv, spv_size, 0);

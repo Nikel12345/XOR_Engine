@@ -75,7 +75,6 @@ struct ShaderProgram {
 
     std::vector<TextureSlotRole> required_slots;
 
-    // Push-инструкции лежат в реестре ShaderManager под именем программы, полем их здесь нет.
 	ShaderProgramDescription spd;
     // Ссылку держат ещё и слепки раскладки, поэтому пайплайн переживает удаление своей sp.
     std::shared_ptr<SDL_GPUGraphicsPipeline> pipeline;

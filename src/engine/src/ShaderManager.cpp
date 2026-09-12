@@ -11,15 +11,14 @@ ShaderManager::ShaderManager(SDL_GPUDevice* device) {
 
     SDL_ShaderCross_Init();
 
-    const char* base = SDL_GetBasePath();                    // папка, где лежит .exe
+    const char* base = SDL_GetBasePath();
 
     m_cacheBasePath = std::string(base) + "shaders/shader_cache";
 
     std::filesystem::create_directories(m_cacheBasePath);
     SDL_Log("[Shader] Shader cache directory: %s", m_cacheBasePath.c_str());
-    // НЕ освобождать base: в SDL3 (в отличие от SDL2) строка SDL_GetBasePath принадлежит SDL
-    // (кэш, освобождается в SDL_Quit). SDL_free здесь = double free → heap corruption на выходе
-    // у любого процесса, который корректно зовёт SDL_Quit (зонды песочницы).
+    // base НЕ освобождать: в SDL3 строка принадлежит SDL, и SDL_free здесь даёт double free
+    // на выходе у любого процесса, который зовёт SDL_Quit.
 };
 
 ShaderProgram* ShaderManager::CreateShaderProgram(
@@ -35,12 +34,11 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
     }
 
     auto program = std::make_unique<ShaderProgram>();
-    program->vs_name = vs_name;   // ссылки по имени на реестры vertex_shaders/fragment_shaders
+    program->vs_name = vs_name;
     program->fs_name = fs_name;
 	program->vertex_shader_buffer_names = std::move(vertex_shader_buffer_names);
 	program->fragment_shader_buffer_names = std::move(fragment_shader_buffer_names);
-	// Слот-роли ВЗАИМОИСКЛЮЧАЮЩИЕ: одна роль = один слот текстуры. Повтор — ошибка композиции
-	// (материал держит одну текстуру на роль); отсеиваем дубликаты, оставляя первое вхождение.
+	// Одна роль = один слот: материал держит по текстуре на роль, поэтому дубликаты отсеиваются.
 	program->required_slots.reserve(texture_slots.size());
 	for (TextureSlotRole role : texture_slots) {
 		if (std::find(program->required_slots.begin(), program->required_slots.end(), role) != program->required_slots.end()) {
@@ -51,13 +49,10 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
 	}
 	program->spd = spd;
     program->render_pass_name = render_pass_name;
-    program->debug_name = name;   // только для логов (см. ShaderProgram::debug_name)
+    program->debug_name = name;
 
-    // ── Сбор usage-флагов ──
-    // Storage-буферы обеих стадий биндятся через SDL_BindGPUVertex/FragmentStorageBuffers, а те
-    // требуют GRAPHICS_STORAGE_READ (SDL_gpu.h:3054, :3127). Union, без приоритетов.
-    // texture_slots (роли) НЕ дают флага атласу: материал ссылается на текстуру по имени, и в какой
-    // она атлас — выясняется лишь на сборке батча, уже после бейка. Это ожидаемое расхождение.
+    // Роли текстур флага атласу НЕ дают: в каком атласе лежит текстура материала, выясняется
+    // только на сборке батча, уже после бейка.
     if (bm) {
         auto collect = [bm](const std::vector<BufferDataName>& names) {
             for (BufferDataName n : names)
@@ -68,9 +63,8 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
         collect(program->fragment_shader_buffer_names);
     }
 
-    // Код-байндинги сюда не копируются: они живут в плоском реестре под ИМЕНЕМ программы, а
-    // сборка батчей резолвит их оттуда. Поэтому порядок «функция / программа» не значит ничего,
-    // и sp, пересозданная загрузкой сцены или редактором, получает их автоматически.
+    // Инструкции программе не копируются: реестр ключуется её именем, поэтому порядок
+    // «функция / программа» не значит ничего, а пересозданная sp получает их сама.
 
     ShaderProgram* ptr = program.get();
 
@@ -94,9 +88,9 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     }
 
     auto result = std::make_unique<ComputeShaderProgram>();
-    result->cs_name = cs_name;   // ссылка по имени на реестр compute_shaders
+    result->cs_name = cs_name;
     result->compute_pass_name = compute_pass_name;
-    result->debug_name = name;   // только для логов (см. ComputeShaderProgram::debug_name)
+    result->debug_name = name;
 
     result->dont_save = dont_save;
 
@@ -108,20 +102,10 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     result->texture_sampler_names = std::move(texture_samplers);
 
 
-    // ── Сбор usage-флагов ──
-    // Роль задаёт СПИСОК, в котором ресурс объявлен, — каждый SDL_Bind* проверяет свой бит:
-    //   ro-буферы  → SDL_BindGPUComputeStorageBuffers требует COMPUTE_STORAGE_READ   (SDL_gpu.h:3375)
-    //   rw-буферы  → SDL_GPUStorageBufferReadWriteBinding требует COMPUTE_STORAGE_WRITE (:2038)
-    //   ro/rw-текстуры и сэмплеры — то же самое для текстурных флагов.
-    // Union без приоритетов: RO и RW НЕЗАВИСИМЫ. «rw важнее ro» было бы ошибкой — уронив RO ради
-    // RW, мы сломали бы бинд той программы, что читает этот же буфер как RO.
-    // SIMULTANEOUS_READ_WRITE — не выводится из формы бинда, а берётся из РУЧНОГО тега
-    // need_simultaneous на самом rw-биндинге: это факт о теле шейдера (читает ли он соседние
-    // тексели, пока другие потоки их пишут), а bloom_up и bloom_composite регистрируются
-    // одинаково. См. ComputeRWTextureBindingParametr::need_simultaneous.
-    // Резолв ТОЛЬКО ради флагов (сама программа хранит имена). Промах здесь не отменяет создание:
-    // ресурс может появиться позже — тогда батч его и найдёт, а вот флаг уже опоздает, см.
-    // warnings.md («usage-флаг после бейка»).
+    // Флаг задаёт СПИСОК, в котором ресурс объявлен. Union без приоритетов: RO и RW независимы,
+    // и «rw важнее ro» сломало бы бинд той программе, что читает тот же буфер как RO.
+    // Резолв здесь ТОЛЬКО ради флагов. Промах создание не отменяет: ресурс может появиться позже,
+    // и батч его найдёт, а вот флаг уже опоздает (см. WARNINGS.md).
     auto buf = [bm](BufferDataName n) -> BufferData* {
         if (!bm) return nullptr;
         BufferData* bd = bm->GetBufferData(n);
@@ -152,7 +136,6 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     for (const AtlasName& n : result->texture_sampler_names)
         if (TextureAtlas* a = atlas(n)) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
-    // См. CreateShaderProgram: push/dispatch программе не копируются — их резолвит сборка батчей.
 
     ComputeShaderProgram* ptr = result.get();
     compute_shader_programs.push_back({ name, std::move(result) });
@@ -162,10 +145,6 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     return ptr;
 }
 
-// ── Реестр код-байндингов ───────────────────────────────────────────────────────────────────
-// Реестр — ЕДИНСТВЕННЫЙ владелец инструкций: программы их копией не держат, поэтому и
-// синхронизировать нечего. Потребитель (сборка батчей) забирает их по имени программы через
-// Collect*/Get*, ровно как резолвит имена буферов и текстур.
 
 void ShaderManager::CreatePushInstruction(const std::string& sp_name, PushStage stage, PushFunc fn)
 {
@@ -179,12 +158,11 @@ void ShaderManager::CreateComputePushInstruction(const std::string& csp_name, Pu
 
 void ShaderManager::CreateDispatchInstruction(const std::string& csp_name, DispatchFunc fn)
 {
-    dispatch_instructions_[csp_name] = std::move(fn);   // ровно один на программу (см. заголовок)
+    dispatch_instructions_[csp_name] = std::move(fn);
 }
 
-// Слоты считаются отдельно по стадиям (они независимые), поэтому вершинная инструкция между
-// двумя фрагментными ничего не сдвигает. Слот проставляется ЗДЕСЬ, а не на исполнении:
-// инструкция не должна зависеть от того, сколько блоков пушат соседи.
+// Слот проставляется ЗДЕСЬ, на сборке: на исполнении инструкция не должна зависеть от того,
+// сколько блоков пушат соседи.
 namespace {
     struct SlotCounter {
         Uint32 next[3] = { 0, 0, 0 };   // по индексу PushStage
@@ -194,9 +172,8 @@ namespace {
     };
 }
 
-// Типовые пуши шейдера: маркеры //@push <тип> в порядке текста → функторы из реестра типов.
-// Незнакомый тип НЕ пропускаем молча: шейдер под него cbuffer уже объявил, и пропуск сдвинул бы
-// слоты всем следующим блокам. Занимаем слот пустой инструкцией и говорим об этом в лог.
+// Незнакомый тип слот ЗАНИМАЕТ: cbuffer под него шейдер уже объявил, и пропуск сдвинул бы
+// слоты всем следующим блокам.
 void ShaderManager::AddKindInstructions(PushInstructions& out, void* slots_raw,
     const std::vector<std::string>& kinds, const std::string& owner) const
 {
@@ -219,9 +196,7 @@ PushInstructions ShaderManager::CollectPushInstructions(const std::string& sp_na
     PushInstructions out;
     SlotCounter slots;
 
-    // 1) ТИПОВЫЕ — первыми и в порядке маркеров исходника: именно этот порядок автор шейдера
-    //    видит у себя в файле рядом с register(bN). Вершинные маркеры берём из vs, фрагментные
-    //    из fs — стадию задаёт сам тип, источник маркера только говорит, где его искать.
+    // Порядок сборки списка = нумерация слотов (docs/shaders/programs.md).
     if (auto sit = shader_programs.find(sp_name); sit != shader_programs.end()) {
         const ShaderProgram* sp = sit->second.get();
         if (auto vit = vertex_shaders.find(sp->vs_name); vit != vertex_shaders.end())
@@ -230,14 +205,11 @@ PushInstructions ShaderManager::CollectPushInstructions(const std::string& sp_na
             AddKindInstructions(out, &slots, fit->second.push_kinds, sp->fs_name);
     }
 
-    // 2) ИМЕННЫЕ — следом, в порядке регистрации. Их cbuffer'ы в шейдере объявлены ПОСЛЕ типовых.
     for (const ShaderPushInstruction& instr : push_instructions_)
         if (instr.program_name == sp_name) slots.Add(out, instr.stage, instr.fn);
 
-    // Сверка с РЕФЛЕКСИЕЙ: все фрагментные блоки — инструкции, значит их число обязано совпасть
-    // с числом uniform-буферов, которое объявил сам шейдер. Не совпало — забыт (или лишний)
-    // маркер, и слоты разъехались: у шейдера блок есть, а пушить его некому, либо наоборот.
-    // Это ловится ЗДЕСЬ, один раз на сборке, вместо разглядывания неправильной картинки.
+    // Сверка с рефлексией: расхождение значит забытый или лишний маркер, то есть разъехавшиеся
+    // слоты.
     if (auto sit = shader_programs.find(sp_name); sit != shader_programs.end()) {
         if (auto fit = fragment_shaders.find(sit->second->fs_name); fit != fragment_shaders.end()) {
             const Uint32 declared = fit->second.shader_data.num_uniform_buffers;
@@ -281,11 +253,8 @@ ShaderManager::DispatchFunc ShaderManager::GetDispatchInstruction(const std::str
 
 void ShaderManager::ReportOrphanCodeBindings()
 {
-    // Осиротевшие записи — не ошибка: сцена могла просто не привезти свою программу (у каждого
-    // фрактала свой sp, а функции обоих зарегистрированы разом в Init). Но это ровно тот случай,
-    // который разовый колбэк с if (sp) съедал молча, — поэтому он идёт в лог одной строкой.
-    // set, а не строка: push и dispatch — РАЗНЫЕ реестры, и csp без программы попадала в отчёт
-    // дважды, что читалось как удвоение списка.
+    // set: push и dispatch — разные реестры, и без него csp без программы попадала бы в отчёт
+    // дважды.
     std::set<std::string> orphans;
     auto check_named = [&orphans](const auto& instructions, auto&& lookup) {
         for (const auto& instr : instructions)
@@ -333,7 +302,7 @@ ShaderProgram* ShaderManager::GetShaderProgram(const ShaderName& name)
     return nullptr;
 }
 
-// Резолв именованных шейдер-данных (без лога на промахе — зовётся на каждой сборке пайплайна/батча).
+// Без лога на промахе: зовётся на каждой сборке пайплайна и батча.
 VertexShaderData* ShaderManager::GetVertexShader(const std::string& name)
 {
     auto it = vertex_shaders.find(name);
@@ -354,7 +323,7 @@ ComputeShaderData* ShaderManager::GetComputeShader(const std::string& name)
 
 bool ShaderManager::DeleteComputeShader(const std::string& name)
 {
-    if (IsComputeShaderUsed(name)) {   // см. комментарий у DeleteVertexShader
+    if (IsComputeShaderUsed(name)) {
         SDL_Log("ShaderManager: compute shader '%s' is used by a compute program - delete refused", name.c_str());
         return false;
     }
@@ -365,8 +334,7 @@ bool ShaderManager::DeleteComputeShader(const std::string& name)
     return true;
 }
 
-// Линейный поиск по единственному реестру: программ десятки, а все вызовы — холодные (создание,
-// регистрация код-байндингов, редактор). Отдельный индекс по имени был бы вторым источником истины.
+// Линейный поиск: программ десятки, все вызовы холодные.
 ComputeShaderProgram* ShaderManager::GetComputeShaderProgram(const std::string& name)
 {
     for (auto& slot : compute_shader_programs)
@@ -376,13 +344,12 @@ ComputeShaderProgram* ShaderManager::GetComputeShaderProgram(const std::string& 
 
 ShaderManager::~ShaderManager()
 {
-	// GPU-шейдеры освобождаются по refcount (shared_ptr в ShaderData) при shader_programs.clear()
-	// ниже — без явного SDL_ReleaseGPUShader, иначе шарящийся vs (main+transparent через один
-	// main_pass_vs) словил бы double-free.
-    for (auto& [n, cs] : compute_shaders) {   // владелец spv_code теперь реестр, не csp
+	// Явного SDL_ReleaseGPUShader здесь нет: шарящийся vs словил бы double-free, а по refcount
+	// он освободится сам на clear() ниже.
+    for (auto& [n, cs] : compute_shaders) {
         if (cs.spv_code) SDL_free(cs.spv_code);
 	}
-	shader_programs.clear();   // sp умирают → их shared_ptr отпускаются (device ещё жив)
+	shader_programs.clear();   // device ещё жив
 	shader_alive_.reset();     // токен гасим ПОСЛЕ: поздние релизы (статик vs на выходе) → no-op
 	SDL_ShaderCross_Quit();
 }
