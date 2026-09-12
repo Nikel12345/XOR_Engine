@@ -148,7 +148,6 @@ enum class TextureSlotRole {
 
     // Роли без семантики: движок биндит по ним хэндл, а сэмплеры под них объявляет сам пролог.
     // Разрыв в нумерации — резерв под новые well-known роли: номер уезжает в сцену ЧИСЛОМ
-    // (states у MaterialComponent), и вставка роли выше переадресовала бы Custom* у старых сцен.
     Custom0 = 1000,
     Custom1,
     Custom2,
@@ -159,8 +158,6 @@ enum class TextureSlotRole {
     Custom7,
 };
 
-// Потолки раскладки текстурных слотов. В HLSL уезжают дефайнами компиляции; дублировать их там
-// литералом нельзя — разъезд C++ и байткода тихо перемешает секции состояний.
 inline constexpr uint32_t MAX_SLOTS = 12;
 inline constexpr uint32_t MAX_VARIATIVE_SLOTS = 4;
 inline constexpr uint32_t MAX_UVL_BLOCKS = 32;
