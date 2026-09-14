@@ -1,55 +1,39 @@
-﻿#include "PCH.h"
+#include "PCH.h"
 #include "TransformDataModule.h"
 #include "BaseComponents.h"
 #include "BufferManager.h"
 #include "ObjectManager.h"
-#include <glm/gtc/type_ptr.hpp>
-#include <unordered_set>
 #include <immintrin.h>
 
-TransformDataModule::TransformDataModule()
+// 16 float'ов GPU-матрицы, column-major: столбцы (x,y,z,i), (a,b,c,j), (e,f,g,k), (w,d,h,l).
+// В этом же порядке GatherPositionStreams собирает потоки для транспонирования.
+static void LoadPositionMatrix(const Positions& P, size_t i, float* m)
 {
+    m[0]  = P.x[i]; m[1]  = P.y[i]; m[2]  = P.z[i]; m[3]  = P.i[i];
+    m[4]  = P.a[i]; m[5]  = P.b[i]; m[6]  = P.c[i]; m[7]  = P.j[i];
+    m[8]  = P.e[i]; m[9]  = P.f[i]; m[10] = P.g[i]; m[11] = P.k[i];
+    m[12] = P.w[i]; m[13] = P.d[i]; m[14] = P.h[i]; m[15] = P.l[i];
 }
 
-// Positions[i] ↔ glm::mat4. Раскладка движка (см. StoreTransforms): GPU-матрица
-// column-major, столбцы = (x,y,z),(a,b,c),(e,f,g),(w,d,h), нижняя строка (i,j,k,l).
-// glm тоже column-major, поэтому отображение прямое (без транспонирования).
-static glm::mat4 LoadPositionMatrix(const Positions& P, size_t i)
+static void StorePositionMatrix(Positions& P, size_t i, const float* m)
 {
-    return glm::mat4(
-        glm::vec4(P.x[i], P.y[i], P.z[i], P.i[i]),
-        glm::vec4(P.a[i], P.b[i], P.c[i], P.j[i]),
-        glm::vec4(P.e[i], P.f[i], P.g[i], P.k[i]),
-        glm::vec4(P.w[i], P.d[i], P.h[i], P.l[i]));
+    P.x[i] = m[0];  P.y[i] = m[1];  P.z[i] = m[2];  P.i[i] = m[3];
+    P.a[i] = m[4];  P.b[i] = m[5];  P.c[i] = m[6];  P.j[i] = m[7];
+    P.e[i] = m[8];  P.f[i] = m[9];  P.g[i] = m[10]; P.k[i] = m[11];
+    P.w[i] = m[12]; P.d[i] = m[13]; P.h[i] = m[14]; P.l[i] = m[15];
 }
 
-static void StorePositionMatrix(Positions& P, size_t i, const glm::mat4& m)
+static void LoadLocalMatrix(const LocalMatrices& L, size_t i, float* m)
 {
-    P.x[i] = m[0][0]; P.y[i] = m[0][1]; P.z[i] = m[0][2]; P.i[i] = m[0][3];
-    P.a[i] = m[1][0]; P.b[i] = m[1][1]; P.c[i] = m[1][2]; P.j[i] = m[1][3];
-    P.e[i] = m[2][0]; P.f[i] = m[2][1]; P.g[i] = m[2][2]; P.k[i] = m[2][3];
-    P.w[i] = m[3][0]; P.d[i] = m[3][1]; P.h[i] = m[3][2]; P.l[i] = m[3][3];
+    m[0]  = L.m0[i];  m[1]  = L.m1[i];  m[2]  = L.m2[i];  m[3]  = L.m3[i];
+    m[4]  = L.m4[i];  m[5]  = L.m5[i];  m[6]  = L.m6[i];  m[7]  = L.m7[i];
+    m[8]  = L.m8[i];  m[9]  = L.m9[i];  m[10] = L.m10[i]; m[11] = L.m11[i];
+    m[12] = L.m12[i]; m[13] = L.m13[i]; m[14] = L.m14[i]; m[15] = L.m15[i];
 }
 
-// LocalMatrices[i] → glm::mat4. Раскладка column-major m0..m15 (как ждал make_mat4).
-static glm::mat4 LoadLocalMatrix(const LocalMatrices& L, size_t i)
-{
-    return glm::mat4(
-        glm::vec4(L.m0[i],  L.m1[i],  L.m2[i],  L.m3[i]),
-        glm::vec4(L.m4[i],  L.m5[i],  L.m6[i],  L.m7[i]),
-        glm::vec4(L.m8[i],  L.m9[i],  L.m10[i], L.m11[i]),
-        glm::vec4(L.m12[i], L.m13[i], L.m14[i], L.m15[i]));
-}
-
-// lhs = lhs * rhs, in-place, БЕЗ glm-математики. 16 float'ов column-major на
-// матрицу (m[col*4 + row]); SSE, столбец = один __m128.
-//
-// Каждый столбец результата — линейная комбинация ВСЕХ столбцов lhs, поэтому все
-// 4 столбца lhs снимаются в c0..c3 ДО первой записи: иначе store столбца 0 затрёт
-// данные, нужные столбцам 1..3 (in-place алиасинг). Эти 4 __m128 — не «лишние
-// локали», а обязательные и бесплатные: живут в xmm-регистрах (4 из 16), в память
-// не сбрасываются. Цикл по j с константной границей разворачивается компилятором,
-// j и b как адресная арифметика исчезают.
+// lhs = lhs * rhs, column-major. Все четыре столбца lhs снимаются в регистры ДО первой записи:
+// каждый столбец результата — комбинация всех столбцов lhs, и запись нулевого затёрла бы данные,
+// нужные остальным.
 static inline void MulMat4InPlace(float* lhs, const float* rhs)
 {
     const __m128 c0 = _mm_loadu_ps(lhs + 0);
@@ -59,10 +43,10 @@ static inline void MulMat4InPlace(float* lhs, const float* rhs)
 
     for (int j = 0; j < 4; ++j) {
         const float* b = rhs + j * 4;
-        __m128 col =                 _mm_mul_ps(c0, _mm_set1_ps(b[0]));
-        col = _mm_add_ps(col,        _mm_mul_ps(c1, _mm_set1_ps(b[1])));
-        col = _mm_add_ps(col,        _mm_mul_ps(c2, _mm_set1_ps(b[2])));
-        col = _mm_add_ps(col,        _mm_mul_ps(c3, _mm_set1_ps(b[3])));
+        __m128 col =          _mm_mul_ps(c0, _mm_set1_ps(b[0]));
+        col = _mm_add_ps(col, _mm_mul_ps(c1, _mm_set1_ps(b[1])));
+        col = _mm_add_ps(col, _mm_mul_ps(c2, _mm_set1_ps(b[2])));
+        col = _mm_add_ps(col, _mm_mul_ps(c3, _mm_set1_ps(b[3])));
         _mm_storeu_ps(lhs + j * 4, col);
     }
 }
@@ -90,15 +74,10 @@ void TransformDataModule::UpdateLocalTransforms(ObjectManager* om, SceneData* sc
     }
 
     for (const LocalXformLink& r : local_links_) {
-        // world — локальная копия матрицы родителя (левый операнд, аккумулятор).
-        // Умножаем на локальную матрицу ребёнка ПРЯМО в world, без возврата новой
-        // матрицы и без промежуточного make_mat4. Родитель в ECS не трогается —
-        // мутируется только стековая копия.
-        // world/local — здесь лишь контейнеры на 16 float'ов (column-major); в самом
-        // умножении glm-математики нет — MulMat4InPlace работает по сырым указателям.
-        glm::mat4 world = LoadPositionMatrix(*r.parent_pos, r.parent_i);
-        const glm::mat4 local = LoadLocalMatrix(*r.local, r.local_i);
-        MulMat4InPlace(glm::value_ptr(world), glm::value_ptr(local));
+        float world[16], local[16];
+        LoadPositionMatrix(*r.parent_pos, r.parent_i, world);
+        LoadLocalMatrix(*r.local, r.local_i, local);
+        MulMat4InPlace(world, local);
         StorePositionMatrix(*r.child_pos, r.child_i, world);
     }
 }
@@ -112,20 +91,15 @@ uint32_t TransformDataModule::CalculateTransformSize(ObjectManager* om, SceneDat
     size_revision_ = rev;
     total_size = 0;
 
-    om->ForEachArchetype<Positions, DrawComponent>(
-        scene,
-        [&](ComponentArray<Positions, void>* posArr,
-            ComponentArray<DrawComponent, void>*)
+    om->ForEachArchetype<Positions, DrawComponent>(scene,
+        [&](ComponentArray<Positions, void>* posArr, ComponentArray<DrawComponent, void>*)
     {
         total_size += safe_u32(posArr->size()) * sizeof(PositionProxy16);
-    }
-    );
+    });
 
     return total_size;
 }
 
-// 16 SoA-потоков в порядке float'ов GPU-матрицы: столбцы = (x,y,z,i),(a,b,c,j),
-// (e,f,g,k),(w,d,h,l) — та же раскладка, что в LoadPositionMatrix выше.
 static void GatherPositionStreams(const Positions& P, const float* src[16])
 {
     src[0]  = P.x.data(); src[1]  = P.y.data(); src[2]  = P.z.data(); src[3]  = P.i.data();
@@ -143,8 +117,6 @@ static void TransposeScalar(const float* const src[16], float* dst, size_t first
     }
 }
 
-// Классическое транспонирование 8x8 float на AVX: после вызова r[j] содержит
-// j-е элементы всех восьми входных регистров.
 static inline void Transpose8x8(__m256 r[8])
 {
     __m256 t0 = _mm256_unpacklo_ps(r[0], r[1]);
@@ -175,11 +147,11 @@ static inline void Transpose8x8(__m256 r[8])
     r[7] = _mm256_permute2f128_ps(u3, u7, 0x31);
 }
 
-// SoA(16 потоков) → AoS(n матриц по 16 float). Блок из 8 энтити — это две матрицы
-// 8x8 (потоки 0..7 и 8..15): после транспонирования lo[m]/hi[m] — первая/вторая
-// половина m-й матрицы блока. Loadu/storeu — std::vector не даёт 32-байтового
-// выравнивания. Интринсики компилируются без /arch:AVX, но исполняются только
-// после рантайм-проверки SDL_HasAVX; хвост и fallback — скалярные.
+// SoA-колонки -> AoS-матрицы. Ручной AVX здесь не украшение: на 800k сущностей замер
+// (sandbox/TransposeVecProbe) даёт 7.0 мс против 8.8 у лучшей формы, которую берёт
+// автовекторизатор, и 10.9 у скаляра ниже; копия тех же байт без перестановки — 4.3 мс.
+// loadu/storeu — std::vector не даёт 32-байтового выравнивания; интринсики компилируются без
+// /arch:AVX, поэтому исполнение гейтится SDL_HasAVX, а хвост блока идёт скаляром.
 static void TransposeSoAToMatrices(const float* const src[16], float* dst, size_t n)
 {
     static const bool has_avx = SDL_HasAVX();
@@ -205,17 +177,12 @@ static void TransposeSoAToMatrices(const float* const src[16], float* dst, size_
     TransposeScalar(src, dst, e, n);
 }
 
-void TransformDataModule::StoreTransforms(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene) {
-	this->UpdateLocalTransforms(om, scene);
+void TransformDataModule::StoreTransforms(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene)
+{
+    UpdateLocalTransforms(om, scene);
 
-    // Порядок обхода совпадает с ForEach<DrawComponent, Positions> (одна и та же map
-    // архетипов + индексы 0..n-1), так что порядок матриц в буфере не меняется.
-    // SIMD-транспонирование целого архетипа НАПРЯМУЮ в mapped transfer-буфер — один
-    // проход по памяти (чтение SoA + запись в tb), как при укладке колонок подряд;
-    // ни промежуточного staging, ни memcpy по 64 байта на энтити.
     om->ForEachArchetype<Positions, DrawComponent>(scene,
-        [&](ComponentArray<Positions, void>* posArr,
-            ComponentArray<DrawComponent, void>*)
+        [&](ComponentArray<Positions, void>* posArr, ComponentArray<DrawComponent, void>*)
     {
         const Positions& P = posArr->data;
         const size_t n = P.size();
@@ -233,20 +200,13 @@ void TransformDataModule::StoreTransforms(BufferManager* bm, UploadTask* task, O
 
 uint32_t TransformDataModule::AskNumTransform(ObjectManager* om, SceneData* scene)
 {
-
     uint32_t num_transform = 0;
 
-    om->ForEachArchetype<Positions, DrawComponent>(
-        scene,
-        [&](ComponentArray<Positions, void>* posArr,
-            ComponentArray<DrawComponent, void>*)
+    om->ForEachArchetype<Positions, DrawComponent>(scene,
+        [&](ComponentArray<Positions, void>* posArr, ComponentArray<DrawComponent, void>*)
     {
         num_transform += safe_u32(posArr->size());
-    }
-    );
+    });
 
     return num_transform;
 }
-
-
-

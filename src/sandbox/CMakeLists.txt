@@ -1,9 +1,10 @@
-add_executable(Sandbox)
+﻿add_executable(Sandbox)
 
 # Площадки для запуска подсистем движка по отдельности.
 # Каждый сценарий — свой .cpp; main решает, что именно запустить.
 set(SANDBOX_SRC
-    src/GravityVecProbe.cpp           # ЗОНД: векторизуется ли гравитационный шаг через ForEach (без интринсиков)
+    src/TransposeVecProbe.cpp         # ЗОНД: нужны ли интринсики в TransformDataModule (транспонирование SoA->AoS и умножение)
+    # src/GravityVecProbe.cpp           # ЗОНД: векторизуется ли гравитационный шаг через ForEach (без интринсиков)
     # src/QueueThreadingProbe.cpp       # зонд: очереди под конвейером потоков движка (ThreadController+SlotController) — потокобезопасность  (см. историю)
     # src/ShaderVramProbe.cpp         # зонд: цена резидентного шейдера — модуль/пайплайн, VRAM vs RAM (см. шапку файла)
     # src/TransferQueueProbe.cpp      # зонд: три очереди последовательно, без потоков (см. шапку файла)
