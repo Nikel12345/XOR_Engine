@@ -3,7 +3,6 @@
 
 using namespace ShaderBase;
 
-// Ведущее подчёркивание помечает служебный ассет для фильтра редактора (ui::IsInternalName).
 static const char* SemSuffix(VertexSemantic s)
 {
     switch (s) {
@@ -21,9 +20,9 @@ GeometryPool::GeometryPool(const std::string& name, uint32_t vertex_size, const 
     vertex_size_ = vertex_size;
 
     if (descs.empty() || vertex_size == 0) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-            "GeometryPool '%s': empty stream list or zero vertex size.", name.c_str());
-        assert(false && "GeometryPool: пустая раскладка");
+        SDL_Log("GeometryPool::GeometryPool: '%s' has an empty stream list or zero vertex size.",
+            name.c_str());
+        assert(false && "GeometryPool: empty layout");
         return;
     }
 
@@ -41,24 +40,22 @@ GeometryPool::GeometryPool(const std::string& name, uint32_t vertex_size, const 
 
     for (const StreamDesc& d : descs) {
         if (d.attrs.empty() || d.stride == 0) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                "GeometryPool '%s': stream without attributes or with zero stride.", name.c_str());
-            assert(false && "GeometryPool: пустой стрим");
+            SDL_Log("GeometryPool::GeometryPool: '%s' declares a stream without attributes or with "
+                "zero stride.", name.c_str());
+            assert(false && "GeometryPool: empty stream");
             continue;
         }
         if (d.src_offset + d.stride > vertex_size) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                "GeometryPool '%s': stream [%u, +%u) does not fit into a %u-byte layout vertex.",
-                name.c_str(), d.src_offset, d.stride, vertex_size);
-            assert(false && "GeometryPool: стрим выходит за вершину раскладки");
+            SDL_Log("GeometryPool::GeometryPool: '%s' stream [%u, +%u) does not fit into a %u-byte "
+                "layout vertex.", name.c_str(), d.src_offset, d.stride, vertex_size);
+            assert(false && "GeometryPool: stream outside the layout vertex");
             continue;
         }
         for (const VertexAttr& a : d.attrs)
             if (a.offset >= d.stride) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "GeometryPool '%s': attribute offset %u is outside its own %u-byte stream vertex.",
-                    name.c_str(), a.offset, d.stride);
-                assert(false && "GeometryPool: атрибут вне своего стрима");
+                SDL_Log("GeometryPool::GeometryPool: '%s' attribute offset %u is outside its own "
+                    "%u-byte stream vertex.", name.c_str(), a.offset, d.stride);
+                assert(false && "GeometryPool: attribute outside its stream");
             }
 
         owned_names_.push_back("_" + name + "_" + SemSuffix(d.attrs.front().semantic));
@@ -82,17 +79,16 @@ GeometryPool::GeometryPool(const std::string& name, uint32_t vertex_size, const 
             // Семантика в двух стримах сделала бы неоднозначным резолв pull в слоты.
             for (const VertexAttr& a : streams_[i].format->attrs)
                 if (streams_[j].format->Find(a.semantic)) {
-                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                        "GeometryPool '%s': semantic %u declared in two streams.", name.c_str(), (unsigned)a.semantic);
-                    assert(false && "GeometryPool: семантика в двух стримах");
+                    SDL_Log("GeometryPool::GeometryPool: '%s' declares semantic %u in two streams.",
+                        name.c_str(), (unsigned)a.semantic);
+                    assert(false && "GeometryPool: semantic in two streams");
                 }
             const uint32_t a0 = streams_[i].src_offset, a1 = a0 + streams_[i].format->stride;
             const uint32_t b0 = streams_[j].src_offset, b1 = b0 + streams_[j].format->stride;
             if (a1 > b0 && b1 > a0) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "GeometryPool '%s': streams [%u,%u) and [%u,%u) overlap in the layout vertex.",
-                    name.c_str(), a0, a1, b0, b1);
-                assert(false && "GeometryPool: стримы перекрываются");
+                SDL_Log("GeometryPool::GeometryPool: '%s' streams [%u,%u) and [%u,%u) overlap in the "
+                    "layout vertex.", name.c_str(), a0, a1, b0, b1);
+                assert(false && "GeometryPool: streams overlap");
             }
         }
 
