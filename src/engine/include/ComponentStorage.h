@@ -1,14 +1,9 @@
 #pragma once
-// ХРАНИЛИЩЕ ECS: тип-стёртые колонки архетипа и вспомогательные трейты. Кода компонентов
-// здесь нет — только машинерия, которая ими оперирует.
+// Машинерия хранилища ECS: тип-стёртые колонки архетипа и трейты. Компоненты лежат в
+// BaseComponents.h отдельно ради времени сборки: ObjectManager.h видит почти весь движок,
+// и правка поля компонента иначе пересобирала бы всё, а не только знающие о нём TU.
 //
-// Отделено от BaseComponents.h НАМЕРЕННО, ради времени сборки: SceneData/ObjectManager нужен
-// Archetype, а не конкретные компоненты, и раньше правка одного поля компонента тянула за
-// собой пересборку всего, что видит ObjectManager.h (а его видит почти весь движок).
-// Теперь такая правка задевает только TU, которые компоненты действительно называют.
-//
-// Самодостаточные инклуды: заголовок включают и PCH-free либы (Physics), и IDE индексирует
-// его без форс-инклуда PCH — поэтому всё используемое тянем сами, не полагаясь на транзитив.
+// Инклуды самодостаточны намеренно: заголовок включают и PCH-free либы (Physics).
 #include <cstdint>
 #include <cstddef>
 #include <vector>
@@ -27,6 +22,18 @@ struct TextureData;
 using f_restrict_pointer = float const* __restrict;
 using Entity = uint32_t;
 
+// SoA-компонент и его прокси — ОДИН компонент в двух видах. Хранилище (тег soa_tag) — это
+// структура параллельных колонок-векторов, она и лежит в архетипе; прокси (тег related_soa) —
+// одна строка полями, и только им компонент передают в CreateEntity. Отсюда весь путь:
+//   сигнатура архетипа считается по related_soa, то есть по типу ХРАНИЛИЩА, а не прокси;
+//   ComponentArray<SoA> держит одно поле data (колонки), а не вектор элементов — отдельного
+//     элемента в памяти нет вообще;
+//   add(proxy) уходит в proxy.emplace_to(storage): по одному push_back в каждую колонку;
+//   swap_remove идёт по columns() — все колонки обязаны оставаться выровненными по индексу,
+//     иначе строки сущностей разъедутся.
+// Поэтому же ForEach/GetComponent отдают SoAElement: ссылаться не на что, возвращается пара
+// (хранилище, индекс). Компонент становится SoA, унаследовав SoAProxyAddable<себя> и объявив
+// size()/columns(); прокси — объявив related_soa и emplace_to.
 template<typename, typename = void>
 struct is_soa : std::false_type {};
 
@@ -91,6 +98,10 @@ struct ComponentArray<T, std::enable_if_t<is_soa<T>::value>> : IComponentArray {
 struct Archetype {
     std::vector<Entity> entities;
     std::unordered_map<std::type_index, std::unique_ptr<IComponentArray>> components;
+    // Номер первой инстанс-строки архетипа в рендер-буферах: строка сущности =
+    // render_instance_base + её индекс в колонках. Считает BatchBuilder::RecalculateInstanceOffsets
+    // (только для архетипов с Draw+Positions, в порядке обхода scene->archetypes), читают
+    // дата-модули. Само ECS его не трогает — поле живёт здесь как ячейка для рендера.
     uint32_t render_instance_base = 0;
 
     template<typename T>

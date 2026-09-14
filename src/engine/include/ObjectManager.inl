@@ -11,6 +11,8 @@ Entity ObjectManager::CreateEntity(const std::string& scene_name, Components&&..
         return static_cast<Entity>(-1);
     }
 
+    // Сигнатура архетипа и его колонки — по типу ХРАНИЛИЩА: прокси и его SoA (PositionProxy16 и
+    // Positions) — один компонент, и архетип обязан знать его под одним именем.
     std::set<std::type_index> sig;
     (..., (
         [&] {
@@ -36,7 +38,7 @@ Entity ObjectManager::CreateEntity(const std::string& scene_name, Components&&..
         }()
             ));
 
-    // Снимаем parent ДО add_components (дальше comps форвардятся в хранилище).
+    // parent снимаем ДО add_components: там comps форвардятся в хранилище, и читать их уже поздно.
     bool has_parent = false;
     Entity parent_id = 0;
     (..., (
@@ -53,7 +55,6 @@ Entity ObjectManager::CreateEntity(const std::string& scene_name, Components&&..
     scene->entity_to_archetype[e] = &arch;
     scene->entity_to_index[e] = arch.entities.size() - 1;
 
-    // Регистрируем ребёнка в обратном индексе иерархии (для каскадного удаления).
     if (has_parent)
         scene->children[parent_id].push_back(e);
 
@@ -66,15 +67,9 @@ template<typename... Ts, typename Fn>
 void ObjectManager::ForEachArchetype(SceneData* scene, Fn&& fn) {
     if (!scene) return;
 
-    // Вторая форма: следом за колонками лямбда получает entities архетипа. Индекс в
-    // entities совпадает с индексом в колонках — CreateEntity кладёт сущность в
-    // arch.entities и её поля в колонки одним шагом, swap_remove снимает их вместе.
-    //
-    // Зачем. Горячему проходу нередко нужен id сущности (адресовать её командой,
-    // сменить материал), а получить его до сих пор можно было только поэлементной
-    // формой ForEach — и она невекторизуема в принципе: тело получает объект на
-    // каждую сущность, расширять его нечем. Здесь же цикл пишет сам вызывающий и
-    // может сделать его векторизуемым (замеры: sandbox/GravityVecProbe.cpp).
+    // Вторая форма (колонки + entities архетипа): горячему проходу нередко нужен id сущности —
+    // адресовать её командой, сменить материал, — а отдать его, не уходя в поэлементный обход,
+    // больше негде. Подробнее о формах — в ObjectManager.h.
     constexpr bool wants_entity_list =
         std::is_invocable_v<std::decay_t<Fn>, ComponentArray<Ts>*..., const std::vector<Entity>&>;
 
@@ -103,21 +98,20 @@ void ObjectManager::ForEachArchetype(SceneData* scene, Fn&& fn) {
 template<typename T>
 std::enable_if_t<!is_soa<T>::value, T&>
 make_param(ComponentArray<T>* arr, size_t i) {
-    return (*arr)[i];  // AoS
+    return (*arr)[i];
 }
 
 template<typename T>
 std::enable_if_t<is_soa<T>::value, SoAElement<T>>
 make_param(ComponentArray<T>* arr, size_t i) {
-    return SoAElement<T>{ &arr->data, i };  // SoA
+    return SoAElement<T>{ &arr->data, i };
 }
 
 
 template<typename... Ts, typename Fn>
 void ObjectManager::ForEach(SceneData* scene, Fn&& fn) {
-    // Как и в ForEachArchetype/Has: нет сцены — пустой обход. МОЛЧА, по той же причине, что в
-    // BatchBuilder::UpdateRenderBatches — это покадровый путь, и лог тут превращается в сотни
-    // одинаковых строк в секунду. Состояние один раз называет ObjectManager::GetActiveScene.
+    // Нет сцены — пустой обход, и МОЛЧА: путь покадровый, лог превратился бы в сотни одинаковых
+    // строк в секунду. Само состояние называет GetActiveScene, один раз на вход в него.
     if (!scene) return;
 
     auto& f = fn;
@@ -181,9 +175,8 @@ void ObjectManager::add_components(Archetype& arch, Components&&... comps) {
 template<typename T>
 foreach_arg_t<T> ObjectManager::GetComponent(SceneData* scene, Entity e)
 {
-    // Тут, в отличие от Has, тихо вернуть «ничего» нельзя — возвращается ССЫЛКА. Поэтому нулевая
-    // сцена ловится assert'ом в точке возникновения: вызывающий обязан был отсеять её раньше
-    // (штатно — тем же Has, который теперь это делает сам).
+    // Тихо вернуть «ничего», как Has, здесь нельзя — возвращается ССЫЛКА. Поэтому нулевая сцена
+    // ловится assert'ом: отсеять её обязан вызывающий, штатно — тем же Has.
     SDL_assert(scene && "GetComponent on null scene - gate it with Has() first");
     auto arch_it = scene->entity_to_archetype.find(e);
     SDL_assert(arch_it != scene->entity_to_archetype.end());
@@ -208,11 +201,9 @@ foreach_arg_t<T> ObjectManager::GetComponent(SceneData* scene, Entity e)
 
 template<typename Component>
 bool ObjectManager::Has(SceneData* scene, Entity e) const {
-    // Нет сцены — нет и компонента. Это ГЛАВНЫЙ фильтр отсутствующей активной сцены: почти каждый
-    // доступ к компоненту в движке и играх стоит за `Has`, поэтому проверка здесь снимает нулевую
-    // сцену разом на всех этих путях (UI_Yoga::EmitNode, EngineContext::Delete/HideEntity, ввод игр),
-    // вместо копии `if (!scene)` в каждом. Тихо, а не assert: «сцены нет» — легальное состояние
-    // движка (пустой кадр = чёрный экран), а не ошибка вызывающего.
+    // Нет сцены — нет и компонента. Это ГЛАВНЫЙ фильтр отсутствующей сцены: почти каждый доступ к
+    // компоненту стоит за Has, поэтому проверка здесь снимает её разом на всех этих путях. Тихо,
+    // а не assert: «сцены нет» — легальное состояние движка (пустой кадр), а не ошибка вызывающего.
     if (!scene) return false;
     auto arch_it = scene->entity_to_archetype.find(e);
     if (arch_it == scene->entity_to_archetype.end())
