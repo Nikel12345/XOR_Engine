@@ -63,18 +63,14 @@ public:
 	BufferManager(SDL_GPUDevice* device, TransferManager* transfer_manager);
 	BufferData* CreateBufferData(BufferDataName name, Uint32 size, BufferDataType type, ResizeBehaviour resize_behaviour = ResizeBehaviour::RESIZE_ONLY);
 
-	// Отложенная инициализация GPU-ресурсов. CreateBufferData только РЕГИСТРИРУЕТ обёртку (размеры)
-	// и кладёт её в pending_bakes; сам SDL_GPUBuffer создаёт этот дренаж. Зовётся КАЖДЫЙ
-	// кадр в начале Engine::PrepareFunc — до PackAtlases и сборки батчей, которые уже требуют
-	// готовые GPU-хэндлы. Игровой апдейт идёт раньше prepare на том же sim-потоке
-	// (ThreadController), поэтому ресурс, созданный в кадре N, создаётся на GPU в том же кадре N —
-	// и все объявления (sp/материалы), сделанные до этого момента, успевают дать ему свои флаги.
 	void BakePending();
 
 	void CreatePrePassUpdateInstruction(BufferData& buffer_data, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
 	void CreatePrePassUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
 
-	// size_fn вернула 0 — updater не зовётся вовсе; этим и выражают гейт по ревизии.
+	// updater не зовётся в двух случаях: size_fn вернула 0 (этим и выражают гейт по ревизии) и
+	// у буфера ещё нет тела — BakePending не создал его, пока usage никто не объявил. Во втором
+	// случае инструкция пропускается целиком и оживает сама, как только тело появится.
 	void CreateUpdateInstruction(BufferData& buffer_data, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn, UpdateInstructionOffsetFunc offset_fn = nullptr);
 	void CreateUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn, UpdateInstructionOffsetFunc offset_fn = nullptr);
 
