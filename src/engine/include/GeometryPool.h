@@ -5,7 +5,6 @@
 #include "Aliases.h"
 #include "ShaderTypes.h"
 
-// Пул геометрии: раскладка вершины и её разбивка на стримы — docs/gpu/geometry/pools.md.
 class GeometryPool
 {
 public:
@@ -18,7 +17,6 @@ public:
     };
 
     struct Stream {
-        // Строкой владеет пул, и ключ реестра BufferManager указывает в неё же.
         BufferDataName                  buffer_name = nullptr;
         const ShaderBase::VertexFormat* format = nullptr;
         uint32_t                        src_offset = 0;

@@ -2,7 +2,6 @@
 #include <vector>
 #include <cstdint>
 
-// Одномерный аллокатор диапазонов в элементах — docs/gpu/geometry/pools.md.
 class RangeAllocator
 {
 public:

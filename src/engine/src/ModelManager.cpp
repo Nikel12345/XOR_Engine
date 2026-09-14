@@ -7,9 +7,9 @@
 
 ModelManager::ModelManager() {};
 
-// Стартовый размер: обе ёмкости растут сами.
-static constexpr uint32_t BASE_VERTEX_CAPACITY = 186150;    // вершин на стрим
-static constexpr uint32_t BASE_INDEX_CAPACITY = 2047501;    // индексов (uint32)
+// Стартовая ёмкость буферов пула, примерно на одну модель; дальше они растут сами.
+static constexpr uint32_t BASE_VERTEX_COUNT = 1024;   // вершин на стрим, байты = count * stride
+static constexpr uint32_t BASE_INDEX_COUNT = 4096;    // индексов uint32
 
 struct SubMeshFileEntry {
     uint32_t vertexOffset;
@@ -137,9 +137,9 @@ GeometryPool* ModelManager::CreateGeometryPool(BufferManager* bm, const std::str
     if (!default_pool) default_pool = pool;
 
     for (const GeometryPool::Stream& s : pool->Streams())
-        bm->CreateBufferData(s.buffer_name, BASE_VERTEX_CAPACITY * s.format->stride,
+        bm->CreateBufferData(s.buffer_name, BASE_VERTEX_COUNT * s.format->stride,
                              BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
-    bm->CreateBufferData(pool->IndexBuffer(), BASE_INDEX_CAPACITY * 4,
+    bm->CreateBufferData(pool->IndexBuffer(), BASE_INDEX_COUNT * safe_u32(sizeof(Uint32)),
                          BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 
     // Порядок регистрации = порядок исполнения, поэтому индексная инструкция идёт последней и
