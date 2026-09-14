@@ -66,7 +66,7 @@ env-кубмапа), и только за ними идут материальн
 объявление даёт молча битые локейшены, без ошибки компиляции.
 
 Что вершинник читает по строке и как он попадает в неё из `SV_InstanceID` — в
-[`../render-pipeline/instance-data.md`](../render-pipeline/instance-data.md).
+[`../../render-pipeline/instance-data.md`](../../render-pipeline/instance-data.md).
 
 ---
 
@@ -74,7 +74,7 @@ env-кубмапа), и только за ними идут материальн
 
 Таблица UVL и слова адресации приезжают push-константами, разбирает их `TexIndex`; переключение
 вариантов включается дефайном, и без него остаётся адресация без выбора. Устройство таблицы,
-ячеек и состояний — в [`../render-pipeline/materials.md`](../render-pipeline/materials.md).
+ячеек и состояний — в [`../../render-pipeline/materials.md`](../../render-pipeline/materials.md).
 
 Потолки раскладки (`MAX_SLOTS`, `MAX_VARIATIVE_SLOTS`, `MAX_UVL_BLOCKS`) приходят дефайнами из C++.
 В шейдерах они объявлены через `#ifndef`, и значения по умолчанию существуют ради исходников,
@@ -90,7 +90,7 @@ env-кубмапа), и только за ними идут материальн
 объявляет тот, кто его включил, потому что раскладка у каждого канала своя.
 
 Устройство и цена — в
-[`../render-pipeline/instance-data.md`](../render-pipeline/instance-data.md).
+[`../../render-pipeline/instance-data.md`](../../render-pipeline/instance-data.md).
 
 ---
 

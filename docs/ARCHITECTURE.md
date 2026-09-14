@@ -166,6 +166,6 @@ XOR Engine — набор статических библиотек. Прило�
 | Индирект, регионы проходов, GPU-каллинг | `docs/render-pipeline/culling.md` |
 | Как инстанс находит свои данные: строки, PIB, разреженные каналы | `docs/render-pipeline/instance-data.md` |
 | Переключаемые варианты текстур | `docs/render-pipeline/materials.md` |
-| Шейдерная программа: реестры, компиляция, пуши | `docs/shaders/programs.md` |
-| Сторона HLSL: слои, регистры, контракты | `docs/shaders/hlsl.md` |
-| Пулы геометрии: потоки, разметка места, путь модели в буферы | `docs/geometry/pools.md` |
+| Шейдерная программа: реестры, компиляция, пуши | `docs/gpu/shaders/programs.md` |
+| Сторона HLSL: слои, регистры, контракты | `docs/gpu/shaders/hlsl.md` |
+| Пулы геометрии: потоки, разметка места, путь модели в буферы | `docs/gpu/geometry/pools.md` |
