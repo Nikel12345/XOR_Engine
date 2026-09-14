@@ -51,8 +51,7 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
     program->render_pass_name = render_pass_name;
     program->debug_name = name;
 
-    // Роли текстур флага атласу НЕ дают: в каком атласе лежит текстура материала, выясняется
-    // только на сборке батча, уже после бейка.
+
     if (bm) {
         auto collect = [bm](const std::vector<BufferDataName>& names) {
             for (BufferDataName n : names)
@@ -62,9 +61,6 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
         collect(program->vertex_shader_buffer_names);
         collect(program->fragment_shader_buffer_names);
     }
-
-    // Инструкции программе не копируются: реестр ключуется её именем, поэтому порядок
-    // «функция / программа» не значит ничего, а пересозданная sp получает их сама.
 
     ShaderProgram* ptr = program.get();
 
@@ -101,11 +97,6 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     result->ro_storage_texture_names = std::move(ro_storage_textures);
     result->texture_sampler_names = std::move(texture_samplers);
 
-
-    // Флаг задаёт СПИСОК, в котором ресурс объявлен. Union без приоритетов: RO и RW независимы,
-    // и «rw важнее ro» сломало бы бинд той программе, что читает тот же буфер как RO.
-    // Резолв здесь ТОЛЬКО ради флагов. Промах создание не отменяет: ресурс может появиться позже,
-    // и батч его найдёт, а вот флаг уже опоздает (см. WARNINGS.md).
     auto buf = [bm](BufferDataName n) -> BufferData* {
         if (!bm) return nullptr;
         BufferData* bd = bm->GetBufferData(n);
@@ -196,7 +187,6 @@ PushInstructions ShaderManager::CollectPushInstructions(const std::string& sp_na
     PushInstructions out;
     SlotCounter slots;
 
-    // Порядок сборки списка = нумерация слотов (docs/shaders/programs.md).
     if (auto sit = shader_programs.find(sp_name); sit != shader_programs.end()) {
         const ShaderProgram* sp = sit->second.get();
         if (auto vit = vertex_shaders.find(sp->vs_name); vit != vertex_shaders.end())
@@ -208,8 +198,6 @@ PushInstructions ShaderManager::CollectPushInstructions(const std::string& sp_na
     for (const ShaderPushInstruction& instr : push_instructions_)
         if (instr.program_name == sp_name) slots.Add(out, instr.stage, instr.fn);
 
-    // Сверка с рефлексией: расхождение значит забытый или лишний маркер, то есть разъехавшиеся
-    // слоты.
     if (auto sit = shader_programs.find(sp_name); sit != shader_programs.end()) {
         if (auto fit = fragment_shaders.find(sit->second->fs_name); fit != fragment_shaders.end()) {
             const Uint32 declared = fit->second.shader_data.num_uniform_buffers;
@@ -300,7 +288,6 @@ ShaderProgram* ShaderManager::GetShaderProgram(const ShaderName& name)
     return nullptr;
 }
 
-// Без лога на промахе: зовётся на каждой сборке пайплайна и батча.
 VertexShaderData* ShaderManager::GetVertexShader(const std::string& name)
 {
     auto it = vertex_shaders.find(name);
@@ -332,7 +319,6 @@ bool ShaderManager::DeleteComputeShader(const std::string& name)
     return true;
 }
 
-// Линейный поиск: программ десятки, все вызовы холодные.
 ComputeShaderProgram* ShaderManager::GetComputeShaderProgram(const std::string& name)
 {
     for (auto& slot : compute_shader_programs)
@@ -381,7 +367,7 @@ ShaderProgramDescription* ShaderProgramDescription::BehavesAsFullscreenEffect() 
     return this;
 }
 // UI-оверлей: перекрытие решает Z (depth_test+write ON), прозрачность — блендом, а прозрачные
-// пиксели ОТБРАСЫВАЮТСЯ в шейдере (clip) — иначе depth_write запечатал бы дыры. См. ui.frag.
+// пиксели ОТБРАСЫВАЮТСЯ в шейдере (clip) — иначе depth_write запечатал бы дыры.
 ShaderProgramDescription* ShaderProgramDescription::BehavesAsUIOverlay() {
     depth_test = true;  depth_write = true;
     color_blend = true;

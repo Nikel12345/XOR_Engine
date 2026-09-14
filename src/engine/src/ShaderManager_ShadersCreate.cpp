@@ -34,12 +34,6 @@ static std::vector<ShaderDefine> NormalizeDefines(const ShaderDefines& in)
     return out;
 }
 
-// visited защищает от циклов (сканер не видит include-guard'ы) и от повторного учёта файла,
-// включённого из нескольких мест.
-//
-// Тем же обходом снимаются маркеры типовых пушей: директивы и маркеры разбираются В ПОРЯДКЕ
-// СМЕЩЕНИЙ, поэтому markers выходит в порядке развёрнутого текста — он же порядок слотов
-// (docs/shaders/programs.md).
 static void HashIncludesRecursive(uint64_t& hash, const std::string& path,
     const char* include_dir, std::unordered_set<std::string>& visited,
     std::vector<std::string>* markers = nullptr)
@@ -251,9 +245,7 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
             "CreateVertexShader '%s': no geometry pool - shader NOT created.", name.c_str());
         return;
     }
-    // Пул отдаёт стримы в каноническом порядке слотов и схлопывает живущие вместе (NORMAL+TANGENT
-    // — один стрим). Слот получает ВСЕ семантики своего стрима: лишние атрибуты валидны, а чтение
-    // необъявленного ловит рефлексия. Пустой резолв = отказ целиком.
+
     const std::vector<const GeometryPool::Stream*> streams = pool->StreamsForSemantics(pull);
     if (streams.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -274,8 +266,6 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
         canonical_names.push_back(stream->buffer_name);
     }
 
-    // Компилируем ТЕМ ЖЕ набором, что ляжет в рецепт: иначе следующая загрузка сцены собрала бы
-    // другой .spv.
     std::vector<ShaderDefine> norm = NormalizeDefines(defines);
 
     size_t n = 0;
@@ -291,8 +281,6 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
     vs.pool_name = pool->Name();
     vs.index_buffer = pool->IndexBuffer();
 
-    // Декларация usage, по ней буферы и создаются: до этого момента буферы пула зарегистрированы,
-    // но VRAM не занимают.
     if (bm) {
         for (BufferDataName canon : vs.vertex_buffer_names)
             if (BufferData* bd = bm->GetBufferData(canon))
@@ -403,7 +391,6 @@ FragmentShaderData ShaderManager::BuildFragmentShader(
     FragmentShaderData fs{};
     fs.source_path = dbg_name ? dbg_name : "";
 
-    // Рефлексия нужна и при дедупе: число uniform-буферов читает сверка push-инструкций.
     SDL_ShaderCross_GraphicsShaderMetadata* metadata =
         SDL_ShaderCross_ReflectGraphicsSPIRV(spv, spv_size, 0);
     if (!metadata) {

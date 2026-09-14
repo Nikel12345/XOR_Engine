@@ -1,12 +1,9 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "GeometryPool.h"
 
 using namespace ShaderBase;
 
-// Суффикс имени буфера — по ведущей семантике стрима. Уникальность имени этим и обеспечена:
-// имя пула уникально (ключ реестра ModelManager), а семантика не повторяется между стримами
-// (проверяется ниже). Ведущее подчёркивание — служебный ассет для фильтра редактора
-// (ui::IsInternalName): стрим-буферы в дропдаунах пользователю не нужны.
+// Ведущее подчёркивание помечает служебный ассет для фильтра редактора (ui::IsInternalName).
 static const char* SemSuffix(VertexSemantic s)
 {
     switch (s) {
@@ -30,16 +27,15 @@ GeometryPool::GeometryPool(const std::string& name, uint32_t vertex_size, const 
         return;
     }
 
-    // Имена и форматы заполняются ПОЛНОСТЬЮ до сборки streams_: те держат на них указатели, и
-    // реаллокация после этого их повесила бы (см. owned_names_/formats_ в заголовке).
+    // Имена и форматы заполняются ПОЛНОСТЬЮ до сборки streams_: те держат на них указатели.
     owned_names_.reserve(descs.size());
     formats_.reserve(descs.size());
     streams_.reserve(descs.size());
     index_name_ = "_" + name + "_Index";
     index_buffer_ = index_name_.c_str();
 
-    // Отбракованные описания пропускаются, поэтому src_offset'ы принятых копим отдельно —
-    // индексы descs и formats_ после первого же skip разъезжаются.
+    // Индексы descs и formats_ после первого же skip разъезжаются, поэтому src_offset'ы
+    // принятых копим отдельно.
     std::vector<uint32_t> accepted_src;
     accepted_src.reserve(descs.size());
 
@@ -50,8 +46,6 @@ GeometryPool::GeometryPool(const std::string& name, uint32_t vertex_size, const 
             assert(false && "GeometryPool: пустой стрим");
             continue;
         }
-        // Стрим обязан помещаться в вершину раскладки: иначе расщепление при заливке читает за её
-        // границей (UploadModelVertexStream шагает по vertex_size, выдирая [src_offset, +stride)).
         if (d.src_offset + d.stride > vertex_size) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                 "GeometryPool '%s': stream [%u, +%u) does not fit into a %u-byte layout vertex.",
@@ -85,15 +79,13 @@ GeometryPool::GeometryPool(const std::string& name, uint32_t vertex_size, const 
 
     for (size_t i = 0; i < streams_.size(); ++i)
         for (size_t j = i + 1; j < streams_.size(); ++j) {
-            // Семантика в двух стримах сделала бы StreamsForSemantics неоднозначной (а на ней держится
-            // резолв pull → слоты) и сломала бы уникальность сгенерированного имени.
+            // Семантика в двух стримах сделала бы неоднозначным резолв pull в слоты.
             for (const VertexAttr& a : streams_[i].format->attrs)
                 if (streams_[j].format->Find(a.semantic)) {
                     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                         "GeometryPool '%s': semantic %u declared in two streams.", name.c_str(), (unsigned)a.semantic);
                     assert(false && "GeometryPool: семантика в двух стримах");
                 }
-            // Перекрытие в вершине раскладки означало бы, что один байт кормит два буфера.
             const uint32_t a0 = streams_[i].src_offset, a1 = a0 + streams_[i].format->stride;
             const uint32_t b0 = streams_[j].src_offset, b1 = b0 + streams_[j].format->stride;
             if (a1 > b0 && b1 > a0) {
@@ -104,9 +96,6 @@ GeometryPool::GeometryPool(const std::string& name, uint32_t vertex_size, const 
             }
         }
 
-    // Позиция ВЫВОДИТСЯ из таблицы стримов, а не хранится отдельным входом — иначе появился бы
-    // второй источник правды, разъезжающийся с раскладкой. POSITION не во FLOAT3 (упакованная) —
-    // законная раскладка, просто пивот и сканирование границ для неё недоступны.
     for (const Stream& s : streams_)
         if (const VertexAttr* a = s.format->Find(POSITION)) {
             if (a->format == SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3)

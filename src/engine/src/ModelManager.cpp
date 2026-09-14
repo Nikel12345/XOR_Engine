@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include <fstream>
 #include <iostream>
 #include <cstring>
@@ -7,7 +7,7 @@
 
 ModelManager::ModelManager() {};
 
-// Ёмкости на заведение пула: обе растут сами (RESIZE_AND_COPY), это лишь стартовый размер.
+// Стартовый размер: обе ёмкости растут сами.
 static constexpr uint32_t BASE_VERTEX_CAPACITY = 186150;    // вершин на стрим
 static constexpr uint32_t BASE_INDEX_CAPACITY = 2047501;    // индексов (uint32)
 
@@ -19,8 +19,8 @@ struct SubMeshFileEntry {
     uint32_t material_index;
 };
 
-// Позиция вершины из байтового стейджинга. memcpy, а не reinterpret_cast: раскладка приходит
-// извне, и выравнивание её вершины/офсета позиции ничем не гарантировано.
+// memcpy, а не разыменование: раскладка приходит извне, и выравнивание позиции в её вершине
+// ничем не гарантировано.
 static inline glm::vec3 ReadPos(const std::byte* base, uint32_t vsize, uint32_t pos_off, size_t i)
 {
     glm::vec3 p;
@@ -33,13 +33,8 @@ static inline void WritePos(std::byte* base, uint32_t vsize, uint32_t pos_off, s
     std::memcpy(base + i * vsize + pos_off, &p, sizeof(glm::vec3));
 }
 
-// Строит сабмеши модели из записей entries: смещения ОТНОСИТЕЛЬНО стейджинга + bounding sphere по
-// вершинам оттуда же. Общее для диска и генератора.
-// Смещения именно относительные: абсолютная база — начало диапазона, который аллокатор выдаст
-// пачке при заливке, а он неизвестен до неё. Переводит их UploadModelIndexBuffer (финализатор).
-// Раскладка без читаемой позиции (нет POSITION либо он упакован) — законна: сабмеши тогда
-// получают вырожденную сферу w=-1, и каллинг трактует такую модель как «видима всегда»
-// (culling_pib.comp.hlsl: has_geom = sphere.w >= 0). Границы для неё обязаны прийти из данных.
+// Раскладка без читаемой позиции законна: сабмеши получают вырожденную сферу w = -1, и отсев
+// трактует такую модель как видимую всегда.
 static void BuildSubmeshes(const std::byte* staging, const GeometryPool* pool, ModelData* model,
     const std::vector<SubMeshFileEntry>& entries, uint32_t vbase, uint32_t ibase)
 {
@@ -77,7 +72,6 @@ static void BuildSubmeshes(const std::byte* staging, const GeometryPool* pool, M
                 if (d > radius) radius = d;
             }
             sub.sphere = glm::vec4(center, radius);
-            // Локальный AABB сабмеша (для авто-боксов коллайдера в ColliderQuery).
             sub.aabb_center = (mn + mx) * 0.5f;
             sub.aabb_half = (mx - mn) * 0.5f;
         }
@@ -85,11 +79,8 @@ static void BuildSubmeshes(const std::byte* staging, const GeometryPool* pool, M
     }
 }
 
-// Запекает пивот в вершины: один проход min/max по диапазону [vbase, vbase+vcount),
-// switch выбирает точку q из локального AABB, и геометрия сдвигается на -q. Вызывается
-// ДО BuildSubmeshes — тогда sphere/AABB сабмешей считаются уже от нового origin.
-// Раскладке без записываемой FLOAT3-позиции пивот недоступен в принципе — вызывающий обязан
-// отсеять такой случай раньше (см. _LoadModelFile).
+// Вызывается ДО BuildSubmeshes: тогда сфера и AABB сабмешей считаются уже от нового origin.
+// Раскладку без записываемой FLOAT3-позиции вызывающий обязан отсеять раньше.
 static void ApplyAnchorShift(std::byte* staging, const GeometryPool* pool, size_t vbase, uint32_t vcount, AnchorShift anchor)
 {
     if (anchor == AnchorShift::Keep || vcount == 0 || !pool->HasFloat3Position()) return;
@@ -123,7 +114,6 @@ static void ApplyAnchorShift(std::byte* staging, const GeometryPool* pool, size_
                  ReadPos(staging, vsize, pos_off, vbase + k) - q);
 }
 
-// ── Пулы геометрии ─────────────────────────────────────────────────────────────────────────
 
 GeometryPool* ModelManager::CreateGeometryPool(BufferManager* bm, const std::string& name, uint32_t vertex_size,
     const std::vector<GeometryPool::StreamDesc>& streams)
@@ -139,24 +129,21 @@ GeometryPool* ModelManager::CreateGeometryPool(BufferManager* bm, const std::str
 
     auto owned = std::make_unique<GeometryPool>(name, vertex_size, streams);
     GeometryPool* pool = owned.get();
-    if (pool->Streams().empty()) {   // конструктор уже отругался — не заводим полупустой пул
+    if (pool->Streams().empty()) {
         return nullptr;
     }
     pools[name] = std::move(owned);
-    residency[pool];                 // пустая запись дозагрузки
+    residency[pool];
     if (!default_pool) default_pool = pool;
 
-    // Только РЕГИСТРАЦИЯ обёрток: SDL_GPUBuffer сделает BakePending, и только когда стримы назовёт
-    // вершинник (usage). Пул, которым никто не пользуется, не занимает ни байта VRAM.
     for (const GeometryPool::Stream& s : pool->Streams())
         bm->CreateBufferData(s.buffer_name, BASE_VERTEX_CAPACITY * s.format->stride,
                              BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
     bm->CreateBufferData(pool->IndexBuffer(), BASE_INDEX_CAPACITY * 4,
                          BufferDataType::Static, ResizeBehaviour::RESIZE_AND_COPY);
 
-    // Сначала ВСЕ стрим-инструкции пула, следом его индексная: последняя финализирует цикл
-    // дозагрузки (двигает счётчики, чистит стейджинг), а порядок регистрации = порядок исполнения
-    // в _ExecuteUpdateInstructions. Обе группы вешает один вызов — переставить их нельзя.
+    // Порядок регистрации = порядок исполнения, поэтому индексная инструкция идёт последней и
+    // закрывает цикл дозагрузки.
     ModelManager* mm = this;
     for (const GeometryPool::Stream& s : pool->Streams()) {
         const uint32_t src_offset = s.src_offset;
@@ -205,7 +192,6 @@ const ModelManager::PoolResidency* ModelManager::_FindResidency(const GeometryPo
     return it != residency.end() ? &it->second : nullptr;
 }
 
-// ── Модели ─────────────────────────────────────────────────────────────────────────────────
 
 ModelData* ModelManager::CreateModel(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor, GeometryPool* pool)
 {
@@ -221,13 +207,13 @@ ModelData* ModelManager::CreateModel(const std::string& name, const std::string&
     return _LoadModelFile(ptr, _ResolvePool(pool), path_vert, path_ind, anchor);
 }
 
-// Upsert: существующий перезагружаем В ТОТ ЖЕ объект (указатель у энтити жив), новый — создаём.
+// Перезагрузка идёт В ТОТ ЖЕ объект: сырой указатель на модель может быть у кода игры.
 ModelData* ModelManager::LoadModelFromFile(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor, GeometryPool* pool)
 {
     ModelData* ptr;
     auto it = models_data.find(name);
     if (it != models_data.end()) {
-        ptr = it->second.get();            // reload в существующий (старая геометрия остаётся в буфере)
+        ptr = it->second.get();   // старая геометрия остаётся в буфере
     }
     else {
         auto model_data = std::make_unique<ModelData>();
@@ -242,8 +228,6 @@ void ModelManager::DeleteModel(const std::string& name)
     auto it = models_data.find(name);
     if (it == models_data.end()) return;
 
-    // Место — в отложенный возврат: PendingFree держит КОПИИ Range, поэтому сам объект можно
-    // сносить прямо сейчас. Про висячий SubMeshData* в батчах — см. заголовок.
     _ReleaseModelRanges(it->second.get());
     models_data.erase(it);
 }
@@ -265,17 +249,13 @@ size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries
             SDL_Log("LoadSceneModels: incomplete entry ('%s') - skipped", e.name.c_str());
             continue;
         }
-        // Пул — по имени из манифеста; пусто/промах → дефолтный (сцены без поля не мигрируются).
         GeometryPool* pool = GetPool(e.pool);
-        // Замена под тем же именем = снос + создание, как у текстур. Место старой геометрии уходит
-        // в отложенный возврат и достаётся новой уже в этом кадре (ReclaimRanges идёт раньше
-        // размещения). Битый файл при этом стирает прежнюю геометрию — та же цена, что у текстур.
+        // Битый файл стирает прежнюю геометрию: замена под тем же именем — это снос и создание.
         if (models_data.count(e.name)) DeleteModel(e.name);
         if (!CreateModel(e.name, e.vertex_path, e.index_path, e.anchor, pool)) continue;
         ++loaded;
-        // Диапазоны кладутся ПОСЛЕ создания, а не параметром CreateModel: они не участвуют в
-        // построении геометрии (сабмеши/сферы уже посчитаны) и приходят не из .bin, а из манифеста.
-        ModelData* md = models_data.at(e.name).get();   // CreateModel только что отчитался успехом
+        // Диапазоны приходят из манифеста, а не из .bin, и в построении геометрии не участвуют.
+        ModelData* md = models_data.at(e.name).get();
         const size_t n = std::min(e.screen_size_span.size(), md->submeshes.size());
         for (size_t i = 0; i < n; ++i) md->submeshes[i].screen_size_span = e.screen_size_span[i];
     }
@@ -286,28 +266,22 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
 {
     if (!pool) return ptr;
 
-    // Перезагрузка В ТОТ ЖЕ объект: место старой геометрии возвращаем аллокатору (отложенно —
-    // по нему ещё рисуют слоты в полёте). У модели, не дошедшей до заливки, диапазоны пусты,
-    // так что двойного возврата при двойной перезагрузке за кадр не будет.
+    // У модели, не дошедшей до заливки, диапазоны пусты — двойного возврата при двойной
+    // перезагрузке за кадр не будет.
     _ReleaseModelRanges(ptr);
 
-    ptr->model_path = path_vert;   // self-describing: рецепт для редактора/сериализации
+    ptr->model_path = path_vert;
     ptr->index_path = path_ind;
     ptr->pool_name = pool->Name();
 
     PoolResidency& res = _Residency(pool);
     const uint32_t vsize = pool->VertexSize();
 
-    // Жадное чтение: submeshes готовы сразу после возврата (CreateModel всегда на prep-потоке,
-    // гонок с общим staging нет). Отложена только заливка на GPU — staging копит данные моделей
-    // до батч-апдейтера. Смещения тут СТЕЙДЖИНГ-относительные: куда пачка ляжет в буфере, решит
-    // аллокатор при заливке, и он же (через финализатор) переведёт их в абсолютные.
     const uint32_t vbase = safe_u32(res.staging_vertices.size() / vsize);
     const uint32_t ibase = safe_u32(res.staging_indices.size());
 
     std::vector<SubMeshFileEntry> entries;
 
-    // --- 1. заголовок вершинного файла + размеры (без роста staging) ---
     std::ifstream vf(path_vert, std::ios::binary);
     if (!vf) {
         SDL_Log("CreateModel: failed to open vertex file: %s", path_vert.c_str());
@@ -333,7 +307,6 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
     vf.seekg(0, std::ios::end);
     size_t file_size = vf.tellg();
     size_t vdata_size = file_size - header_size;
-    // Размер вершины даёт РАСКЛАДКА пула — файл обязан ей соответствовать.
     if (vdata_size == 0 || vdata_size % vsize != 0) {
         SDL_Log("CreateModel: vertex data size %zu does not match pool '%s' layout (%u B/vertex) in: %s",
             vdata_size, pool->Name().c_str(), vsize, path_vert.c_str());
@@ -342,7 +315,6 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
     }
     uint32_t vcount = safe_u32(vdata_size / vsize);
 
-    // --- 2. размер индексного файла (без роста staging) ---
     std::ifstream indf(path_ind, std::ios::binary);
     if (!indf) {
         SDL_Log("CreateModel: failed to open index file: %s", path_ind.c_str());
@@ -359,16 +331,14 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
     }
     uint32_t icount = safe_u32(isize / sizeof(uint32_t));
 
-    // Пивот переписывает позиции — раскладке без записываемой FLOAT3-позиции он недоступен.
-    // Это не дыра, а честное свойство раскладки: сообщаем и грузим как Keep.
+    // Пивот переписывает позиции, поэтому раскладке без записываемой FLOAT3-позиции он
+    // недоступен: сообщаем и грузим как Keep.
     if (anchor != AnchorShift::Keep && !pool->HasFloat3Position()) {
         SDL_Log("CreateModel: pool '%s' has no float3 POSITION - anchor shift ignored for '%s'",
             pool->Name().c_str(), path_vert.c_str());
         anchor = AnchorShift::Keep;
     }
 
-    // Все проверки пройдены — растим staging и читаем данные.
-    // --- 3. вершины ---
     vf.seekg(static_cast<std::streamoff>(header_size), std::ios::beg);
     res.staging_vertices.resize((size_t(vbase) + vcount) * size_t(vsize));
     vf.read(reinterpret_cast<char*>(res.staging_vertices.data() + size_t(vbase) * vsize), vdata_size);
@@ -378,7 +348,6 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
         assert(false && "CreateModel: incomplete vertex read");
     }
 
-    // --- 4. индексы ---
     res.staging_indices.resize(size_t(ibase) + icount, 0);
     indf.read(reinterpret_cast<char*>(res.staging_indices.data() + ibase), isize);
     if (!indf) {
@@ -387,11 +356,9 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
         assert(false && "CreateModel: incomplete index read");
     }
 
-    // --- 5. пивот (до сабмешей, чтобы sphere/AABB считались от нового origin) ---
     ptr->anchor = anchor;
     ApplyAnchorShift(res.staging_vertices.data(), pool, vbase, vcount, anchor);
 
-    // --- 6. сабмеши + bounding sphere ---
     BuildSubmeshes(res.staging_vertices.data(), pool, ptr, entries, vbase, ibase);
 
     _PushBatchEntry(res, ptr, vbase, vcount, ibase, icount);
@@ -419,8 +386,6 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
     PoolResidency& res = _Residency(p);
     const uint32_t vsize = p->VertexSize();
 
-    // Жадная генерация: submeshes готовы сразу (как и у дискового пути). Отложена только заливка.
-    // Смещения стейджинг-относительные — как и у файлового пути (см. BuildSubmeshes).
     const uint32_t vbase = safe_u32(res.staging_vertices.size() / vsize);
     const uint32_t ibase = safe_u32(res.staging_indices.size());
 
@@ -432,9 +397,8 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
         assert(false && "CreateModel: empty procedural mesh");
         return ptr;
     }
-    // Единственная автоматическая сверка генератора с пулом: байты обязаны делиться на вершину
-    // раскладки. Порядок ПОЛЕЙ так не проверить — привязка «структура ↔ пул» остаётся за автором
-    // (структура едет вместе со своей *Layout()-функцией), это лишь защита от грубого промаха.
+    // Единственная автоматическая сверка генератора с пулом: порядок ПОЛЕЙ так не проверить,
+    // привязка «структура — пул» остаётся за автором.
     if (verts.size() % vsize != 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
             "CreateModel('%s'): generator produced %zu bytes, not a multiple of pool '%s' vertex (%u B).",
@@ -449,11 +413,9 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
     std::memcpy(res.staging_vertices.data() + size_t(vbase) * vsize, verts.data(), verts.size());
     res.staging_indices.insert(res.staging_indices.end(), inds.begin(), inds.end());
 
-    // Пивот — до сабмешей, чтобы sphere/AABB считались от нового origin.
     ptr->anchor = anchor;
     ApplyAnchorShift(res.staging_vertices.data(), p, vbase, vcount, anchor);
 
-    // Вся геометрия — один сабмеш, материал 0.
     std::vector<SubMeshFileEntry> entries{ SubMeshFileEntry{ 0, 0, vcount, icount, 0 } };
     BuildSubmeshes(res.staging_vertices.data(), p, ptr, entries, vbase, ibase);
 
@@ -463,11 +425,9 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
     return ptr;
 }
 
-// ── Заливка ────────────────────────────────────────────────────────────────────────────────
 
 uint32_t ModelManager::CalculateModelsVerticesSize(const GeometryPool* pool, uint32_t stream_stride)
 {
-    // Чистый геттер: staging заполнен жадно в CreateModel. Размер — на ОДИН стрим пула.
     const PoolResidency* res = _FindResidency(pool);
     if (!res || !res->dirty) return 0;
     return safe_u32(res->staging_vertices.size() / pool->VertexSize() * stream_stride);
@@ -484,8 +444,6 @@ uint32_t ModelManager::GetVertexBaseOffset(const GeometryPool* pool, uint32_t st
 {
     _EnsureBatchAllocation(pool);
     const PoolResidency* res = _FindResidency(pool);
-    // Элементы → байты СВОЕГО стрима: стримы растут в ногу, поэтому один элементный диапазон
-    // обслуживает все три, каждый по своему страйду.
     return (res && res->batch_allocated) ? res->batch_verts.first * stream_stride : 0;
 }
 
@@ -493,7 +451,7 @@ uint32_t ModelManager::GetIndexBaseOffset(const GeometryPool* pool)
 {
     _EnsureBatchAllocation(pool);
     const PoolResidency* res = _FindResidency(pool);
-    // Аллокатор индексов считает В ЭЛЕМЕНТАХ (как first_index команды), а заливке нужны БАЙТЫ.
+    // Аллокатор считает В ЭЛЕМЕНТАХ, а заливке нужны БАЙТЫ.
     return (res && res->batch_allocated) ? res->batch_index.first * safe_u32(sizeof(Uint32)) : 0;
 }
 
@@ -506,13 +464,10 @@ void ModelManager::PackModels()
 
         for (const BatchEntry& e : res.batch) {
             if (!e.model) continue;
-            // Смещения сабмешей приходят из BuildSubmeshes стейджинг-относительными: абсолютная
-            // база — начало выданного пачке диапазона, и известна она только здесь.
             for (SubMeshData& s : e.model->submeshes) {
                 s.vertexOffset += res.batch_verts.first;
                 s.indexOffset += res.batch_index.first;
             }
-            // Место модели — чтобы вернуть его аллокатору при следующей перезагрузке.
             e.model->vertex_range = { res.batch_verts.first + e.vbase, e.vcount };
             e.model->index_range = { res.batch_index.first + e.ibase, e.icount };
         }
@@ -525,9 +480,6 @@ void ModelManager::_EnsureBatchAllocation(const GeometryPool* pool)
     PoolResidency& res = _Residency(pool);
     if (res.batch_allocated || !res.dirty || res.staging_vertices.empty()) return;
 
-    // Одно выделение на всю пачку: инструкция заливки пишет один непрерывный диапазон. Не нашлось
-    // подходящей дыры — аллокатор отдаст место с вершины, то есть ровно прежнее поведение
-    // «дозаписать в конец». Хуже, чем было, не станет никогда.
     res.batch_verts = res.verts.Allocate(safe_u32(res.staging_vertices.size() / pool->VertexSize()));
     res.batch_index = res.index.Allocate(safe_u32(res.staging_indices.size()));
     res.batch_allocated = true;
@@ -536,8 +488,8 @@ void ModelManager::_EnsureBatchAllocation(const GeometryPool* pool)
 void ModelManager::_PushBatchEntry(PoolResidency& res, ModelData* model, uint32_t vbase, uint32_t vcount,
     uint32_t ibase, uint32_t icount)
 {
-    // Без дубля: одно имя могли перезагрузить дважды за кадр — тогда актуальна последняя запись
-    // (её сабмеши и лежат в модели), а первая стала мусором в стейджинге.
+    // Одно имя могли перезагрузить дважды за кадр: актуальна последняя запись, первая стала
+    // мусором в стейджинге.
     for (BatchEntry& e : res.batch)
         if (e.model == model) { e = { model, vbase, vcount, ibase, icount }; return; }
     res.batch.push_back({ model, vbase, vcount, ibase, icount });
@@ -556,9 +508,6 @@ void ModelManager::_ReleaseModelRanges(ModelData* model)
 
 void ModelManager::ReclaimRanges()
 {
-    // Массовое освобождение перед массовым размещением — та же двухфазность, что у атласов
-    // (PackAtlases: сначала _ReleasePendingRegions, потом раскладка новых). Обоснование отсутствия
-    // фенс-штампа — в заголовке.
     for (auto& [pool, res] : residency) {
         for (const PendingFree& p : res.pending_free) {
             res.verts.Free(p.verts);
@@ -574,8 +523,7 @@ void ModelManager::UploadModelVertexStream(BufferManager* bm, UploadTask* task, 
     PoolResidency& res = _Residency(pool);
     if (!res.dirty || res.staging_vertices.empty()) return;
 
-    // Стейджинг — интерлив (формат ЗАГРУЗКИ пула); стрим — плотный срез каждой вершины.
-    // Гатер прямо в mapped transfer-буфер (write-combined: только писать), без промежуточной копии.
+    // Гатер прямо в mapped transfer-буфер: он write-combined, читать из него нельзя.
     const uint32_t vsize = pool->VertexSize();
     const size_t   count = res.staging_vertices.size() / vsize;
     const uint32_t bytes = safe_u32(count * stream_stride);
@@ -594,8 +542,7 @@ void ModelManager::UploadModelIndexBuffer(BufferManager* bm, UploadTask* task, c
     uint32_t ibytes = safe_u32(res.staging_indices.size() * sizeof(Uint32));
     bm->UploadToTransferBuffer(task, ibytes, res.staging_indices.data());
 
-    // Индексный апдейтер идёт последним (после ВСЕХ стрим-заливок ЭТОГО пула) — закрываем цикл.
-    // Размещение к этому моменту уже сделал PackModels.
+    // Идёт после ВСЕХ стрим-заливок этого пула — закрываем цикл. Размещение уже сделал PackModels.
     res.batch.clear();
     res.batch_allocated = false;
     res.batch_placed = false;

@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "RangeAllocator.h"
 #include <algorithm>
 
@@ -10,7 +10,7 @@ RangeAllocator::Range RangeAllocator::Allocate(uint32_t count)
         if (free_[i].count < count) continue;
         Range out{ free_[i].first, count };
         if (free_[i].count == count) free_.erase(free_.begin() + i);
-        else { free_[i].first += count; free_[i].count -= count; }   // остаток остаётся дырой
+        else { free_[i].first += count; free_[i].count -= count; }
         return out;
     }
 
@@ -38,9 +38,8 @@ void RangeAllocator::Free(Range r)
         free_.erase(it);
     }
 
-    // Дыра, дошедшая до вершины, дырой не хранится — вершина просто опускается. Ради этого
-    // перезагрузка сцены не оставляет буфер навсегда раздутым: когда освободится весь хвост,
-    // занятое схлопнется обратно, а не будет вечно жить выше старого содержимого.
+    // Дыра, дошедшая до вершины, дырой не хранится: вершина опускается, и освободившийся хвост
+    // буфера снова считается свободным местом.
     if (!free_.empty() && free_.back().first + free_.back().count == top_) {
         top_ = free_.back().first;
         free_.pop_back();
