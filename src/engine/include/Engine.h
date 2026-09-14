@@ -204,6 +204,7 @@ private:
 
     void PrepareFuncPrepassUndepended(uint8_t idx);
     void PrepareFuncPrepassDepended(uint8_t idx);
+    void ReturnCompletedTransferBuffers();
 
 	void InitDefaultBufferUpdaters();
     void InitPasses();
@@ -288,14 +289,16 @@ private:
     ImDrawData* imgui_draw_data = nullptr;
 
     // Transfer-буферы, ушедшие в полёт для слота: держим до fence той фазы, что их читает
-    // (контракт TransferManager::ReleaseTB). Стеш пишется ДО публикации fence, читается после
-    // его сигнала — видимость между потоками даёт mutex SlotController'а.
-    // Оба сабмитятся в PrepareFunc и оба отпускаются в UploadFunc, но буферами РАЗНЫМИ: заливка
-    // буферов идёт на копировальную очередь, а текстурная (мипы и блиты превью — отрисовка,
-    // копировальной их не исполнить) на графическую. Fences обоих лежат в SlotData::upload и
-    // ждутся одним wait_all — отсюда и общая точка освобождения.
+    // (контракт TransferManager::ReleaseTB).
+    // Оба сабмитятся в PrepareFunc, но буферами РАЗНЫМИ: заливка буферов идёт на копировальную
+    // очередь, а текстурная (мипы и блиты превью — отрисовка, копировальной их не исполнить) на
+    // графическую. Fences обоих лежат в SlotData::upload и ждутся одним wait_all — отсюда и общая
+    // точка освобождения.
     TransferBufferData* pending_upload_tbs[BUFFERING_LEVEL] = {};
     TransferBufferData* pending_texture_tbs[BUFFERING_LEVEL] = {};
+    // Ставит UploadFunc, дождавшись фенсов слота; снимает подготовка, возвращая TB в пул. Так
+    // пулом владеет один поток. Не увиденный флаг стоит кадр задержки: пул заведёт лишнюю запись.
+    std::atomic<bool> tb_returnable[BUFFERING_LEVEL] = {};
 
     // [PROFILE] Момент завершения предыдущего кадра (сигнал render-fence в FenceFunc).
     // Разница между соседними завершениями = реальный период кадра (1/период = FPS).

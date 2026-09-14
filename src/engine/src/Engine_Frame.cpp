@@ -43,6 +43,7 @@ void Engine::PrepareFunc(uint8_t slot)
 		const uint64_t fences_done = slot_controller->RenderFencesDone();
 		buffer_manager->TrashBuffers(fences_done);
 		model_manager->ReclaimRanges();
+		ReturnCompletedTransferBuffers();
 	}
 
 	{
@@ -107,6 +108,19 @@ void Engine::PrepareFunc(uint8_t slot)
 	//		o.p95 - p.p95, 100.0 * (o.p95 - p.p95) / o.p95,
 	//		g_stat_calls);
 	//}
+}
+
+// Возврат в пул идёт здесь, а не на стадии загрузки: аренда тоже отсюда, и пулу с одним потоком
+// не нужны замки. Флаг слота ставит UploadFunc после своих фенсов.
+void Engine::ReturnCompletedTransferBuffers()
+{
+	for (uint8_t s = 0; s < BUFFERING_LEVEL; ++s) {
+		if (!tb_returnable[s].exchange(false, std::memory_order_acquire)) continue;
+		transfer_manager->ReleaseTB(pending_upload_tbs[s]);
+		pending_upload_tbs[s] = nullptr;
+		transfer_manager->ReleaseTB(pending_texture_tbs[s]);
+		pending_texture_tbs[s] = nullptr;
+	}
 }
 
 void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
@@ -188,18 +202,12 @@ void Engine::UploadFunc(uint8_t slot)
 		SDL_ReleaseGPUFence(dev, sd.upload.items[i]);
 	sd.upload.Clear();
 
-	auto t_rel = Prof::Clock::now();
-	transfer_manager->ReleaseTB(pending_upload_tbs[slot]);
-	pending_upload_tbs[slot] = nullptr;
-	transfer_manager->ReleaseTB(pending_texture_tbs[slot]);
-	pending_texture_tbs[slot] = nullptr;
-	double release_ms = Prof::MsSince(t_rel);
+	tb_returnable[slot].store(true, std::memory_order_release);
 
 	slot_controller->SetSlotState(slot, SlotState::PREPARED);
 
 	Prof::Upload().Add("upload_gpu (submit->fence, заливка на GPU)", upload_ms);
 	Prof::Upload().Add("upload_fence_wait (CPU-блок)", wait_ms);
-	Prof::Upload().Add("release_tbs (возврат TB в пул)", release_ms);
 	PROF_FRAME(Upload);
 }
 

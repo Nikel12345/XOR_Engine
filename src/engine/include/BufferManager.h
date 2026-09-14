@@ -118,8 +118,8 @@ public:
 	void CreatePostReadbackUpdateInstruction(BufferDataName name, UpdateInstructionUpdaterFunc fn, UpdateInstructionSizeFunc size_fn);
 
 	// Execute*, строящие таски, арендуют transfer-буфер у TransferManager и возвращают его.
-	// Владелец fence фазы (prep-функция) обязан вернуть его через TransferManager::ReleaseTB
-	// ПОСЛЕ ожидания fence. nullptr (пустая фаза) — допустим, ReleaseTB(nullptr) — no-op.
+	// Вызывающий держит его до конца fence своей фазы, а сам ReleaseTB зовёт с prep-потока —
+	// пулом владеет он один. nullptr (пустая фаза) — допустим, ReleaseTB(nullptr) — no-op.
 	TransferBufferData* ExecutePrePassUpdateInstruction(SDL_GPUCopyPass* cp);
 	// Требует завершения работы GPU
 	// Requre GPU idle

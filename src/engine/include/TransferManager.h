@@ -3,7 +3,6 @@
 #include <SDL3/SDL_gpu.h>
 #include <vector>
 #include <memory>
-#include <mutex>
 
 static constexpr uint32_t BASE_TB_SIZE = 10 * 1024 * 1024;
 
@@ -17,8 +16,11 @@ struct TransferBufferData {
 };
 
 // Пул transfer-буферов, общий для всех загрузчиков (BufferManager, TextureManager, ...).
-// Acquire атомарно выдаёт свободный TB подходящей ёмкости (или создаёт новый и добавляет
-// в пул), Release возвращает его. Пул только растёт — стабилизируется на пиковой нагрузке.
+// Acquire выдаёт свободный TB подходящей ёмкости (или создаёт новый и добавляет в пул),
+// Release возвращает его. Пул только растёт — стабилизируется на пиковой нагрузке.
+//
+// ЗАМКОВ НЕТ: обе операции идут на потоке, который готовит кадр. Стадия загрузки, дождавшись
+// фенсов слота, только помечает его флагом, а ReleaseTB зовёт ближайшая подготовка.
 class TransferManager
 {
 public:
@@ -39,14 +41,11 @@ public:
 private:
 	TransferBufferData* AcquireTB(std::vector<std::unique_ptr<TransferBufferData>>& pool, uint32_t size, SDL_GPUTransferBufferUsage usage);
 	// Ищет наименьшую свободную запись ёмкостью >= size (класс размера: BASE_TB_SIZE,
-	// удваиваемый) или создаёт новую, помечает busy и возвращает. Лочит mtx сам, только на
-	// скан/push_back; создание буфера идёт вне лока.
+	// удваиваемый) или создаёт новую, помечает busy и возвращает.
 	TransferBufferData* EnsureTBCapacity(std::vector<std::unique_ptr<TransferBufferData>>& pool, uint32_t size, SDL_GPUTransferBufferUsage usage);
 
 	SDL_GPUDevice* dev = nullptr;
 	// unique_ptr — адреса записей стабильны при росте пула: указатели на руках у загрузчиков.
 	std::vector<std::unique_ptr<TransferBufferData>> upload_pool;
 	std::vector<std::unique_ptr<TransferBufferData>> download_pool;
-	// Защищает только скан/рост пула и флаги busy; работа с выданным буфером идёт без лока.
-	std::mutex mtx;
 };
