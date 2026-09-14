@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
 #include <atomic>
@@ -298,6 +298,8 @@ private:
     TransferBufferData* pending_texture_tbs[BUFFERING_LEVEL] = {};
     // Ставит UploadFunc, дождавшись фенсов слота; снимает подготовка, возвращая TB в пул. Так
     // пулом владеет один поток. Не увиденный флаг стоит кадр задержки: пул заведёт лишнюю запись.
+    // Данные с флагом не едут (указатели выше пишет и читает сам prep-поток, а «GPU дочитал»
+    // обеспечил фенс), поэтому relaxed: атомик нужен только за определённое чтение.
     std::atomic<bool> tb_returnable[BUFFERING_LEVEL] = {};
 
     // [PROFILE] Момент завершения предыдущего кадра (сигнал render-fence в FenceFunc).

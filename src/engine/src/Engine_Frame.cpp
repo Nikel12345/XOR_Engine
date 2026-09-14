@@ -115,7 +115,8 @@ void Engine::PrepareFunc(uint8_t slot)
 void Engine::ReturnCompletedTransferBuffers()
 {
 	for (uint8_t s = 0; s < BUFFERING_LEVEL; ++s) {
-		if (!tb_returnable[s].exchange(false, std::memory_order_acquire)) continue;
+		if (!tb_returnable[s].load(std::memory_order_relaxed)) continue;
+		tb_returnable[s].store(false, std::memory_order_relaxed);
 		transfer_manager->ReleaseTB(pending_upload_tbs[s]);
 		pending_upload_tbs[s] = nullptr;
 		transfer_manager->ReleaseTB(pending_texture_tbs[s]);
@@ -202,7 +203,7 @@ void Engine::UploadFunc(uint8_t slot)
 		SDL_ReleaseGPUFence(dev, sd.upload.items[i]);
 	sd.upload.Clear();
 
-	tb_returnable[slot].store(true, std::memory_order_release);
+	tb_returnable[slot].store(true, std::memory_order_relaxed);
 
 	slot_controller->SetSlotState(slot, SlotState::PREPARED);
 
