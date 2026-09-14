@@ -11,8 +11,6 @@ TransferManager::~TransferManager()
         if (tbd->tb) SDL_ReleaseGPUTransferBuffer(dev, tbd->tb);
 }
 
-// Классы размеров: BASE_TB_SIZE, удваиваемый до нужного. Без округления пул зарастает
-// буферами случайных ёмкостей, которые никто больше не переиспользует.
 static uint32_t SizeClass(uint32_t size)
 {
     uint32_t c = BASE_TB_SIZE;
@@ -30,9 +28,25 @@ TransferBufferData* TransferManager::AcquireDownloadTB(uint32_t size)
     return AcquireTB(download_pool, size, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD);
 }
 
+void TransferManager::MarkReturnable(TransferBufferData* tbd)
+{
+    if (tbd) tbd->returnable.store(true, std::memory_order_relaxed);
+}
+
+void TransferManager::DrainReturnable(std::vector<std::unique_ptr<TransferBufferData>>& pool)
+{
+    for (auto& entry : pool) {
+        if (!entry->returnable.load(std::memory_order_relaxed)) continue;
+        entry->returnable.store(false, std::memory_order_relaxed);
+        ReleaseTB(entry.get());
+    }
+}
+
 TransferBufferData* TransferManager::AcquireTB(std::vector<std::unique_ptr<TransferBufferData>>& pool, uint32_t size, SDL_GPUTransferBufferUsage usage)
 {
     if (size == 0) return nullptr;
+
+    DrainReturnable(pool);
 
     TransferBufferData* tbd = EnsureTBCapacity(pool, size, usage);   // уже помечен busy
     if (!tbd) return nullptr;

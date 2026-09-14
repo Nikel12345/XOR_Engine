@@ -281,22 +281,14 @@ int main(int, char**)
         }
 
         // ══ КОНВЕЙЕР ДВИЖКА ══
-        // Пер-слотовые transfer-буферы заливки: upload-стадия после своего fence помечает слот,
-        // а возврат в пул делает sim — как в движке (пулом владеет один поток).
+        // Пер-слотовые transfer-буферы заливки: upload-стадия после своего fence помечает запись,
+        // а возвращает её в пул ближайшая аренда на sim — как в движке (пулом владеет один поток).
         TransferBufferData* pending_upload_tbs[BUFFERING_LEVEL] = {};
-        std::atomic<bool> tb_returnable[BUFFERING_LEVEL] = {};
 
         auto game_iter_cb = [] {};
 
         // sim-поток → КОПИРОВАЛЬНАЯ очередь
         auto prepare_cb = [&](uint8_t slot) {
-            for (uint8_t s = 0; s < BUFFERING_LEVEL; ++s) {
-                if (!tb_returnable[s].load(std::memory_order_relaxed)) continue;
-                tb_returnable[s].store(false, std::memory_order_relaxed);
-                trm.ReleaseTB(pending_upload_tbs[s]);
-                pending_upload_tbs[s] = nullptr;
-            }
-
             UploadCommandBuffer cb = qm.GetUploadQueue().AcquireCommandBuffer();
             if (!cb) { g_error = true; return; }
 
@@ -324,7 +316,8 @@ int main(int, char**)
                 SDL_ReleaseGPUFence(dev, uf.items[i]);
             uf.Clear();
 
-            tb_returnable[slot].store(true, std::memory_order_relaxed);   // возврат — на sim
+            trm.MarkReturnable(pending_upload_tbs[slot]);   // возврат сделает аренда на sim
+            pending_upload_tbs[slot] = nullptr;
 
             slots.SetSlotState(slot, SlotState::PREPARED);
             ++g_uploads;
