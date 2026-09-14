@@ -34,8 +34,6 @@ struct VertexShaderData {
     std::string    pool_name;
     BufferDataName index_buffer = nullptr;
     std::vector<ShaderDefine> defines;
-    // Маркеры //@push в порядке развёрнутого текста — он же порядок слотов
-    // (docs/shaders/programs.md).
     std::vector<std::string> push_kinds;
     bool dont_save = false;
 };
@@ -102,8 +100,6 @@ struct ComputeShaderProgram {
     std::string debug_name;
 };
 
-// Реестр compute-программ обязан быть УПОРЯДОЧЕННЫМ (порядок = порядок исполнения внутри
-// прохода), поэтому он вектор ячеек, а не словарь.
 struct ComputeProgramSlot {
     std::string name;
     std::unique_ptr<ComputeShaderProgram> program;

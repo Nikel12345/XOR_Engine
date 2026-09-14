@@ -38,7 +38,6 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
     program->fs_name = fs_name;
 	program->vertex_shader_buffer_names = std::move(vertex_shader_buffer_names);
 	program->fragment_shader_buffer_names = std::move(fragment_shader_buffer_names);
-	// Одна роль = один слот: материал держит по текстуре на роль, поэтому дубликаты отсеиваются.
 	program->required_slots.reserve(texture_slots.size());
 	for (TextureSlotRole role : texture_slots) {
 		if (std::find(program->required_slots.begin(), program->required_slots.end(), role) != program->required_slots.end()) {
@@ -139,7 +138,7 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
 
 void ShaderManager::CreatePushInstruction(const std::string& sp_name, PushStage stage, PushFunc fn)
 {
-    push_instructions_.push_back({ sp_name, stage, std::move(fn) });   // в КОНЕЦ: порядок = нумерация слотов
+    push_instructions_.push_back({ sp_name, stage, std::move(fn) });
 }
 
 void ShaderManager::CreateComputePushInstruction(const std::string& csp_name, PushFunc fn)
@@ -152,8 +151,6 @@ void ShaderManager::CreateDispatchInstruction(const std::string& csp_name, Dispa
     dispatch_instructions_[csp_name] = std::move(fn);
 }
 
-// Слот проставляется ЗДЕСЬ, на сборке: на исполнении инструкция не должна зависеть от того,
-// сколько блоков пушат соседи.
 namespace {
     struct SlotCounter {
         Uint32 next[3] = { 0, 0, 0 };   // по индексу PushStage
@@ -163,8 +160,6 @@ namespace {
     };
 }
 
-// Незнакомый тип слот ЗАНИМАЕТ: cbuffer под него шейдер уже объявил, и пропуск сдвинул бы
-// слоты всем следующим блокам.
 void ShaderManager::AddKindInstructions(PushInstructions& out, void* slots_raw,
     const std::vector<std::string>& kinds, const std::string& owner) const
 {
@@ -268,7 +263,6 @@ void ShaderManager::ReportOrphanCodeBindings()
 void ShaderManager::ClearSavableComputeShaderPrograms()
 {
     const size_t before = compute_shader_programs.size();
-    // Порядок уцелевших сохраняем — он же порядок их исполнения.
     std::erase_if(compute_shader_programs,
         [](const ComputeProgramSlot& s) { return !s.program || !s.program->dont_save; });
     const size_t removed = before - compute_shader_programs.size();
@@ -314,7 +308,7 @@ bool ShaderManager::DeleteComputeShader(const std::string& name)
     }
     auto it = compute_shaders.find(name);
     if (it == compute_shaders.end()) return false;
-    if (it->second.spv_code) SDL_free(it->second.spv_code);   // владелец сырого spv — реестр
+    if (it->second.spv_code) SDL_free(it->second.spv_code);
     compute_shaders.erase(it);
     return true;
 }

@@ -34,7 +34,6 @@ namespace ShaderBase {
     };
 }
 
-// Пустое value — дефайн без значения (компилятор считает его равным 1).
 struct ShaderDefine {
     std::string name;
     std::string value;
@@ -43,7 +42,6 @@ using ShaderDefines = std::vector<ShaderDefine>;
 
 enum class PushStage : uint8_t { Vertex, Fragment, Compute };
 
-// Тип состояния прохода знает только сам проход, отсюда void*.
 struct PushInput {
     const void*                    pass_state = nullptr;
     const RenderSnap::TextureDraw* draw       = nullptr;
@@ -53,8 +51,6 @@ struct PushConstantBinder {
     SDL_GPUCommandBuffer* cb = nullptr;
     PushStage stage = PushStage::Fragment;
     Uint32    uniform_slot = 0;
-    // Кадровый слот для Ask*(frame): типизированному функтору достаётся только состояние
-    // прохода, поэтому слот приходит биндером.
     uint8_t   frame = 0;
 
     template<typename T> void Push(const T& d) const { PushRaw(&d, sizeof(T)); }
@@ -166,8 +162,5 @@ struct ComputeRWTextureBindingParametr {
     std::string texture_atlas = "";
     Uint32 mip_level = 0;
     Uint32 layer = 0;
-    // true → шейдер читает СОСЕДНИЕ тексели этой же текстуры, пока другие потоки диспатча их
-    // пишут. SDL требует под это COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE, и это не то же самое,
-    // что READ|WRITE. Тег ручной: различие видно только в теле шейдера.
     bool need_simultaneous = false;
 };

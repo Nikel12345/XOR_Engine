@@ -38,9 +38,7 @@ public:
 		const ComputePassName& compute_pass_name,
 		BufferManager* bm, TextureManager* tm, bool dont_save = false);
 
-	// Сцена пересоздаёт свои csp целиком: upsert по имени переставил бы программу в конец вектора,
-	// то есть в конец очереди исполнения. Пайплайны вызывающий обязан инвалидировать ДО вызова —
-	// здесь объекты разрушаются.
+	// Пайплайны вызывающий обязан инвалидировать ДО вызова — здесь объекты разрушаются.
 	void ClearSavableComputeShaderPrograms();
 
 	VertexShaderData*   GetVertexShader(const std::string& name);
@@ -60,8 +58,6 @@ public:
 		return false;
 	}
 
-	// false = отказ (используется) или нет такой записи. После удаления ни пайплайны, ни батчи
-	// трогать не нужно.
 	bool DeleteVertexShader(const std::string& name) {
 		if (IsVertexShaderUsed(name)) { SDL_Log("ShaderManager: vertex shader '%s' is used by a shader program — delete refused", name.c_str()); return false; }
 		return vertex_shaders.erase(name) > 0;
@@ -154,7 +150,6 @@ private:
 	void AddKindInstructions(PushInstructions& out, void* slots_raw,
 		const std::vector<std::string>& kinds, const std::string& owner) const;
 
-	// out_push_kinds заполняется и при попадании в кэш .spv.
 	Uint8* LoadOrCompileSPIRV(const char* hlsl_path, SDL_ShaderCross_ShaderStage stage, size_t& out_size,
 	                          const ShaderDefines& defines,
 	                          std::vector<std::string>* out_push_kinds = nullptr);
@@ -177,7 +172,6 @@ private:
 
 	std::unordered_map<std::string, PushKind> push_kinds_;
 
-	// Записи переживают пересоздание программ: на них никто не ссылается, принадлежность — имя.
 	std::vector<ShaderPushInstruction> push_instructions_;
 	std::vector<ShaderPushInstruction> compute_push_instructions_;
 	std::unordered_map<std::string, DispatchFunc> dispatch_instructions_;

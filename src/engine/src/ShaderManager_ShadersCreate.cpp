@@ -169,8 +169,6 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     // На сам SPIR-V драйвер не влияет: ключ расширен консервативно, цена промаха — одна
     // перекомпиляция на старте. Строки домешиваем целиком, их формат не специфицирован.
     if (const SDL_PropertiesID gpu_props = SDL_GetGPUDeviceProperties(dev)) {
-        // Лог нужен, чтобы видеть непустые свойства: пустые строки домешали бы ноль байт, и
-        // расширение ключа молча стало бы пустышкой.
         static bool logged = false;
         const uint64_t before = hash;
         for (const char* key : { SDL_PROP_GPU_DEVICE_NAME_STRING,
