@@ -3,11 +3,87 @@
 #include <iostream>
 #include <cstring>
 #include "ModelManager.h"
+#include <algorithm>
 #include "BufferManager.h"
 
 ModelManager::ModelManager() {};
 
-// Стартовая ёмкость буферов пула, примерно на одну модель; дальше они растут сами.
+// Одномерный аллокатор диапазонов в элементах: first-fit по адресу, соседи при возврате
+// сливаются. ИНВАРИАНТ списка дыр — отсортирован по first, соседи слиты, пустых нет; на нём
+// держится и слияние (смотрим только двух соседей), и опускание вершины.
+class RangeAllocator
+{
+public:
+    GeometryRange Allocate(uint32_t count)
+    {
+        if (count == 0) return {};
+
+        for (size_t i = 0; i < free_.size(); ++i) {
+            if (free_[i].count < count) continue;
+            GeometryRange out{ free_[i].first, count };
+            if (free_[i].count == count) free_.erase(free_.begin() + i);
+            else { free_[i].first += count; free_[i].count -= count; }
+            return out;
+        }
+
+        GeometryRange out{ top_, count };
+        top_ += count;
+        return out;
+    }
+
+    void Free(GeometryRange r)
+    {
+        if (r.count == 0) return;
+
+        auto it = std::lower_bound(free_.begin(), free_.end(), r.first,
+            [](const GeometryRange& a, uint32_t f) { return a.first < f; });
+        it = free_.insert(it, r);
+
+        // Сначала правый сосед, потом левый: после слияния с правым блок вырастает, и левый должен
+        // видеть уже итоговую границу — иначе цепочка из трёх смежных дыр слипнется не полностью.
+        if (it + 1 != free_.end() && it->first + it->count == (it + 1)->first) {
+            it->count += (it + 1)->count;
+            free_.erase(it + 1);
+        }
+        if (it != free_.begin() && (it - 1)->first + (it - 1)->count == it->first) {
+            (it - 1)->count += it->count;
+            free_.erase(it);
+        }
+
+        // Дыра, дошедшая до вершины, дырой не хранится: вершина опускается, и освободившийся хвост
+        // буфера снова считается свободным местом.
+        if (!free_.empty() && free_.back().first + free_.back().count == top_) {
+            top_ = free_.back().first;
+            free_.pop_back();
+        }
+    }
+
+private:
+    std::vector<GeometryRange> free_;
+    uint32_t top_ = 0;
+};
+
+// Состояние дозагрузки ОДНОГО пула: у каждого своя раскладка, свои буферы и своё элементное
+// пространство.
+struct PoolResidency {
+    // БАЙТЫ раскладки пула: вершина i начинается с i * VertexSize().
+    std::vector<std::byte> staging_vertices;
+    std::vector<Uint32>    staging_indices;
+    bool dirty = false;
+
+    RangeAllocator verts;
+    RangeAllocator index;
+
+    GeometryRange batch_verts;
+    GeometryRange batch_index;
+    bool batch_allocated = false;
+    // Модели этого кадра; их диапазоны стейджинг-относительны, пока PackModels не прибавит базу.
+    std::vector<ModelData*> batch;
+
+    // Копии диапазонов, а не указатели на модели: саму модель можно снести сразу.
+    std::vector<std::pair<GeometryRange, GeometryRange>> pending_free;
+};
+
 static constexpr uint32_t BASE_VERTEX_COUNT = 1024;   // вершин на стрим, байты = count * stride
 static constexpr uint32_t BASE_INDEX_COUNT = 4096;    // индексов uint32
 
@@ -133,7 +209,7 @@ GeometryPool* ModelManager::CreateGeometryPool(BufferManager* bm, const std::str
         return nullptr;
     }
     pools[name] = std::move(owned);
-    residency[pool];
+    _Residency(pool);
     if (!default_pool) default_pool = pool;
 
     for (const GeometryPool::Stream& s : pool->Streams())
@@ -186,10 +262,17 @@ GeometryPool* ModelManager::_ResolvePool(GeometryPool* pool)
     return default_pool;
 }
 
-const ModelManager::PoolResidency* ModelManager::_FindResidency(const GeometryPool* pool) const
+PoolResidency& ModelManager::_Residency(const GeometryPool* pool)
+{
+    std::unique_ptr<PoolResidency>& slot = residency[pool];
+    if (!slot) slot = std::make_unique<PoolResidency>();
+    return *slot;
+}
+
+const PoolResidency* ModelManager::_FindResidency(const GeometryPool* pool) const
 {
     auto it = residency.find(pool);
-    return it != residency.end() ? &it->second : nullptr;
+    return it != residency.end() ? it->second.get() : nullptr;
 }
 
 
@@ -361,7 +444,7 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
 
     BuildSubmeshes(res.staging_vertices.data(), pool, ptr, entries, vbase, ibase);
 
-    _PushBatchEntry(res, ptr, vbase, vcount, ibase, icount);
+    _PushBatchEntry(res, ptr, { vbase, vcount }, { ibase, icount });
     res.dirty = true;
     ++spheres_revision;
     return ptr;
@@ -419,7 +502,7 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
     std::vector<SubMeshFileEntry> entries{ SubMeshFileEntry{ 0, 0, vcount, icount, 0 } };
     BuildSubmeshes(res.staging_vertices.data(), p, ptr, entries, vbase, ibase);
 
-    _PushBatchEntry(res, ptr, vbase, vcount, ibase, icount);
+    _PushBatchEntry(res, ptr, { vbase, vcount }, { ibase, icount });
     res.dirty = true;
     ++spheres_revision;
     return ptr;
@@ -457,21 +540,21 @@ uint32_t ModelManager::GetIndexBaseOffset(const GeometryPool* pool)
 
 void ModelManager::PackModels()
 {
-    for (auto& [pool, res] : residency) {
-        if (res.batch_placed) continue;
+    for (auto& [pool, slot] : residency) {
+        PoolResidency& res = *slot;
         _EnsureBatchAllocation(pool);
         if (!res.batch_allocated) continue;
 
-        for (const BatchEntry& e : res.batch) {
-            if (!e.model) continue;
-            for (SubMeshData& s : e.model->submeshes) {
+        for (ModelData* model : res.batch) {
+            if (!model || model->placed) continue;
+            for (SubMeshData& s : model->submeshes) {
                 s.vertexOffset += res.batch_verts.first;
                 s.indexOffset += res.batch_index.first;
             }
-            e.model->vertex_range = { res.batch_verts.first + e.vbase, e.vcount };
-            e.model->index_range = { res.batch_index.first + e.ibase, e.icount };
+            model->vertex_range.first += res.batch_verts.first;
+            model->index_range.first += res.batch_index.first;
+            model->placed = true;
         }
-        res.batch_placed = true;
     }
 }
 
@@ -485,33 +568,38 @@ void ModelManager::_EnsureBatchAllocation(const GeometryPool* pool)
     res.batch_allocated = true;
 }
 
-void ModelManager::_PushBatchEntry(PoolResidency& res, ModelData* model, uint32_t vbase, uint32_t vcount,
-    uint32_t ibase, uint32_t icount)
+void ModelManager::_PushBatchEntry(PoolResidency& res, ModelData* model,
+    GeometryRange verts, GeometryRange index)
 {
-    // Одно имя могли перезагрузить дважды за кадр: актуальна последняя запись, первая стала
-    // мусором в стейджинге.
-    for (BatchEntry& e : res.batch)
-        if (e.model == model) { e = { model, vbase, vcount, ibase, icount }; return; }
-    res.batch.push_back({ model, vbase, vcount, ibase, icount });
+    model->vertex_range = verts;   // стейджинг-относительные до PackModels
+    model->index_range = index;
+    model->placed = false;
+
+    // Одно имя могли перезагрузить дважды за кадр: первая запись стала мусором в стейджинге.
+    for (ModelData* m : res.batch)
+        if (m == model) return;
+    res.batch.push_back(model);
 }
 
 void ModelManager::_ReleaseModelRanges(ModelData* model)
 {
-    if (!model || (model->vertex_range.count == 0 && model->index_range.count == 0)) return;
+    if (!model || !model->placed) return;
     auto pit = pools.find(model->pool_name);
     if (pit == pools.end()) return;   // пул не резолвится — место вернуть некуда
 
     _Residency(pit->second.get()).pending_free.push_back({ model->vertex_range, model->index_range });
     model->vertex_range = {};
     model->index_range = {};
+    model->placed = false;
 }
 
 void ModelManager::ReclaimRanges()
 {
-    for (auto& [pool, res] : residency) {
-        for (const PendingFree& p : res.pending_free) {
-            res.verts.Free(p.verts);
-            res.index.Free(p.index);
+    for (auto& [pool, slot] : residency) {
+        PoolResidency& res = *slot;
+        for (const auto& [verts, index] : res.pending_free) {
+            res.verts.Free(verts);
+            res.index.Free(index);
         }
         res.pending_free.clear();
     }
@@ -545,7 +633,6 @@ void ModelManager::UploadModelIndexBuffer(BufferManager* bm, UploadTask* task, c
     // Идёт после ВСЕХ стрим-заливок этого пула — закрываем цикл. Размещение уже сделал PackModels.
     res.batch.clear();
     res.batch_allocated = false;
-    res.batch_placed = false;
     res.batch_verts = {};
     res.batch_index = {};
 
@@ -559,8 +646,8 @@ void ModelManager::UploadModelIndexBuffer(BufferManager* bm, UploadTask* task, c
 
 bool ModelManager::CheckDirty() const
 {
-    for (const auto& [pool, res] : residency)
-        if (res.dirty) return true;
+    for (const auto& [pool, slot] : residency)
+        if (slot->dirty) return true;
     return false;
 }
 

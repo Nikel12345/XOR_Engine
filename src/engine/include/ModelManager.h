@@ -10,6 +10,7 @@
 
 class BufferManager;
 struct UploadTask;
+struct PoolResidency;   // состояние дозагрузки одного пула, тело в ModelManager.cpp
 struct SceneModelEntry {
 	std::string name;
 	std::string vertex_path;
@@ -93,37 +94,6 @@ public:
 	~ModelManager();
 
 private:
-	// Смещения ОТНОСИТЕЛЬНЫ стейджинга: абсолютную базу даёт размещение, а оно позже загрузки.
-	struct BatchEntry {
-		ModelData* model = nullptr;
-		uint32_t vbase = 0, vcount = 0;   // элементы вершин
-		uint32_t ibase = 0, icount = 0;   // элементы индексов
-	};
-
-	// Копии Range, а не указатели в ModelData: саму модель можно снести сразу.
-	struct PendingFree {
-		RangeAllocator::Range verts;
-		RangeAllocator::Range index;
-	};
-
-	struct PoolResidency {
-		// БАЙТЫ раскладки пула: вершина i начинается с i * VertexSize().
-		std::vector<std::byte> staging_vertices;
-		std::vector<Uint32>    staging_indices;
-		bool dirty = false;
-
-		RangeAllocator verts;
-		RangeAllocator index;
-
-		RangeAllocator::Range batch_verts;
-		RangeAllocator::Range batch_index;
-		bool batch_allocated = false;
-		bool batch_placed = false;   // смещения пачки уже переведены в абсолютные
-		std::vector<BatchEntry> batch;
-
-		std::vector<PendingFree> pending_free;
-	};
-
 	ModelData* _LoadModelFile(ModelData* ptr, GeometryPool* pool, const std::string& path_vert,
 	                          const std::string& path_ind, AnchorShift anchor);
 	// nullptr = пулов вообще нет (ошибка вызывающего).
@@ -133,16 +103,16 @@ private:
 	void _EnsureBatchAllocation(const GeometryPool* pool);
 	// Пул берём из самой модели: она могла быть загружена в другой, и вернуть надо туда.
 	void _ReleaseModelRanges(ModelData* model);
-	// Без дубля: то же имя могли перезагрузить дважды за кадр.
-	void _PushBatchEntry(PoolResidency& res, ModelData* model, uint32_t vbase, uint32_t vcount,
-	                     uint32_t ibase, uint32_t icount);
-	PoolResidency& _Residency(const GeometryPool* pool) { return residency[pool]; }
+	// Диапазоны кладутся В МОДЕЛЬ стейджинг-относительными; дубля в списке не заводим.
+	void _PushBatchEntry(PoolResidency& res, ModelData* model, GeometryRange verts, GeometryRange index);
+	PoolResidency& _Residency(const GeometryPool* pool);
 	const PoolResidency* _FindResidency(const GeometryPool* pool) const;
 
 	std::unordered_map<std::string, std::unique_ptr<ModelData>> models_data;
 
 	std::unordered_map<std::string, std::unique_ptr<GeometryPool>> pools;
-	std::unordered_map<const GeometryPool*, PoolResidency>         residency;
+	// Состояние дозагрузки пула — непрозрачное: раскладка места и стейджинг наружу не торчат.
+	std::unordered_map<const GeometryPool*, std::unique_ptr<PoolResidency>> residency;
 	GeometryPool* default_pool = nullptr;
 
 	uint64_t spheres_revision = 0;   // см. SpheresRevision()
