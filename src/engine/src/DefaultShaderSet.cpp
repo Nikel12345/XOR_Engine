@@ -5,7 +5,7 @@
 #include "DefaultRenderPassSet.h"
 #include "PositionStructure.h"
 
-using namespace ShaderBase;   // POSITION/UV/... в раскладках вершин
+using namespace ShaderBase;
 #include "EngineContext.h"
 #include "BufferManager.h"
 #include "ShaderData.h"
@@ -18,14 +18,13 @@ using namespace ShaderBase;   // POSITION/UV/... в раскладках вер�
 
 namespace DefaultShaderProgramSet
 {
-    // compute (render-программы больше не создаются кодом — идут из shaders.json)
     bool culling_pib_inited = false;
     bool shadow_blur_inited = false;
 
 }
 
 namespace {
-    // Регион прохода в штампе слота; прохода нет — пустой регион, диспатч выйдет нулевым.
+    // Прохода нет — пустой регион, и диспатч у программы выйдет нулевым.
     PassRegion RegionOfPass(PassManager* pm, uint32_t pass_ordinal, uint8_t slot)
     {
         const PassRegions& regions = pm->AskRegions(slot);
@@ -35,13 +34,9 @@ namespace {
         return PassRegion{};
     }
 
-    // Culling-программа ОДНОГО прохода. У всех проходов она одинакова кроме камерного буфера:
-    // числа своего региона программа берёт из штампа PassManager по ординалу прохода, а сам
-    // ординал стабилен (MainInit идёт после FillRenderPasses). Новый проход = ещё один вызов.
-    // screen_target — цветовой таргет прохода, по высоте которого меряется «мелкое в пикселях»;
-    // nullptr = проход в отсеве по экранному размеру не участвует (порог зануляется у него локально,
-    // хотя состояние прохода общее). Атлас держим УКАЗАТЕЛЕМ и читаем размер на исполнении: ресайз
-    // меняет width/height внутри атласа, поэтому скопированное на setup число протухло бы.
+    // Culling-программа ОДНОГО прохода: у всех проходов она одинакова кроме камерного буфера, а
+    // числа своего региона берёт из штампа PassManager по ординалу прохода. Ординал снимается здесь
+    // и стабилен — MainInit идёт после FillRenderPasses.
     void CreateCullingProgram(EngineContext* ctx, ShaderManager* sm, PassManager* pm,
                               const std::string& program_name, const RenderPassName& pass_name,
                               BufferDataName camera_buffer, TextureAtlas* screen_target = nullptr,
@@ -71,9 +66,8 @@ namespace {
             data.num_blocks  = region.command_blocks_count;
             data.cmd_base    = region.cmd_base;
             data.commands    = region.commands;
-            // Порог приезжает из состояния прохода (одного на все программы каллинга), а вот
-            // применим он не всем: у теней и UI своё разрешение, и тот же порог в пикселях означал
-            // бы там совсем другой размер объекта. Кому таргет не дали — тому отсев выключен.
+            // Состояние прохода одно на все программы каллинга, а порог в пикселях применим не
+            // всем: у теней и UI своё разрешение. Кому не дали таргет — тому отсев выключен.
             if (screen_target) data.target_height = screen_target->height;
             else               data.min_screen_radius_px = 0.0f;
             data.invert_span = invert_span ? 1u : 0u;
@@ -97,29 +91,20 @@ void DefaultShaderProgramSet::SetDefaultPushes(EngineContext* ctx)
     namespace RP = DefaultRenderPassNamespace;
     ShaderManager* sm = ctx->GetShaderManager();
 
-    // ── ТИПОВЫЕ: тип объявляет ШЕЙДЕР маркером //@push, программа о нём не знает ──
-    // Число источников света: маркер стоит в прологах main/transparent, поэтому пуш получает
-    // ЛЮБАЯ программа, чей fs включает движковую лайтинг-базу, — и движковая, и игровая, без
-    // единой регистрации на стороне игры. Данные — из состояния прохода (MAIN/TRANSPARENT
-    // пишут туда AskNumLights слепка своего слота).
     sm->RegisterPushKind<RP::LightCountPushData>("light_count", PushStage::Fragment,
         [](const PushConstantBinder& b, RP::LightCountPushData data) { b.Push(data); });
 
-    // Материальные блоки: данные у них не в состоянии прохода, а в ГРУППЕ ТЕКСТУР текущего
-    // draw'а (in.draw — слепок батча), поэтому форма сырая, без типизированной обёртки.
-    // Объявлены маркерами в прологах (main текстурный/бестекстурный, transparent), значит их
-    // получает любой surface, написанный по движковому material_api, — включая игровые.
     sm->RegisterPushKind("uvl", PushStage::Fragment, [](const PushConstantBinder& b, const PushInput& in) {
         if (!in.draw) return;
         if (!in.draw->texture_uvl.empty()) { b.Push(in.draw->texture_uvl); return; }
-        // Пустая таблица — всё равно пушим: блок ОБЪЯВЛЕН, а пропуск оставил бы в слоте таблицу
-        // предыдущего draw'а. Нулевой блок покрывает индекс 0, куда смотрит нулевая раскладка.
+        // Пустую таблицу всё равно пушим: блок ОБЪЯВЛЕН, а пропуск оставил бы в слоте таблицу
+        // предыдущего draw'а.
         const UVL_Block empty{};
         b.Push(empty);
     });
     sm->RegisterPushKind("material_params", PushStage::Fragment, [](const PushConstantBinder& b, const PushInput& in) {
-        // Блоб адресован ИМЕННО этой sp (SpBinding::params). Пусто = материал не дал параметров
-        // шейдеру, который их объявил, — авторская ошибка материала; пушить тут нечего.
+        // Пусто = материал не дал параметров шейдеру, который их объявил: ошибка материала,
+        // пушить нечего.
         if (!in.draw || !in.draw->params || in.draw->params->empty()) return;
         b.Push(*in.draw->params);
     });
@@ -128,20 +113,15 @@ void DefaultShaderProgramSet::SetDefaultPushes(EngineContext* ctx)
         b.Push(in.draw->variant_layout);
     });
 
-    // ── ИМЕННЫЕ: блок принадлежит КОНКРЕТНОЙ программе, общего типа тут нет ──
-    // ShadowCaster: номер световой камеры и режим глубины (fragment slot 0 → b0, space3).
     // Тот же ShadowPushData тело теневого прохода пушит ещё и в вершинник, прямым вызовом.
     sm->CreatePushInstruction<RP::ShadowPushData>("ShadowCaster", PushStage::Fragment,
         [](const PushConstantBinder& b, RP::ShadowPushData data) { b.Push(data); });
-    // Wireframe: цвет debug-рамки, приезжает состоянием DEBUG_PASS.
     sm->CreatePushInstruction<RP::DebugColliderPushData>("Wireframe", PushStage::Fragment,
         [](const PushConstantBinder& b, RP::DebugColliderPushData data) { b.Push(data); });
 }
 
 void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx)
 {
-    // push/dispatch регистрируем в РЕЕСТРЕ по имени программы (не полем csp):
-    // загрузка сцены пересоздаёт csp, и реестр вешает функции на неё сам.
     ShaderManager* sm = ctx->GetShaderManager();
     using namespace DefaultBuffersNames;
     if (culling_pib_inited) {
@@ -152,12 +132,8 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx)
     namespace RP = DefaultRenderPassNamespace;
     PassManager* pm = ctx->GetPassManager();
 
-    // CSD (culling_clear_cs/culling_pib_cs) грузятся из сцены (shaders.json). Здесь — только
-    // сами compute-программы (держат указатели на буферы, не сериализуются) + их push/dispatch.
-    // csp хранит cs_name; резолв в CSD — на сборке compute-пайплайна (после LoadScene).
-
-    // (1) CLEAR — обнуляет num_instances ВСЕХ (камера,команда) перед scatter. Создаётся ПЕРВОЙ →
-    // в CULLING_PASS это shader_batch[0], SDL барьерит между compute-пассами → scatter видит нули.
+    // CLEAR обнуляет num_instances всех пар (камера, команда) и создаётся ПЕРВОЙ: в CULLING_PASS
+    // это shader_batch[0], а между compute-пассами SDL ставит барьер, поэтому scatter видит нули.
     ComputeShaderProgram* csp_clear = ctx->CreateComputeShaderProgram("csp_culling_clear", "culling_clear_cs",
         { DEFAULT_INDIRECT_BUFFER },   // rw (u0)
         {}, {}, {}, {},
@@ -172,15 +148,13 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx)
         binder.element_count = { pm->AskRegions(binder.frame).total_commands, 1, 1 };
     });
 
-    // Скаттер: программа НА ПРОХОД с батчами, отличаются только имя и камерный буфер.
-    // Отсев по экранному размеру включён ТОЛЬКО у MAIN: он один рисует непрозрачную массовку,
-    // ради замера которой режим и заведён, и мерить «мелкое» надо по его таргету (scene_hdr).
+    // Скаттер: по программе НА ПРОХОД с батчами. Отсев по экранному размеру включён только у
+    // MAIN — он один рисует непрозрачную массовку, ради которой режим и заведён.
     TextureAtlas* scene_hdr = ctx->GetTextureAtlas(std::string("scene_hdr"));
     CreateCullingProgram(ctx, sm, pm, "csp_cull_shadow",      RP::SHADOW_PASS,      DEFAULT_LIGHT_CAMERA_BUFFER);
     CreateCullingProgram(ctx, sm, pm, "csp_cull_main",        RP::MAIN_PASS,        DEFAULT_CAMERA_BUFFER, scene_hdr);
-    // Сплат-программа выключена вместе со своим проходом (см. Engine::Init): без SPLAT_PASS
-    // RegionOfPass отдавал бы ей пустой регион. Сам механизм invert_span остаётся в шейдере и в
-    // CreateCullingProgram — включается этой одной строкой.
+    // Сплат выключен вместе со своим проходом (Engine::Init); механизм invert_span остаётся в
+    // шейдере и включается этой строкой.
     // CreateCullingProgram(ctx, sm, pm, "csp_cull_splat", RP::SPLAT_PASS, DEFAULT_CAMERA_BUFFER, scene_hdr, /*invert_span=*/true);
     CreateCullingProgram(ctx, sm, pm, "csp_cull_transparent", RP::TRANSPARENT_PASS, DEFAULT_CAMERA_BUFFER);
     CreateCullingProgram(ctx, sm, pm, "csp_cull_debug",       RP::DEBUG_PASS,       DEFAULT_CAMERA_BUFFER);
@@ -191,8 +165,6 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx)
 
 void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm)
 {
-    // push/dispatch регистрируем в РЕЕСТРЕ по имени программы (не полем csp):
-    // загрузка сцены пересоздаёт csp, и реестр вешает функции на неё сам.
     ShaderManager* sm = ctx->GetShaderManager();
     using namespace DefaultRenderPassNamespace;
     if (shadow_blur_inited) {
@@ -257,14 +229,12 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
     static bool inited = false;
     if (inited) { SDL_Log("AO shader programs already initialized."); return; }
 
-    // Порядок создания = порядок исполнения в проходе, а он здесь единственная связь между шагами:
-    // ssao пишет __ssao, blur_h переносит его в __ssao_temp, blur_v — обратно, композит читает
-    // __ssao. Переставить местами = читать прошлый кадр.
+    // ПОРЯДОК СОЗДАНИЯ = порядок исполнения, и он здесь единственная связь между шагами: ssao
+    // пишет __ssao, blur_h переносит его в __ssao_temp, blur_v — обратно, композит читает __ssao.
+    // Переставить местами значит читать прошлый кадр.
     //
-    // Камерный буфер нужен и блюру: билатеральный вес считается по ЛИНЕЙНОЙ глубине, а её из
-    // буфера глубины достают членами proj.
-
-    // (1) SSAO: глубина (сэмплер) + камера (ro) → карта AO половинного разрешения.
+    // Камерный буфер нужен и блюру: билатеральный вес считается по ЛИНЕЙНОЙ глубине, а её достают
+    // из буфера глубины членами proj.
     ctx->CreateComputeShaderProgram("ssao", "ssao_cs",
         {}, { DEFAULT_CAMERA_BUFFER },
         { { SSAO_TEXTURE, 0, 0 } },   // rw
@@ -272,8 +242,8 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
         { std::string("__main_depth") },
         AO_PASS, /*dont_save=*/true);
 
-    // (2)(3) Разделимый блюр: ping-pong между двумя картами. SIMULTANEOUS не нужен — каждый шаг
-    // читает ЧУЖУЮ текстуру, а пишет только свой тексель.
+    // Разделимый блюр ping-pong'ом между двумя картами. SIMULTANEOUS не нужен: каждый шаг читает
+    // ЧУЖУЮ текстуру, а пишет только свой тексель.
     ctx->CreateComputeShaderProgram("ssao_blur_h", "ssao_blur_h_cs",
         {}, { DEFAULT_CAMERA_BUFFER },
         { { SSAO_TEMP, 0, 0 } },
@@ -288,8 +258,8 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
         { SSAO_TEMP, std::string("__main_depth") },
         AO_PASS, /*dont_save=*/true);
 
-    // (4) Композит: scene_hdr -= ambient*(1-AO). scene_hdr здесь только storage, ambient и AO
-    // только сэмплеры — одновременного sampler+storage на одной текстуре нет.
+    // scene_hdr здесь только storage, ambient и AO только сэмплеры — одновременного
+    // sampler+storage на одной текстуре нет.
     ctx->CreateComputeShaderProgram("ao_composite", "ao_composite_cs",
         {}, {},
         { { std::string("scene_hdr"), 0, 0 } },
@@ -297,8 +267,6 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
         { SCENE_AMBIENT, SSAO_TEXTURE },
         AO_PASS, /*dont_save=*/true);
 
-    // Один cbuffer AOParams на все четыре: состояние прохода уходит вниз как есть, раскладка
-    // AOState совпадает с ним.
     const char* programs[] = { "ssao", "ssao_blur_h", "ssao_blur_v", "ao_composite" };
     for (const char* name : programs) {
         sm->CreateComputePushInstruction<AOState>(name, [](const PushConstantBinder& b, AOState st) {
@@ -306,8 +274,6 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
         });
     }
 
-    // Размеры диспатчей берём у ЖИВЫХ атласов: ресайз меняет width/height внутри атласа, поэтому
-    // указатель остаётся верным, а числа приезжают уже новые.
     {
         TextureAtlas* ao_tex = ctx->GetTextureAtlas(SSAO_TEXTURE);
         TextureAtlas* ao_tmp = ctx->GetTextureAtlas(SSAO_TEMP);
@@ -338,9 +304,8 @@ void DefaultShaderProgramSet::SetFogProgram(EngineContext* ctx)
     static bool inited = false;
     if (inited) { SDL_Log("Fog shader program already initialized."); return; }
 
-    // Один шаг на весь эффект: глубина (сэмплер) + камера (ro) → домешивание тумана в scene_hdr.
-    // scene_hdr здесь ТОЛЬКО storage, глубина — только сэмплер: одновременного sampler+storage на
-    // одной текстуре нет. Своих таргетов у прохода не появляется вовсе.
+    // scene_hdr здесь только storage, глубина — только сэмплер: одновременного sampler+storage на
+    // одной текстуре нет.
     ctx->CreateComputeShaderProgram("fog", "fog_cs",
         {}, { DEFAULT_CAMERA_BUFFER },
         { { std::string("scene_hdr"), 0, 0 } },   // rw
@@ -348,13 +313,10 @@ void DefaultShaderProgramSet::SetFogProgram(EngineContext* ctx)
         { std::string("__main_depth") },
         FOG_PASS, /*dont_save=*/true);
 
-    // Состояние прохода уходит вниз как есть: раскладка FogState совпадает с cbuffer FogParams.
     sm->CreateComputePushInstruction<FogState>("fog", [](const PushConstantBinder& b, FogState st) {
         b.Push(st);
     });
 
-    // Размер диспатча берём у ЖИВОГО атласа: ресайз меняет width/height внутри него, поэтому
-    // указатель остаётся верным, а числа приезжают уже новые.
     {
         TextureAtlas* hdr = ctx->GetTextureAtlas(std::string("scene_hdr"));
         sm->CreateDispatchInstruction<DummyDispatchData>("fog", [hdr](DispatchSizeBinder& b, DummyDispatchData) {
@@ -367,20 +329,16 @@ void DefaultShaderProgramSet::SetFogProgram(EngineContext* ctx)
 
 void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
 {
-    // push/dispatch регистрируем в РЕЕСТРЕ по имени программы (не полем csp):
-    // загрузка сцены пересоздаёт csp, и реестр вешает функции на неё сам.
     ShaderManager* sm = ctx->GetShaderManager();
     using namespace DefaultRenderPassNamespace;
     static bool inited = false;
     if (inited) { SDL_Log("Bloom shader programs already initialized."); return; }
 
-    // CSD (bloom_*_cs) грузятся из сцены (shaders.json) — здесь только сами compute-программы
-    // (указатели на атласы, не сериализуются) + push/dispatch; csp резолвит cs_name на пайплайне.
-
-    // Пирамида — BLOOM_LEVELS ОТДЕЛЬНЫХ текстур "bloom_L<i>" (см. _SetDefaultCommonResources):
-    // dst-уровень биндится RW-storage, src-уровень — сэмплером. Отдельные текстуры исключают
-    // одновременный RW+sampled бинд одной (layout-ошибки валидации на общей мип-цепочке).
-    // Размер диспатча — по живому атласу уровня (ресайз меняет width/height внутри атласа).
+    // ПОРЯДОК СОЗДАНИЯ = порядок исполнения: prefilter, затем down по уровням вниз, затем up
+    // снизу вверх, затем композит — каждый шаг читает то, что записал предыдущий.
+    //
+    // Пирамида — BLOOM_LEVELS ОТДЕЛЬНЫХ текстур "bloom_L<i>", а не мипы одной: dst-уровень
+    // биндится RW-storage, src — сэмплером, и на общей мип-цепочке это ошибка layout-валидации.
     auto L = [](uint32_t i) { return "__bloom_L" + std::to_string(i); };
 
     ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
@@ -390,8 +348,6 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
         {},
         { std::string("scene_hdr"), std::string("scene_emission") },   // sampler t0/s0, t1/s1
         BLOOM_PASS, /*dont_save=*/true);
-    // Значения больше не литералы здесь: программа СОБИРАЕТ свой cbuffer из состояния прохода
-    // (BloomState), которое лежит в шаге и правится редактором.
     sm->CreateComputePushInstruction<BloomState>("bloom_down_0",[](const PushConstantBinder& b, BloomState st) {
         BloomParams d{};
         d.threshold = st.threshold;
@@ -408,7 +364,6 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
         });
     }
 
-    // --- Downsample: уровень i-1 → уровень i (1..N-1). Источник — sampler соседнего уровня. ---
     for (uint32_t i = 1; i < BLOOM_LEVELS; ++i) {
         const std::string down_name = "bloom_down_" + std::to_string(i);
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
@@ -418,7 +373,6 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             {},
             { L(i - 1) },         // combined sampler: предыдущий (вдвое крупнее) уровень
             BLOOM_PASS, /*dont_save=*/true);
-        // Из состояния берёт только выключатель Karis: остальное bloom_down не читает.
         sm->CreateComputePushInstruction<BloomState>(down_name,[](const PushConstantBinder& b, BloomState st) {
             BloomParams d{}; d.useKaris = st.karis_down; b.Push(d);
         });
@@ -428,14 +382,13 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
         });
     }
 
-    // --- Upsample (tent, аддитивно): уровень i+1 → += уровень i, от мелкого к крупному. ---
     for (int i = (int)BLOOM_LEVELS - 2; i >= 0; --i) {
         const std::string up_name = "bloom_up_" + std::to_string(i);
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
             up_name, "bloom_up_cs",
             {}, {},
-            // rw: bloom_L<i>. Tent-фильтр читает СОСЕДНИЕ тексели того же уровня, пока другие потоки
-            // диспатча их пишут → нужен SIMULTANEOUS (не выводится из формы бинда — ручной тег).
+            // Tent-фильтр читает СОСЕДНИЕ тексели того же уровня, пока другие потоки диспатча их
+            // пишут: отсюда SIMULTANEOUS, из формы бинда он не выводится.
             { { .texture_atlas = L((uint32_t)i), .need_simultaneous = true } },
             {},
             { L((uint32_t)i + 1) },         // combined sampler: следующий (вдвое мельче) уровень
@@ -450,7 +403,6 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
         });
     }
 
-    // --- Composite: scene_hdr += bloom_L0 * intensity (hue-preserving clip) ---
     {
         auto dst = ctx->GetTextureAtlas(std::string("scene_hdr"));
         ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
