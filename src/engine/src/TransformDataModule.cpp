@@ -1,9 +1,22 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "TransformDataModule.h"
 #include "BaseComponents.h"
 #include "BufferManager.h"
 #include "ObjectManager.h"
-#include <immintrin.h>
+
+// Платформенный гейт SIMD. Сборка может выключить его сама (-DTDM_SIMD_X86=0); под платформу
+// без x86-интринсиков модуль собирается со скалярными заготовками ниже.
+#if !defined(TDM_SIMD_X86)
+    #if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
+        #define TDM_SIMD_X86 1
+    #else
+        #define TDM_SIMD_X86 0
+    #endif
+#endif
+
+#if TDM_SIMD_X86
+    #include <immintrin.h>
+#endif
 
 // 16 float'ов GPU-матрицы, column-major: столбцы (x,y,z,i), (a,b,c,j), (e,f,g,k), (w,d,h,l).
 // В этом же порядке GatherPositionStreams собирает потоки для транспонирования.
@@ -31,9 +44,11 @@ static void LoadLocalMatrix(const LocalMatrices& L, size_t i, float* m)
     m[12] = L.m12[i]; m[13] = L.m13[i]; m[14] = L.m14[i]; m[15] = L.m15[i];
 }
 
-// lhs = lhs * rhs, column-major. Все четыре столбца lhs снимаются в регистры ДО первой записи:
-// каждый столбец результата — комбинация всех столбцов lhs, и запись нулевого затёрла бы данные,
-// нужные остальным.
+// lhs = lhs * rhs, column-major. Все четыре столбца lhs снимаются ДО первой записи: каждый
+// столбец результата — комбинация всех столбцов lhs, и запись нулевого затёрла бы данные,
+// нужные остальным. Заготовка без SIMD делает то же самое через копию (замер: 3.8 мс против
+// 2.2 на 200k матриц).
+#if TDM_SIMD_X86
 static inline void MulMat4InPlace(float* lhs, const float* rhs)
 {
     const __m128 c0 = _mm_loadu_ps(lhs + 0);
@@ -50,6 +65,20 @@ static inline void MulMat4InPlace(float* lhs, const float* rhs)
         _mm_storeu_ps(lhs + j * 4, col);
     }
 }
+#else
+static inline void MulMat4InPlace(float* lhs, const float* rhs)
+{
+    float a[16];
+    for (int k = 0; k < 16; ++k) a[k] = lhs[k];
+
+    for (int j = 0; j < 4; ++j) {
+        const float b0 = rhs[j * 4 + 0], b1 = rhs[j * 4 + 1];
+        const float b2 = rhs[j * 4 + 2], b3 = rhs[j * 4 + 3];
+        for (int i = 0; i < 4; ++i)
+            lhs[j * 4 + i] = a[i] * b0 + a[4 + i] * b1 + a[8 + i] * b2 + a[12 + i] * b3;
+    }
+}
+#endif
 
 void TransformDataModule::UpdateLocalTransforms(ObjectManager* om, SceneData* scene)
 {
@@ -117,6 +146,7 @@ static void TransposeScalar(const float* const src[16], float* dst, size_t first
     }
 }
 
+#if TDM_SIMD_X86
 static inline void Transpose8x8(__m256 r[8])
 {
     __m256 t0 = _mm256_unpacklo_ps(r[0], r[1]);
@@ -147,34 +177,45 @@ static inline void Transpose8x8(__m256 r[8])
     r[7] = _mm256_permute2f128_ps(u3, u7, 0x31);
 }
 
-// SoA-колонки -> AoS-матрицы. Ручной AVX здесь не украшение: на 800k сущностей замер
-// (sandbox/TransposeVecProbe) даёт 7.0 мс против 8.8 у лучшей формы, которую берёт
-// автовекторизатор, и 10.9 у скаляра ниже; копия тех же байт без перестановки — 4.3 мс.
-// loadu/storeu — std::vector не даёт 32-байтового выравнивания; интринсики компилируются без
-// /arch:AVX, поэтому исполнение гейтится SDL_HasAVX, а хвост блока идёт скаляром.
-static void TransposeSoAToMatrices(const float* const src[16], float* dst, size_t n)
+// Укладывает блоками по 8 сущностей и возвращает, сколько уложено; остаток добирает вызывающий.
+// Ручной AVX здесь не украшение, не векторизуется.
+static size_t TransposeBlocks(const float* const src[16], float* dst, size_t n)
 {
-    static const bool has_avx = SDL_HasAVX();
-
     size_t e = 0;
-    if (has_avx) {
-        for (; e + 8 <= n; e += 8) {
-            __m256 lo[8], hi[8];
-            for (int s = 0; s < 8; ++s) {
-                lo[s] = _mm256_loadu_ps(src[s] + e);
-                hi[s] = _mm256_loadu_ps(src[s + 8] + e);
-            }
-            Transpose8x8(lo);
-            Transpose8x8(hi);
+    for (; e + 8 <= n; e += 8) {
+        __m256 lo[8], hi[8];
+        for (int s = 0; s < 8; ++s) {
+            lo[s] = _mm256_loadu_ps(src[s] + e);
+            hi[s] = _mm256_loadu_ps(src[s + 8] + e);
+        }
+        Transpose8x8(lo);
+        Transpose8x8(hi);
 
-            float* out = dst + e * 16;
-            for (int m = 0; m < 8; ++m) {
-                _mm256_storeu_ps(out + m * 16,     lo[m]);
-                _mm256_storeu_ps(out + m * 16 + 8, hi[m]);
-            }
+        float* out = dst + e * 16;
+        for (int m = 0; m < 8; ++m) {
+            _mm256_storeu_ps(out + m * 16,     lo[m]);
+            _mm256_storeu_ps(out + m * 16 + 8, hi[m]);
         }
     }
-    TransposeScalar(src, dst, e, n);
+    return e;
+}
+#else
+// Заготовка: блоков нет, всё уедет в скалярный проход. Пустой она быть может, а MulMat4InPlace
+// выше — нет: без умножения иерархия считалась бы неверно.
+static size_t TransposeBlocks(const float* const[16], float*, size_t)
+{
+    static bool logged = false;
+    if (!logged) {
+        SDL_Log("TransformDataModule: no SIMD transpose on this platform - scalar path");
+        logged = true;
+    }
+    return 0;
+}
+#endif
+
+static void TransposeSoAToMatrices(const float* const src[16], float* dst, size_t n)
+{
+    TransposeScalar(src, dst, TransposeBlocks(src, dst, n), n);
 }
 
 void TransformDataModule::StoreTransforms(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene)
