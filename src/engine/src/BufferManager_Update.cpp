@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "BufferManager.h"
 #include "EngineProfiler.h"
 
@@ -84,27 +84,16 @@ TransferBufferData* BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* c
     target_task_vector.clear();
     target_task_vector.reserve(target_instr_vector.size());
 
-    // ── ПРОФАЙЛ: фаза 1 — «замер размера» (size_fn) по каждому буферу отдельно.
-    //    Метка "<buf> .size", плюс сам вычисленный размер в байтах (столбец KB).
     const uint8_t li = logic_index.load();
     for (auto& instr : target_instr_vector) {
         UploadTask task{};
         task.dst_buffer_data = instr.buffer_data;
-        // Гейт незабейканного буфера: GPU-хэндла нет (ни одна SP не объявила usage → BakePending его
-        // не создал; напр. UI-текст-буферы в игре без UI-шейдера). Пропускаем инструкцию ЦЕЛИКОМ, а
-        // не только финальную заливку (та и так гейтится в _ExecuteUploadTasks): незачем считать
-        // size_fn, растить ёмкость, арендовать TB и гонять updater ради данных, которым некуда ехать.
-        // size=0 держит выравнивание instr↔task для фазы 2 и глушит апдейт вниз по конвейеру.
-        // Появится usage → BakePending создаст буфер, и обновлялка оживёт со следующего кадра сама.
         if (!_GetGPUBufferForFrame(instr.buffer_data, li)) {
             task.size = 0;
             target_task_vector.push_back(task);
             continue;
         }
         {
-            // Push/Pop, а не Add: замер ОБЪЕМЛЕТ чужие скоупы (size_fn и updater могут
-            // содержать свои PROF_SCOPE), и только открытый скоуп делает их детьми в
-            // отчёте. С Add они оказались бы соседями, а [other] родителя - отрицательным.
             const char* nm = instr.buffer_data ? instr.buffer_data->debug_name.c_str() : "?";
             const size_t ph = Prof::Sim().Push((std::string(nm) + " .size").c_str());
             auto t = Prof::Clock::now();
@@ -118,8 +107,6 @@ TransferBufferData* BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* c
         target_task_vector.push_back(task);
     }
 
-    // ── ПРОФАЙЛ: построение задач + аренда TB + EnsureBufferCapacity (пересоздание
-    //    GPU-буферов при росте) — общая для всех буферов стадия.
     TransferBufferData* tbd;
     {
         auto t = Prof::Clock::now();
@@ -127,8 +114,6 @@ TransferBufferData* BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* c
         Prof::Sim().Add("  [build_tasks + ensure_capacity]", Prof::MsSince(t));
     }
 
-    // ── ПРОФАЙЛ: фаза 2 — «запись» (updater пишет данные в transfer-буфер) по буферам.
-    //    Метка "<buf> .store".
     for (size_t i = 0; i < target_instr_vector.size(); ++i) {
         auto& instr = target_instr_vector[i];
         auto& task = target_task_vector[i];
@@ -180,9 +165,6 @@ void BufferManager::_ExecuteUploadTasks(SDL_GPUCopyPass* cp, std::vector<UploadT
         if (task.size == 0 || task.resize_dst_buf_only || !task.tbd) continue;
         BufferData* buffer_data = task.dst_buffer_data;
         SDL_GPUBuffer* target_buffer = _GetGPUBufferForFrame(buffer_data, idx);
-        // Буфер мог не забейкаться (ни одна SP не объявила usage → GPU-хэндла нет; напр. UI-текст-
-        // буферы в игре без UI-шейдера). Заливать в null нельзя — SDL_UploadToGPUBuffer ассертит.
-        // Обновлялка на незабейканный буфер = безвредный no-op (потребителя всё равно нет).
         if (!target_buffer) continue;
         SDL_GPUTransferBufferLocation src = { task.tbd->tb, task.tb_offset };
         SDL_GPUBufferRegion dstReg = { target_buffer, task.dst_offset, task.size };
@@ -205,8 +187,6 @@ void* BufferManager::AcquireTransferWritePtr(UploadTask* task, Uint32 size)
         return nullptr;
     }
 
-    // Проверка границ буфера-назначения с учётом базового смещения (dst_offset уже его включает).
-    // Destination-bounds check accounting for the base offset (dst_offset already includes it).
     const Uint32 dst_capacity = (task->dst_buffer_data->type == BufferDataType::Static)
         ? task->dst_buffer_data->Static.buffer_size
         : task->dst_buffer_data->Dynamic.buffer_size[li];
@@ -219,15 +199,6 @@ void* BufferManager::AcquireTransferWritePtr(UploadTask* task, Uint32 size)
     std::byte* dst = static_cast<std::byte*>(task->tbd->mapped) + task->tb_offset + task->written_size;
     task->written_size += size;
 
-    // Использованный объём = базовое смещение + дозаписанное (dst_offset включает базу).
-    // МАКСИМУМ, а не присваивание: с тех пор как база заливки может быть НЕ концом занятого
-    // (аллокатор диапазонов сажает пачку в освободившуюся дыру), запись в начало буфера занизила
-    // бы эту величину — а её берёт copy_size в EnsureBufferCapacity, и ближайший рост буфера
-    // молча отрезал бы весь хвост. Смысл поля от этого — «высокая вода», а не «занято сейчас»;
-    // единственный потребитель (RESIZE_AND_COPY) от лишних скопированных байт не страдает.
-    // Used size = base offset + appended bytes (dst_offset includes the base). MAX, not assign:
-    // an upload into a reclaimed hole would otherwise lower the high-water mark that
-    // EnsureBufferCapacity copies on resize, silently truncating the buffer's tail.
     const Uint32 used = task->dst_offset + task->written_size;
     switch (task->dst_buffer_data->type) {
     case BufferDataType::Static:

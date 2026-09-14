@@ -1,9 +1,6 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "BufferManager.h"
 
-// Индексный буфер пула шейдер-батча: отрезолвлен на сборке батча (принадлежность пулу по
-// стримам vs) и приезжает из слепка. false = бинда НЕ было — вызывающий обязан пропустить
-// draw: indexed indirect со стейлым/несбинженным индексным буфером — UB, не деградация.
 bool BufferManager::BindGPUIndexBuffer(SDL_GPURenderPass* rp, const BufferData* buffer_data, Uint32 offset)
 {
     if (!buffer_data || buffer_data->type != BufferDataType::Static || !buffer_data->Static.buffer) {
@@ -20,10 +17,6 @@ bool BufferManager::BindGPUIndexBuffer(SDL_GPURenderPass* rp, const BufferData* 
     return true;
 }
 
-// Вершинные стримы шейдер-батча: список объявлен вершинником (CreateVertexShader, перечисление
-// имён буферов) и приезжает сюда из слепка. ПОРЯДОК СПИСКА = ПОРЯДОК СЛОТОВ пайплайна: биндим
-// одним вызовом с нулевого слота. Любой сбой резолва — ПРОПУСК ВСЕГО бинда, не сдвиг: слот со
-// сдвинутым буфером = чтение чужого страйда = UB (вызывающий обязан пропустить и draw).
 bool BufferManager::BindGPUVertexBuffers(SDL_GPURenderPass* rp, const std::vector<BufferData*>& buffers_data_vec)
 {
     if (buffers_data_vec.empty()) {
