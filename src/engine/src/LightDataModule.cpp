@@ -198,22 +198,19 @@ void LightDataModule::StampShadowCameras(ObjectManager* om, SceneData* scene, ui
 
     om->ForEach<Positions, SpotLightComponent, ShadowCasterComponent>(scene,
         [&](SoAElement<Positions>, SpotLightComponent& light, ShadowCasterComponent) {
-            cams.push_back({ light.light_data.GetMaxDistance(), 0,
-                             static_cast<uint8_t>(light.needsUpdate ? 1 : 0) });
+            cams.push_back({ light.light_data.GetMaxDistance(), 0 });
         });
     om->ForEach<Positions, SphereLightComponent, ShadowCasterComponent>(scene,
         [&](SoAElement<Positions>, SphereLightComponent& light, ShadowCasterComponent) {
             for (int face = 0; face < 6; ++face)
-                cams.push_back({ light.light_data.GetMaxDistance(), 0,
-                                 static_cast<uint8_t>(light.needsUpdate ? 1 : 0) });
+                cams.push_back({ light.light_data.GetMaxDistance(), 0 });
         });
     // Directional: cascade_count ortho-камер на источник (per-instance, т.к. число каскадов
     // у разных источников может отличаться). max_range — per-cascade far.
     om->ForEach<DirectLightComponent, ShadowCasterComponent>(scene,
         [&](DirectLightComponent& light, ShadowCasterComponent&) {
             for (int c = 0; c < light.light_data.cascade_count; ++c)
-                cams.push_back({ light.light_data.CascadeFar(c), 1,
-                                 static_cast<uint8_t>(light.needsUpdate ? 1 : 0) });
+                cams.push_back({ light.light_data.CascadeFar(c), 1 });
         });
 }
 

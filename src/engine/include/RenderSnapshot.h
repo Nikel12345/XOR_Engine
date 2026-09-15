@@ -20,7 +20,6 @@ namespace RenderSnap {
     struct ShadowCam {
         float   max_range = 0.0f;
         uint8_t is_ortho = 0;
-        uint8_t needs_render = 0;
     };
 
     struct LightCams {

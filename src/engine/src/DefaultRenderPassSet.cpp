@@ -128,8 +128,6 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
 
         for (uint32_t camera_index = 0; camera_index < num_cams; ++camera_index) {
             const RenderSnap::ShadowCam& cam = cams[camera_index];
-            if (!cam.needs_render) continue;
-
             st->camera_index = camera_index;
             st->max_range = cam.max_range;         // spot/sphere: max distance, direct: per-cascade far
             st->is_ortho = cam.is_ortho;           // 1 → линейная осевая глубина (directional)
@@ -683,7 +681,6 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
         if (!st) { SDL_Log("SHADOW_PASS (VSM): pass state is not initialized"); return; }
 
         for (Uint32 camera_index = 0; camera_index < num_cams; ++camera_index) {
-            if (!cams[camera_index].needs_render) continue;
             st->camera_index = camera_index;
             rp.renderPassTexsData.SetColorTargetInfoLayer(camera_index, 0);
             pm->RenderPassStandardBody(cb, &rp, bm, 0, st);

@@ -197,7 +197,7 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
         });
         sm->CreateDispatchInstruction<DummyDispatchData>(name_h,
             [L, blur_temp_atlas, ldm](DispatchSizeBinder& binder, DummyDispatchData) {
-            if (ldm->IsShadowLayerDirty(binder.frame, L))
+            if (ldm->IsShadowLayerUsed(binder.frame, L))
                 binder.element_count = { blur_temp_atlas->width, blur_temp_atlas->height, 1 };
             else
                 binder.element_count = { 0, 0, 0 };
@@ -214,7 +214,7 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
 
         sm->CreateDispatchInstruction<DummyDispatchData>(name_v,
             [L, moments_atlas, ldm](DispatchSizeBinder& binder, DummyDispatchData) {
-            if (ldm->IsShadowLayerDirty(binder.frame, L))
+            if (ldm->IsShadowLayerUsed(binder.frame, L))
                 binder.element_count = { moments_atlas->width, moments_atlas->height, 1 };
             else
                 binder.element_count = { 0, 0, 0 };

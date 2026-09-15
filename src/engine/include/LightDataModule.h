@@ -50,9 +50,11 @@ public:
     const std::vector<RenderSnap::ShadowCam>& AskShadowCameras(uint8_t slot) const {
         return snapshots[slot].cams;
     }
-    bool IsShadowLayerDirty(uint8_t slot, uint32_t layer) const {
-        const auto& cams = snapshots[slot].cams;
-        return layer < cams.size() && cams[layer].needs_render != 0;
+    // Занят ли слой теневого массива камерой в ЭТОМ слоте. Слоёв в атласе фиксированное число, а
+    // камер столько, сколько дала сцена, поэтому хвост слоёв держит мусор прошлой сцены — его не
+    // читают (проход рисует только num_cams слоёв) и обрабатывать не должны.
+    bool IsShadowLayerUsed(uint8_t slot, uint32_t layer) const {
+        return layer < snapshots[slot].cams.size();
     }
 
 private:
