@@ -19,37 +19,20 @@ struct LightCamera {
 class LightDataModule {
 public:
     LightDataModule();
-    // Размер = ровно число источников сцены. Хвост буфера (он только растёт, ужать его
-    // EnsureBufferCapacity не умеет) остаётся с байтами прошлых кадров — и это НЕ страшно
-    // ровно потому, что счётчик едет шейдеру ЯВНО, push-константой из слепка (AskNumLights),
-    // а не выводится из размера буфера. Убери пуш — и сцена с меньшим числом источников
-    // (в пределе — без света вовсе) будет освещаться светом предыдущей сцены.
     uint32_t CalculateLightSize(ObjectManager* om, SceneData* scene);
     void StoreLightData(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene);
-
-    // Считает размер буфера LightCameras слота И пишет слепок его теневых камер
-    // (snapshots[slot]) — одним перечислением, тем же порядком spot→sphere→direct, каким
-    // StoreLightCameras наполняет буфер. Size-фаза выполняется ВСЕГДА (в отличие от store,
-    // который скипается при size==0), поэтому слепок слота не бывает стейлым.
-    // Слепок теневых камер слота. Пишется в СВОЕЙ фазе PrepareFunc (Engine), а не в size_fn:
-    // size-функции обязаны быть читалками, иначе порядок регистрации инструкций становится
-    // несущим — на этом уже стоял отдельный инвариант.
     void StampShadowCameras(ObjectManager* om, SceneData* scene, uint8_t slot);
     uint32_t CalculateLightCamerasSize(uint8_t slot) const;
     void StoreLightCameras(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene);
 
-    // ── Ask*(slot): читают ТОЛЬКО слепок слота — безопасны с рендер-потока (и с sim после
-    // size-фазы LIGHT_CAMERA_BUFFER этого prepare; порядок регистрации апдейтеров это даёт).
-    // Отсутствие ObjectManager в параметрах — контракт: в ECS отсюда не ходим.
     uint32_t AskNumLightCameras(uint8_t slot) const {
         return static_cast<uint32_t>(snapshots[slot].cams.size());
     }
-    // Счётчик источников для лайтящих фрагментников (RP::LightCountPushData): сколько записей
-    // лежит в LIGHT_BUFFER этого слота.
     uint32_t AskNumLights(uint8_t slot) const { return snapshots[slot].num_lights; }
     const std::vector<RenderSnap::ShadowCam>& AskShadowCameras(uint8_t slot) const {
         return snapshots[slot].cams;
     }
+
     // Занят ли слой теневого массива камерой в ЭТОМ слоте. Слоёв в атласе фиксированное число, а
     // камер столько, сколько дала сцена, поэтому хвост слоёв держит мусор прошлой сцены — его не
     // читают (проход рисует только num_cams слоёв) и обрабатывать не должны.

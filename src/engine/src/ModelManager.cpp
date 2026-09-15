@@ -8,9 +8,6 @@
 
 ModelManager::ModelManager() {};
 
-// Одномерный аллокатор диапазонов в элементах: first-fit по адресу, соседи при возврате
-// сливаются. ИНВАРИАНТ списка дыр — отсортирован по first, соседи слиты, пустых нет; на нём
-// держится и слияние (смотрим только двух соседей), и опускание вершины.
 class RangeAllocator
 {
 public:
@@ -63,8 +60,7 @@ private:
     uint32_t top_ = 0;
 };
 
-// Состояние дозагрузки ОДНОГО пула: у каждого своя раскладка, свои буферы и своё элементное
-// пространство.
+
 struct PoolResidency {
     // БАЙТЫ раскладки пула: вершина i начинается с i * VertexSize().
     std::vector<std::byte> staging_vertices;
@@ -77,10 +73,8 @@ struct PoolResidency {
     GeometryRange batch_verts;
     GeometryRange batch_index;
     bool batch_allocated = false;
-    // Модели этого кадра; их диапазоны стейджинг-относительны, пока PackModels не прибавит базу.
     std::vector<ModelData*> batch;
 
-    // Копии диапазонов, а не указатели на модели: саму модель можно снести сразу.
     std::vector<std::pair<GeometryRange, GeometryRange>> pending_free;
 };
 

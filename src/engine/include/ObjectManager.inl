@@ -110,8 +110,7 @@ make_param(ComponentArray<T>* arr, size_t i) {
 
 template<typename... Ts, typename Fn>
 void ObjectManager::ForEach(SceneData* scene, Fn&& fn) {
-    // Нет сцены — пустой обход, и МОЛЧА: путь покадровый, лог превратился бы в сотни одинаковых
-    // строк в секунду. Само состояние называет GetActiveScene, один раз на вход в него.
+    // Нет сцены — пустой обход
     if (!scene) return;
 
     auto& f = fn;

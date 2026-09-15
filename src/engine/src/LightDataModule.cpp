@@ -119,8 +119,6 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
 			bm->UploadToTransferBuffer(task, sizeof(LightLayout), &light_layout);
         });
 
-    // Directional: третий блок в том же порядке spot→sphere→direct, чтобы сквозной
-    // offset/camera_index оставался согласован с StoreLightCameras и теневым проходом.
     om->ForEach<DirectLightComponent>(scene,
         [&](Entity e, DirectLightComponent& light) {
             DirectLightComponent::DirectLightData& d = light.light_data;
@@ -142,8 +140,6 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
             light_layout.g = d.g;
             light_layout.b = d.b;
             light_layout.power = d.power;
-            // Глубина у directional нормируется per-cascade (ndc.z каждого каскада),
-            // поэтому общий max_range шейдеру не нужен.
             light_layout.max_range = 0.0f;
 
             if (om->Has<ShadowCasterComponent>(scene, e)) {
@@ -162,11 +158,6 @@ void LightDataModule::StoreLightData(BufferManager* bm, UploadTask* task, Object
 
 }
 
-// Размер буфера LightCameras слота + СЛЕПОК его теневых камер (snapshots[slot]) одним
-// перечислением. ОБЯЗАН идти теми же тремя запросами (фильтр ShadowCasterComponent) и в том
-// же порядке spot→sphere→direct, что StoreLightCameras: индекс в cams = camera_index =
-// позиция камеры в буфере. Совпадение больше не инвариант «трёх одинаковых ForEach по
-// файлам» — теневой проход и каллинг читают эту таблицу, а не ECS.
 uint32_t LightDataModule::CalculateLightCamerasSize(uint8_t slot) const
 {
     return safe_u32(snapshots[slot].cams.size()) * safe_u32(sizeof(LightCamera));
@@ -180,9 +171,6 @@ void LightDataModule::StampShadowCameras(ObjectManager* om, SceneData* scene, ui
     num_lights = 0;
     if (!scene) return;
 
-    // Счётчик ВСЕХ источников (не только теневых) — тем же перечислением и теми же фильтрами,
-    // что CalculateLightSize: это число записей в LIGHT_BUFFER слота, и его же получает
-    // фрагментник push-константой. Считаем архетипами — размеры колонок, без обхода строк.
     om->ForEachArchetype<Positions, SpotLightComponent>(scene,
         [&](ComponentArray<Positions, void>* posArr, ComponentArray<SpotLightComponent, void>*) {
             num_lights += safe_u32(posArr->size());
@@ -205,8 +193,6 @@ void LightDataModule::StampShadowCameras(ObjectManager* om, SceneData* scene, ui
             for (int face = 0; face < 6; ++face)
                 cams.push_back({ light.light_data.GetMaxDistance(), 0 });
         });
-    // Directional: cascade_count ortho-камер на источник (per-instance, т.к. число каскадов
-    // у разных источников может отличаться). max_range — per-cascade far.
     om->ForEach<DirectLightComponent, ShadowCasterComponent>(scene,
         [&](DirectLightComponent& light, ShadowCasterComponent&) {
             for (int c = 0; c < light.light_data.cascade_count; ++c)
@@ -228,8 +214,6 @@ inline void StoreSpotLightCamera(BufferManager* bm, UploadTask* task, Positions&
     glm::mat4 view = glm::lookAt(position, position + dir, up);
 
     float fov = 2.0f * std::atan(light.source_angle);
-    // near маленький: distance shadow map не зависит от точности near-плоскости,
-    // зато близкие к источнику окклюдеры (пол прямо над лампой) не отсекаются.
     glm::mat4 proj = glm::perspectiveZO(
         fov, 1.0f, 0.05f, light.GetMaxDistance());
 
@@ -247,12 +231,12 @@ static const glm::vec3 cubeDirs[6] = {
 };
 // Выводится из Vulkan spec cubemap UV convention
 static const glm::vec3 cubeUps[6] = {
-    { 0, 1,  0},  // +X: cam_x=-rz, cam_y=-ry ✓
-    { 0, 1,  0},  // -X: cam_x=+rz, cam_y=-ry ✓
-    { 0,  0,  1},  // +Y: cam_x=+rx, cam_y=+rz ✓
-    { 0,  0, -1},  // -Y: cam_x=+rx, cam_y=-rz ✓
-    { 0, 1,  0},  // +Z: cam_x=+rx, cam_y=-ry ✓
-    { 0, 1,  0},  // -Z: cam_x=-rx, cam_y=-ry ✓
+    { 0, 1,  0},  // +X: cam_x=-rz, cam_y=-ry 
+    { 0, 1,  0},  // -X: cam_x=+rz, cam_y=-ry 
+    { 0,  0,  1},  // +Y: cam_x=+rx, cam_y=+rz 
+    { 0,  0, -1},  // -Y: cam_x=+rx, cam_y=-rz 
+    { 0, 1,  0},  // +Z: cam_x=+rx, cam_y=-ry 
+    { 0, 1,  0},  // -Z: cam_x=-rx, cam_y=-ry 
 };
 
 
@@ -271,10 +255,6 @@ inline void StoreSphereLightCameras(BufferManager* bm, UploadTask* task, Positio
 	}
 }
 
-// Ortho-камера(ы) directional. Камера статична (не едет за игроком): бокс строится
-// вокруг center из компонента. eye отодвинут на half_depth в сторону источника, чтобы
-// near=0 не отсёк окклюдеры перед центром. orthoZO — depth [0,1], как perspectiveZO.
-// Сейчас 1 каскад; под CSM здесь будет цикл по слайсам фрустума камеры.
 inline void StoreDirectionalCascades(BufferManager* bm, UploadTask* task,
     DirectLightComponent::DirectLightData& d) {
     glm::vec3 dir = glm::normalize(glm::vec3(d.dir_x, d.dir_y, d.dir_z));
@@ -283,9 +263,6 @@ inline void StoreDirectionalCascades(BufferManager* bm, UploadTask* task,
         ? glm::vec3(1.0f, 0.0f, 0.0f)
         : glm::vec3(0.0f, 1.0f, 0.0f);
 
-    // Вложенные концентрические боксы, мелкий→крупный (каскад 0 первым — шейдер берёт
-    // первый содержащий). И латераль, и глубина масштабируются ratio^c: иначе пол
-    // покрывается только в боковом направлении. eye отодвигается на per-cascade глубину.
     for (int c = 0; c < d.cascade_count; ++c) {
         float he    = d.CascadeExtent(c);
         float depth = d.CascadeDepth(c);

@@ -6,13 +6,10 @@ class BufferManager;
 class ObjectManager;
 struct UploadTask;
 
-// Три буфера разреженного канала для текста UI: rank, index, text. Устройство канала —
-// docs/render-pipeline/instance-data.md.
 class UI_DataModule {
 public:
 	UI_DataModule();
 
-	// Обязана идти ПЕРВОЙ из трёх инструкций: две другие читают её результат.
 	void BuildStaging(ObjectManager* om);
 
 	uint32_t CalcRankSize()  const;

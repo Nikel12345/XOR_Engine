@@ -19,7 +19,6 @@
 #endif
 
 // 16 float'ов GPU-матрицы, column-major: столбцы (x,y,z,i), (a,b,c,j), (e,f,g,k), (w,d,h,l).
-// В этом же порядке GatherPositionStreams собирает потоки для транспонирования.
 static void LoadPositionMatrix(const Positions& P, size_t i, float* m)
 {
     m[0]  = P.x[i]; m[1]  = P.y[i]; m[2]  = P.z[i]; m[3]  = P.i[i];
@@ -46,8 +45,7 @@ static void LoadLocalMatrix(const LocalMatrices& L, size_t i, float* m)
 
 // lhs = lhs * rhs, column-major. Все четыре столбца lhs снимаются ДО первой записи: каждый
 // столбец результата — комбинация всех столбцов lhs, и запись нулевого затёрла бы данные,
-// нужные остальным. Заготовка без SIMD делает то же самое через копию (замер: 3.8 мс против
-// 2.2 на 200k матриц).
+// нужные остальным. Заготовка без SIMD делает то же самое через копию.
 #if TDM_SIMD_X86
 static inline void MulMat4InPlace(float* lhs, const float* rhs)
 {

@@ -13,8 +13,7 @@ InstanceDataModule::InstanceDataModule()
 {
 }
 
-// Размер = число рисуемых строк × sizeof(InstanceData). Отбор и порядок архетипов — ТЕ ЖЕ,
-// что в TransformDataModule (инвариант «строка инстанс-данных = строка матрицы»).
+// Обход точно такой же, как в TransformDataModule (инвариант «строка инстанс-данных = строка матрицы»).
 uint32_t InstanceDataModule::CalculateInstanceSize(ObjectManager* om, SceneData* scene)
 {
 	uint32_t total = 0;

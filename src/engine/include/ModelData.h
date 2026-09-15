@@ -7,13 +7,13 @@
 #include <cstring>
 #include <SDL3/SDL_stdinc.h>
 #include <glm/glm.hpp>
+
 // Диапазон в буферах пула, В ЭЛЕМЕНТАХ.
 struct GeometryRange {
     uint32_t first = 0;
     uint32_t count = 0;
 };
 
-// Вершины заполняются БАЙТАМИ в раскладке своего пула.
 using ModelGeneratorFn = std::function<void(std::vector<std::byte>&, std::vector<Uint32>&)>;
 
 template<class V>
@@ -24,7 +24,7 @@ inline void WriteVertices(std::vector<std::byte>& out, const std::vector<V>& src
     if (!src.empty()) std::memcpy(out.data() + base, src.data(), src.size() * sizeof(V));
 }
 
-// Ступень лесенки экранных размеров: 0 = граница не задана, иначе порог = 0.5 * 2^(L-1) px.
+// LOD "для бедных"
 struct SubMeshSpan {
     uint8_t lod_min = 0;
     uint8_t lod_max = 0;
