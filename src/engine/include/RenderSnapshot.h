@@ -26,7 +26,9 @@ namespace RenderSnap {
     struct TextureDraw {
         std::vector<UVL_Block> texture_uvl;
         VariantLayout variant_layout;
-        const std::vector<uint8_t>* params = nullptr;
+        // Тот же блоб, что у материала, а не копия: правку слайдером в инспекторе видно сразу.
+        // Ссылка ВЛАДЕЮЩАЯ, поэтому материал вправе умереть раньше слепка (см. SpBinding::params).
+        std::shared_ptr<std::vector<uint8_t>> params;
         uint32_t indirect_command_index = 0;
         uint32_t draw_count = 0;
     };

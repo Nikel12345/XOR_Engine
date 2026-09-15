@@ -42,6 +42,9 @@ static inline uint64_t MixKey(uint64_t key) {
     return key;
 }
 
+// «Параметров нет»: общий пустой shared_ptr, чтобы у тернарника выше был один тип.
+const std::shared_ptr<std::vector<uint8_t>> kNoParams{};
+
 // Ключ ПАМЯТКИ предпрохода, а не узла дерева: две ячейки одного материала могут отрезолвиться
 // в одну sp (обе упали на фолбэк), а блобы у них разные.
 MatSpKey HashMatSpMemo(const Material* mat, const ShaderProgram* sp,
@@ -196,13 +199,13 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
         const VariativeRoles cells = CollectVariativeRoles(*material);
 
         for (const SpBinding& binding : material->shader_programs) {
-            const std::vector<uint8_t>* sp_params =
-                (binding.params && !binding.params->empty()) ? binding.params.get() : nullptr;
+            const std::shared_ptr<std::vector<uint8_t>>& sp_params =
+                (binding.params && !binding.params->empty()) ? binding.params : kNoParams;
             ShaderProgram* sp = sm->GetShaderProgram(binding.sp);
             if (!sp) sp = fallback;
             if (!sp) continue;
 
-            const MatSpKey memo = HashMatSpMemo(material, sp, sp_params);
+            const MatSpKey memo = HashMatSpMemo(material, sp, sp_params.get());
             if (mat_sp_layouts.count(memo)) continue;
 
             MatSpLayout lay{};
@@ -265,7 +268,7 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
                 lay.texture_binding.clear();
             }
             else {
-                lay.res_key   = HashMatSpResources(sp, sp_params, lay.slot, block_handles);
+                lay.res_key   = HashMatSpResources(sp, sp_params.get(), lay.slot, block_handles);
                 lay.atlas_key = sp->required_slots.empty() ? 0 : HashAtlasBatchKey(sp, block_handles);
             }
             mat_sp_layouts.emplace(memo, std::move(lay));
@@ -308,8 +311,8 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
         for (const SpBinding& binding : material->shader_programs)
         {
             const ShaderName& sp_name = binding.sp;
-            const std::vector<uint8_t>* sp_params =
-                (binding.params && !binding.params->empty()) ? binding.params.get() : nullptr;
+            const std::shared_ptr<std::vector<uint8_t>>& sp_params =
+                (binding.params && !binding.params->empty()) ? binding.params : kNoParams;
             ShaderProgram* sp = sm ? sm->GetShaderProgram(sp_name) : nullptr;
             // Имя РЕАЛЬНО взятой программы: по нему резолвятся push-инструкции, и на фолбэк-ветке
             // с запрошенным именем программа получила бы чужие пуши.
@@ -349,7 +352,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
             ShaderBatchData& sb = shader_map[sp_key];
 
-            auto lay_it = mat_sp_layouts.find(HashMatSpMemo(material, sp, sp_params));
+            auto lay_it = mat_sp_layouts.find(HashMatSpMemo(material, sp, sp_params.get()));
             if (lay_it == mat_sp_layouts.end()) continue;
             const MatSpLayout& lay = lay_it->second;
             if (!lay.bindable) continue;

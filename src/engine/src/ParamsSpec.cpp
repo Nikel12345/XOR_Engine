@@ -76,7 +76,7 @@ void SetMaterialParamsBlob(Material* m, const ShaderName& sp_name,
             "(add the sp to the material first)", sp_name.c_str());
         return;
     }
-    if (!b->params) b->params = std::make_unique<std::vector<uint8_t>>();
+    if (!b->params) b->params = std::make_shared<std::vector<uint8_t>>();
     b->params->resize(size);
     std::memcpy(b->params->data(), data, size);
     b->params_type = type_name;
@@ -85,7 +85,7 @@ void SetMaterialParamsBlob(Material* m, const ShaderName& sp_name,
 void ApplyMaterialParamsSpec(SpBinding* b, const ParamsSpec& s)
 {
     if (!b) return;
-    if (!b->params) b->params = std::make_unique<std::vector<uint8_t>>();
+    if (!b->params) b->params = std::make_shared<std::vector<uint8_t>>();
     *b->params     = s.defaults;   // дефолты = member-инициализаторы структуры типа
     b->params_type = s.name;
 }
@@ -93,9 +93,8 @@ void ApplyMaterialParamsSpec(SpBinding* b, const ParamsSpec& s)
 void ClearMaterialParams(SpBinding* b)
 {
     if (!b) return;
-    // Байты гасим, САМ БЛОБ ОСТАВЛЯЕМ ЖИТЬ: на его адрес смотрят дерево батчей и слепок
-    // рендера (см. SpBinding::params) — free под рендер-потоком недопустим. Пустой блоб
-    // и есть «параметров нет»: и пуш, и ключ батча гейтятся размером.
+    // Гасим байты, а не роняем ссылку: пустой блоб и есть «параметров нет» (и пуш,
+    // и ключ батча гейтятся размером), а следующий Apply переиспользует аллокацию.
     if (b->params) b->params->clear();
     b->params_type.clear();
 }

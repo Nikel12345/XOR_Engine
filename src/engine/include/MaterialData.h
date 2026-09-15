@@ -11,7 +11,10 @@
 struct SpBinding {
     ShaderName sp;
 
-    std::unique_ptr<std::vector<uint8_t>> params;
+    // ВЛАДЕНИЕ РАЗДЕЛЁННОЕ: на блоб смотрит ещё и слепок рендера, живущий несколько кадров после
+    // того, как материал ячейку снял или пережил загрузку сцены. Кто отпустит последним, тот и
+    // освободит — материалу не нужно ни доживать до этого, ни вести кладбище снятых блобов.
+    std::shared_ptr<std::vector<uint8_t>> params;
 
     // ИНВАРИАНТ: пустой params_type равносилен пустому блобу (держат Apply/ClearMaterialParams).
     std::string params_type;
@@ -22,10 +25,6 @@ struct Material {
     std::map<TextureSlotRole, std::vector<TextureName>> textures;
 
     std::vector<SpBinding> shader_programs;
-
-    // Освободить блоб снятой sp может только смерть материала: на его адрес ещё несколько кадров
-    // смотрит слепок рендера.
-    std::vector<std::unique_ptr<std::vector<uint8_t>>> retired_params;
 
     bool dont_save = false;
 

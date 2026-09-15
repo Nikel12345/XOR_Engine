@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "BaseComponents.h"
 #include "DefaultCommandSet.h"
 #include "InputManager.h"
@@ -225,9 +225,6 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
 				auto& sps = m->shader_programs;
 				for (size_t i = 0; i < sps.size(); ++i) if (sps[i].sp == c->shader) {
-					// Блоб НЕ освобождаем: на его адрес ещё смотрит слепок рендера (живёт несколько
-					// кадров после этой правки) — переселяем на кладбище материала, см. retired_params.
-					if (sps[i].params) m->retired_params.push_back(std::move(sps[i].params));
 					sps.erase(sps.begin() + i);
 					break;
 				}

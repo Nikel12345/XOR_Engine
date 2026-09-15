@@ -70,7 +70,7 @@ struct TextureBatchData {
 	std::vector<UVL_Block> texture_uvl;
     VariantLayout variant_layout;
     uint32_t indirect_command_index = 0;
-    const std::vector<uint8_t>* params = nullptr;
+    std::shared_ptr<std::vector<uint8_t>> params;
 };
 
 struct MatSpLayout {

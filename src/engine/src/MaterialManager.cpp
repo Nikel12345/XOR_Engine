@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "MaterialManager.h"
 #include "TextureData.h"
 #include "TextureManager.h"
@@ -41,17 +41,13 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 		if (!m) continue;
 		m->textures.clear();
 		for (auto& [role, tex] : e.textures) m->textures[role] = tex;   // список вариантов целиком
-		// Ячейки пересобираем целиком: блобы прежних sp уходят на кладбище материала, а не в free —
-		// на их адреса может смотреть слепок рендера (см. Material::retired_params).
-		for (SpBinding& old : m->shader_programs)
-			if (old.params) m->retired_params.push_back(std::move(old.params));
 		m->shader_programs.clear();
 		m->shader_programs.reserve(e.shaders.size());
 		for (const SceneShaderEntry& se : e.shaders) {
 			SpBinding b;
 			b.sp = se.name;
 			b.params_type = se.params_type;
-			if (!se.params.empty()) b.params = std::make_unique<std::vector<uint8_t>>(se.params);
+			if (!se.params.empty()) b.params = std::make_shared<std::vector<uint8_t>>(se.params);
 			m->shader_programs.push_back(std::move(b));
 		}
 		m->dont_save = false;   // пришёл из файла — сохраняемый
