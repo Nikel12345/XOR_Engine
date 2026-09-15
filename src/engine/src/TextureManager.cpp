@@ -84,7 +84,7 @@ TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_
     preview.Create(dev);   // подсистема превью ассетов UI (владеет своей GPU-текстурой)
 }
 
-TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler)
+TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler, ResourceTag tags)
 {
 	auto it = atlases_data.find(name);
     if (it != atlases_data.end()) {
@@ -95,6 +95,7 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
 
     atlas->tci = tci;
     atlas->debug_name = name;
+    atlas->tags = tags;
     atlas->tci.usage &= SDL_GPU_TEXTUREUSAGE_SAMPLER;
     if (tci.num_levels > 1)
         atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
@@ -121,7 +122,7 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
 	return ptr;
 }
 
-TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, TextureAtlas* existing_atlas, SDL_GPUSampler* sampler)
+TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, TextureAtlas* existing_atlas, SDL_GPUSampler* sampler, ResourceTag tags)
 {
     if (!existing_atlas) {
         SDL_Log("Invalid existing atlas provided for new atlas '%s'", name.c_str());
@@ -137,6 +138,7 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, Textur
     atlas->shares_with = existing_atlas;
     atlas->tci = existing_atlas->tci;
     atlas->debug_name = name;
+    atlas->tags = tags;
     atlas->texture_binding.sampler = sampler;
     atlas->width = existing_atlas->width;
     atlas->height = existing_atlas->height;

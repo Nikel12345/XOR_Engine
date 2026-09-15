@@ -1,6 +1,7 @@
-#pragma once
+﻿#pragma once
 #include "config.h"
 #include "SDL3/SDL_gpu.h"
+#include "ResourceTags.h"
 
 enum struct BufferDataType {
 	Static,
@@ -25,6 +26,7 @@ struct BufferData {
     BufferDataType type = BufferDataType::Static;
     ResizeBehaviour resize_behaviour = ResizeBehaviour::RESIZE_ONLY;
     std::string debug_name;
+    ResourceTag tags = ResourceTag::None;
 
     struct StaticBufferInfo {
         SDL_GPUBuffer* buffer = nullptr;

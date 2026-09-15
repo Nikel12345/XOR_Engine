@@ -36,7 +36,7 @@ struct VertexShaderData {
     BufferDataName index_buffer = nullptr;
     std::vector<ShaderDefine> defines;
     std::vector<std::string> push_kinds;
-    ResTag tags = ResTag::None;
+    ResourceTag tags = ResourceTag::None;
 };
 
 struct FragmentShaderData {
@@ -44,7 +44,7 @@ struct FragmentShaderData {
     std::string source_path;
     std::vector<ShaderDefine> defines;
     std::vector<std::string> push_kinds;
-    ResTag tags = ResTag::None;
+    ResourceTag tags = ResourceTag::None;
 };
 
 struct ComputeShaderData {
@@ -62,7 +62,7 @@ struct ComputeShaderData {
     Uint32 num_readwrite_storage_buffers = 0;
     Uint32 num_uniform_buffers = 0;
     std::vector<std::string> push_kinds;
-    ResTag tags = ResTag::None;
+    ResourceTag tags = ResourceTag::None;
 };
 
 struct ShaderProgram {
@@ -80,7 +80,7 @@ struct ShaderProgram {
     RenderPassName render_pass_name;
 
     std::string debug_name;
-    ResTag tags = ResTag::None;
+    ResourceTag tags = ResourceTag::None;
 };
 
 
@@ -97,7 +97,7 @@ struct ComputeShaderProgram {
 
     ComputePassName compute_pass_name;
     std::shared_ptr<SDL_GPUComputePipeline> pipeline;
-    ResTag tags = ResTag::None;
+    ResourceTag tags = ResourceTag::None;
     std::string debug_name;
 };
 

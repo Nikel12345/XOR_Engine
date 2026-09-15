@@ -50,7 +50,7 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 			if (!se.params.empty()) b.params = std::make_shared<std::vector<uint8_t>>(se.params);
 			m->shader_programs.push_back(std::move(b));
 		}
-		m->dont_save = false;   // пришёл из файла — сохраняемый
+		m->tags = ResourceTag::None;   // пришёл из файла — сохраняемый
 		++n;
 	}
 	return n;

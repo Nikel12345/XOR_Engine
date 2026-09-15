@@ -7,6 +7,7 @@
 #include <cstring>
 #include <SDL3/SDL_stdinc.h>
 #include <glm/glm.hpp>
+#include "ResourceTags.h"
 
 // Диапазон в буферах пула, В ЭЛЕМЕНТАХ.
 struct GeometryRange {
@@ -68,5 +69,5 @@ struct ModelData {
     // Пусты у процедурных моделей: из файла они не пересоздаются.
     std::string model_path;
     std::string index_path;
-    bool dont_save = false;
+    ResourceTag tags = ResourceTag::None;
 };

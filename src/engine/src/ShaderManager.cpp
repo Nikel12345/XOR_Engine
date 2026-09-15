@@ -75,7 +75,7 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     std::vector<AtlasName> ro_storage_textures,
     std::vector<AtlasName> texture_samplers,
     const ComputePassName& compute_pass_name,
-    BufferManager* bm, TextureManager* tm, ResTag tags)
+    BufferManager* bm, TextureManager* tm, ResourceTag tags)
 {
     if (ComputeShaderProgram* existing = GetComputeShaderProgram(name)) {
         SDL_Log("Compute shader program '%s' already exists, returning existing.", name.c_str());
@@ -264,7 +264,7 @@ void ShaderManager::ClearSavableComputeShaderPrograms()
 {
     const size_t before = compute_shader_programs.size();
     std::erase_if(compute_shader_programs,
-        [](const ComputeProgramSlot& s) { return !s.program || !HasTag(s.program->tags, ResTag::DontSave); });
+        [](const ComputeProgramSlot& s) { return !s.program || !HasTag(s.program->tags, ResourceTag::DontSave); });
     const size_t removed = before - compute_shader_programs.size();
     if (removed) {
         dirty_compute_pipelines = true;

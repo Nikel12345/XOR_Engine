@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include "ResourceTags.h"
 
 // Конвенция упаковки ИСХОДНОГО файла текстуры. Канон движка: G = linear roughness (ORM),
 // A нормал-карты = HEIGHT (яркое = выше; POM марчит depth = 1 - A).
@@ -31,6 +32,8 @@ struct TextureData {
 
 
 struct TextureAtlas{
+	ResourceTag tags = ResourceTag::None;
+
 	// НЕвладеющий список размещений текстур в атласе. Держим именно TextureData (а не TextureHandle):
 	// атлас — тонкая прослойка над GPU-текстурой, ему нужны только регионы (UVL+layer). Владелец
 	// самих TextureData — TextureManager::handles_data (по значению внутри TextureHandle, адрес
@@ -98,10 +101,7 @@ struct TextureHandle : std::enable_shared_from_this<TextureHandle> {
 	std::string       atlas_name;
 	std::string       source_path;
 	ChannelConvention conv = ChannelConvention::AsIs;
-	// Не писать в файл сцены при SaveScene. Движковые дефолты (_NoTextureDummy, default_*)
-	// ставят true — они гарантированно пересоздаются кодом до всякой загрузки, файл ими не
-	// раздуваем. UI-пересоздание идёт через create-API с дефолтом false → «тронул = сохраняемый».
-	bool              dont_save = false;
+	ResourceTag       tags = ResourceTag::None;
 	// Превью для UI держит отдельная подсистема PreviewPacker (ключ — ИМЯ текстуры), поэтому хэндл
 	// про превью ничего не знает — он только про GPU-раскладку. См. TextureManager::preview.
 };

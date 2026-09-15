@@ -75,7 +75,7 @@ namespace DefaultRenderPassNamespace
             auto env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
             // faceSize пресета — единственный источник истины о разрешении env-куба: крест сцены
             // нарежется под него (CreateCubeMapTexture).
-            default_env_atlas = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(512), env_sampler);
+            default_env_atlas = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(512), env_sampler, ResourceTag::Default);
         }
         return default_env_atlas;
     }
@@ -98,8 +98,8 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
     auto shadow_tci = TexturePresets::GetCreateInfo(TexturePreset::Depth_FlatArray1024_8Layers);
     uint32_t max_layers = shadow_tci.layer_count_or_depth;
 
-    shadow_depth_flat_array = tm->CreateTextureAtlas(SHADOW_DEPTH_FLAT_ARRAY, shadow_tci, shadow_sampler);
-    TextureAtlas* shadow_temp = tm->CreateTextureAtlas("shadow_depth_single_temp", TexturePresets::GetCreateInfo(TexturePreset::TempDepth1024), shadow_sampler);
+    shadow_depth_flat_array = tm->CreateTextureAtlas(SHADOW_DEPTH_FLAT_ARRAY, shadow_tci, shadow_sampler, ResourceTag::Default | ResourceTag::System);
+    TextureAtlas* shadow_temp = tm->CreateTextureAtlas("shadow_depth_single_temp", TexturePresets::GetCreateInfo(TexturePreset::TempDepth1024), shadow_sampler, ResourceTag::Default);
 
     RenderPassTexturesInfo shadow_rptd{};
     shadow_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, shadow_temp->format);
@@ -188,7 +188,7 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     // SetDepthTexture проходов, SAMPLER — декларации AO-программ, обе до бейка (в самом tci он 0 —
     // CreateTextureAtlas его стрижёт).
     g_pass_system.main_depth = tm->CreateTextureAtlas("__main_depth", depth_tci,
-        tm->GetSampler(DefaultSamplersNames::SIMPLE_SAMPLER));
+        tm->GetSampler(DefaultSamplersNames::SIMPLE_SAMPLER), ResourceTag::Default | ResourceTag::System);
     g_pass_system.main_depth_format = depth_tci.format;
 
     // HDR-таргеты набора: сцена рендерится в линейный HDR (эмиссия/блики уходят за 1.0), на экран
@@ -196,13 +196,13 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     // источник bloom. scene_hdr сэмплится bloom-prefilter'ом (13-тап) → нужен LINEAR + clamp, как у
     // эмиссии и уровней bloom (compute-фильтры). На present-blit фильтр сэмплера не влияет.
     auto env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
-    g_pass_system.scene_hdr      = tm->CreateTextureAtlas("scene_hdr",      TexturePresets::SceneHDR(width, height),    env_sampler);
-    g_pass_system.scene_emission = tm->CreateTextureAtlas("scene_emission", TexturePresets::EmissionHDR(width, height), env_sampler);
+    g_pass_system.scene_hdr      = tm->CreateTextureAtlas("scene_hdr",      TexturePresets::SceneHDR(width, height),    env_sampler, ResourceTag::Default);
+    g_pass_system.scene_emission = tm->CreateTextureAtlas("scene_emission", TexturePresets::EmissionHDR(width, height), env_sampler, ResourceTag::Default);
     // Третий MRT main-прохода + пара карт AO (половина кадра). Сэмплер LINEAR: композит читает AO
     // с половинного разрешения на полном — билинейный апскейл идёт даром, отдельного шага не нужно.
-    g_pass_system.scene_ambient  = tm->CreateTextureAtlas(SCENE_AMBIENT, TexturePresets::AmbientHDR(width, height), env_sampler);
-    g_pass_system.ssao      = tm->CreateTextureAtlas(SSAO_TEXTURE, TexturePresets::AmbientOcclusion(ssao_w, ssao_h), env_sampler);
-    g_pass_system.ssao_temp = tm->CreateTextureAtlas(SSAO_TEMP,    TexturePresets::AmbientOcclusion(ssao_w, ssao_h), env_sampler);
+    g_pass_system.scene_ambient  = tm->CreateTextureAtlas(SCENE_AMBIENT, TexturePresets::AmbientHDR(width, height), env_sampler, ResourceTag::Default | ResourceTag::System);
+    g_pass_system.ssao      = tm->CreateTextureAtlas(SSAO_TEXTURE, TexturePresets::AmbientOcclusion(ssao_w, ssao_h), env_sampler, ResourceTag::Default | ResourceTag::System);
+    g_pass_system.ssao_temp = tm->CreateTextureAtlas(SSAO_TEMP,    TexturePresets::AmbientOcclusion(ssao_w, ssao_h), env_sampler, ResourceTag::Default | ResourceTag::System);
 
     // Bloom-пирамида: BLOOM_LEVELS отдельных текстур "bloom_L<i>". Уровень 0 = bloom_scale от
     // эффектного домена, дальше /2 на уровень.
@@ -211,7 +211,7 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
         uint32_t lw = 0, lh = 0;
         BloomLevelSize(gc, out_w, out_h, i, lw, lh);
         g_pass_system.bloom_levels[i] = tm->CreateTextureAtlas("__bloom_L" + std::to_string(i),
-            TexturePresets::BloomLevel(lw, lh), env_sampler);
+            TexturePresets::BloomLevel(lw, lh), env_sampler, ResourceTag::Default | ResourceTag::System);
     }
 
     // Инструкции ресайза экранных таргетов: правило вывода размера — своё у каждого таргета — живёт
@@ -654,9 +654,9 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
     auto shadow_sampler = tm->GetSampler(DefaultSamplersNames::VSM_SAMPLER);
     auto vsm_sampler = tm->GetSampler(DefaultSamplersNames::VSM_SAMPLER);
 
-    shadow_moments_array = tm->CreateTextureAtlas(SHADOW_MOMENTS_ARRAY, TexturePresets::GetCreateInfo(TexturePreset::ShadowRG32_FlatArray1024_8Layers), vsm_sampler);
-    TextureAtlas* shadow_depth_tex = tm->CreateTextureAtlas("shadow_depth_single_temp", TexturePresets::GetCreateInfo(TexturePreset::TempDepth1024), shadow_sampler);
-    TextureAtlas* shadow_moments_temp = tm->CreateTextureAtlas(SHADOW_MOMENTS_BLUR_TEMP, TexturePresets::GetCreateInfo(TexturePreset::TempShadowRG32_1024), vsm_sampler);
+    shadow_moments_array = tm->CreateTextureAtlas(SHADOW_MOMENTS_ARRAY, TexturePresets::GetCreateInfo(TexturePreset::ShadowRG32_FlatArray1024_8Layers), vsm_sampler, ResourceTag::Default | ResourceTag::System);
+    TextureAtlas* shadow_depth_tex = tm->CreateTextureAtlas("shadow_depth_single_temp", TexturePresets::GetCreateInfo(TexturePreset::TempDepth1024), shadow_sampler, ResourceTag::Default);
+    TextureAtlas* shadow_moments_temp = tm->CreateTextureAtlas(SHADOW_MOMENTS_BLUR_TEMP, TexturePresets::GetCreateInfo(TexturePreset::TempShadowRG32_1024), vsm_sampler, ResourceTag::Default | ResourceTag::System);
 
     RenderPassTexturesInfo shadow_rptd{};
     shadow_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_DONT_CARE, shadow_depth_tex->format);

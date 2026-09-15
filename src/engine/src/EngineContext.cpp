@@ -43,17 +43,21 @@ TextureAtlas* EngineContext::GetTextureAtlas(const AtlasName& name) const
 	return texture_manager->GetTextureAtlas(name);
 }
 
-TextureAtlas* EngineContext::CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name)
+TextureAtlas* EngineContext::CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name, ResourceTag tags)
 {
 	auto sampler = texture_manager->GetSampler(sampler_name);
-	return texture_manager->CreateTextureAtlas(name, tci, sampler);
+	TextureAtlas* a = texture_manager->CreateTextureAtlas(name, tci, sampler);
+	if (a) a->tags = tags;
+	return a;
 }
 
-TextureAtlas* EngineContext::CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name)
+TextureAtlas* EngineContext::CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name, ResourceTag tags)
 {
 	auto sampler = texture_manager->GetSampler(sampler_name);
 	TextureAtlas* existing_atlas = texture_manager->GetTextureAtlas(existing_atlas_name);
-	return texture_manager->CreateTextureAtlas(name, existing_atlas, sampler);
+	TextureAtlas* a = texture_manager->CreateTextureAtlas(name, existing_atlas, sampler);
+	if (a) a->tags = tags;
+	return a;
 }
 
 // В какой CPU-пиксельформат декодить, чтобы байты совпали с форматом GPU-атласа.
@@ -72,7 +76,7 @@ static SDL_PixelFormat PixelFormatForGpuFormat(SDL_GPUTextureFormat fmt)
 	}
 }
 
-TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv, bool dont_save) {
+TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv, ResourceTag tags) {
 	TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
 	if (!atlas) return nullptr;   // GetTextureAtlas уже залогировал отсутствие
 
@@ -127,7 +131,7 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 	}
 
 	TextureHandle* h = texture_manager->CreateTexture(name, atlas, img.width, img.height, std::move(img.pixels));
-	if (h) { h->atlas_name = atlas_name; h->source_path = path; h->conv = conv; h->dont_save = dont_save; }   // самоописание для редактора/сериализации
+	if (h) { h->atlas_name = atlas_name; h->source_path = path; h->conv = conv; h->tags = tags; }   // самоописание для редактора/сериализации
 	return h;
 }
 
@@ -167,7 +171,7 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 	return h;
 }
 
-Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::initializer_list<ShaderName> shaders, bool dont_save)
+Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::initializer_list<ShaderName> shaders, ResourceTag tags)
 {
 	// Материал хранит ИМЕНА (name-based ссылки, резолв отложен на сборку батча). Здесь sp резолвим
 	// лишь для авторской валидации: у каждого required_slot шейдера должна быть текстура в материале.
@@ -208,7 +212,7 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 	}
 	const std::string material_name = name;   // name уходит по move — копию держим для диагностики
 	Material* m = material_manager->CreateMaterial(std::move(name), std::move(texture_names), std::move(shader_names));
-	if (m) m->dont_save = dont_save;
+	if (m) m->tags = tags;
 	// Слот материала = фрагментный сэмплер → атласы его текстур получают SAMPLER (сбор usage-флагов).
 	material_manager->CollectSamplerUsage(m, texture_manager, material_name);
 	return m;
@@ -286,11 +290,10 @@ ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_p
 	return model_manager->CreateModel(name, model_path, index_path, anchor, model_manager->GetPool(pool_name));
 }
 
-ModelData* EngineContext::CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor, bool dont_save, const std::string& pool_name)
+ModelData* EngineContext::CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor, ResourceTag tags, const std::string& pool_name)
 {
 	ModelData* m = model_manager->CreateModel(name, std::move(generator), anchor, model_manager->GetPool(pool_name));
-	if (m) m->dont_save = dont_save;   // флаг ставим тут, не тащим в сигнатуру MM (см. ModelData::dont_save)
-	return m;
+	if (m) m->tags = tags;   	return m;
 }
 
 void EngineContext::DeleteEntity(const SceneName& scene_name, Entity e)
@@ -426,13 +429,13 @@ void EngineContext::CreateComputePipelines()
 // tags ставим тут через реестр (не тащим флаг в gpu_ctx/sm-сигнатуры): Create* создаёт SD в
 // реестре, затем помечаем его. Get*Shader на промахе не логирует (см. ShaderManager) — компиляция
 // могла не пройти, тогда просто некому ставить флаг.
-void EngineContext::CreateFragmentShader(const std::string& name, const char* path, ResTag tags, const ShaderDefines& defines) {
+void EngineContext::CreateFragmentShader(const std::string& name, const char* path, ResourceTag tags, const ShaderDefines& defines) {
 	gpu_ctx->CreateFragmentShader(name, path, defines);
 	if (auto* d = shader_manager->GetFragmentShader(name)) d->tags = tags;
 }
 
 void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,
-	std::initializer_list<ShaderBase::VertexSemantic> pull, ResTag tags, const ShaderDefines& defines) {
+	std::initializer_list<ShaderBase::VertexSemantic> pull, ResourceTag tags, const ShaderDefines& defines) {
 	// Резолв пула — здесь: его реестр в ModelManager, а gpu_ctx о нём не знает (там только GPU-менеджеры).
 	gpu_ctx->CreateVertexShader(name, hlsl_path, model_manager->GetPool(pool_name),
 		std::vector<ShaderBase::VertexSemantic>(pull), defines);
@@ -442,13 +445,13 @@ void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl
 ShaderProgram* EngineContext::CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 	const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 	const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
-	std::initializer_list<TextureSlotRole> texture_slots, ResTag tags) {
+	std::initializer_list<TextureSlotRole> texture_slots, ResourceTag tags) {
 	ShaderProgram* sp = gpu_ctx->CreateShaderProgram(name, spd, associated_pass_name, vs_name, vertex_shader_buffers, fs_name, fragment_shader_buffers, texture_slots);
 	if (sp) sp->tags = tags;
 	return sp;
 }
 
-void EngineContext::CreateComputeShader(const std::string& name, const char* hlsl_path, ResTag tags, const ShaderDefines& defines) {
+void EngineContext::CreateComputeShader(const std::string& name, const char* hlsl_path, ResourceTag tags, const ShaderDefines& defines) {
 	gpu_ctx->CreateComputeShader(name, hlsl_path, defines);
 	if (auto* d = shader_manager->GetComputeShader(name)) d->tags = tags;
 }
@@ -459,7 +462,7 @@ ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::strin
 	std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
 	std::initializer_list<AtlasName> ro_storage_textures,
 	std::initializer_list<AtlasName> texture_samplers,
-	const ComputePassName& associated_compute_pass, ResTag tags)
+	const ComputePassName& associated_compute_pass, ResourceTag tags)
 {
 	return gpu_ctx->CreateComputeShaderProgram(name, cs_name, rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers, associated_compute_pass, tags);
 }

@@ -61,7 +61,7 @@ class BufferManager
 {
 public:
 	BufferManager(SDL_GPUDevice* device, TransferManager* transfer_manager);
-	BufferData* CreateBufferData(BufferDataName name, Uint32 size, BufferDataType type, ResizeBehaviour resize_behaviour = ResizeBehaviour::RESIZE_ONLY);
+	BufferData* CreateBufferData(BufferDataName name, Uint32 size, BufferDataType type, ResizeBehaviour resize_behaviour = ResizeBehaviour::RESIZE_ONLY, ResourceTag tags = ResourceTag::None);
 
 	void BakePending();
 

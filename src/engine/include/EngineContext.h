@@ -59,12 +59,11 @@ public:
 	GpuTaskContext& Gpu() { return *gpu_ctx; }
 	GpuTaskContext* GetGpuContext() { return gpu_ctx; }
 
-	TextureAtlas* CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name);
-	TextureAtlas* CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name);
+	TextureAtlas* CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name, ResourceTag tags = ResourceTag::None);
+	TextureAtlas* CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name, ResourceTag tags = ResourceTag::None);
 	// conv — конвенция исходного файла; импорт нормализует её к канону движка (G = roughness).
 	// По умолчанию AsIs (поведение без изменений). SmoothnessInGreen инвертирует G на загрузке.
-	// dont_save=true — движковый дефолт, в файл сцены не пишется (см. TextureHandle::dont_save).
-	TextureHandle* CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv = ChannelConvention::AsIs, bool dont_save = false);
+	TextureHandle* CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv = ChannelConvention::AsIs, ResourceTag tags = ResourceTag::None);
 	// Грузит cube-текстуру (4×3 крест) в УЖЕ существующий cube-атлас (создаётся отдельно
 	// через CreateTextureAtlas с tci.type=CUBE — характер атласа задаёт только tci). ctx здесь
 	// дирижёр: проверяет совместимость (что атлас и правда куб + квадратный) и делегирует
@@ -72,10 +71,9 @@ public:
 	TextureHandle* CreateCubeMapTexture(const TextureName& name, const AtlasName& atlas_name, const char* path);
 	TextureAtlas* GetTextureAtlas(const AtlasName& name) const;
 
-	// dont_save=true — кодовая инфраструктура (напр. debug_collider), в materials.json не пишется.
 	// Слот — СПИСОК имён: { { TextureSlotRole::Albedo, { "wood", "wood_cracked" } }, ... }.
 	// [0] рисуется по умолчанию, остальные — варианты, переключаемые состоянием на сущности.
-	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::initializer_list<ShaderName> shaders, bool dont_save = false);
+	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::initializer_list<ShaderName> shaders, ResourceTag tags = ResourceTag::None);
 
 	// Тип-безопасная упаковка per-sp факторов (T = раскладка cbuffer MaterialBlock ЭТОЙ sp).
 	// Адресат данных — программа: у материала на каждую sp своя ячейка (см. SpBinding).
@@ -120,11 +118,10 @@ public:
 	// pool_name пусто = дефолтный пул (первый созданный) — старые сцены и код не мигрируются.
 	ModelData* CreateModel(const ModelName& name, const char* model_path, const char* index_path,
 		AnchorShift anchor = AnchorShift::Keep, const std::string& pool_name = {});
-	// dont_save=true — движковая/кодовая процедурная модель (sphere/quad/cubes), в models.json не пишется.
 	// Форма со СТЁРТЫМ типом: вершины — байты в раскладке пула. Прямо её зовут редко, обычно берут
 	// типизированную обёртку ниже.
 	ModelData* CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep,
-		bool dont_save = false, const std::string& pool_name = {});
+		ResourceTag tags = ResourceTag::None, const std::string& pool_name = {});
 
 	// Типизированная форма: V — структура вершины, которую заполняет генератор. Задаётся ЯВНО, как
 	// T у ShaderManager::CreatePushInstruction<T>, и стирание типа делает обёртка — генератор просто
@@ -132,14 +129,14 @@ public:
 	// соответствовать (грубое несовпадение ловит проверка кратности в ModelManager).
 	template<typename V, typename Fn>
 	ModelData* CreateModel(const ModelName& name, Fn&& generator, AnchorShift anchor = AnchorShift::Keep,
-		bool dont_save = false, const std::string& pool_name = {})
+		ResourceTag tags = ResourceTag::None, const std::string& pool_name = {})
 	{
 		return CreateModel(name, ModelGeneratorFn(
 			[gen = std::forward<Fn>(generator)](std::vector<std::byte>& out, std::vector<Uint32>& indices) {
 				std::vector<V> verts;
 				gen(verts, indices);
 				WriteVertices(out, verts);
-			}), anchor, dont_save, pool_name);
+			}), anchor, tags, pool_name);
 	}
 
 	void CreateGraphicsPipelines();
@@ -192,19 +189,18 @@ public:
 	void RegisterGenerator(const SceneName& scene_name, std::function<void()> generator);
 
 	// Create*Shader регистрируют шейдер-данные по имени в ShaderManager; CreateShaderProgram
-	// ссылается на них по имени (vs_name/fs_name/cs_name). dont_save=true — движковый дефолт
-	// (весь набор Engine::InitDefaultShaders), в shaders.json не пишется (см. *ShaderData::dont_save).
-	void CreateFragmentShader(const std::string& name, const char* hlsl_path, ResTag tags = ResTag::None, const ShaderDefines& defines = {});
+	// ссылается на них по имени (vs_name/fs_name/cs_name).
+	void CreateFragmentShader(const std::string& name, const char* hlsl_path, ResourceTag tags = ResourceTag::None, const ShaderDefines& defines = {});
 	// Вершинник называет ПУЛ (по имени, как модели) и потребляемые СЕМАНТИКИ; набор и порядок
 	// слотов выводит сам пул. Пустое имя пула = дефолтный.
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,
-		std::initializer_list<ShaderBase::VertexSemantic> pull, ResTag tags = ResTag::None, const ShaderDefines& defines = {});
+		std::initializer_list<ShaderBase::VertexSemantic> pull, ResourceTag tags = ResourceTag::None, const ShaderDefines& defines = {});
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 		const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 		const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
-		std::initializer_list<TextureSlotRole> texture_slots, ResTag tags = ResTag::None);
+		std::initializer_list<TextureSlotRole> texture_slots, ResourceTag tags = ResourceTag::None);
 
-	void CreateComputeShader(const std::string& name, const char* hlsl_path, ResTag tags = ResTag::None, const ShaderDefines& defines = {});
+	void CreateComputeShader(const std::string& name, const char* hlsl_path, ResourceTag tags = ResourceTag::None, const ShaderDefines& defines = {});
 	ComputeShaderProgram* CreateComputeShaderProgram(const std::string& name,
 		const std::string& cs_name,
 		std::initializer_list<BufferDataName> rw_storage_buffers,
@@ -212,7 +208,7 @@ public:
 		std::initializer_list<ComputeRWTextureBindingParametr> rw_storage_textures,   // топ-левел тип (ShaderTypes.h)
 		std::initializer_list<AtlasName> ro_storage_textures,
 		std::initializer_list<AtlasName> texture_samplers,
-		const ComputePassName& associated_compute_pass, ResTag tags = ResTag::None);
+		const ComputePassName& associated_compute_pass, ResourceTag tags = ResourceTag::None);
 
 	BufferManager* GetBufferManager() const { return buffer_manager; }
 	TextureManager* GetTextureManager() const { return texture_manager; }

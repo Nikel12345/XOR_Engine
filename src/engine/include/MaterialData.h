@@ -7,6 +7,7 @@
 #include <cstdint>
 #include "ShaderTypes.h"
 #include "Aliases.h"
+#include "ResourceTags.h"
 
 struct SpBinding {
     ShaderName sp;
@@ -26,7 +27,7 @@ struct Material {
 
     std::vector<SpBinding> shader_programs;
 
-    bool dont_save = false;
+    ResourceTag tags = ResourceTag::None;
 
     SpBinding* FindBinding(const ShaderName& sp_name) {
         for (SpBinding& b : shader_programs) if (b.sp == sp_name) return &b;

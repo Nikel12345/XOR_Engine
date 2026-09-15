@@ -11,6 +11,7 @@
 #include "config.h"
 #include "TransferManager.h"
 #include "TextureData.h"
+#include "ResourceTags.h"
 #include "PreviewPacker.h"
 
 struct UploadTaskTexture {
@@ -70,9 +71,9 @@ class TextureManager
 public:
 	TextureManager(SDL_GPUDevice* device, TransferManager* transfer_manager);
 
-	TextureAtlas* CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler);
+	TextureAtlas* CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler, ResourceTag tags = ResourceTag::None);
 	// Create TextureAtlas from an already existing TextureAtlas
-	TextureAtlas* CreateTextureAtlas(const std::string& name, TextureAtlas* existing_atlas, SDL_GPUSampler* sampler);
+	TextureAtlas* CreateTextureAtlas(const std::string& name, TextureAtlas* existing_atlas, SDL_GPUSampler* sampler, ResourceTag tags = ResourceTag::None);
 	// Загрузку с диска делает TextureLoader; оркестрация — в EngineContext.
 	// layer_span > 1 — одна текстура на НЕСКОЛЬКИХ подряд идущих слоях (грани кубмапы): w/h тогда
 	// обязаны совпасть с размером слоя, а pixels держать слои стопкой. Про кубы TM не знает

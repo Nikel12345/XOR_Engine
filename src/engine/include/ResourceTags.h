@@ -1,13 +1,7 @@
 ﻿#pragma once
 #include <cstdint>
 
-// Теги ресурса менеджера — общие для текстур, моделей, материалов и шейдеров (пока размечены
-// только шейдеры). Отвечают на три РАЗНЫХ вопроса, поэтому это биты, а не одно перечисление:
-// ресурс бывает служебным, но сохраняемым, и дефолтным, но выбираемым руками.
-//
-// Биты НЕЗАВИСИМЫ и ставятся явно: Default не подразумевает DontSave. Правило «одно следует из
-// другого» пришлось бы держать в голове на каждом call-site, а так что написано — то и есть.
-enum class ResTag : uint32_t {
+enum class ResourceTag : uint32_t {
     None     = 0,
     // В манифест сцены не пишется. Ресурс, который сцена не возит и потому не может потерять.
     DontSave = 1u << 0,
@@ -19,13 +13,13 @@ enum class ResTag : uint32_t {
     Default  = 1u << 2,
 };
 
-constexpr ResTag operator|(ResTag a, ResTag b)
+constexpr ResourceTag operator|(ResourceTag a, ResourceTag b)
 {
-    return static_cast<ResTag>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    return static_cast<ResourceTag>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
 }
-constexpr ResTag& operator|=(ResTag& a, ResTag b) { a = a | b; return a; }
+constexpr ResourceTag& operator|=(ResourceTag& a, ResourceTag b) { a = a | b; return a; }
 
-constexpr bool HasTag(ResTag tags, ResTag t)
+constexpr bool HasTag(ResourceTag tags, ResourceTag t)
 {
     return (static_cast<uint32_t>(tags) & static_cast<uint32_t>(t)) != 0;
 }
