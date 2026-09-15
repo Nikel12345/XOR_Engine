@@ -18,8 +18,8 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 	ctx->GetBatchBuilder()->SetDummyTexture("_NoTextureDummy", tm);
 
 	TextureHandle* def_tex[] = {
-		tm->CreateTexture("default_albedo",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0xFF })),   // белый
-		tm->CreateTexture("default_normal",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0x80 })),   // 128,128,128,128 (высота в альфе)
+		tm->CreateTexture("default_albedo",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0xFF })),
+		tm->CreateTexture("default_normal",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0x80 })),
 		tm->CreateTexture("default_orm",      "_FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF })),
 		tm->CreateTexture("default_emissive", "_FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF })),
 	};
@@ -40,19 +40,19 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 	}, AnchorShift::Keep, /*dont_save=*/true);
 
 	ctx->CreateModel<PosUVNormal>("sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
-		const uint32_t stacks = 32;   // деления по широте
-		const uint32_t slices = 48;   // деления по долготе
+		const uint32_t stacks = 32;
+		const uint32_t slices = 48;
 		const float R = 1.0f;
 		const float PI = 3.14159265358979323846f;
 
 		for (uint32_t i = 0; i <= stacks; ++i) {
-			float phi = PI * (float)i / (float)stacks;              // 0..π (полюс→полюс)
+			float phi = PI * (float)i / (float)stacks;
 			float cp = std::cos(phi), sp = std::sin(phi);
 			for (uint32_t j = 0; j <= slices; ++j) {
-				float theta = 2.0f * PI * (float)j / (float)slices; // 0..2π
+				float theta = 2.0f * PI * (float)j / (float)slices;
 				float ct = std::cos(theta), st = std::sin(theta);
 
-				float nx = sp * ct, ny = cp, nz = sp * st;          // нормаль = точка на единичной сфере
+				float nx = sp * ct, ny = cp, nz = sp * st;
 				PosUVNormal vert{};
 				vert.x = R * nx; vert.y = R * ny; vert.z = R * nz;
 				// U зеркалим (1-u): без этого надпись читалась ЗЕРКАЛЬНО (только изнутри сферы). V уже
@@ -99,7 +99,7 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 				vert.x = fd.c[0] + uv[q][0]*fd.U[0] + uv[q][1]*fd.V[0];
 				vert.y = fd.c[1] + uv[q][0]*fd.U[1] + uv[q][1]*fd.V[1];
 				vert.z = fd.c[2] + uv[q][0]*fd.U[2] + uv[q][1]*fd.V[2];
-				vert.u = uv[q][0]; vert.v = 1.0f - uv[q][1];   // v-down канон
+				vert.u = uv[q][0]; vert.v = 1.0f - uv[q][1];
 				vert.nx = fd.N[0]; vert.ny = fd.N[1]; vert.nz = fd.N[2];
 				vert.tx = tx;      vert.ty = ty;      vert.tz = tz;
 				v.push_back(vert);
