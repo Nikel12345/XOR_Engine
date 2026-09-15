@@ -76,8 +76,10 @@ void SetMaterialParamsBlob(Material* m, const ShaderName& sp_name,
             "(add the sp to the material first)", sp_name.c_str());
         return;
     }
-    if (!b->params) b->params = std::make_shared<std::vector<uint8_t>>();
-    b->params->resize(size);
+    // НОВЫЙ блоб, а не запись в существующий: слепки кадров в полёте читают старый, а resize
+    // переселил бы его буфер у них под руками — shared_ptr держит вектор, но не его внутреннюю
+    // память. Правка ОТДЕЛЬНЫХ полей (слайдер инспектора) идёт мимо этого, прямо в блоб.
+    b->params      = std::make_shared<std::vector<uint8_t>>(size);
     std::memcpy(b->params->data(), data, size);
     b->params_type = type_name;
 }
@@ -85,17 +87,19 @@ void SetMaterialParamsBlob(Material* m, const ShaderName& sp_name,
 void ApplyMaterialParamsSpec(SpBinding* b, const ParamsSpec& s)
 {
     if (!b) return;
-    if (!b->params) b->params = std::make_shared<std::vector<uint8_t>>();
-    *b->params     = s.defaults;   // дефолты = member-инициализаторы структуры типа
+    // Тоже новый блоб (см. SetMaterialParamsBlob). Смена адреса здесь даже желательна: адрес входит
+    // в ключ узла дерева, а смена типа обязана этот ключ подвинуть.
+    b->params      = std::make_shared<std::vector<uint8_t>>(s.defaults);   // дефолты = member-инициализаторы типа
     b->params_type = s.name;
 }
 
 void ClearMaterialParams(SpBinding* b)
 {
     if (!b) return;
-    // Гасим байты, а не роняем ссылку: пустой блоб и есть «параметров нет» (и пуш,
-    // и ключ батча гейтятся размером), а следующий Apply переиспользует аллокацию.
-    if (b->params) b->params->clear();
+    // Отпускаем ссылку, а не гасим байты: слепки кадров в полёте держат блоб сами и дорисуются
+    // последними корректными значениями. Гашение писало бы в буфер, который в этот момент читает
+    // рендер-поток, — без нужды, ради состояния, которое и так выражено пустым указателем.
+    b->params.reset();
     b->params_type.clear();
 }
 
