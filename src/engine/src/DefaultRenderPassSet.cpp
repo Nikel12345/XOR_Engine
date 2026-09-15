@@ -133,7 +133,6 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
             st->camera_index = camera_index;
             st->max_range = cam.max_range;         // spot/sphere: max distance, direct: per-cascade far
             st->is_ortho = cam.is_ortho;           // 1 → линейная осевая глубина (directional)
-            SDL_PushGPUVertexUniformData(cb, 0, st, sizeof(ShadowPushData));
             // Номер блока = номер световой камеры: блоков у прохода ровно столько (см. инструкцию
             // счёта регионов ниже), а байты считает сам StandardBody.
             pm->RenderPassStandardBody(cb, &rp, bm, camera_index, st);
@@ -678,7 +677,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
         if (num_cams > flat_array->layers) num_cams = flat_array->layers;
 
         // Состояние — в шаге (см. PCF-вариант). Вниз уходит ShadowPushData, а не голый Uint32:
-        // push_func программы ShadowCaster кастует push_data_raw именно к нему, и передача
+        // инструкции программы ShadowCaster кастуют push_data_raw именно к нему, и передача
         // 4-байтового camera_index читалась бы за пределами объекта.
         ShadowPushData* st = rp.State<ShadowPushData>();
         if (!st) { SDL_Log("SHADOW_PASS (VSM): pass state is not initialized"); return; }
@@ -686,7 +685,6 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
         for (Uint32 camera_index = 0; camera_index < num_cams; ++camera_index) {
             if (!cams[camera_index].needs_render) continue;
             st->camera_index = camera_index;
-            SDL_PushGPUVertexUniformData(cb, 0, &camera_index, sizeof(Uint32));
             rp.renderPassTexsData.SetColorTargetInfoLayer(camera_index, 0);
             pm->RenderPassStandardBody(cb, &rp, bm, 0, st);
         }

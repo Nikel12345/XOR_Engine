@@ -113,7 +113,10 @@ void DefaultShaderProgramSet::SetDefaultPushes(EngineContext* ctx)
         b.Push(in.draw->variant_layout);
     });
 
-    // Тот же ShadowPushData тело теневого прохода пушит ещё и в вершинник, прямым вызовом.
+    // Обе стадии ShadowCaster читают одно состояние прохода, но берут из него разное: вершиннику
+    // нужен только номер камеры, чтобы выбрать матрицы из LightCameras.
+    sm->CreatePushInstruction<RP::ShadowPushData>("ShadowCaster", PushStage::Vertex,
+        [](const PushConstantBinder& b, RP::ShadowPushData data) { b.Push(data.camera_index); });
     sm->CreatePushInstruction<RP::ShadowPushData>("ShadowCaster", PushStage::Fragment,
         [](const PushConstantBinder& b, RP::ShadowPushData data) { b.Push(data); });
     sm->CreatePushInstruction<RP::DebugColliderPushData>("Wireframe", PushStage::Fragment,

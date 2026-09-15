@@ -16,11 +16,10 @@ struct LightCamera {
 };
 StructuredBuffer<LightCamera> LightCameras : register(t2, space0);
 
-// Раскладка = ShadowPushData (DefaultRenderPassSet.h), пушится на каждую световую камеру.
+// Вершинная инструкция ShadowCaster отдаёт из состояния прохода только номер камеры; остальное
+// из ShadowPushData (far, is_ortho) забирает своим пушем фрагментник.
 cbuffer CurrentCameraUBO : register(b0, space1) {
-    int   currentCameraIndex;
-    float currentFarRange;
-    uint  is_ortho;         // здесь не используется (нужен фрагменту) — для совпадения раскладки
+    int currentCameraIndex;
 };
 
 struct VSOutput {
