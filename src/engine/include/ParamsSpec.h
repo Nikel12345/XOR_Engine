@@ -39,6 +39,11 @@
 #include <SDL3/SDL_log.h>
 #include "MaterialData.h"
 
+// Потолок блоба. Он уезжает в cbuffer push-константой, и до этого потолка размер не проверял
+// никто: слишком большой тип просто обрезался бы на пуше — без ошибки и без строки в логе.
+// 128 — с запасом: самый крупный встроенный тип занимает 48 байт, состояния проходов ≤ 32.
+inline constexpr size_t kMaxParamsBlob = 128;
+
 // Вид поля: сколько 4-байтовых лейнов занимает в блобе и каким виджетом рисуется.
 // Все лейны по 4 байта — как в cbuffer (bool в HLSL тоже 4 байта, на CPU держим uint32_t).
 // Angle — радианы в блобе и в файле (как F32), слайдер UI в градусах; lo/hi у него — ГРАДУСЫ.
@@ -140,6 +145,7 @@ ParamsSpec MakeParamsSpec(std::string name, std::vector<ParamsFieldSpec> fields)
 {
     static_assert(std::is_trivially_copyable_v<T>, "params-блоб копируется байтами в cbuffer");
     static_assert(sizeof(T) % 16 == 0, "раскладка cbuffer обязана быть кратна 16 байтам");
+    static_assert(sizeof(T) <= kMaxParamsBlob, "params-блоб не влезает в cbuffer (kMaxParamsBlob)");
     ParamsSpec s;
     s.name = std::move(name);
     s.type = std::type_index(typeid(T));

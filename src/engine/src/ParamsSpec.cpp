@@ -23,6 +23,16 @@ void ParamsSpecRegistry::Register(ParamsSpec s)
     }
     if (by_name_.count(s.name)) return;   // идемпотентно: уже зарегали
 
+    // Тип, собранный MakeParamsSpec, сюда с таким размером не дойдёт — его ловит static_assert.
+    // Эта ветка для блоба, собранного в рантайме (спека руками, чужой размер): НЕ регистрируем
+    // вовсе, иначе тип попал бы в дропдаун инспектора и в манифест, а на пуше молча обрезался.
+    if (s.size > kMaxParamsBlob) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "ParamsSpec '%s': blob is %zu bytes, limit is %zu (kMaxParamsBlob) - type NOT registered",
+            s.name.c_str(), s.size, kMaxParamsBlob);
+        return;
+    }
+
     // Схема обязана лежать внутри блоба: поле за границей sizeof(T) — ложь о раскладке,
     // с ней UI писал бы мимо структуры. Отбрасываем поимённо, тип регистрируем без него.
     for (size_t i = 0; i < s.fields.size(); ) {
@@ -74,6 +84,14 @@ void SetMaterialParamsBlob(Material* m, const ShaderName& sp_name,
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
             "SetMaterialParams: material has no shader program '%s' - params have no addressee "
             "(add the sp to the material first)", sp_name.c_str());
+        return;
+    }
+    // Сырой путь мимо MakeParamsSpec: размер приходит числом, поэтому проверяем и в релизе.
+    // Ячейку оставляем как была — прежние параметры лучше, чем обрезанные на пуше.
+    if (size > kMaxParamsBlob) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "SetMaterialParams: '%s' blob is %zu bytes, limit is %zu (kMaxParamsBlob) - params NOT set",
+            sp_name.c_str(), size, kMaxParamsBlob);
         return;
     }
     // НОВЫЙ блоб, а не запись в существующий: слепки кадров в полёте читают старый, а resize
