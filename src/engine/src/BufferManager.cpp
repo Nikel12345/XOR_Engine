@@ -6,16 +6,16 @@
 
 BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_manager) : dev(device), trm(transfer_manager) {
     using namespace DefaultBuffersNames;
-	CreateBufferData(DEFAULT_TRANSFORM_BUFFER, BASE_TB_SIZE / 10, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
-	CreateBufferData(DEFAULT_LIGHT_BUFFER, sizeof(LightLayout) * 2, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
-	CreateBufferData(DEFAULT_CAMERA_BUFFER, sizeof(CameraData), BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
-	CreateBufferData(DEFAULT_POSITION_INDEX_BUFFER, BASE_TB_SIZE / 16/ 10, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
-	CreateBufferData(DEFAULT_INSTANCE_BUFFER, BASE_TB_SIZE / 80, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+	CreateBufferData(DEFAULT_TRANSFORM_BUFFER, BASE_TB_SIZE / 10, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	CreateBufferData(DEFAULT_LIGHT_BUFFER, sizeof(LightLayout) * 2, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	CreateBufferData(DEFAULT_CAMERA_BUFFER, sizeof(CameraData), BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	CreateBufferData(DEFAULT_POSITION_INDEX_BUFFER, BASE_TB_SIZE / 16/ 10, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	CreateBufferData(DEFAULT_INSTANCE_BUFFER, BASE_TB_SIZE / 80, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
 	CreateBufferData(DEFAULT_LIGHT_CAMERA_BUFFER, sizeof(CameraData) * 6, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
 
-	CreateBufferData(DEFAULT_TEX_STATE_RANK_BUFFER, sizeof(uint32_t) * 2 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
-	CreateBufferData(DEFAULT_TEX_STATE_INDEX_BUFFER, sizeof(uint32_t) * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
-	CreateBufferData(DEFAULT_TEX_STATE_BUFFER, sizeof(uint32_t) * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+	CreateBufferData(DEFAULT_TEX_STATE_RANK_BUFFER, sizeof(uint32_t) * 2 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	CreateBufferData(DEFAULT_TEX_STATE_INDEX_BUFFER, sizeof(uint32_t) * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	CreateBufferData(DEFAULT_TEX_STATE_BUFFER, sizeof(uint32_t) * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
 
     CreateBufferData(DEFAULT_INDIRECT_BUFFER, sizeof(SDL_GPUIndexedIndirectDrawCommand) * 10, BufferDataType::Dynamic)
         ->usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
@@ -28,7 +28,7 @@ BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_ma
     CreateBufferData(UI_TEXT_INDEX_BUFFER,    sizeof(uint32_t) * 2 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
     CreateBufferData(UI_TEXT_BUFFER,          sizeof(uint32_t) * 4096,    BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
 
-    CreateBufferData(UI_FONT_UVL_BUFFER, sizeof(uint32_t) * 4 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    CreateBufferData(UI_FONT_UVL_BUFFER, sizeof(uint32_t) * 4 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
 }
 
 BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, BufferDataType type, ResizeBehaviour resize_behaviour, ResourceTag tags)

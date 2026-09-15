@@ -143,7 +143,7 @@ bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec
             if (ImGui::BeginCombo(f.key, sel.empty() ? "(none)" : sel.c_str())) {
                 if (ImGui::Selectable("(none)", sel.empty())) put_str(f, {});
                 for (auto& [nm, m] : target.ctx->GetModelManager()->GetModels()) {
-                    if (!g_show_internal && IsInternalName(nm)) continue;
+                    if (m && !g_show_internal && HasTag(m->tags, ResourceTag::System)) continue;
                     if (ImGui::Selectable(nm.c_str(), nm == sel)) put_str(f, nm);
                 }
                 ImGui::EndCombo();
@@ -265,7 +265,7 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
 
         if (ImGui::BeginCombo(label, sel.empty() ? "(none)" : sel.c_str())) {
             for (auto& [nm, m] : t.ctx->GetMaterialManager()->GetMaterials()) {
-                if (!g_show_internal && IsInternalName(nm)) continue;
+                if (m && !g_show_internal && HasTag(m->tags, ResourceTag::System)) continue;
                 if (!ImGui::Selectable(nm.c_str(), nm == sel)) continue;
                 if (t.live())
                     t.ctx->GetInputManager()->PushCommand(CommandId::SetEntityMaterial,

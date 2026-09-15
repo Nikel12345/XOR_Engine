@@ -105,11 +105,8 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
 
         // Общая раскладка плиток: переносим ряд, когда следующая не влезает по ширине.
         // preview_of (опционально) — резолвер картинки-превью по имени; пустой tex → затычка.
-        // hide_internal — параметром, а не по виду: у проходов имена служебные ВСЕ
-        // («_DefaultBloomPass»), и общий фильтр спрятал бы вкладку целиком.
         auto tiles = [&](SelKind kind, bool withNew, auto&& onNew, auto&& for_each_name,
-                         std::function<TilePreview(const std::string&)> preview_of = {},
-                         bool hide_internal = true)
+                         std::function<TilePreview(const std::string&)> preview_of = {})
         {
             const AssetIcon icon = icon_of(kind);
             float avail = ImGui::GetContentRegionAvail().x;
@@ -125,7 +122,6 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
 
             for_each_name([&](const std::string& name)
             {
-                if (hide_internal && !g_show_internal && IsInternalName(name)) return;   // фильтр служебных
                 bool selected = (g_sel.kind == kind && g_sel.name == name);
                 TilePreview pv{};
                 if (preview_of) pv = preview_of(name);
@@ -147,21 +143,24 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
                     g_sel = Selection{}; g_sel.kind = SelKind::Material; g_sel.name = nm;
                     ctx->GetInputManager()->PushCommand(CommandId::CreateMaterial, new CreateMaterialCmd{ nm });
                 },
-                [&](auto&& emit) { for (auto& [name, mat] : ctx->GetMaterialManager()->GetMaterials()) emit(name); },
+                [&](auto&& emit) { for (auto& [name, mat] : ctx->GetMaterialManager()->GetMaterials())
+                                       if (mat && (g_show_internal || !HasTag(mat->tags, ResourceTag::System))) emit(name); },
                 material_preview);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Textures")) {
             tiles(SelKind::Texture, true,
                 [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Texture; g_sel.name = ""; },   // + = форма новой текстуры
-                [&](auto&& emit) { for (auto& [name, h] : ctx->GetTextureManager()->GetTextureHandles()) emit(name); },
+                [&](auto&& emit) { for (auto& [name, h] : ctx->GetTextureManager()->GetTextureHandles())
+                                       if (h && (g_show_internal || !HasTag(h->tags, ResourceTag::System))) emit(name); },
                 texture_preview);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Models")) {
             tiles(SelKind::Model, true,
                 [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Model; g_sel.name = ""; },   // + = форма новой модели
-                [&](auto&& emit) { for (auto& [name, m] : ctx->GetModelManager()->GetModels()) emit(name); });
+                [&](auto&& emit) { for (auto& [name, m] : ctx->GetModelManager()->GetModels())
+                                       if (m && (g_show_internal || !HasTag(m->tags, ResourceTag::System))) emit(name); });
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Shaders")) {                                        // graphics sp (создание/правка в UI)
@@ -191,7 +190,7 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
                 [](const auto& a, const auto& b) { return a.first < b.first; });
             tiles(SelKind::Pass, false, []{},
                 [&](auto&& emit) { for (const auto& [idx, name] : ordered) emit(*name); },
-                {}, /*hide_internal=*/false);
+                {});
             ImGui::EndTabItem();
         }
         // Именованные шейдер-данные (vs/fs/cs) — только список; редактирование (пути) появится позже.

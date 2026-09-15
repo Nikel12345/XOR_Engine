@@ -180,7 +180,7 @@ namespace {
 
         std::vector<std::string> texNames;                   // значения комбобокса текстур — по алфавиту
         for (auto& [n, h] : ctx->GetTextureManager()->GetTextureHandles())
-            if (g_show_internal || !IsInternalName(n)) texNames.push_back(n);
+            if (h && (g_show_internal || !HasTag(h->tags, ResourceTag::System))) texNames.push_back(n);
         std::sort(texNames.begin(), texNames.end());
 
         for (size_t si = 0; si < mat->shader_programs.size(); ++si) {
@@ -564,7 +564,7 @@ namespace {
         // Атлас — дропдаун существующих (общий фильтр служебных с браузером), отфильтрованный по виду.
         if (ImGui::BeginCombo("Atlas", atlasSel.empty() ? "(select)" : atlasSel.c_str())) {
             for (auto& [an, a] : ctx->GetTextureManager()->GetAtlases()) {
-                if (!g_show_internal && IsInternalName(an)) continue;
+                if (a && !g_show_internal && HasTag(a->tags, ResourceTag::System)) continue;
                 if (IsCubeAtlas(a.get()) != cubeSel) continue;
                 bool sel = (an == atlasSel);
                 if (ImGui::Selectable(an.c_str(), sel)) atlasSel = an;
@@ -862,7 +862,7 @@ namespace {
         // Перечень — каноничные ключи реестра (BufferDataName): их же кладём в ссылки sp.
         std::vector<BufferDataName> bufNames;
         for (auto& [k, b] : ctx->GetBufferManager()->GetBuffersData())
-            if (b && (g_show_internal || !IsInternalName(b->debug_name))) bufNames.push_back(k);
+            if (b && (g_show_internal || !HasTag(b->tags, ResourceTag::System))) bufNames.push_back(k);
         std::sort(bufNames.begin(), bufNames.end(),
                   [](BufferDataName a, BufferDataName b) { return std::strcmp(a, b) < 0; });
         BufferListEditor("Vertex buffers",   vsBufSel, bufNames);

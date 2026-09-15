@@ -6,10 +6,6 @@
 // и инспектором. Логики состояния тут нет — только рисование + возврат клика.
 namespace ui {
 
-// Служебный ассет = имя на "_" (напр. "_NoTextureDummy"). Общий фильтр браузера и
-// дропдаунов текстур в инспекторе — одна галочка (g_show_internal) на всё.
-inline bool IsInternalName(const std::string& n) { return !n.empty() && n[0] == '_'; }
-
 // Тип ассета для плитки — задаёт цвет + рисунок-затычку, когда картинки-превью нет
 // (см. DrawAssetIcon). С превью затычка не рисуется.
 enum class AssetIcon { Texture, Model, Material, Shader, Compute, Vsd, Fsd, Csd, Generic };

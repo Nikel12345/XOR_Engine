@@ -99,7 +99,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
     uint32_t max_layers = shadow_tci.layer_count_or_depth;
 
     shadow_depth_flat_array = tm->CreateTextureAtlas(SHADOW_DEPTH_FLAT_ARRAY, shadow_tci, shadow_sampler, ResourceTag::Default | ResourceTag::System);
-    TextureAtlas* shadow_temp = tm->CreateTextureAtlas("shadow_depth_single_temp", TexturePresets::GetCreateInfo(TexturePreset::TempDepth1024), shadow_sampler, ResourceTag::Default);
+    TextureAtlas* shadow_temp = tm->CreateTextureAtlas("shadow_depth_single_temp", TexturePresets::GetCreateInfo(TexturePreset::TempDepth1024), shadow_sampler, ResourceTag::Default | ResourceTag::System);
 
     RenderPassTexturesInfo shadow_rptd{};
     shadow_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_CLEAR, SDL_GPU_STOREOP_STORE, shadow_temp->format);
@@ -196,8 +196,8 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     // источник bloom. scene_hdr сэмплится bloom-prefilter'ом (13-тап) → нужен LINEAR + clamp, как у
     // эмиссии и уровней bloom (compute-фильтры). На present-blit фильтр сэмплера не влияет.
     auto env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
-    g_pass_system.scene_hdr      = tm->CreateTextureAtlas("scene_hdr",      TexturePresets::SceneHDR(width, height),    env_sampler, ResourceTag::Default);
-    g_pass_system.scene_emission = tm->CreateTextureAtlas("scene_emission", TexturePresets::EmissionHDR(width, height), env_sampler, ResourceTag::Default);
+    g_pass_system.scene_hdr      = tm->CreateTextureAtlas("scene_hdr",      TexturePresets::SceneHDR(width, height),    env_sampler, ResourceTag::Default | ResourceTag::System);
+    g_pass_system.scene_emission = tm->CreateTextureAtlas("scene_emission", TexturePresets::EmissionHDR(width, height), env_sampler, ResourceTag::Default | ResourceTag::System);
     // Третий MRT main-прохода + пара карт AO (половина кадра). Сэмплер LINEAR: композит читает AO
     // с половинного разрешения на полном — билинейный апскейл идёт даром, отдельного шага не нужно.
     g_pass_system.scene_ambient  = tm->CreateTextureAtlas(SCENE_AMBIENT, TexturePresets::AmbientHDR(width, height), env_sampler, ResourceTag::Default | ResourceTag::System);
@@ -655,7 +655,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
     auto vsm_sampler = tm->GetSampler(DefaultSamplersNames::VSM_SAMPLER);
 
     shadow_moments_array = tm->CreateTextureAtlas(SHADOW_MOMENTS_ARRAY, TexturePresets::GetCreateInfo(TexturePreset::ShadowRG32_FlatArray1024_8Layers), vsm_sampler, ResourceTag::Default | ResourceTag::System);
-    TextureAtlas* shadow_depth_tex = tm->CreateTextureAtlas("shadow_depth_single_temp", TexturePresets::GetCreateInfo(TexturePreset::TempDepth1024), shadow_sampler, ResourceTag::Default);
+    TextureAtlas* shadow_depth_tex = tm->CreateTextureAtlas("shadow_depth_single_temp", TexturePresets::GetCreateInfo(TexturePreset::TempDepth1024), shadow_sampler, ResourceTag::Default | ResourceTag::System);
     TextureAtlas* shadow_moments_temp = tm->CreateTextureAtlas(SHADOW_MOMENTS_BLUR_TEMP, TexturePresets::GetCreateInfo(TexturePreset::TempShadowRG32_1024), vsm_sampler, ResourceTag::Default | ResourceTag::System);
 
     RenderPassTexturesInfo shadow_rptd{};

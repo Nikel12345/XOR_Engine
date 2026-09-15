@@ -77,7 +77,7 @@ TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_
         tci.layer_count_or_depth = 1;
         tci.num_levels           = 1;
         tci.sample_count         = SDL_GPU_SAMPLECOUNT_1;
-        TextureAtlas* text_atlas = CreateTextureAtlas(DefaultAtlasNames::TEXT_ATLAS, tci, GetSampler("_SimpleSampler"));
+        TextureAtlas* text_atlas = CreateTextureAtlas(DefaultAtlasNames::TEXT_ATLAS, tci, GetSampler("_SimpleSampler"), ResourceTag::Default | ResourceTag::System);
         text_atlas->padding = 0;
     }
 
