@@ -36,7 +36,7 @@ public:
 		std::vector<AtlasName> ro_storage_textures,
 		std::vector<AtlasName> texture_samplers,
 		const ComputePassName& compute_pass_name,
-		BufferManager* bm, TextureManager* tm, bool dont_save = false);
+		BufferManager* bm, TextureManager* tm, ResTag tags = ResTag::None);
 
 	// Пайплайны вызывающий обязан инвалидировать ДО вызова — здесь объекты разрушаются.
 	void ClearSavableComputeShaderPrograms();

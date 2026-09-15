@@ -61,6 +61,7 @@ set(ENGINEECS_HDR
     include/BaseComponents.h
     include/SceneData.h
     include/Aliases.h
+    include/ResourceTags.h
     include/ComponentSerializer.h
 )
 list(TRANSFORM ENGINEECS_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)

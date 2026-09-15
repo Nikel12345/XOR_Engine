@@ -349,6 +349,7 @@ namespace {
         // Добавить sp (перечень graphics sp, ещё не добавленных материалу).
         if (ImGui::BeginCombo("+ Shader", "(add)")) {
             for (auto& [spn, spp] : sm->GetShaderPrograms()) {
+                if (!g_show_internal && HasTag(spp->tags, ResTag::System)) continue;   // служебная: руками не выбирают
                 bool present = false;
                 for (auto& b : mat->shader_programs) if (b.sp == spn) { present = true; break; }
                 if (present) continue;
@@ -839,6 +840,7 @@ namespace {
         // Вершинный слот — только вершинники; фрагментный — только фрагментные (фильтр по типу реестра).
         if (ImGui::BeginCombo("Vertex", vsSel.c_str())) {
             for (auto& [n, d] : smgr->GetVertexShaders()) {
+                if (!g_show_internal && HasTag(d.tags, ResTag::System)) continue;
                 bool is_cur = (n == vsSel);
                 if (ImGui::Selectable(n.c_str(), is_cur)) vsSel = n;
                 if (is_cur) ImGui::SetItemDefaultFocus();
@@ -847,6 +849,7 @@ namespace {
         }
         if (ImGui::BeginCombo("Fragment", fsSel.c_str())) {
             for (auto& [n, d] : smgr->GetFragmentShaders()) {
+                if (!g_show_internal && HasTag(d.tags, ResTag::System)) continue;
                 bool is_cur = (n == fsSel);
                 if (ImGui::Selectable(n.c_str(), is_cur)) fsSel = n;
                 if (is_cur) ImGui::SetItemDefaultFocus();

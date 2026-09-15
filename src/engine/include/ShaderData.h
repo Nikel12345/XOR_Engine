@@ -7,6 +7,7 @@
 #include <SDL3/SDL_gpu.h>
 #include "ShaderTypes.h"
 #include "Aliases.h"
+#include "ResourceTags.h"
 
 
 struct BufferData;
@@ -35,7 +36,7 @@ struct VertexShaderData {
     BufferDataName index_buffer = nullptr;
     std::vector<ShaderDefine> defines;
     std::vector<std::string> push_kinds;
-    bool dont_save = false;
+    ResTag tags = ResTag::None;
 };
 
 struct FragmentShaderData {
@@ -43,7 +44,7 @@ struct FragmentShaderData {
     std::string source_path;
     std::vector<ShaderDefine> defines;
     std::vector<std::string> push_kinds;
-    bool dont_save = false;
+    ResTag tags = ResTag::None;
 };
 
 struct ComputeShaderData {
@@ -61,7 +62,7 @@ struct ComputeShaderData {
     Uint32 num_readwrite_storage_buffers = 0;
     Uint32 num_uniform_buffers = 0;
     std::vector<std::string> push_kinds;
-    bool dont_save = false;
+    ResTag tags = ResTag::None;
 };
 
 struct ShaderProgram {
@@ -79,7 +80,7 @@ struct ShaderProgram {
     RenderPassName render_pass_name;
 
     std::string debug_name;
-    bool dont_save = false;
+    ResTag tags = ResTag::None;
 };
 
 
@@ -96,7 +97,7 @@ struct ComputeShaderProgram {
 
     ComputePassName compute_pass_name;
     std::shared_ptr<SDL_GPUComputePipeline> pipeline;
-    bool dont_save = false;
+    ResTag tags = ResTag::None;
     std::string debug_name;
 };
 

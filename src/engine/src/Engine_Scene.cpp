@@ -8,6 +8,7 @@
 #include "MaterialManager.h"
 #include "ParamsSpec.h"
 #include "ShaderManager.h"
+#include "ResourceTags.h"
 #include "PipeManager.h"
 #include "PassManager.h"
 #include "BufferManager.h"
@@ -404,7 +405,7 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm)
 
 	yyjson_mut_val* vsa = d.Arr("vertex_shaders");
 	for (auto& [name, vs] : sm->GetVertexShaders()) {
-		if (vs.dont_save || vs.source_path.empty()) continue;
+		if (HasTag(vs.tags, ResTag::DontSave) || vs.source_path.empty()) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, vsa);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "path", vs.source_path.c_str());
@@ -421,7 +422,7 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm)
 	auto write_sd = [&](const char* key, auto& registry) {
 		yyjson_mut_val* arr = d.Arr(key);
 		for (auto& [name, sd] : registry) {
-			if (sd.dont_save || sd.source_path.empty()) continue;
+			if (HasTag(sd.tags, ResTag::DontSave) || sd.source_path.empty()) continue;
 			yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, arr);
 			yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());
 			yyjson_mut_obj_add_strcpy(d.doc, e, "path", sd.source_path.c_str());
@@ -434,7 +435,7 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm)
 	// SP сгруппированы ПО ТИПУ (как SD), без поля "kind" внутри записи.
 	yyjson_mut_val* spa = d.Arr("render_shader_programs");
 	for (auto& [name, sp] : sm->GetShaderPrograms()) {
-		if (!sp || sp->dont_save) continue;
+		if (!sp || HasTag(sp->tags, ResTag::DontSave)) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, spa);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "vs",   sp->vs_name.c_str());
@@ -451,7 +452,7 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm)
 	// ровно в том, в каком программы создавались.
 	yyjson_mut_val* cspa = d.Arr("compute_shader_programs");
 	for (auto& [csp_name, csp] : sm->GetComputeShaderPrograms()) {
-		if (!csp || csp->dont_save) continue;
+		if (!csp || HasTag(csp->tags, ResTag::DontSave)) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, cspa);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", csp_name.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "cs",   csp->cs_name.c_str());

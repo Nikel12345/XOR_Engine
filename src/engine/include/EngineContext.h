@@ -11,6 +11,7 @@ struct ModelComponent;
 #include <utility>
 #include <initializer_list>
 #include "Aliases.h"
+#include "ResourceTags.h"
 #include "ObjectManager.h"
 #include "BatchBuilder.h"
 #include "ShaderTypes.h"
@@ -193,17 +194,17 @@ public:
 	// Create*Shader регистрируют шейдер-данные по имени в ShaderManager; CreateShaderProgram
 	// ссылается на них по имени (vs_name/fs_name/cs_name). dont_save=true — движковый дефолт
 	// (весь набор Engine::InitDefaultShaders), в shaders.json не пишется (см. *ShaderData::dont_save).
-	void CreateFragmentShader(const std::string& name, const char* hlsl_path, bool dont_save = false, const ShaderDefines& defines = {});
+	void CreateFragmentShader(const std::string& name, const char* hlsl_path, ResTag tags = ResTag::None, const ShaderDefines& defines = {});
 	// Вершинник называет ПУЛ (по имени, как модели) и потребляемые СЕМАНТИКИ; набор и порядок
 	// слотов выводит сам пул. Пустое имя пула = дефолтный.
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,
-		std::initializer_list<ShaderBase::VertexSemantic> pull, bool dont_save = false, const ShaderDefines& defines = {});
+		std::initializer_list<ShaderBase::VertexSemantic> pull, ResTag tags = ResTag::None, const ShaderDefines& defines = {});
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 		const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 		const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
-		std::initializer_list<TextureSlotRole> texture_slots, bool dont_save = false);
+		std::initializer_list<TextureSlotRole> texture_slots, ResTag tags = ResTag::None);
 
-	void CreateComputeShader(const std::string& name, const char* hlsl_path, bool dont_save = false, const ShaderDefines& defines = {});
+	void CreateComputeShader(const std::string& name, const char* hlsl_path, ResTag tags = ResTag::None, const ShaderDefines& defines = {});
 	ComputeShaderProgram* CreateComputeShaderProgram(const std::string& name,
 		const std::string& cs_name,
 		std::initializer_list<BufferDataName> rw_storage_buffers,
@@ -211,7 +212,7 @@ public:
 		std::initializer_list<ComputeRWTextureBindingParametr> rw_storage_textures,   // топ-левел тип (ShaderTypes.h)
 		std::initializer_list<AtlasName> ro_storage_textures,
 		std::initializer_list<AtlasName> texture_samplers,
-		const ComputePassName& associated_compute_pass, bool dont_save = false);
+		const ComputePassName& associated_compute_pass, ResTag tags = ResTag::None);
 
 	BufferManager* GetBufferManager() const { return buffer_manager; }
 	TextureManager* GetTextureManager() const { return texture_manager; }

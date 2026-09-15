@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "BaseComponents.h"
 #include "EngineContext.h"
 #include "Engine.h"
@@ -423,34 +423,34 @@ void EngineContext::CreateComputePipelines()
 }
 
 // GPU-методы — тонкие форвардеры в gpu_ctx (реализация в GpuTaskContext.cpp).
-// dont_save ставим тут через реестр (не тащим флаг в gpu_ctx/sm-сигнатуры): Create* создаёт SD в
+// tags ставим тут через реестр (не тащим флаг в gpu_ctx/sm-сигнатуры): Create* создаёт SD в
 // реестре, затем помечаем его. Get*Shader на промахе не логирует (см. ShaderManager) — компиляция
 // могла не пройти, тогда просто некому ставить флаг.
-void EngineContext::CreateFragmentShader(const std::string& name, const char* path, bool dont_save, const ShaderDefines& defines) {
+void EngineContext::CreateFragmentShader(const std::string& name, const char* path, ResTag tags, const ShaderDefines& defines) {
 	gpu_ctx->CreateFragmentShader(name, path, defines);
-	if (auto* d = shader_manager->GetFragmentShader(name)) d->dont_save = dont_save;
+	if (auto* d = shader_manager->GetFragmentShader(name)) d->tags = tags;
 }
 
 void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,
-	std::initializer_list<ShaderBase::VertexSemantic> pull, bool dont_save, const ShaderDefines& defines) {
+	std::initializer_list<ShaderBase::VertexSemantic> pull, ResTag tags, const ShaderDefines& defines) {
 	// Резолв пула — здесь: его реестр в ModelManager, а gpu_ctx о нём не знает (там только GPU-менеджеры).
 	gpu_ctx->CreateVertexShader(name, hlsl_path, model_manager->GetPool(pool_name),
 		std::vector<ShaderBase::VertexSemantic>(pull), defines);
-	if (auto* d = shader_manager->GetVertexShader(name)) d->dont_save = dont_save;
+	if (auto* d = shader_manager->GetVertexShader(name)) d->tags = tags;
 }
 
 ShaderProgram* EngineContext::CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 	const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 	const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
-	std::initializer_list<TextureSlotRole> texture_slots, bool dont_save) {
+	std::initializer_list<TextureSlotRole> texture_slots, ResTag tags) {
 	ShaderProgram* sp = gpu_ctx->CreateShaderProgram(name, spd, associated_pass_name, vs_name, vertex_shader_buffers, fs_name, fragment_shader_buffers, texture_slots);
-	if (sp) sp->dont_save = dont_save;
+	if (sp) sp->tags = tags;
 	return sp;
 }
 
-void EngineContext::CreateComputeShader(const std::string& name, const char* hlsl_path, bool dont_save, const ShaderDefines& defines) {
+void EngineContext::CreateComputeShader(const std::string& name, const char* hlsl_path, ResTag tags, const ShaderDefines& defines) {
 	gpu_ctx->CreateComputeShader(name, hlsl_path, defines);
-	if (auto* d = shader_manager->GetComputeShader(name)) d->dont_save = dont_save;
+	if (auto* d = shader_manager->GetComputeShader(name)) d->tags = tags;
 }
 
 ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
@@ -459,7 +459,7 @@ ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::strin
 	std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
 	std::initializer_list<AtlasName> ro_storage_textures,
 	std::initializer_list<AtlasName> texture_samplers,
-	const ComputePassName& associated_compute_pass, bool dont_save)
+	const ComputePassName& associated_compute_pass, ResTag tags)
 {
-	return gpu_ctx->CreateComputeShaderProgram(name, cs_name, rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers, associated_compute_pass, dont_save);
+	return gpu_ctx->CreateComputeShaderProgram(name, cs_name, rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers, associated_compute_pass, tags);
 }

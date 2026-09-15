@@ -47,13 +47,13 @@ ComputeShaderProgram* GpuTaskContext::CreateComputeShaderProgram(const std::stri
 	std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
 	std::initializer_list<AtlasName> ro_storage_textures,
 	std::initializer_list<AtlasName> texture_samplers,
-	const ComputePassName& associated_compute_pass, bool dont_save)
+	const ComputePassName& associated_compute_pass, ResTag tags)
 {
 	// Ничего не резолвится: csp хранит ИМЕНА (сериализуемо) — и ресурсов, и прохода. Резолв
 	// делает сборка батча, у неё для этого есть все менеджеры.
 	return shader_manager->CreateComputeShaderProgram(name, cs_name,
 		rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers,
-		associated_compute_pass, buffer_manager, texture_manager, dont_save);
+		associated_compute_pass, buffer_manager, texture_manager, tags);
 }
 
 // --- Буферы: форвард в BufferManager ---
