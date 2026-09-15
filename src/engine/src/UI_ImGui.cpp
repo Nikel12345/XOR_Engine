@@ -22,7 +22,7 @@ void UI_ImGui::Init(SDL_Window* win, SDL_GPUDevice* dev)
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;   // docking-ветка ImGui: окна можно стыковать (см. будущий DockSpace)
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     ImGui_ImplSDL3_InitForSDLGPU(win);
 
@@ -32,19 +32,16 @@ void UI_ImGui::Init(SDL_Window* win, SDL_GPUDevice* dev)
     init_info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
     ImGui_ImplSDLGPU3_Init(&init_info);
 
-    // Шрифт ImGui: дефолтный ProggyClean покрывает только латиницу, поэтому кириллические подписи
-    // редактора (инспектор/иерархия) без этого рисуются знаками «?». Догружаем кириллицу МЕРЖ-режимом
-    // из системного шрифта: латиница остаётся дефолтной (при пересечении глифов побеждает первый
-    // добавленный шрифт), из Segoe UI берутся только кириллические глифы. ImGui 1.92 растеризует по
-    // требованию (backend выставляет RendererHasTextures) — ручная сборка атласа не нужна. Путь
-    // системный → только Windows и только если файл реально есть (иначе просто оставляем дефолт).
+    // Дефолтный ProggyClean покрывает только латиницу, поэтому кириллические подписи редактора без
+    // этого рисуются знаками «?». Мержим вторым шрифтом, а не заменяем: при пересечении глифов
+    // побеждает первый добавленный, так что из Segoe UI приедет только кириллица.
     io.Fonts->AddFontDefault();
 #ifdef _WIN32
     {
         const char* sys_font = "C:/Windows/Fonts/segoeui.ttf";
         if (std::filesystem::exists(sys_font)) {
             ImFontConfig cfg;
-            cfg.MergeMode = true;   // доклеить в дефолтный шрифт, а не заменить его
+            cfg.MergeMode = true;
             io.Fonts->AddFontFromFileTTF(sys_font, 0.0f, &cfg, io.Fonts->GetGlyphRangesCyrillic());
         } else {
             SDL_Log("ImGui font: '%s' not found - Cyrillic editor labels will render as '?'", sys_font);

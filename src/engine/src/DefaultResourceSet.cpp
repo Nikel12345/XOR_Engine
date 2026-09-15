@@ -13,17 +13,10 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 
 	ctx->CreateTextureAtlas("_FallbackAtlas", TexturePresets::AlbedoAtlas(64, 1, 1), "_SimpleSampler");
 	ctx->CreateTextureFromFile("_NoTextureDummy", "_FallbackAtlas", "../engine/textures/dummy.png",
-		ChannelConvention::AsIs, /*dont_save=*/true);   // движковый дефолт — в файл сцены не идёт
+		ChannelConvention::AsIs, /*dont_save=*/true);
 
-	// ПО ИМЕНИ (как SetFallbackShader): удаление _NoTextureDummy не оставляет висячего указателя —
-	// промах на сборке батча даёт пропуск отрисовки (пустой рендер), а не разыменование мёртвого хэндла.
 	ctx->GetBatchBuilder()->SetDummyTexture("_NoTextureDummy", tm);
 
-	// Все material-атласы — BGRA8 UNORM (движок без sRGB-форматов), поэтому дефолты кладём в один
-	// движковый _FallbackAtlas: цвет читается как есть, нормаль тоже (без sRGB-декода). Пиксели —
-	// BGRA (все каналы равны → порядок неважен). Материалы ссылаются по имени, атлас безразличен.
-	// dont_save: движковые дефолты пересоздаются кодом всегда — в файл сцены не идут (байтовые и
-	// так скипались бы по пустому source_path, но флаг — явный маркер, не побочный эффект).
 	TextureHandle* def_tex[] = {
 		tm->CreateTexture("default_albedo",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0xFF })),   // белый
 		tm->CreateTexture("default_normal",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0x80 })),   // 128,128,128,128 (высота в альфе)
@@ -32,13 +25,10 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 	};
 	for (TextureHandle* h : def_tex) if (h) h->dont_save = true;
 
-	// Примитивы-дефолты движка (quad/sphere): генерируются кодом, поэтому dont_save (в models.json
-	// не идут). Раньше жили в игре — вынесены сюда, чтобы любая игра/сцена могла ссылаться на них по
-	// имени без своего кода генерации. Процедурные пути пусты → и без флага не сериализовались бы.
-	// КАНОН развёртки: начало текстуры top-left (как грузит SDL_GPU и как рисует ImGui) → V идёт
-	// ВНИЗ (v=0 у геометрического ВЕРХА). Верхние вершины (y=1) получают v=0 → верх картинки сверху.
-	// Развёртка при этом левосторонняя относительно нормали — компенсируется глобально одним
-	// cross(T,N) в main_pass.vert (не флаг). НЕ возвращай v-up: это перевернёт ориентированные текстуры.
+	// КАНОН развёртки у всех трёх примитивов: начало текстуры top-left (как грузит SDL_GPU и как
+	// рисует ImGui) → V идёт ВНИЗ, v=0 у геометрического ВЕРХА. Развёртка при этом левосторонняя
+	// относительно нормали — компенсируется глобально одним cross(T,N) в main_pass.vert (не флаг).
+	// НЕ возвращай v-up: это перевернёт ориентированные текстуры.
 	ctx->CreateModel<PosUVNormal>("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
 		v = {
 			{ 0,0,0,  0,1,  0,0,1,  1,0,0 },
@@ -87,9 +77,6 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 		}
 	}, AnchorShift::Keep, /*dont_save=*/true);
 
-	// Единичный куб (центр 0, полу-размер 1), v-down канон — как quad/sphere. Движковый примитив,
-	// чтобы любая игра ссылалась по имени "cube" без своего кода генерации (был копией в mygame).
-	// 6 граней, CCW наружу; тангенс = направление U; хранимый v = 1-параметр (позиция по исходному uv).
 	ctx->CreateModel<PosUVNormal>("cube", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
 		struct FaceDef { float c[3], U[3], V[3], N[3]; };
 		static const FaceDef faces[6] = {
@@ -121,8 +108,4 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 			idx.push_back(vbase + 0); idx.push_back(vbase + 2); idx.push_back(vbase + 3);
 		}
 	}, AnchorShift::Keep, /*dont_save=*/true);
-
-	// Фон сцены (скайбокс/фрактал) движковым дефолтом больше НЕ является: модель/шейдеры/материал/
-	// текстура — ресурсы сцены (манифесты папки сцены), сам фон — сущность в её scene.json.
-	// Классический скайбокс — src/game/saved_scene/scene1, фрактал — src/mygame/saved_scene/scene_fractal.
 }
