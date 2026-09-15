@@ -57,7 +57,7 @@
             ]
         },
         {
-            "name": "_skybox",
+            "name": "skybox",
             "shaders": [
                 {
                     "name": "Skybox"

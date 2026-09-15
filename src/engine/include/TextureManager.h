@@ -35,17 +35,17 @@ struct UploadTaskTexture {
 struct AtlasPacker;
 
 namespace DefaultSamplersNames {
-	inline constexpr const char* DEFAULT_SAMPLER = "_DefaultSampler";
-	inline constexpr const char* DEFAULT_SHADOW_SAMPLER = "_DefaultShadowSampler";
-	inline constexpr const char* VSM_SAMPLER = "_VsmSampler";
-	inline constexpr const char* ENV_SAMPLER = "_EnvSampler";
+	inline constexpr const char* DEFAULT_SAMPLER = "DefaultSampler";
+	inline constexpr const char* DEFAULT_SHADOW_SAMPLER = "DefaultShadowSampler";
+	inline constexpr const char* VSM_SAMPLER = "VsmSampler";
+	inline constexpr const char* ENV_SAMPLER = "EnvSampler";
 	// NEAREST + clamp. Для глубины: билинейная фильтрация усреднила бы значения с РАЗНЫХ
 	// поверхностей, а из них потом восстанавливают позицию — получилась бы точка, которой нет.
-	inline constexpr const char* SIMPLE_SAMPLER = "_SimpleSampler";
+	inline constexpr const char* SIMPLE_SAMPLER = "SimpleSampler";
 };
 
 namespace DefaultAtlasNames {
-	inline constexpr const char* TEXT_ATLAS = "__TextAtlas";
+	inline constexpr const char* TEXT_ATLAS = "TextAtlas";
 };
 
 struct PendingTextureDestroy {

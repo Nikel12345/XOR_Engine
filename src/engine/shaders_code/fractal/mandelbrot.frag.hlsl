@@ -4,7 +4,7 @@
 // (mygame/FractalUpdateSet.cpp, сцена scene_mandelbrot).
 //
 // ГЛУБИНА — ПЕРЕТУРБАЦИЯ: CPU раз в кадр итерирует РЕФЕРЕНС (центр окна) в double и заливает
-// орбиту Z_0..Z_{len-1} буфером (_MandelbrotOrbitBuffer). Пиксель итерирует только ДЕЛЬТУ от
+// орбиту Z_0..Z_{len-1} буфером (MandelbrotOrbitBuffer). Пиксель итерирует только ДЕЛЬТУ от
 // референса: для z = Z + dz алгебраически ТОЧНО dz' = (2Z + dz)·dz + dc,
 // где dc = смещение пикселя от центра — оно мало́ по построению и живёт в обычном float.
 // Абсолютная координата пикселя нигде не материализуется → нет и потери её младших битов
@@ -32,7 +32,7 @@ TextureCube  u_envCube    : register(t1, space2);
 [[vk::combinedImageSampler]]
 SamplerState u_envSampler : register(s1, space2);
 
-// Кадр Мандельброта (пишет апдейтер _MandelbrotOrbitBuffer, mygame/FractalUpdateSet.cpp):
+// Кадр Мандельброта (пишет апдейтер MandelbrotOrbitBuffer, mygame/FractalUpdateSet.cpp):
 // [0] = (len asuint, half_h), [1] = (aspect, 0), [2 + n] — Z_n референс-орбиты.
 // Камерного буфера здесь НЕТ намеренно: пан/зум/аспект запечены сюда на CPU, а
 // неиспользуемое объявление DXC стрипает → дырявые слоты storage-буферов (SDL ждёт

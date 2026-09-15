@@ -9,7 +9,7 @@ static constexpr int BUFFERING_LEVEL = 3;
 // ── ДИАГНОСТИКА контеншена store (разбор 2026-07-05): отключают фазы конвейера,
 //    чтобы замерить время store в профайлере без нагрузки рендера/аплоада на память
 //    и PCIe. В UPS_priority sim продолжает готовить кадры (frame skip переиспользует
-//    неотрисованные слоты), так что `_DefaultTransformBuffer .store` меряется непрерывно.
+//    неотрисованные слоты), так что `DefaultTransformBuffer .store` меряется непрерывно.
 //    В норме ОБА false.
 //      DISABLE_RENDER — не стартовать render+fence потоки (нет рендер-GPU-работы);
 //      DISABLE_UPLOAD — не стартовать upload; PrepareFunc гоняет store БЕЗ submit на GPU

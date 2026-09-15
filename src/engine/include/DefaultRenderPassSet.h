@@ -6,22 +6,22 @@ class BatchBuilder;
 class PassManager;
 namespace DefaultRenderPassNamespace
 {
-    inline constexpr const char* DEPTH_PASS = "_DefaultDepthRenderPass";
-    inline constexpr const char* MAIN_PASS = "_DefaultMainRenderPass";
-    inline constexpr const char* TRANSPARENT_PASS = "_DefaultTransparentRenderPass";
-    inline constexpr const char* SPLAT_PASS = "_DefaultSplatRenderPass";
-    inline constexpr const char* DEBUG_PASS = "_DefaultDebugRenderPass";
-    inline constexpr const char* PRESENT_PASS = "_DefaultPresentPass";
-    inline constexpr const char* BLOOM_PASS = "_DefaultBloomPass";
-    inline constexpr const char* AO_PASS = "_DefaultAOPass";
-    inline constexpr const char* FOG_PASS = "_DefaultFogPass";
-    inline constexpr const char* UI_PASS = "_DefaultUIPass";
+    inline constexpr const char* DEPTH_PASS = "DefaultDepthRenderPass";
+    inline constexpr const char* MAIN_PASS = "DefaultMainRenderPass";
+    inline constexpr const char* TRANSPARENT_PASS = "DefaultTransparentRenderPass";
+    inline constexpr const char* SPLAT_PASS = "DefaultSplatRenderPass";
+    inline constexpr const char* DEBUG_PASS = "DefaultDebugRenderPass";
+    inline constexpr const char* PRESENT_PASS = "DefaultPresentPass";
+    inline constexpr const char* BLOOM_PASS = "DefaultBloomPass";
+    inline constexpr const char* AO_PASS = "DefaultAOPass";
+    inline constexpr const char* FOG_PASS = "DefaultFogPass";
+    inline constexpr const char* UI_PASS = "DefaultUIPass";
 
     // Число уровней bloom-пирамиды (bloom_0 = ½ окна, каждый следующий ещё вдвое меньше).
     inline constexpr uint32_t BLOOM_LEVELS = 4;
-    inline constexpr const char* SHADOW_PASS = "_DefaultShadowRenderPass";
-    inline constexpr const char* CULLING_PASS = "_DefaultCullingPass";
-    inline constexpr const char* SHADOW_BLUR_PASS = "_DefaultBlurPass";
+    inline constexpr const char* SHADOW_PASS = "DefaultShadowRenderPass";
+    inline constexpr const char* CULLING_PASS = "DefaultCullingPass";
+    inline constexpr const char* SHADOW_BLUR_PASS = "DefaultBlurPass";
     inline const std::string SHADOW_DEPTH_FLAT_ARRAY = "shadow_depth_flat_array";
 
 
@@ -75,7 +75,7 @@ namespace DefaultRenderPassNamespace
     void SetTransparentPass(EngineContext* ctx, LightDataModule* ldm);   // ldm — см. SetDefaultMainRenderPass
 
     // UI-оверлей: рендер UI-энтити (NDC-квады) в scene_hdr ПОСЛЕ bloom, ДО present (не блумится).
-    // Своя глубина (main_depth с CLEAR — z-пространство UI отдельное), __TextAtlas как глобалка.
+    // Своя глубина (main_depth с CLEAR — z-пространство UI отдельное), TextAtlas как глобалка.
     void SetUIPass(EngineContext* ctx);
 
     // Финальный проход: blit HDR-сцены (scene_hdr) в свопчейн с конвертацией формата.
@@ -148,8 +148,8 @@ namespace DefaultRenderPassNamespace
     inline const std::string AO_STATE = "AOState";
 
     inline const std::string SCENE_AMBIENT = "scene_ambient";
-    inline const std::string SSAO_TEXTURE  = "__ssao";
-    inline const std::string SSAO_TEMP     = "__ssao_temp";
+    inline const std::string SSAO_TEXTURE  = "ssao";
+    inline const std::string SSAO_TEMP     = "ssao_temp";
 
     // Проход-compute между MAIN (20) и TRANSPARENT (22): к моменту его исполнения глубина и
     // ambient непрозрачной геометрии готовы, а bloom (26) увидит уже затенённую сцену.

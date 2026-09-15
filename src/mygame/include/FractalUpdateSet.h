@@ -31,8 +31,8 @@ namespace FractalUpdateSet
 {
     // Имена буферов. На них по имени ссылаются fs_buffers sp сцены (shaders.json) — буфер
     // ДОЛЖЕН существовать до LoadScene (резолв имён идёт по уже созданным, Engine_Scene).
-    inline constexpr const char* MENGER_FRAME_BUFFER     = "_FractalFrameBuffer";
-    inline constexpr const char* MANDELBROT_ORBIT_BUFFER = "_MandelbrotOrbitBuffer";
+    inline constexpr const char* MENGER_FRAME_BUFFER     = "FractalFrameBuffer";
+    inline constexpr const char* MANDELBROT_ORBIT_BUFFER = "MandelbrotOrbitBuffer";
 
     // Кадр губки: [0]=(позиция,глубина), [1]=(K,tFar,1/туман,0), [2+j]=(офсет предка, 3^(j+1)).
     inline constexpr uint32_t MENGER_MAX_CONTEXT = 8;   // уровней предков в шейдер (дальше — туман)
@@ -74,7 +74,7 @@ namespace FractalUpdateSet
     // MainIterate КАЖДЫЙ тик (после внесения ввода в камеру, ДО prepare) — тогда трансформы
     // якорённых объектов, посчитанные следом от MengerCameraPos(), уезжают на GPU в ТОМ ЖЕ
     // тике, что и кадр фрактала (штатный StoreTransforms идёт в prepare ПОСЛЕ MainIterate),
-    // и позиция камеры обнуляется ДО снапшота view — в _cameraBuffer всегда чистая ротация.
+    // и позиция камеры обнуляется ДО снапшота view — в cameraBuffer всегда чистая ротация.
     // Публикация кадра в буфер осталась в апдейтере (SetMengerFrameUpdater) — он теперь
     // только сериализует состояние.
     void MengerTick(CameraManager* cm);

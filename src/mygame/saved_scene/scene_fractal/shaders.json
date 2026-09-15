@@ -16,18 +16,18 @@
             "name": "AnchorObject",
             "vs": "main_pass_vs",
             "fs": "anchor_surface_fs",
-            "pass": "_DefaultMainRenderPass",
+            "pass": "DefaultMainRenderPass",
             "vs_buffers": [
-                "_DefaultTransformBuffer",
+                "DefaultTransformBuffer",
                 "DefaultOutPibBuffer",
-                "_cameraBuffer",
-                "_DefaultInstanceBuffer"
+                "cameraBuffer",
+                "DefaultInstanceBuffer"
             ],
             "fs_buffers": [
-                "_lightBuffer",
+                "lightBuffer",
                 "DefaultLightCameraBuffer",
-                "_cameraBuffer",
-                "_FractalFrameBuffer"
+                "cameraBuffer",
+                "FractalFrameBuffer"
             ],
             "slots": [
                 "Albedo",
@@ -54,13 +54,13 @@
             "name": "Fractal",
             "vs": "skybox_vs",
             "fs": "fractal_fs",
-            "pass": "_DefaultMainRenderPass",
+            "pass": "DefaultMainRenderPass",
             "vs_buffers": [
-                "_cameraBuffer"
+                "cameraBuffer"
             ],
             "fs_buffers": [
-                "_FractalFrameBuffer",
-                "_cameraBuffer"
+                "FractalFrameBuffer",
+                "cameraBuffer"
             ],
             "slots": [],
             "spd": {

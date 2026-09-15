@@ -64,7 +64,7 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
         };
         // Превью материала — три исхода, различимых с одного взгляда на список:
         //   albedo есть и резолвится → его превью с тинтом baseColor (Opaque);
-        //   albedo НАЗНАЧЕН, но битый (удалён/переименован) → превью _NoTextureDummy БЕЗ тинта —
+        //   albedo НАЗНАЧЕН, но битый (удалён/переименован) → превью NoTextureDummy БЕЗ тинта —
         //     маркер «тут дырка», как и в самом рендере;
         //   albedo-слота нет вообще (нетекстурный материал) → обычная затычка-сфера.
         auto material_preview = [&](const std::string& matName) -> TilePreview
@@ -99,7 +99,7 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
                     if (tinted) break;
                 }
             }
-            else pv = texture_preview("_NoTextureDummy");           // битая ссылка → dummy, БЕЗ тинта
+            else pv = texture_preview("NoTextureDummy");           // битая ссылка → dummy, БЕЗ тинта
             return pv;
         };
 

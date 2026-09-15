@@ -7,7 +7,7 @@
         "tower",
         "telecom",
         "radiotower",
-        "_skybox"
+        "skybox"
     ],
     "models": [
         "building1",

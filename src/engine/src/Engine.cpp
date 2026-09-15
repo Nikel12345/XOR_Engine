@@ -151,7 +151,7 @@ Engine::Engine(const EngineConfig& cfg)
 	DefaultCommandSet::SetAll(*input_manager);
 	RegisterBuiltinComponentSpecs();
 	RegisterBuiltinMaterialParamsSpecs();
-	object_manager->CreateScene("_staging")->is_active = false;
+	object_manager->CreateScene("staging")->is_active = false;
 	pass_manager->FillRenderPasses();
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});

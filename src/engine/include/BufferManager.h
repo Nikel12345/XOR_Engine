@@ -14,16 +14,16 @@
 #include "BufferUpdateStruct.h"
 
 namespace DefaultBuffersNames {
-	inline constexpr const char* DEFAULT_TRANSFORM_BUFFER = "_DefaultTransformBuffer";
-	inline constexpr const char* DEFAULT_CAMERA_BUFFER = "_cameraBuffer";
-	inline constexpr const char* DEFAULT_LIGHT_BUFFER = "_lightBuffer";
-	inline constexpr const char* DEFAULT_POSITION_INDEX_BUFFER = "_DefaultPositionIndexBuffer";
-	inline constexpr const char* DEFAULT_INSTANCE_BUFFER = "_DefaultInstanceBuffer";
+	inline constexpr const char* DEFAULT_TRANSFORM_BUFFER = "DefaultTransformBuffer";
+	inline constexpr const char* DEFAULT_CAMERA_BUFFER = "cameraBuffer";
+	inline constexpr const char* DEFAULT_LIGHT_BUFFER = "lightBuffer";
+	inline constexpr const char* DEFAULT_POSITION_INDEX_BUFFER = "DefaultPositionIndexBuffer";
+	inline constexpr const char* DEFAULT_INSTANCE_BUFFER = "DefaultInstanceBuffer";
 	inline constexpr const char* DEFAULT_LIGHT_CAMERA_BUFFER = "DefaultLightCameraBuffer";
 
-	inline constexpr const char* DEFAULT_TEX_STATE_RANK_BUFFER   = "_DefaultTexStateRankBuffer";
-	inline constexpr const char* DEFAULT_TEX_STATE_INDEX_BUFFER  = "_DefaultTexStateIndexBuffer";
-	inline constexpr const char* DEFAULT_TEX_STATE_BUFFER        = "_DefaultTexStateBuffer";
+	inline constexpr const char* DEFAULT_TEX_STATE_RANK_BUFFER   = "DefaultTexStateRankBuffer";
+	inline constexpr const char* DEFAULT_TEX_STATE_INDEX_BUFFER  = "DefaultTexStateIndexBuffer";
+	inline constexpr const char* DEFAULT_TEX_STATE_BUFFER        = "DefaultTexStateBuffer";
 
 	inline constexpr const char* DEFAULT_INDIRECT_BUFFER = "DefaultIndirectBuffer";
 	inline constexpr const char* DEFAULT_BOUND_SPHERE_BUFFER = "DefaultBoundSphereBuffer";
@@ -34,7 +34,7 @@ namespace DefaultBuffersNames {
 	inline constexpr const char* UI_TEXT_INDEX_BUFFER    = "UITextIndex";
 	inline constexpr const char* UI_TEXT_BUFFER          = "UITextBuffer";
 
-	inline constexpr const char* UI_FONT_UVL_BUFFER      = "__FontUVL";
+	inline constexpr const char* UI_FONT_UVL_BUFFER      = "FontUVL";
 };
 
 struct PendingDestroy {

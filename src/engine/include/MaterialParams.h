@@ -33,7 +33,7 @@ static_assert(sizeof(OpaqueMaterialParams) == 48,
 
 
 // UI-элемент: два цвета. bg_color — тинт фона (× albedo), text_color — цвет глифов (× покрытие
-// из __TextAtlas). Оба редактируются в инспекторе и мутабельны на лету (hover/анимация через
+// из TextAtlas). Оба редактируются в инспекторе и мутабельны на лету (hover/анимация через
 // material->params). Один тип на все UI-элементы (у безтекстовых text_color просто не задействован).
 struct alignas(16) UIMaterialParams
 {

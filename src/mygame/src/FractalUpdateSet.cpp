@@ -454,7 +454,7 @@ void SetMengerFrameUpdater(EngineContext* ctx)
 
 	// ── Апдейтер ТОЛЬКО сериализует состояние губки в буфер слота: позиция/масштаб обновлены
 	// раньше в этом же тике (MengerTick из MainIterate — см. контракт в заголовке). Камера
-	// отсюда не читается: view шейдер берёт из _cameraBuffer (чистая ротация — аккумулятор
+	// отсюда не читается: view шейдер берёт из cameraBuffer (чистая ротация — аккумулятор
 	// обнулён в MengerTick до снапшота). Сам буфер создаёт MyGame::MainInit (под if сцены). ──
 	BufferManager* bm = ctx->GetBufferManager();
 

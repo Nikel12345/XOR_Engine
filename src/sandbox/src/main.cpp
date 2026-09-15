@@ -2,8 +2,8 @@
 //  Sandbox: почему TDM store изолированно ~0.7 мс, а в профайлере движка 30+ мс?
 //
 //  Профайлер игры (при живом рендере) показал:
-//    _DefaultTransformBuffer .store  avg 43 ms   (буфер 12.5 МБ ≈ 200k энтити)
-//    _DefaultInstanceBuffer  .store  avg 1.5 ms  (тоже раздут → проблема системная)
+//    DefaultTransformBuffer .store  avg 43 ms   (буфер 12.5 МБ ≈ 200k энтити)
+//    DefaultInstanceBuffer  .store  avg 1.5 ms  (тоже раздут → проблема системная)
 //    gpu_frame 30 ms, fence_wait 25 ms           (GPU — бутылочное горло)
 //  Изолированно тот же store = 18 GB/s. В движке = 0.29 GB/s. Разница НЕ в алгоритме.
 //

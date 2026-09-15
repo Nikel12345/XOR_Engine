@@ -30,7 +30,7 @@ GeometryPool::GeometryPool(const std::string& name, uint32_t vertex_size, const 
     owned_names_.reserve(descs.size());
     formats_.reserve(descs.size());
     streams_.reserve(descs.size());
-    index_name_ = "_" + name + "_Index";
+    index_name_ = name + "_Index";
     index_buffer_ = index_name_.c_str();
 
     // Индексы descs и formats_ после первого же skip разъезжаются, поэтому src_offset'ы
@@ -58,7 +58,7 @@ GeometryPool::GeometryPool(const std::string& name, uint32_t vertex_size, const 
                 assert(false && "GeometryPool: attribute outside its stream");
             }
 
-        owned_names_.push_back("_" + name + "_" + SemSuffix(d.attrs.front().semantic));
+        owned_names_.push_back(name + "_" + SemSuffix(d.attrs.front().semantic));
         VertexFormat fmt;
         fmt.attrs = d.attrs;
         fmt.stride = d.stride;

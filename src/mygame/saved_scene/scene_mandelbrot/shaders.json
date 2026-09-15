@@ -20,10 +20,10 @@
             "name": "Mandelbrot",
             "vs": "fractal2d_vs",
             "fs": "mandelbrot_fs",
-            "pass": "_DefaultMainRenderPass",
+            "pass": "DefaultMainRenderPass",
             "vs_buffers": [],
             "fs_buffers": [
-                "_MandelbrotOrbitBuffer"
+                "MandelbrotOrbitBuffer"
             ],
             "slots": [],
             "spd": {

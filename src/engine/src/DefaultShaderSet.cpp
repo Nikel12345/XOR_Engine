@@ -121,19 +121,19 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 
 	// Отдельная тройка, а не ссылка на main_pass_vs/untextured_surface_fs ниже: фолбэк обязан
 	// пережить удаление любого шейдера из редактора. Одинаковый байткод дедуплицируется по хэшу SPIR-V.
-	ctx->CreateVertexShader("_fallback_vs",
+	ctx->CreateVertexShader("fallback_vs",
 		"../engine/shaders_code/main_pass/main_pass.vert.hlsl",
 		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::DontSave | ResourceTag::Default | ResourceTag::System);
-	ctx->CreateFragmentShader("_fallback_fs",
+	ctx->CreateFragmentShader("fallback_fs",
 		"../engine/shaders_code/main_pass/untextured/surface.hlsl", ResourceTag::DontSave | ResourceTag::Default | ResourceTag::System);
 	{
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry()->DoesNotCull();
-		ctx->CreateShaderProgram("_Fallback", spd, RP::MAIN_PASS,
-			"_fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-			"_fallback_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
+		ctx->CreateShaderProgram("Fallback", spd, RP::MAIN_PASS,
+			"fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"fallback_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
 			{ }, ResourceTag::DontSave | ResourceTag::Default | ResourceTag::System);
-		ctx->GetBatchBuilder()->SetFallbackShader("_Fallback");
+		ctx->GetBatchBuilder()->SetFallbackShader("Fallback");
 	}
 
 	ctx->CreateVertexShader("main_pass_vs", "../engine/shaders_code/main_pass/main_pass.vert.hlsl",
@@ -353,21 +353,21 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
         {}, { DEFAULT_CAMERA_BUFFER },
         { { SSAO_TEXTURE, 0, 0 } },
         {},
-        { std::string("__main_depth") },
+        { std::string("main_depth") },
         AO_PASS, ResourceTag::DontSave | ResourceTag::Default);
 
     ctx->CreateComputeShaderProgram("ssao_blur_h", "ssao_blur_h_cs",
         {}, { DEFAULT_CAMERA_BUFFER },
         { { SSAO_TEMP, 0, 0 } },
         {},
-        { SSAO_TEXTURE, std::string("__main_depth") },
+        { SSAO_TEXTURE, std::string("main_depth") },
         AO_PASS, ResourceTag::DontSave | ResourceTag::Default);
 
     ctx->CreateComputeShaderProgram("ssao_blur_v", "ssao_blur_v_cs",
         {}, { DEFAULT_CAMERA_BUFFER },
         { { SSAO_TEXTURE, 0, 0 } },
         {},
-        { SSAO_TEMP, std::string("__main_depth") },
+        { SSAO_TEMP, std::string("main_depth") },
         AO_PASS, ResourceTag::DontSave | ResourceTag::Default);
 
     ctx->CreateComputeShaderProgram("ao_composite", "ao_composite_cs",
@@ -418,7 +418,7 @@ void DefaultShaderProgramSet::SetFogProgram(EngineContext* ctx)
         {}, { DEFAULT_CAMERA_BUFFER },
         { { std::string("scene_hdr"), 0, 0 } },
         {},
-        { std::string("__main_depth") },
+        { std::string("main_depth") },
         FOG_PASS, ResourceTag::DontSave | ResourceTag::Default);
 
     sm->CreateComputePushInstruction<FogState>("fog", [](const PushConstantBinder& b, FogState st) {
@@ -442,7 +442,7 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     static bool inited = false;
     if (inited) { SDL_Log("Bloom shader programs already initialized."); return; }
 
-    auto L = [](uint32_t i) { return "__bloom_L" + std::to_string(i); };
+    auto L = [](uint32_t i) { return "bloom_L" + std::to_string(i); };
 
     ComputeShaderProgram* p = ctx->CreateComputeShaderProgram(
         "bloom_down_0", "bloom_prefilter_cs",

@@ -393,7 +393,7 @@ namespace TexturePresets {
     // Albedo (sRGB-данные, но формат UNORM как везде в движке).
     // COLOR_TARGET здесь НЕ ставим: его добавит _MaterialAtlas ровно тогда, когда запрошены мипы
     // (мип-ген рендерит в уровни). Безусловный COLOR_TARGET раздавал его и немипованным атласам —
-    // например _FallbackAtlas (64px, 1 мип), которому мип-ген не нужен вовсе.
+    // например FallbackAtlas (64px, 1 мип), которому мип-ген не нужен вовсе.
     inline SDL_GPUTextureCreateInfo AlbedoAtlas(uint32_t resolution, uint32_t layers = 1, uint32_t mip_levels = 1) {
         return _MaterialAtlas(resolution, layers, mip_levels, SDL_GPU_TEXTUREUSAGE_SAMPLER);
     }

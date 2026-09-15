@@ -11,17 +11,17 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 {
 	TextureManager* tm = ctx->GetTextureManager();
 
-	ctx->CreateTextureAtlas("_FallbackAtlas", TexturePresets::AlbedoAtlas(64, 1, 1), "_SimpleSampler", ResourceTag::Default | ResourceTag::System);
-	ctx->CreateTextureFromFile("_NoTextureDummy", "_FallbackAtlas", "../engine/textures/dummy.png",
+	ctx->CreateTextureAtlas("FallbackAtlas", TexturePresets::AlbedoAtlas(64, 1, 1), "SimpleSampler", ResourceTag::Default | ResourceTag::System);
+	ctx->CreateTextureFromFile("NoTextureDummy", "FallbackAtlas", "../engine/textures/dummy.png",
 		ChannelConvention::AsIs, ResourceTag::DontSave | ResourceTag::Default | ResourceTag::System);
 
-	ctx->GetBatchBuilder()->SetDummyTexture("_NoTextureDummy", tm);
+	ctx->GetBatchBuilder()->SetDummyTexture("NoTextureDummy", tm);
 
 	TextureHandle* def_tex[] = {
-		tm->CreateTexture("default_albedo",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0xFF })),
-		tm->CreateTexture("default_normal",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0x80 })),
-		tm->CreateTexture("default_orm",      "_FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF })),
-		tm->CreateTexture("default_emissive", "_FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF })),
+		tm->CreateTexture("default_albedo",   "FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0xFF })),
+		tm->CreateTexture("default_normal",   "FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0x80 })),
+		tm->CreateTexture("default_orm",      "FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF })),
+		tm->CreateTexture("default_emissive", "FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF })),
 	};
 	for (TextureHandle* h : def_tex) if (h) h->tags = ResourceTag::DontSave | ResourceTag::Default;
 

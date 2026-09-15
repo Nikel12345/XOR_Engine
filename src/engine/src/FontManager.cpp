@@ -66,7 +66,7 @@ FontData* FontManager::CreateFont(TextureManager* tm,
 					std::vector<std::byte> r8(n);
 					for (size_t i = 0; i < n; ++i) r8[i] = bgra[i * 4 + 3];   // альфа BGRA (index 3) → R
 					// имена глиф-текстур с "__" (движковая инфраструктура; в textures.json не пишутся)
-					g.handle = tm->CreateTexture("__glyph_" + name + "_" + std::to_string(cp),
+					g.handle = tm->CreateTexture("glyph_" + name + "_" + std::to_string(cp),
 					                             fd.atlas, static_cast<uint32_t>(s->w), static_cast<uint32_t>(s->h),
 					                             std::move(r8));
 					if (g.handle) g.handle->tags = ResourceTag::DontSave | ResourceTag::Default | ResourceTag::System;

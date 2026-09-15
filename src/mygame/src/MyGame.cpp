@@ -78,7 +78,7 @@ SDL_AppResult MyGame::MainInit()
         FractalUpdateSet::SetMengerFrameUpdater(ctx);
         // Атлас под альбедо якорённого куба — кодовая инфраструктура (как в Game.cpp), ДО
         // LoadScene: текстура iron из textures.json садится в него при загрузке. Роли
-        // Normal/ORM/Emissive берут движковые default_* из _FallbackAtlas — свой атлас не нужен.
+        // Normal/ORM/Emissive берут движковые default_* из FallbackAtlas — свой атлас не нужен.
         ctx->CreateTextureAtlas("albedo_atlas",
             TexturePresets::AlbedoAtlas(2048, 1, TexturePresets::FullMipLevels(2048)),
             DefaultSamplersNames::DEFAULT_SAMPLER);

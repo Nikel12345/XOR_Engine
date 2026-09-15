@@ -18,7 +18,7 @@
 using namespace ui;
 
 // «+ create entity» разворачивает форму: чекбоксы компонентов из реестра + поля выбранных.
-// Черновик — НАСТОЯЩАЯ энтити в сцене "_staging" (created в Engine-ините, никогда не активна:
+// Черновик — НАСТОЯЩАЯ энтити в сцене "staging" (created в Engine-ините, никогда не активна:
 // дата-модули/батчи её не видят, UI-поток правит её монопольно). Компоненты рисует ui::
 // DrawEntityComponents — ТОТ ЖЕ вид, что у инспектора, только цель не живая (EditTarget).
 // Create = SaveScene(staging) → CreateEntityCmd в sim-поток (LoadScene тем же путём, что файл
@@ -106,7 +106,7 @@ namespace {
 
     void DrawCreateEntityForm(EngineContext* ctx, ObjectManager* om)
     {
-        SceneData* stg = om->GetScene("_staging");
+        SceneData* stg = om->GetScene("staging");
         if (!stg) return;
 
         ImGui::BeginChild("create_entity_form", ImVec2(0, 0),
@@ -264,7 +264,7 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
             if (g_ce_open) {
                 if (g_ce_checked.empty())   // стартовый набор — типичный рисуемый
                     g_ce_checked = { "Transform", "Model", "Material", "Draw" };
-                if (g_ce_entity == kNoEntity) RebuildStaging(om, om->GetScene("_staging"));
+                if (g_ce_entity == kNoEntity) RebuildStaging(om, om->GetScene("staging"));
             }
         }
         if (g_ce_open) DrawCreateEntityForm(ctx, om);

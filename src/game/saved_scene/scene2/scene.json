@@ -1,5 +1,5 @@
 {
-    "materials": ["_skybox", "brick", "wood", "m_orange", "transparent", "metal1", "m_gray", "metal2", "emission", "car", "car2", "ground"],
+    "materials": ["skybox", "brick", "wood", "m_orange", "transparent", "metal1", "m_gray", "metal2", "emission", "car", "car2", "ground"],
     "models": ["skybox_cube", "quad", "ship", "sphere", "car"],
     "DirectLight,ShadowCaster": {
         "count": 1,

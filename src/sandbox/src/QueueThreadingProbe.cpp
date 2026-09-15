@@ -74,7 +74,7 @@ extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
 namespace {
 
-constexpr const char* TICK_BUFFER = "__probe_tick_buffer";
+constexpr const char* TICK_BUFFER = "probe_tick_buffer";
 constexpr uint32_t VERTEX_COUNT = 3;
 constexpr uint32_t VERTEX_BYTES = VERTEX_COUNT * sizeof(PosOnly);
 

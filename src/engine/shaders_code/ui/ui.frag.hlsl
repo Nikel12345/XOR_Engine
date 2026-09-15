@@ -1,5 +1,5 @@
 // UI-фрагментник: обычный текстурный (albedo как main_pass, но БЕЗ освещения) + композит текста.
-// Фон = bg_color × albedo. Текст = text_color, замаскированный покрытием глифа из __TextAtlas
+// Фон = bg_color × albedo. Текст = text_color, замаскированный покрытием глифа из TextAtlas
 // (разреженный канал по row). depth_write включён, поэтому прозрачные пиксели ОТБРАСЫВАЕМ (clip),
 // чтобы перекрытие решала z, а не порядок отрисовки (см. решение по прозрачности UI).
 
@@ -13,7 +13,7 @@ struct PSInput
     [[vk::location(2)]] nointerpolation uint v_row : TEXCOORD2;
 };
 
-// Глобалка прохода: __TextAtlas (R8, покрытие/ глифов) — слот 0.
+// Глобалка прохода: TextAtlas (R8, покрытие/ глифов) — слот 0.
 [[vk::combinedImageSampler]] Texture2DArray<float> u_glyph        : register(t0, space2);
 [[vk::combinedImageSampler]] SamplerState          u_glyphSampler : register(s0, space2);
 // Слот материала: фон (albedo) — слот 1 (после глобалки).

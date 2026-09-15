@@ -28,7 +28,7 @@ struct Selection {
 
 // Определения — в UI_ImGui.cpp (якорный TU панелей).
 extern Selection g_sel;          // текущий выбор (кого показывает Inspector / держит гизмо)
-extern bool      g_show_internal;// показывать служебные ассеты (имена на "_", напр. "_NoTextureDummy")
+extern bool      g_show_internal;// показывать ассеты с тегом ResourceTag::System
 
 // Полупрозрачный фон панелей (0 = сквозь пустые места видно 3D-сцену).
 constexpr float kPanelBgAlpha = 0.0f;

@@ -25,7 +25,7 @@ static const char* DefaultTextureForRole(TextureSlotRole r)
 	case TextureSlotRole::Normal:   return "default_normal";
 	case TextureSlotRole::ORM:      return "default_orm";
 	case TextureSlotRole::Emissive: return "default_emissive";
-	default:                        return "_NoTextureDummy";   // Custom* и прочее
+	default:                        return "NoTextureDummy";   // Custom* и прочее
 	}
 }
 

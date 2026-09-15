@@ -77,7 +77,7 @@ TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_
         tci.layer_count_or_depth = 1;
         tci.num_levels           = 1;
         tci.sample_count         = SDL_GPU_SAMPLECOUNT_1;
-        TextureAtlas* text_atlas = CreateTextureAtlas(DefaultAtlasNames::TEXT_ATLAS, tci, GetSampler("_SimpleSampler"), ResourceTag::Default | ResourceTag::System);
+        TextureAtlas* text_atlas = CreateTextureAtlas(DefaultAtlasNames::TEXT_ATLAS, tci, GetSampler("SimpleSampler"), ResourceTag::Default | ResourceTag::System);
         text_atlas->padding = 0;
     }
 
@@ -596,7 +596,7 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
 
     // Раскладка задач в transfer-буфере. Оффсет обязан быть кратен размеру текселя формата
     // НАЗНАЧЕНИЯ (VUID-vkCmdCopyBufferToImage-dstImage-07975), а задачи РАЗНЫХ форматов лежат в
-    // ОДНОМ буфере: глифы шрифта грузятся в R8-атлас (__TextAtlas) задачами размером w*h — сплошь
+    // ОДНОМ буфере: глифы шрифта грузятся в R8-атлас (TextAtlas) задачами размером w*h — сплошь
     // и рядом нечётным, — и первая же такая задача сбивает выравнивание ВСЕМ следующим за ней
     // 4-байтовым атласам (albedo/normal/env_skybox). Копия с невыровненного оффсета — UB: один
     // драйвер её вытягивает, другой читает со сдвигом на байт, и каналы уезжают (альфа 255

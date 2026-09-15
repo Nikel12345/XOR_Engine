@@ -25,7 +25,7 @@
             "conv": "SmoothnessInGreen"
         },
         {
-            "name": "_env_skybox_cube",
+            "name": "env_skybox_cube",
             "atlas": "env_skybox",
             "path": "textures/skybox.png",
             "conv": "AsIs",

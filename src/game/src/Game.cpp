@@ -79,7 +79,7 @@ SDL_AppResult Game::MainInit()
 	TextureAtlas* emissive_atlas = ctx->CreateTextureAtlas("emissive_atlas", TexturePresets::EmissiveAtlas(1024, 2), DefaultSamplersNames::DEFAULT_SAMPLER);
 
 
-	// --- Шрифт: растеризуется в общий __TextAtlas (CWD=src/game → путь fonts/…). ---
+	// --- Шрифт: растеризуется в общий TextAtlas (CWD=src/game → путь fonts/…). ---
 	ctx->CreateFont("default", "fonts/cuyabra-Regular.otf", 48.0f);
 
     {

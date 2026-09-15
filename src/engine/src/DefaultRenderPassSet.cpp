@@ -187,7 +187,7 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     // поверхностей в несуществующую точку. usage DEPTH_STENCIL_TARGET доложит декларация
     // SetDepthTexture проходов, SAMPLER — декларации AO-программ, обе до бейка (в самом tci он 0 —
     // CreateTextureAtlas его стрижёт).
-    g_pass_system.main_depth = tm->CreateTextureAtlas("__main_depth", depth_tci,
+    g_pass_system.main_depth = tm->CreateTextureAtlas("main_depth", depth_tci,
         tm->GetSampler(DefaultSamplersNames::SIMPLE_SAMPLER), ResourceTag::Default | ResourceTag::System);
     g_pass_system.main_depth_format = depth_tci.format;
 
@@ -210,7 +210,7 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
         uint32_t lw = 0, lh = 0;
         BloomLevelSize(gc, out_w, out_h, i, lw, lh);
-        g_pass_system.bloom_levels[i] = tm->CreateTextureAtlas("__bloom_L" + std::to_string(i),
+        g_pass_system.bloom_levels[i] = tm->CreateTextureAtlas("bloom_L" + std::to_string(i),
             TexturePresets::BloomLevel(lw, lh), env_sampler, ResourceTag::Default | ResourceTag::System);
     }
 
@@ -233,7 +233,7 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
             t.RecreateAtlasTexture(a, TexturePresets::EmissionHDR(rw, rh));
         });
     for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
-        tm->CreateResizeInstruction("__bloom_L" + std::to_string(i),
+        tm->CreateResizeInstruction("bloom_L" + std::to_string(i),
             [a = g_pass_system.bloom_levels[i], i, ctx](TextureManager& t, uint32_t w, uint32_t h) {
                 uint32_t lw, lh;  BloomLevelSize(*ctx->GetGraphicsConfig(), w, h, i, lw, lh);
                 t.RecreateAtlasTexture(a, TexturePresets::BloomLevel(lw, lh));
@@ -259,7 +259,7 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
             uint32_t sw, sh;  GfxEffectTarget(gc, w, h, gc.ssao_scale, sw, sh);
             t.RecreateAtlasTexture(a, TexturePresets::AmbientOcclusion(sw, sh));
         });
-    tm->CreateResizeInstruction("__main_depth",
+    tm->CreateResizeInstruction("main_depth",
         [a = g_pass_system.main_depth, ctx](TextureManager& t, uint32_t w, uint32_t h) {
             uint32_t rw, rh;  GfxRenderTarget(*ctx->GetGraphicsConfig(), w, h, rw, rh);
             auto tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
