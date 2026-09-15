@@ -3,7 +3,9 @@
 #include "UI_Internal.h"
 #include "imgui_internal.h"
 #include "imgui_impl_sdl3.h"
+#include "imgui_impl_sdlgpu3.h"
 #include "ImGuizmo.h"
+#include <filesystem>
 
 // Панели живут в отдельных TU (UI_Hierarchy / UI_AssetBrowser / UI_Inspector), но методы —
 // все члены UI_ImGui, а их общее состояние объявлено в UI_Internal.h. Тут — «якорь»: определения
@@ -12,6 +14,50 @@
 namespace ui {
     Selection g_sel;
     bool      g_show_internal = false;
+}
+
+void UI_ImGui::Init(SDL_Window* win, SDL_GPUDevice* dev)
+{
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;   // docking-ветка ImGui: окна можно стыковать (см. будущий DockSpace)
+
+    ImGui_ImplSDL3_InitForSDLGPU(win);
+
+    ImGui_ImplSDLGPU3_InitInfo init_info = {};
+    init_info.Device = dev;
+    init_info.ColorTargetFormat = SDL_GetGPUSwapchainTextureFormat(dev, win);
+    init_info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
+    ImGui_ImplSDLGPU3_Init(&init_info);
+
+    // Шрифт ImGui: дефолтный ProggyClean покрывает только латиницу, поэтому кириллические подписи
+    // редактора (инспектор/иерархия) без этого рисуются знаками «?». Догружаем кириллицу МЕРЖ-режимом
+    // из системного шрифта: латиница остаётся дефолтной (при пересечении глифов побеждает первый
+    // добавленный шрифт), из Segoe UI берутся только кириллические глифы. ImGui 1.92 растеризует по
+    // требованию (backend выставляет RendererHasTextures) — ручная сборка атласа не нужна. Путь
+    // системный → только Windows и только если файл реально есть (иначе просто оставляем дефолт).
+    io.Fonts->AddFontDefault();
+#ifdef _WIN32
+    {
+        const char* sys_font = "C:/Windows/Fonts/segoeui.ttf";
+        if (std::filesystem::exists(sys_font)) {
+            ImFontConfig cfg;
+            cfg.MergeMode = true;   // доклеить в дефолтный шрифт, а не заменить его
+            io.Fonts->AddFontFromFileTTF(sys_font, 0.0f, &cfg, io.Fonts->GetGlyphRangesCyrillic());
+        } else {
+            SDL_Log("ImGui font: '%s' not found - Cyrillic editor labels will render as '?'", sys_font);
+        }
+    }
+#endif
+}
+
+void UI_ImGui::Shutdown()
+{
+    ImGui_ImplSDLGPU3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
 }
 
 // Обмен выбором с игрой (sim-поток) — контракт и модель потокобезопасности в заголовке.

@@ -6,10 +6,17 @@
 // Заголовку хватает forward-декларации: только статические методы с EngineContext*.
 // imgui/ObjectManager/CameraManager тянут сами UI_*.cpp — по факту использования.
 class EngineContext;
+struct SDL_Window;
+struct SDL_GPUDevice;
 
 class UI_ImGui
 {
 public:
+    // Контекст ImGui + оба бэкенда (SDL3 и SDL_GPU) + шрифт редактора. Зовётся из конструктора
+    // движка, когда окно и девайс уже есть; Shutdown — из его деструктора, в обратном порядке.
+    static void Init(SDL_Window* win, SDL_GPUDevice* dev);
+    static void Shutdown();
+
     static void Iterate(EngineContext* ctx);
 
     // ── Обмен выбором с игрой (вызывать с sim-потока). Выбор редактора сейчас — один

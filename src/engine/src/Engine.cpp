@@ -30,25 +30,19 @@
 #include "EngineContext.h"
 #include "DefaultUpdateSet.h"
 #include "DefaultRenderPassSet.h"
-#include "DefaultShaderSet.h"   // код-байндинги движкового набора (SetDefaultPushes)
-#include "TexturesPresets.h"
+#include "DefaultShaderSet.h"
+#include "DefaultResourceSet.h"
 #include "ComponentSerializer.h"
 #include "ParamsSpec.h"
 #include "PositionStructure.h"
 #include "DefaultCommandSet.h"
 #include "UI_ImGui.h"
-#include "imgui.h"
-#include "imgui_impl_sdl3.h"
-#include "imgui_impl_sdlgpu3.h"
-#include <filesystem>
-
-using namespace ShaderBase;   // POSITION/UV/... в раскладке fallback-vs
 
 //  Engine: конструирование/разрушение + инициализация дефолтов.
 //  Кадровый конвейер — Engine_Frame.cpp; save/load сцены — Engine_Scene.cpp;
 //  регистрация UI-команд — DefaultCommandSet.cpp.
 
-void Engine::OnWindowResized(Sint32 window_w, Sint32 window_h, Sint32 render_w, Sint32 render_h)
+void Engine::OnWindowResized(Sint32 window_w, Sint32 window_h)
 {
 	// Публикуем ТОЛЬКО размер окна: он свойство платформы и больше ничьё, а внутреннее разрешение —
 	// производное от него и GraphicsConfig, и хранить его отдельно значило бы завести второй источник
@@ -57,8 +51,6 @@ void Engine::OnWindowResized(Sint32 window_w, Sint32 window_h, Sint32 render_w, 
 	// и дороже записи одного числа здесь ничего нет.
 	size_state_.window_size.store(EngineSizeState::Pack(safe_i_u32(window_w), safe_i_u32(window_h)),
 	                              std::memory_order_release);
-
-	(void)render_w;  (void)render_h;
 }
 
 bool Engine::InitPlatform(const EngineConfig& cfg)
@@ -187,7 +179,7 @@ Engine::Engine(const EngineConfig& cfg)
 	engine_context->CreateGeometryPool(POS_UV_NORM_POOL, sizeof(PosUVNormal), PosUVNormLayout());
 	InitDefaultBufferUpdaters();
 	InitPasses();
-	InitUICommands();
+	DefaultCommandSet::SetAll(*input_manager);
 	RegisterBuiltinComponentSpecs();          // спецификации компонентов:  save/load сцены + схема полей для UI
 	RegisterBuiltinMaterialParamsSpecs();     // спецификации params материалов: то же самое для блоба факторов
 	// Staging-сцена формы создания энтити (UI_Hierarchy): НИКОГДА не активна — дата-модули и
@@ -206,353 +198,13 @@ Engine::Engine(const EngineConfig& cfg)
 	);
 	thread_controller->SetFenceCallback([this](uint8_t slot) {this->FenceFunc(slot); });
 
-	IMGUI_CHECKVERSION();
-	ImGui::CreateContext();
-	ImGuiIO& io = ImGui::GetIO();
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;   // docking-ветка ImGui: окна можно стыковать (см. будущий DockSpace)
-
-	ImGui_ImplSDL3_InitForSDLGPU(win);
-
-	ImGui_ImplSDLGPU3_InitInfo init_info = {};
-	init_info.Device = dev;
-	init_info.ColorTargetFormat = SDL_GetGPUSwapchainTextureFormat(dev, win);
-	init_info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
-	ImGui_ImplSDLGPU3_Init(&init_info);
-
-	// Шрифт ImGui: дефолтный ProggyClean покрывает только латиницу, поэтому кириллические подписи
-	// редактора (инспектор/иерархия) без этого рисуются знаками «?». Догружаем кириллицу МЕРЖ-режимом
-	// из системного шрифта: латиница остаётся дефолтной (при пересечении глифов побеждает первый
-	// добавленный шрифт), из Segoe UI берутся только кириллические глифы. ImGui 1.92 растеризует по
-	// требованию (backend выставляет RendererHasTextures) — ручная сборка атласа не нужна. Путь
-	// системный → только Windows и только если файл реально есть (иначе просто оставляем дефолт).
-	io.Fonts->AddFontDefault();
-#ifdef _WIN32
-	{
-		const char* sys_font = "C:/Windows/Fonts/segoeui.ttf";
-		if (std::filesystem::exists(sys_font)) {
-			ImFontConfig cfg;
-			cfg.MergeMode = true;   // доклеить в дефолтный шрифт, а не заменить его
-			io.Fonts->AddFontFromFileTTF(sys_font, 0.0f, &cfg, io.Fonts->GetGlyphRangesCyrillic());
-		} else {
-			SDL_Log("ImGui font: '%s' not found - Cyrillic editor labels will render as '?'", sys_font);
-		}
-	}
-#endif
-
-	engine_context->CreateTextureAtlas("_FallbackAtlas", TexturePresets::AlbedoAtlas(64, 1, 1), "_SimpleSampler");
-	engine_context->CreateTextureFromFile("_NoTextureDummy", "_FallbackAtlas", "../engine/textures/dummy.png",
-		ChannelConvention::AsIs, /*dont_save=*/true);   // движковый дефолт — в файл сцены не идёт
-
-	// ПО ИМЕНИ (как SetFallbackShader): удаление _NoTextureDummy не оставляет висячего указателя —
-	// промах на сборке батча даёт пропуск отрисовки (пустой рендер), а не разыменование мёртвого хэндла.
-	batch_builder->SetDummyTexture("_NoTextureDummy", texture_manager);
-	InitDefaultResources();
-	InitDefaultShaders();
+	UI_ImGui::Init(win, dev);
+	DefaultResourceSet::SetDefaultResources(engine_context);
+	DefaultShaderProgramSet::SetDefaultShaders(engine_context);
 	// Бейк GPU-ресурсов здесь НЕ делаем: игра объявляет свои ресурсы и шейдерные программы позже
 	// (атласы в Game::Init, sp — в манифесте сцены), а именно объявления sp несут usage-флаги.
 	// Точка бейка — конец первого Engine::LoadScene.
 	init_ok = true;
-}
-
-void Engine::InitDefaultResources()
-{
-	// Все material-атласы — BGRA8 UNORM (движок без sRGB-форматов), поэтому дефолты кладём в один
-	// движковый _FallbackAtlas: цвет читается как есть, нормаль тоже (без sRGB-декода). Пиксели —
-	// BGRA (все каналы равны → порядок неважен). Материалы ссылаются по имени, атлас безразличен.
-	// dont_save: движковые дефолты пересоздаются кодом всегда — в файл сцены не идут (байтовые и
-	// так скипались бы по пустому source_path, но флаг — явный маркер, не побочный эффект).
-	TextureHandle* def_tex[] = {
-		texture_manager->CreateTexture("default_albedo",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0xFF })),   // белый
-		texture_manager->CreateTexture("default_normal",   "_FallbackAtlas", 4, 4, std::vector<std::byte>(4 * 4 * 4, std::byte{ 0x80 })),   // 128,128,128,128 (высота в альфе)
-		texture_manager->CreateTexture("default_orm",      "_FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF })),
-		texture_manager->CreateTexture("default_emissive", "_FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF })),
-	};
-	for (TextureHandle* h : def_tex) if (h) h->dont_save = true;
-
-	// Примитивы-дефолты движка (quad/sphere): генерируются кодом, поэтому dont_save (в models.json
-	// не идут). Раньше жили в игре — вынесены сюда, чтобы любая игра/сцена могла ссылаться на них по
-	// имени без своего кода генерации. Процедурные пути пусты → и без флага не сериализовались бы.
-	// КАНОН развёртки: начало текстуры top-left (как грузит SDL_GPU и как рисует ImGui) → V идёт
-	// ВНИЗ (v=0 у геометрического ВЕРХА). Верхние вершины (y=1) получают v=0 → верх картинки сверху.
-	// Развёртка при этом левосторонняя относительно нормали — компенсируется глобально одним
-	// cross(T,N) в main_pass.vert (не флаг). НЕ возвращай v-up: это перевернёт ориентированные текстуры.
-	engine_context->CreateModel<PosUVNormal>("quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
-		v = {
-			{ 0,0,0,  0,1,  0,0,1,  1,0,0 },
-			{ 1,0,0,  1,1,  0,0,1,  1,0,0 },
-			{ 1,1,0,  1,0,  0,0,1,  1,0,0 },
-			{ 0,1,0,  0,0,  0,0,1,  1,0,0 },
-		};
-		i = { 0, 1, 2, 0, 2, 3 };
-	}, AnchorShift::Keep, /*dont_save=*/true);
-
-	engine_context->CreateModel<PosUVNormal>("sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
-		const uint32_t stacks = 32;   // деления по широте
-		const uint32_t slices = 48;   // деления по долготе
-		const float R = 1.0f;
-		const float PI = 3.14159265358979323846f;
-
-		for (uint32_t i = 0; i <= stacks; ++i) {
-			float phi = PI * (float)i / (float)stacks;              // 0..π (полюс→полюс)
-			float cp = std::cos(phi), sp = std::sin(phi);
-			for (uint32_t j = 0; j <= slices; ++j) {
-				float theta = 2.0f * PI * (float)j / (float)slices; // 0..2π
-				float ct = std::cos(theta), st = std::sin(theta);
-
-				float nx = sp * ct, ny = cp, nz = sp * st;          // нормаль = точка на единичной сфере
-				PosUVNormal vert{};
-				vert.x = R * nx; vert.y = R * ny; vert.z = R * nz;
-				// U зеркалим (1-u): без этого надпись читалась ЗЕРКАЛЬНО (только изнутри сферы). V уже
-				// v-down (v=0 у полюса φ=0 = верх картинки) — канон, не трогаем. Тангенс — вдоль НОВОГО
-				// +U (∂pos/∂(−θ)) → знак θ-производной инвертируется, чтобы TBN совпал с cross(T,N).
-				vert.u = 1.0f - (float)j / (float)slices;
-				vert.v = (float)i / (float)stacks;
-				vert.nx = nx; vert.ny = ny; vert.nz = nz;
-				vert.tx = st; vert.ty = 0.0f; vert.tz = -ct;
-				v.push_back(vert);
-			}
-		}
-
-		const uint32_t row = slices + 1;
-		for (uint32_t i = 0; i < stacks; ++i) {
-			for (uint32_t j = 0; j < slices; ++j) {
-				uint32_t a = i * row + j;
-				uint32_t b = a + row;
-				idx.push_back(a);     idx.push_back(a + 1); idx.push_back(b);
-				idx.push_back(a + 1); idx.push_back(b + 1); idx.push_back(b);
-			}
-		}
-	}, AnchorShift::Keep, /*dont_save=*/true);
-
-	// Единичный куб (центр 0, полу-размер 1), v-down канон — как quad/sphere. Движковый примитив,
-	// чтобы любая игра ссылалась по имени "cube" без своего кода генерации (был копией в mygame).
-	// 6 граней, CCW наружу; тангенс = направление U; хранимый v = 1-параметр (позиция по исходному uv).
-	engine_context->CreateModel<PosUVNormal>("cube", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
-		struct FaceDef { float c[3], U[3], V[3], N[3]; };
-		static const FaceDef faces[6] = {
-			{{ 1,-1, 1}, { 0, 0,-2}, { 0, 2, 0}, { 1, 0, 0}},  // +X
-			{{-1,-1,-1}, { 0, 0, 2}, { 0, 2, 0}, {-1, 0, 0}},  // -X
-			{{-1, 1, 1}, { 2, 0, 0}, { 0, 0,-2}, { 0, 1, 0}},  // +Y
-			{{-1,-1,-1}, { 2, 0, 0}, { 0, 0, 2}, { 0,-1, 0}},  // -Y
-			{{-1,-1, 1}, { 2, 0, 0}, { 0, 2, 0}, { 0, 0, 1}},  // +Z
-			{{ 1,-1,-1}, {-2, 0, 0}, { 0, 2, 0}, { 0, 0,-1}},  // -Z
-		};
-		const float uv[4][2] = { {0,0}, {1,0}, {1,1}, {0,1} };
-		for (int f = 0; f < 6; ++f) {
-			const FaceDef& fd = faces[f];
-			float tx = fd.U[0], ty = fd.U[1], tz = fd.U[2];
-			const float tl = std::sqrt(tx*tx + ty*ty + tz*tz);
-			if (tl > 0.0f) { tx /= tl; ty /= tl; tz /= tl; }
-			const uint32_t vbase = static_cast<uint32_t>(v.size());
-			for (int q = 0; q < 4; ++q) {
-				PosUVNormal vert{};
-				vert.x = fd.c[0] + uv[q][0]*fd.U[0] + uv[q][1]*fd.V[0];
-				vert.y = fd.c[1] + uv[q][0]*fd.U[1] + uv[q][1]*fd.V[1];
-				vert.z = fd.c[2] + uv[q][0]*fd.U[2] + uv[q][1]*fd.V[2];
-				vert.u = uv[q][0]; vert.v = 1.0f - uv[q][1];   // v-down канон
-				vert.nx = fd.N[0]; vert.ny = fd.N[1]; vert.nz = fd.N[2];
-				vert.tx = tx;      vert.ty = ty;      vert.tz = tz;
-				v.push_back(vert);
-			}
-			idx.push_back(vbase + 0); idx.push_back(vbase + 1); idx.push_back(vbase + 2);
-			idx.push_back(vbase + 0); idx.push_back(vbase + 2); idx.push_back(vbase + 3);
-		}
-	}, AnchorShift::Keep, /*dont_save=*/true);
-
-	// Фон сцены (скайбокс/фрактал) движковым дефолтом больше НЕ является: модель/шейдеры/материал/
-	// текстура — ресурсы сцены (манифесты папки сцены), сам фон — сущность в её scene.json.
-	// Классический скайбокс — src/game/saved_scene/scene1, фрактал — src/mygame/saved_scene/scene_fractal.
-}
-
-// Движковый набор шейдеров: вершинники/фрагментники/compute + render-программы, которыми рисуются
-// штатные проходы. Раньше он ехал в манифесте сцены (game/saved_scene/scene1/shaders.json) — то есть каждая
-// сцена возила КОПИЮ движковой инфраструктуры, а сцена без неё оставалась без базового рендера.
-// Теперь это дефолтные ресурсы, как quad/sphere/cube и default_albedo: создаются кодом на старте,
-// у всех dont_save (в shaders.json не пишутся и оттуда не грузятся).
-//
-// Цена резидентности замерена зондом sandbox/ShaderVramProbe.cpp: 0 байт VRAM и на шейдер, и на
-// пайплайн; ~160 KB RAM драйвера на весь набор — против 5.3 MB у ОДНОЙ текстуры 1024² с мипами.
-// Поэтому «создаём всегда, даже если сцена этим не рисует» здесь ничего не стоит.
-//
-// Сцена объявляет в своём манифесте только СВОИ шейдеры — те, которых движок не предусматривает
-// (фрактальные фоны mygame: fractal_fs/anchor_surface_fs и их sp живут в манифесте своей сцены).
-//
-// Требует готовыми: пул геометрии (вершинники объявляют по нему usage буферов), буферы
-// (InitDefaultBufferUpdaters) и проходы (InitPasses) — sp ссылается на проход по имени.
-void Engine::InitDefaultShaders()
-{
-	using namespace DefaultBuffersNames;
-	using namespace ShaderBase;
-	namespace RP = DefaultRenderPassNamespace;
-
-	// Код-байндинги движкового набора (типы типовых пушей + именные) — ПЕРЕД созданием шейдеров:
-	// разбор маркеров //@push сверяется с реестром типов прямо на компиляции.
-	DefaultShaderProgramSet::SetDefaultPushes(engine_context);
-
-
-	// ── Fallback: материал с УДАЛЁННОЙ sp рисуется им (аналог untextured — цвет из params, без
-	//    текстур). Держим ОТДЕЛЬНОЙ тройкой, а не ссылкой на main_pass_vs/untextured_surface_fs
-	//    ниже: смысл fallback-а в том, чтобы пережить удаление любого шейдера из редактора.
-	//    Одинаковый с ними байткод дедуплицируется по хэшу SPIR-V — второго GPU-шейдера не будет. ──
-	engine_context->CreateVertexShader("_fallback_vs",
-		"../engine/shaders_code/main_pass/main_pass.vert.hlsl",
-		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, /*dont_save=*/true);
-	engine_context->CreateFragmentShader("_fallback_fs",
-		"../engine/shaders_code/main_pass/untextured/surface.hlsl", /*dont_save=*/true);
-	{
-		ShaderProgramDescription spd;
-		spd.BehavesAsOpaqueGeometry()->DoesNotCull();
-		engine_context->CreateShaderProgram("_Fallback", spd, RP::MAIN_PASS,
-			"_fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-			"_fallback_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
-			{ }, /*dont_save=*/true);   // текстур нет
-		batch_builder->SetFallbackShader("_Fallback");   // ПО ИМЕНИ: удаление fallback → промах → пустой рендер
-	}
-
-	// ── Вершинники. Пул один (PosUVNorm), различаются НАБОРОМ семантик: теневому и скайбоксу
-	//    хватает позиции, лишние стримы они не биндят (и не объявляют им VERTEX-usage). ──
-	engine_context->CreateVertexShader("main_pass_vs", "../engine/shaders_code/main_pass/main_pass.vert.hlsl",
-		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, /*dont_save=*/true);
-	engine_context->CreateVertexShader("shadow_vs", "../engine/shaders_code/shadow_pass/shadow_pass.vert.hlsl",
-		POS_UV_NORM_POOL, { POSITION }, /*dont_save=*/true);
-	engine_context->CreateVertexShader("skybox_vs", "../engine/shaders_code/skybox/skybox.vert.hlsl",
-		POS_UV_NORM_POOL, { POSITION }, /*dont_save=*/true);
-	engine_context->CreateVertexShader("debug_collider_vs", "../engine/shaders_code/debug/debug_collider.vert.hlsl",
-		POS_UV_NORM_POOL, { POSITION }, /*dont_save=*/true);
-
-	// ── Фрагментники ──
-	// Потолки раскладки вариантов уезжают в HLSL ДЕФАЙНАМИ, а не дублируются литералом: разъезд
-	// C++ и байткода тихо перемешал бы секции состояний. Дефайны входят в ключ кэша .spv, поэтому
-	// смена константы сама инвалидирует кэш. Набор отдаётся КАЖДОМУ fs, который включает пролог с
-	// таблицей UVL, — забыть один значит собрать его на дефолте #ifndef, без ошибки и без лога.
-	const ShaderDefines kVariantDefines = {
-		// Включает САМО переключение (чтение буферов состояний). Без него пролог собирается
-		// без них и показывает дефолт слота — так живут пользовательские surface из кода игры,
-		// которым эти буферы никто не биндит.
-		{ "TEXTURE_VARIANTS",    "1" },
-		{ "MAX_VARIATIVE_SLOTS", std::to_string(MAX_VARIATIVE_SLOTS) },
-		{ "MAX_SLOTS",           std::to_string(MAX_SLOTS) },
-		{ "MAX_UVL_BLOCKS",      std::to_string(MAX_UVL_BLOCKS) },
-	};
-	engine_context->CreateFragmentShader("main_surface_fs",        "../engine/shaders_code/main_pass/surface.hlsl", /*dont_save=*/true, kVariantDefines);
-	engine_context->CreateFragmentShader("untextured_surface_fs",  "../engine/shaders_code/main_pass/untextured/surface.hlsl", /*dont_save=*/true);
-	engine_context->CreateFragmentShader("transparent_surface_fs", "../engine/shaders_code/transparent_pass/surface.hlsl", /*dont_save=*/true, kVariantDefines);
-	engine_context->CreateFragmentShader("shadow_fs",              "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl", /*dont_save=*/true);
-	engine_context->CreateFragmentShader("skybox_fs",              "../engine/shaders_code/skybox/skybox.frag.hlsl", /*dont_save=*/true);
-	engine_context->CreateFragmentShader("debug_collider_fs",      "../engine/shaders_code/debug/debug_collider.frag.hlsl", /*dont_save=*/true);
-
-	// ── Compute-ШЕЙДЕРЫ (не программы). Программы (csp) держат указатели на буферы/атласы и
-	//    создаются игрой (DefaultShaderProgramSet::Set*Programs); сюда идут только сами CSD,
-	//    на которые те ссылаются по имени. ──
-	engine_context->CreateComputeShader("bloom_prefilter_cs", "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl", /*dont_save=*/true);
-	engine_context->CreateComputeShader("bloom_down_cs",      "../engine/shaders_code/comp/bloom_down.comp.hlsl", /*dont_save=*/true);
-	engine_context->CreateComputeShader("bloom_up_cs",        "../engine/shaders_code/comp/bloom_up.comp.hlsl", /*dont_save=*/true);
-	engine_context->CreateComputeShader("bloom_composite_cs", "../engine/shaders_code/comp/bloom_composite.comp.hlsl", /*dont_save=*/true);
-	engine_context->CreateComputeShader("ssao_cs",            "../engine/shaders_code/comp/ssao.comp.hlsl", /*dont_save=*/true);
-	engine_context->CreateComputeShader("ssao_blur_h_cs",     "../engine/shaders_code/comp/ssao_blur_h.comp.hlsl", /*dont_save=*/true);
-	engine_context->CreateComputeShader("ssao_blur_v_cs",     "../engine/shaders_code/comp/ssao_blur_v.comp.hlsl", /*dont_save=*/true);
-	engine_context->CreateComputeShader("ao_composite_cs",    "../engine/shaders_code/comp/ao_composite.comp.hlsl", /*dont_save=*/true);
-	engine_context->CreateComputeShader("fog_cs",             "../engine/shaders_code/comp/fog.comp.hlsl", /*dont_save=*/true);
-	engine_context->CreateComputeShader("culling_clear_cs",   "../engine/shaders_code/comp/culling_clear.comp.hlsl", /*dont_save=*/true);
-	engine_context->CreateComputeShader("culling_pib_cs",     "../engine/shaders_code/comp/culling_pib.comp.hlsl", /*dont_save=*/true);
-
-	// ── Render-программы. Имена — короткие, в стиле URP: их видно в списке шейдеров редактора
-	//    и в materials.json, читаются они чаще, чем пишутся. Подчёркивание = служебная программа,
-	//    которую не выбирают руками (движковое соглашение: _FallbackAtlas, _staging, _cameraBuffer).
-	//    "LitColor" — тот же свет и тот же PBR, что у Lit, но БЕЗ карт: цвет берётся из params
-	//    материала. Именно "Lit", а не "Unlit": освещение здесь считается полностью. ──
-	{
-		ShaderProgramDescription spd;
-		spd.BehavesAsOpaqueGeometry();
-		// Оба буфера вариантов — во ФРАГМЕНТНОМ списке, и это не вкусовщина: вершинник
-		// main_pass_vs общий не только с LitColor/LitTransparent, но и с программами ИГР
-		// (фрактальные поверхности mygame). Буфер в вершинном списке обязана была бы биндить
-		// КАЖДАЯ такая sp — иначе «Missing vertex storage buffer binding». Поэтому вершинник
-		// отдаёт лишь row (он у него и так есть), а префикс читает фрагментник — и платят за
-		// это только те sp, которым варианты нужны.
-		engine_context->CreateShaderProgram("Lit", spd, RP::MAIN_PASS,
-			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-			"main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
-			{ TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive },
-			/*dont_save=*/true);
-
-		// Тот же vs и те же буферы, но fs без текстур: материал без карт рисуется цветом из params.
-		// Без буферов вариантов вовсе: у текстурелесс материала их нет по определению.
-		engine_context->CreateShaderProgram("LitColor", spd, RP::MAIN_PASS,
-			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-			"untextured_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
-			{ }, /*dont_save=*/true);
-	}
-	{
-		// Прозрачные: глубину читают, но НЕ пишут (иначе перекрывали бы друг друга), блендинг включён.
-		// Из света берут только _lightBuffer — теневые карты прозрачные не читают.
-		ShaderProgramDescription spd;
-		spd.BehavesAsTransparentGeometry();
-		engine_context->CreateShaderProgram("LitTransparent", spd, RP::TRANSPARENT_PASS,
-			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
-			"transparent_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
-			{ TextureSlotRole::Albedo, TextureSlotRole::Normal }, /*dont_save=*/true);
-	}
-	{
-		// Теневой: камера СВЕТОВАЯ (DefaultLightCameraBuffer вместо _cameraBuffer), цвета нет.
-		ShaderProgramDescription spd;
-		spd.BehavesAsShadowCaster();
-		engine_context->CreateShaderProgram("ShadowCaster", spd, RP::SHADOW_PASS,
-			"shadow_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-			"shadow_fs", { }, { }, /*dont_save=*/true);
-	}
-	{
-		// Каркас коллайдеров: линии поверх картинки, глубина не участвует вовсе.
-		ShaderProgramDescription spd;
-		spd.BehavesAsOpaqueGeometry()->IgnoresDepth()->AsLineList();
-		engine_context->CreateShaderProgram("Wireframe", spd, RP::DEBUG_PASS,
-			"debug_collider_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
-			"debug_collider_fs", { }, { }, /*dont_save=*/true);
-	}
-	// Сплат ВЫКЛЮЧЕН вместе со своим проходом (см. Engine::Init). Держать sp живой нельзя:
-	// её render_pass_name указывал бы на незарегистрированный SPLAT_PASS, а PipeManager на такое
-	// ругается на каждой сборке пайплайна. Включать — вместе с SetDefaultSplatPass.
-	//
-	//	{
-	//		ShaderProgramDescription spd;
-	//		spd.BehavesAsOpaqueGeometry()->AsPointList();
-	//		engine_context->CreateShaderProgram("Splat", spd, RP::SPLAT_PASS,
-	//			"splat_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
-	//			"splat_fs", { }, { }, /*dont_save=*/true);
-	//	}
-	{
-		// Скайбокс: transformless (без Positions, PIB=-1) — из буферов ему нужна только камера.
-		// z=w в вершиннике даёт глубину РОВНО на клире, поэтому LESS не пройдёт — нужен LESS_OR_EQUAL.
-		ShaderProgramDescription spd;
-		spd.BehavesAsOpaqueGeometry()->ReadsDepthOnly()->WithDepthCompare(SDL_GPU_COMPAREOP_LESS_OR_EQUAL);
-		engine_context->CreateShaderProgram("Skybox", spd, RP::MAIN_PASS,
-			"skybox_vs", { DEFAULT_CAMERA_BUFFER },
-			"skybox_fs", { }, { }, /*dont_save=*/true);
-	}
-
-	{
-		// UI-оверлей: рисует энтити, которые emit-ит UI_Yoga. Программа движковая — раньше жила
-		// в игре (DefaultShaderProgramSet::SetUIProgram), хотя сам UI_Yoga давно подсистема движка,
-		// и без неё UI не рисовался бы вообще. VS тянет POSITION+UV (юнит-квад), матрица даёт NDC;
-		// FS — заливка albedo (без света) + текст. Объявление FS-буферов здесь = их usage, по
-		// которому BakePending эти буферы и создаёт. Слот Albedo = фон узла.
-		engine_context->CreateVertexShader("ui_vs", "../engine/shaders_code/ui/ui.vert.hlsl",
-			POS_UV_NORM_POOL, { POSITION, UV }, /*dont_save=*/true);
-		engine_context->CreateFragmentShader("ui_fs", "../engine/shaders_code/ui/ui.frag.hlsl", /*dont_save=*/true, kVariantDefines);
-
-		ShaderProgramDescription spd;
-		spd.BehavesAsUIOverlay();
-		engine_context->CreateShaderProgram("UI", spd, RP::UI_PASS,
-			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_INSTANCE_BUFFER },
-			// Буферы вариантов — в ХВОСТ фрагментного списка (t6..t8 после GlyphUVL t5). Вершинный
-			// не трогаем: ui_vs и так отдаёт row, а буфер в его списке пришлось бы биндить всем.
-			"ui_fs", { UI_TEXT_RANK_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER,
-			           DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
-			{ TextureSlotRole::Albedo }, /*dont_save=*/true);
-	}
-
-
 }
 
 void Engine::InitDefaultBufferUpdaters()
@@ -609,14 +261,6 @@ void Engine::InitPasses()
 	}
 }
 
-void Engine::InitUICommands()
-{
-	// Регистрация билтин UI-команд вынесена в DefaultCommandSet (свободные функции,
-	// как DefaultUpdateSet/DefaultRenderPassSet) — лямбды stateless, полей Engine не касаются.
-	DefaultCommandSet::SetAll(*input_manager);
-}
-
-
 void Engine::SetGameIterate(std::function<void()> cb)
 {
 	thread_controller->SetGameIterationCallback(std::move(cb));
@@ -646,7 +290,7 @@ int Engine::Run()
 			if (event.type == SDL_EVENT_WINDOW_RESIZED)
 				// window-пара из события; render-пара (0,0) пока не используется — внутреннее
 				// разрешение зафиксировано в движке, картинка тянется на окно present-блитом.
-				OnWindowResized(event.window.data1, event.window.data2, 0, 0);
+				OnWindowResized(event.window.data1, event.window.data2);
 
 			// Весь игровой ввод — в очередь IM, дренит sim-поток.
 			input_manager->HandleEvent(event);
@@ -675,9 +319,10 @@ Engine::~Engine()
 	// менеджеры, по которым ходят потоки конвейера. Повторный вызов после Run() — no-op.
 	thread_controller->Shutdown();
 
-	ImGui_ImplSDLGPU3_Shutdown();
-	ImGui_ImplSDL3_Shutdown();
-	ImGui::DestroyContext();
+	UI_ImGui::Shutdown();
+
+	// Первым: он не владеет ничем, а держит сырые ссылки на всё, что удаляется ниже.
+	delete engine_context;
 
 	delete buffer_manager;
 	delete texture_manager;
@@ -700,11 +345,15 @@ Engine::~Engine()
 	delete input_manager;
 	delete texture_loader;
 	delete font_manager;   // dtor: TTF_CloseFont всех шрифтов + TTF_Quit
+	delete batch_builder;
 	delete pib_data_module;
 	delete transform_data_module;
+	delete instance_data_module;
 	delete light_data_module;
-	delete ui_data_module;
+	delete indirect_data_module;
+	delete bound_sphere_data_module;
 	delete tex_state_data_module;
+	delete ui_data_module;
 	delete ui_yoga;   // YGNodeFreeRecursive дерева + YGConfigFree (в его dtor)
 	delete graphics_config;
 

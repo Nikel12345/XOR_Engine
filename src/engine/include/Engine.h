@@ -190,8 +190,7 @@ public:
 
     // Событие ОС (MAIN-поток): публикует новый размер ОКНА, и только его. Пересоздание таргетов из
     // этого следует, но делает его гейт RenderFunc — окно там лишь один из входов наравне с конфигом.
-    // render_w/h не используются (SDL отдаёт их для HiDPI) — оставлены под будущую симметрию.
-    void OnWindowResized(Sint32 window_w, Sint32 window_h, Sint32 render_w, Sint32 render_h);
+    void OnWindowResized(Sint32 window_w, Sint32 window_h);
     ~Engine();
 
     const double targetUPS = 1000.0 / 60.0;
@@ -207,15 +206,6 @@ private:
 
 	void InitDefaultBufferUpdaters();
     void InitPasses();
-    void InitUICommands();
-    // Движковые дефолтные текстуры (albedo/normal/orm/emissive) в _FallbackAtlas — чтобы редактор
-    // мог создавать материалы и заполнять слоты по ролям без ассетов игры.
-    void InitDefaultResources();
-
-    // Движковый набор шейдеров (vs/fs/cs + render-программы штатных проходов) и их push-константы.
-    // Всё с dont_save: сцена их не возит и не может потерять. Только СВОИ шейдеры сцена объявляет
-    // в манифесте. Зовётся после InitDefaultResources — нужны пул, буферы и проходы.
-    void InitDefaultShaders();
 
     PrepassTimingReport PrepareFuncPrepassDepended_Original(uint8_t slot);
     PrepassTimingReport PrepareFuncPrepassDepended_Optimized(uint8_t slot);
