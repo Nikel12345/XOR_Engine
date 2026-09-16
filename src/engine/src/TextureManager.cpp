@@ -766,7 +766,7 @@ size_t TextureManager::ClearSceneTextures()
         if (h && !HasTag(h->tags, ResourceTag::CodeOwned) && !h->source_path.empty())
             doomed.push_back(TextureId{ i });
     }
-    for (TextureId id : doomed) { DeleteTextureHandle(id, NameSlot::Keep); ReleasePreview(id); }
+    for (TextureId id : doomed) { DeleteTextureHandle(id, NameSlot::Release); ReleasePreview(id); }
     return doomed.size();
 }
 

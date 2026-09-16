@@ -265,11 +265,11 @@ size_t ShaderManager::ClearSceneShaders()
 
     for (int32_t i = 0; i < shader_programs.Count(); ++i) {
         const ShaderProgram* sp = shader_programs.At(i).object.get();
-        if (sp && !HasTag(sp->tags, ResourceTag::CodeOwned)) removed += shader_programs.Clear(ShaderProgramId{ i }) ? 1 : 0;
+        if (sp && !HasTag(sp->tags, ResourceTag::CodeOwned)) removed += shader_programs.Drop(ShaderProgramId{ i }) ? 1 : 0;
     }
     for (int32_t i = 0; i < compute_shader_programs.Count(); ++i) {
         const ComputeShaderProgram* csp = compute_shader_programs.At(i).object.get();
-        if (csp && !HasTag(csp->tags, ResourceTag::CodeOwned)) removed += compute_shader_programs.Clear(ComputeProgramId{ i }) ? 1 : 0;
+        if (csp && !HasTag(csp->tags, ResourceTag::CodeOwned)) removed += compute_shader_programs.Drop(ComputeProgramId{ i }) ? 1 : 0;
     }
 
     auto doomed = [](const auto& registry) {
@@ -281,9 +281,9 @@ size_t ShaderManager::ClearSceneShaders()
         }
         return out;
     };
-    for (VertexShaderId id : doomed(vertex_shaders))   removed += DeleteVertexShader(id, NameSlot::Keep) ? 1 : 0;
-    for (FragmentShaderId id : doomed(fragment_shaders)) removed += DeleteFragmentShader(id, NameSlot::Keep) ? 1 : 0;
-    for (ComputeShaderId id : doomed(compute_shaders))  removed += DeleteComputeShader(id, NameSlot::Keep) ? 1 : 0;
+    for (VertexShaderId id : doomed(vertex_shaders))   removed += DeleteVertexShader(id, NameSlot::Release) ? 1 : 0;
+    for (FragmentShaderId id : doomed(fragment_shaders)) removed += DeleteFragmentShader(id, NameSlot::Release) ? 1 : 0;
+    for (ComputeShaderId id : doomed(compute_shaders))  removed += DeleteComputeShader(id, NameSlot::Release) ? 1 : 0;
 
     if (removed) {
         dirty_graphics_pipelines = true;
