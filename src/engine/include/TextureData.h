@@ -6,8 +6,6 @@
 #include "ResourceTags.h"
 #include "ResourceId.h"
 
-// Конвенция упаковки ИСХОДНОГО файла: канон движка — G несёт linear roughness, альфа нормал-карты
-// несёт height. Инверсия формат-независима: G = индекс 1, A = 3 и в RGBA, и в BGRA.
 enum class ChannelConvention {
 	AsIs,
 	SmoothnessInGreen,   // G = smoothness → инвертируется в roughness
@@ -15,19 +13,18 @@ enum class ChannelConvention {
 };
 
 struct TextureData {
-	uint32_t uv_packed_offset = 0;  // unorm16 × 2: offset_x в low, offset_y в high
-	uint32_t uv_packed_scale  = 0;  // unorm16 × 2: scale_x в low, scale_y в high
-	uint32_t layer            = 0;
-	uint32_t layer_span       = 1;   // подряд идущих слоёв от layer: 1 у текстуры, 6 у кубмапы
+	uint16_t uv_offset_x = 0;   // unorm16 от стороны атласа
+	uint16_t uv_offset_y = 0;
+	uint16_t uv_scale_x = 0;
+	uint16_t uv_scale_y = 0;
+	uint32_t layer = 0;
+	uint32_t layer_span = 1;
 };
-
 
 struct TextureAtlas{
 	ResourceTag tags = ResourceTag::None;
 
-	std::vector<TextureData*> textures;   // НЕвладеющий; владелец записей — сами хэндлы
-	// .texture пуст до бейка, поэтому копировать биндинг на setup нельзя — держи TextureAtlas*
-	// и резолви на исполнении.
+	std::vector<TextureData*> textures;
 	SDL_GPUTextureSamplerBinding texture_binding;
 	SDL_GPUTextureCreateInfo tci{};
 	std::string name;

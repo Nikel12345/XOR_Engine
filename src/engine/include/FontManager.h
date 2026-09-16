@@ -26,10 +26,12 @@ struct GlyphInfo {
 // line_height, — и имя обязано это говорить. Общего у них только 12 байт UVL, и те приходят из
 // TextureData; сводить их в один тип значит снова завести слово с двумя хозяевами.
 struct alignas(16) GlyphUVL {
-	uint32_t uv_packed_offset = 0;
-	uint32_t uv_packed_scale  = 0;
-	uint32_t layer            = 0;
-	uint32_t advance_bits     = 0;   // биты float: advance / line_height
+	uint16_t uv_offset_x  = 0;
+	uint16_t uv_offset_y  = 0;
+	uint16_t uv_scale_x   = 0;
+	uint16_t uv_scale_y   = 0;
+	uint32_t layer        = 0;
+	uint32_t advance_bits = 0;   // биты float: advance / line_height
 };
 static_assert(sizeof(GlyphUVL) == 16, "GlyphUVL using in shader as uint4");
 

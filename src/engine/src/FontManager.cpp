@@ -152,7 +152,7 @@ void FontManager::StoreGlyphUVL(FontData* font, BufferManager* bm, UploadTask* t
 	const float inv_lh = font->line_height > 0 ? 1.0f / static_cast<float>(font->line_height) : 0.0f;
 	for (const GlyphInfo& g : font->glyphs) {
 		const TextureData td = g.handle ? g.handle->texture_data : TextureData{};
-		GlyphUVL entry{ td.uv_packed_offset, td.uv_packed_scale, td.layer,
+		GlyphUVL entry{ td.uv_offset_x, td.uv_offset_y, td.uv_scale_x, td.uv_scale_y, td.layer,
 		                std::bit_cast<uint32_t>(static_cast<float>(g.advance) * inv_lh) };
 		bm->UploadToTransferBuffer(task, sizeof(GlyphUVL), &entry);
 	}

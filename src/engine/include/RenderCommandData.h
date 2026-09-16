@@ -39,14 +39,22 @@ struct ModelBatchData {
     SubMeshDraw submesh;
 };
 
+// Должно совпадать с material_api.hlsl: шейдер читает блок как uint4 и распаковывает
+// unpackUnorm2x16, поэтому пары x/y обязаны лежать в одном слове.
 struct alignas(16) UVL_Block {
-    uint32_t uv_packed_offset = 0;
-    uint32_t uv_packed_scale = 0;
+    uint16_t uv_offset_x = 0;
+    uint16_t uv_offset_y = 0;
+    uint16_t uv_scale_x = 0;
+    uint16_t uv_scale_y = 0;
     uint32_t layer = 0;
 };
+static_assert(std::endian::native == std::endian::little,
+              "UVL_Block ложится в GPU-слова побайтно");
+static_assert(sizeof(UVL_Block) == 4 * sizeof(uint32_t));
 
-inline UVL_Block MakeUVL(const TextureData& td) {
-    return { td.uv_packed_offset, td.uv_packed_scale, td.layer };
+inline UVL_Block MakeUVL(const TextureData& placement) {
+    return { placement.uv_offset_x, placement.uv_offset_y,
+             placement.uv_scale_x,  placement.uv_scale_y, placement.layer };
 }
 
 // Должно совпадать с material_api.hlsl.

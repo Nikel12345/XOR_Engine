@@ -288,10 +288,11 @@ void TextureManager::RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCre
     QueueDeleteTexture(old_tex);
 }
 
-static uint32_t PackUnorm16x2(float x, float y) {
-    uint16_t lx = static_cast<uint16_t>(SDL_clamp(x, 0.0f, 1.0f) * 65535.0f + 0.5f);
-    uint16_t ly = static_cast<uint16_t>(SDL_clamp(y, 0.0f, 1.0f) * 65535.0f + 0.5f);
-    return static_cast<uint32_t>(lx) | (static_cast<uint32_t>(ly) << 16);
+static uint16_t PackUnorm16(float value) {
+    return safe_u32_u16(safe_f_u32(std::floor(SDL_clamp(value, 0.0f, 1.0f) * 65535.0f + 0.5f)));
+}
+static float UnpackUnorm16(uint16_t value) {
+    return static_cast<float>(value) / 65535.0f;
 }
 
 void TextureManager::CreateUploadTask(TextureId id, TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name, uint32_t layer_span)
@@ -365,8 +366,10 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
             packer.layers[base + i].free_spaces.clear();
 
         TextureData& placement = task.target_handle->texture_data;
-        placement.uv_packed_offset = PackUnorm16x2(0.0f, 0.0f);
-        placement.uv_packed_scale  = PackUnorm16x2(1.0f, 1.0f);   // != 0 → запись размещена
+        placement.uv_offset_x = 0;
+        placement.uv_offset_y = 0;
+        placement.uv_scale_x  = PackUnorm16(1.0f);   // != 0 → запись размещена
+        placement.uv_scale_y  = PackUnorm16(1.0f);
         placement.layer = base;
 
         preview.Request(task.id, atlas, 0, 0, src_width, src_height, base);
@@ -417,12 +420,10 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     }
 
     TextureData& placement = task.target_handle->texture_data;
-    const float offset_u = (float)(outer.x + pad_x) / (float)atlas->width;
-    const float offset_v = (float)(outer.y + pad_y) / (float)atlas->height;
-    const float scale_u  = (float)src_width  / (float)atlas->width;
-    const float scale_v  = (float)src_height / (float)atlas->height;
-    placement.uv_packed_offset = PackUnorm16x2(offset_u, offset_v);
-    placement.uv_packed_scale  = PackUnorm16x2(scale_u, scale_v);
+    placement.uv_offset_x = PackUnorm16((float)(outer.x + pad_x) / (float)atlas->width);
+    placement.uv_offset_y = PackUnorm16((float)(outer.y + pad_y) / (float)atlas->height);
+    placement.uv_scale_x  = PackUnorm16((float)src_width  / (float)atlas->width);
+    placement.uv_scale_y  = PackUnorm16((float)src_height / (float)atlas->height);
     placement.layer = placed_layer;
 
     preview.Request(task.id, atlas, outer.x + pad_x, outer.y + pad_y, src_width, src_height, placed_layer);
@@ -466,13 +467,11 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
 }
 
 static rectpack2D::rect_xywh _DecodeOuterRect(const TextureData& placement, const TextureAtlas* atlas) {
-    if (placement.uv_packed_scale == 0) return rectpack2D::rect_xywh(0, 0, 0, 0);
-    auto unpack_lo = [](uint32_t packed) { return (float)(packed & 0xFFFFu) / 65535.0f; };
-    auto unpack_hi = [](uint32_t packed) { return (float)(packed >> 16)     / 65535.0f; };
-    const int inner_width  = (int)(unpack_lo(placement.uv_packed_scale)  * atlas->width  + 0.5f);
-    const int inner_height = (int)(unpack_hi(placement.uv_packed_scale)  * atlas->height + 0.5f);
-    const int inner_x      = (int)(unpack_lo(placement.uv_packed_offset) * atlas->width  + 0.5f);
-    const int inner_y      = (int)(unpack_hi(placement.uv_packed_offset) * atlas->height + 0.5f);
+    if (placement.uv_scale_x == 0) return rectpack2D::rect_xywh(0, 0, 0, 0);
+    const int inner_width  = (int)(UnpackUnorm16(placement.uv_scale_x)  * atlas->width  + 0.5f);
+    const int inner_height = (int)(UnpackUnorm16(placement.uv_scale_y)  * atlas->height + 0.5f);
+    const int inner_x      = (int)(UnpackUnorm16(placement.uv_offset_x) * atlas->width  + 0.5f);
+    const int inner_y      = (int)(UnpackUnorm16(placement.uv_offset_y) * atlas->height + 0.5f);
     const int pad_x = ((uint32_t)inner_width  >= atlas->width)  ? 0 : atlas->padding;
     const int pad_y = ((uint32_t)inner_height >= atlas->height) ? 0 : atlas->padding;
 
@@ -633,7 +632,7 @@ bool TextureManager::DeleteTextureHandle(TextureId id, NameSlot slot)
         auto& placements = atlas->textures;
         placements.erase(std::remove(placements.begin(), placements.end(), placement), placements.end());
 
-        for (uint32_t i = 0; placement->uv_packed_scale != 0 && i < placement->layer_span; ++i) {
+        for (uint32_t i = 0; placement->uv_scale_x != 0 && i < placement->layer_span; ++i) {
             const std::pair<TextureAtlas*, uint32_t> key{ atlas, placement->layer + i };
             if (std::find(pending_region_release_.begin(), pending_region_release_.end(), key)
                 == pending_region_release_.end())
