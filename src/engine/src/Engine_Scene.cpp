@@ -674,10 +674,7 @@ static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 			TextureSlotRole role;
 			if (!RoleFromStr(JsonStr(t, "role"), role)) return;
 			std::vector<TextureName> names;
-			if (yyjson_val* arr = yyjson_obj_get(t, "textures"))
-				ForEachVal(arr, [&](yyjson_val* s) { if (const char* str = yyjson_get_str(s)) names.emplace_back(str); });
-			else
-				names.emplace_back(JsonStr(t, "texture"));
+			ForEachIn(t, "textures", [&](yyjson_val* s) { if (const char* str = yyjson_get_str(s)) names.emplace_back(str); });
 			me.textures.emplace_back(role, std::move(names));
 		});
 

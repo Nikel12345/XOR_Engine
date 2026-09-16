@@ -38,19 +38,27 @@
             "textures": [
                 {
                     "role": "Albedo",
-                    "texture": "iron"
+                    "textures": [
+                        "iron"
+                    ]
                 },
                 {
                     "role": "Normal",
-                    "texture": "default_normal"
+                    "textures": [
+                        "default_normal"
+                    ]
                 },
                 {
                     "role": "ORM",
-                    "texture": "default_orm"
+                    "textures": [
+                        "default_orm"
+                    ]
                 },
                 {
                     "role": "Emissive",
-                    "texture": "default_emissive"
+                    "textures": [
+                        "default_emissive"
+                    ]
                 }
             ]
         }
