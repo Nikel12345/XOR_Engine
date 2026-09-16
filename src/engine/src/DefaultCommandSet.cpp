@@ -167,9 +167,10 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
 				// Номер варианта в слоте; 0 — дефолт. Вне диапазона (список успели укоротить
 				// между кадром UI и исполнением) — тихо игнорируем: это не ошибка, а гонка.
-				std::vector<TextureName>& variants = m->textures[static_cast<TextureSlotRole>(c->role)];
-				if (variants.empty()) variants.emplace_back(c->texture);
-				else if (c->variant < variants.size()) variants[c->variant] = c->texture;
+				const TextureId tid = ctx->GetTextureManager()->InternTexture(c->texture);
+				std::vector<TextureId>& variants = m->textures[static_cast<TextureSlotRole>(c->role)];
+				if (variants.empty()) variants.push_back(tid);
+				else if (c->variant < variants.size()) variants[c->variant] = tid;
 				// Новый слот → его атлас сэмплится (сбор usage-флагов + проверка намерения).
 				ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->material);
 			}
@@ -184,9 +185,9 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 		{
 			const CreateMaterialCmd* c = static_cast<const CreateMaterialCmd*>(data);
 			ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram("Lit");
-			std::vector<std::pair<TextureSlotRole, std::vector<TextureName>>> texs;
+			std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> texs;
 			if (sp) for (TextureSlotRole role : sp->required_slots)
-				texs.emplace_back(role, std::vector<TextureName>{ DefaultTextureForRole(role) });
+				texs.emplace_back(role, std::vector<TextureId>{ ctx->GetTextureManager()->InternTexture(DefaultTextureForRole(role)) });
 			Material* m = ctx->GetMaterialManager()->CreateMaterial(c->name, std::move(texs), std::vector<ShaderName>{ "Lit" });
 			if (m) ctx->SetMaterialParams(m, "Lit", OpaqueMaterialParams{});   // блоб адресован Lit: её MaterialBlock
 			ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->name);
@@ -209,7 +210,7 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 					m->shader_programs.push_back(SpBinding{ c->shader, nullptr, {} });
 					if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader))
 						for (TextureSlotRole role : sp->required_slots)
-							if (!m->textures.count(role)) m->textures[role] = { DefaultTextureForRole(role) };
+							if (!m->textures.count(role)) m->textures[role] = { ctx->GetTextureManager()->InternTexture(DefaultTextureForRole(role)) };
 					ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->material);
 					ctx->GetBatchBuilder()->SetDirtyBatches(true);
 				}
@@ -242,8 +243,8 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 		{
 			const MaterialVariantCmd* c = static_cast<const MaterialVariantCmd*>(data);
 			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
-				std::vector<TextureName>& variants = m->textures[static_cast<TextureSlotRole>(c->role)];
-				variants.push_back(variants.empty() ? TextureName{} : variants[0]);
+				std::vector<TextureId>& variants = m->textures[static_cast<TextureSlotRole>(c->role)];
+				variants.push_back(variants.empty() ? TextureId{} : variants[0]);
 				ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->material);
 				// Структурная правка: сменились длина таблицы UVL и нумерация ячеек секции.
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
@@ -303,13 +304,14 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 		{
 			const UpsertTextureCmd* c = static_cast<const UpsertTextureCmd*>(data);
 			if (!c->name.empty() && !c->atlas.empty() && !c->path.empty()) {
-				if (!c->old_name.empty() && c->old_name != c->name) {
-					ctx->GetTextureManager()->DeleteTextureHandle(c->old_name);   // переименование → снять старую
-					ctx->GetTextureManager()->ReleasePreview(c->old_name);        // старого имени больше нет — превью тоже
-				}
-				ctx->GetTextureManager()->DeleteTextureHandle(c->name);           // replace под новым именем (no-op, если нет)
-				// ReleasePreview(name) НЕ зовём: это replace того же имени, слот превью должен пережить
-				// пересоздание (иначе плитка мигнёт затычкой до нового блита).
+				TextureManager* tm = ctx->GetTextureManager();
+				// Переименование = правка имени ЯЧЕЙКИ: материалы держат её id, поэтому их ссылки
+				// переживают его сами — снимать и перевешивать больше нечего.
+				if (!c->old_name.empty() && c->old_name != c->name)
+					tm->RenameTexture(tm->TextureIdOf(c->old_name), c->name);
+				tm->DeleteTextureHandle(tm->InternTexture(c->name));   // replace в той же ячейке (no-op, если пуста)
+				// ReleasePreview НЕ зовём: ячейка та же, слот превью должен пережить пересоздание
+				// (иначе плитка мигнёт затычкой до нового блита).
 				// Куб — это ОДИН хэндл на 6 слоёв, поэтому и снятие выше, и превью, и переименование
 				// работают для него теми же строками, что и для обычной текстуры: различие ровно в
 				// том, каким методом читается файл.
@@ -320,13 +322,15 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 			delete c;
 		});
 
-	// Удаление текстуры — снять хэндл (материалы по имени → dummy) + пересборка.
+	// Удаление текстуры — снять хэндл (материалы → dummy) + пересборка.
 	im.RegisterCommand(CommandId::DeleteTexture,
 		[](EngineContext* ctx, const void* data)
 		{
 			const DeleteTextureCmd* c = static_cast<const DeleteTextureCmd*>(data);
-			ctx->GetTextureManager()->DeleteTextureHandle(c->name);
-			ctx->GetTextureManager()->ReleasePreview(c->name);   // реальное удаление → освободить превью-ячейку
+			TextureManager* tm = ctx->GetTextureManager();
+			const TextureId id = tm->TextureIdOf(c->name);
+			tm->DeleteTextureHandle(id);
+			tm->ReleasePreview(id);   // реальное удаление → освободить превью-ячейку
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
 		});

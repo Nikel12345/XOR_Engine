@@ -83,7 +83,7 @@ private:
 		const MaterialComponent& material_component, const ModelComponent& model_component);
 	void RemoveEntityFromBatches(Entity entity);
 
-	std::string dummy_texture_name;
+	TextureId dummy_texture;
 	std::string fallback_shader_name;
 	std::unordered_map<Entity, std::vector<PibSlot>> entity_slots;
 

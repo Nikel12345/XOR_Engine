@@ -23,7 +23,7 @@ struct SpBinding {
 
 struct Material {
     // Порядок ролей задаёт нумерацию ячеек состояний, поэтому контейнер обязан быть упорядоченным.
-    std::map<TextureSlotRole, std::vector<TextureName>> textures;
+    std::map<TextureSlotRole, std::vector<TextureId>> textures;
 
     std::vector<SpBinding> shader_programs;
 

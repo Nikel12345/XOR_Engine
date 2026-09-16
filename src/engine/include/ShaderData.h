@@ -86,14 +86,14 @@ struct ShaderProgram {
 
 struct ComputeShaderProgram {
     using ComputeRWTextureBindingParametr = ::ComputeRWTextureBindingParametr;
-    using ComputeRWTextureBinding         = ::ComputeRWTextureBindingParametr;
+    using ComputeRWTextureBinding         = ::ComputeRWTextureBinding;
 
     std::string cs_name;
     std::vector<BufferDataName> rw_storage_buffer_names;
     std::vector<BufferDataName> ro_storage_buffer_names;
-    std::vector<ComputeRWTextureBindingParametr> rw_storage_textures;
-    std::vector<AtlasName> ro_storage_texture_names;
-    std::vector<AtlasName> texture_sampler_names;
+    std::vector<ComputeRWTextureBinding> rw_storage_textures;
+    std::vector<AtlasId> ro_storage_texture_ids;
+    std::vector<AtlasId> texture_sampler_ids;
 
     ComputePassName compute_pass_name;
     std::shared_ptr<SDL_GPUComputePipeline> pipeline;

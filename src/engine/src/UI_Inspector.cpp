@@ -179,8 +179,11 @@ namespace {
         const auto& specs = ParamsSpecRegistry::Materials().All();
 
         std::vector<std::string> texNames;                   // значения комбобокса текстур — по алфавиту
-        for (auto& [n, h] : ctx->GetTextureManager()->GetTextureHandles())
-            if (h && (g_show_internal || !HasTag(h->tags, ResourceTag::System))) texNames.push_back(n);
+        const TextureRegistry& treg = ctx->GetTextureManager()->Textures();
+        for (uint32_t ti = 1; ti < treg.Count(); ++ti) {
+            const TextureRegistry::Cell& c = treg.At(ti);
+            if (c.object && (g_show_internal || !HasTag(c.object->tags, ResourceTag::System))) texNames.push_back(c.name);
+        }
         std::sort(texNames.begin(), texNames.end());
 
         for (size_t si = 0; si < mat->shader_programs.size(); ++si) {
@@ -292,7 +295,8 @@ namespace {
                     // Комбобокс — ровно один, на показанный номер. Роль без текстур показываем
                     // пустой строкой номера 0: назначить ей текстуру можно тут же.
                     // БЕЗ Indent: комбобокс встаёт по левому краю, вровень со строкой роли над ним.
-                    const std::string current = (v < n) ? it->second[v] : std::string();
+                    const TextureId current_id = (v < n) ? it->second[v] : TextureId{};
+                    const std::string current = ctx->GetTextureManager()->TextureNameOf(current_id);
                     if (ImGui::BeginCombo("##variant", current.c_str())) {
                         for (const std::string& tn : texNames) {
                             bool is_cur = (tn == current);
@@ -303,8 +307,8 @@ namespace {
                         }
                         ImGui::EndCombo();
                     }
-                    // Имя назначено, но текстуры с ним нет (удалена/переименована) → маркер.
-                    if (!current.empty() && !ctx->GetTextureManager()->GetTextureHandles().count(current))
+                    // Ссылка есть, а текстуры в ячейке нет (удалена) → маркер.
+                    if (current_id && !ctx->GetTextureManager()->GetTextureHandle(current_id))
                         MissingRefMark("texture not found - dummy is used");
                     ImGui::PopID();
                 }
@@ -532,7 +536,7 @@ namespace {
             if (!g_sel.name.empty()) {
                 // Ресурс самоописываем: тянем атлас/путь прямо из хэндла (см. TextureHandle).
                 if (TextureHandle* h = ctx->GetTextureManager()->GetTextureHandle(g_sel.name)) {
-                    atlasSel = h->atlas_name;
+                    atlasSel = ctx->GetTextureManager()->AtlasNameOf(h->atlas_id);
                     std::snprintf(pathBuf, sizeof pathBuf, "%s", h->source_path.c_str());
                     convSel = h->conv;
                     cubeSel = IsCubeAtlas(h->atlas);
@@ -563,11 +567,14 @@ namespace {
 
         // Атлас — дропдаун существующих (общий фильтр служебных с браузером), отфильтрованный по виду.
         if (ImGui::BeginCombo("Atlas", atlasSel.empty() ? "(select)" : atlasSel.c_str())) {
-            for (auto& [an, a] : ctx->GetTextureManager()->GetAtlases()) {
-                if (a && !g_show_internal && HasTag(a->tags, ResourceTag::System)) continue;
-                if (IsCubeAtlas(a.get()) != cubeSel) continue;
-                bool sel = (an == atlasSel);
-                if (ImGui::Selectable(an.c_str(), sel)) atlasSel = an;
+            const AtlasRegistry& areg = ctx->GetTextureManager()->Atlases();
+            for (uint32_t ai = 1; ai < areg.Count(); ++ai) {
+                const AtlasRegistry::Cell& c = areg.At(ai);
+                if (!c.object) continue;
+                if (!g_show_internal && HasTag(c.object->tags, ResourceTag::System)) continue;
+                if (IsCubeAtlas(c.object.get()) != cubeSel) continue;
+                bool sel = (c.name == atlasSel);
+                if (ImGui::Selectable(c.name.c_str(), sel)) atlasSel = c.name;
                 if (sel) ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();

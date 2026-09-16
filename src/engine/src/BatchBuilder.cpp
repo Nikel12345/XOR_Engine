@@ -137,12 +137,11 @@ BatchBuilder::BatchBuilder()
 
 void BatchBuilder::SetDummyTexture(const std::string& name, TextureManager* tm)
 {
-    dummy_texture_name = name;
     if (!tm) return;
-    const auto& handles = tm->GetTextureHandles();
-    auto it = handles.find(name);
-    if (it == handles.end() || !it->second) return;
-    TextureAtlas* atlas = it->second->atlas;
+    dummy_texture = tm->InternTexture(name);
+    TextureHandle* handle = tm->GetTextureHandle(dummy_texture);
+    if (!handle) return;
+    TextureAtlas* atlas = handle->atlas;
     if (!atlas) return;
 
     if (atlas->texture_binding.texture && !(atlas->tci.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
@@ -151,7 +150,7 @@ void BatchBuilder::SetDummyTexture(const std::string& name, TextureManager* tm)
             "CREATED without SDL_GPU_TEXTUREUSAGE_SAMPLER. It IS bound as a fragment sampler "
             "(fallback for missing material slots) - the bind will abort. "
             "Declare SAMPLER at atlas creation.",
-            name.c_str(), atlas->debug_name.c_str());
+            name.c_str(), atlas->name.c_str());
     }
 
     // Своего материала у dummy нет, поэтому SAMPLER его атласу объявляем здесь.
@@ -181,11 +180,7 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
     mat_sp_layouts.clear();
     if (!mtm || !sm) return;
 
-    TextureHandle* dummy = nullptr;
-    if (tm && !dummy_texture_name.empty()) {
-        auto dit = tm->GetTextureHandles().find(dummy_texture_name);
-        if (dit != tm->GetTextureHandles().end()) dummy = dit->second.get();
-    }
+    TextureHandle* dummy = tm ? tm->GetTextureHandle(dummy_texture) : nullptr;
     if (dummy && !dummy->atlas) dummy = nullptr;
     ShaderProgram* fallback = fallback_shader_name.empty() ? nullptr : sm->GetShaderProgram(fallback_shader_name);
 
@@ -217,7 +212,7 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
             for (size_t s = 0; s < sp->required_slots.size(); ++s) {
                 const TextureSlotRole role = sp->required_slots[s];
                 auto it = material->textures.find(role);
-                const std::vector<TextureName>* names =
+                const std::vector<TextureId>* names =
                     (it != material->textures.end()) ? &it->second : nullptr;
 
                 const uint32_t base = safe_u32(lay.uvl.size());
@@ -685,12 +680,12 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
             }
             return out;
         };
-        auto resolve_atlases = [&](const std::vector<AtlasName>& names, const char* kind) {
+        auto resolve_atlases = [&](const std::vector<AtlasId>& ids, const char* kind) {
             std::vector<TextureAtlas*> out;
-            out.reserve(names.size());
-            for (const AtlasName& n : names) {
-                TextureAtlas* a = tm ? tm->GetTextureAtlas(n) : nullptr;
-                if (!a) { SDL_Log("BuildComputeBatches '%s': %s atlas '%s' not found - binding slots will shift", slot.name.c_str(), kind, n.c_str()); continue; }
+            out.reserve(ids.size());
+            for (AtlasId id : ids) {
+                TextureAtlas* a = tm ? tm->GetTextureAtlas(id) : nullptr;
+                if (!a) { SDL_Log("BuildComputeBatches '%s': %s atlas '%s' not found - binding slots will shift", slot.name.c_str(), kind, tm ? tm->AtlasNameOf(id).c_str() : "?"); continue; }
                 out.push_back(a);
             }
             return out;
@@ -704,11 +699,11 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         new_batch.rw_storage_textures.reserve(sp->rw_storage_textures.size());
         for (const auto& d : sp->rw_storage_textures) {
             TextureAtlas* a = tm ? tm->GetTextureAtlas(d.texture_atlas) : nullptr;
-            if (!a) { SDL_Log("BuildComputeBatches '%s': rw atlas '%s' not found - binding slots will shift", slot.name.c_str(), d.texture_atlas.c_str()); continue; }
+            if (!a) { SDL_Log("BuildComputeBatches '%s': rw atlas '%s' not found - binding slots will shift", slot.name.c_str(), tm ? tm->AtlasNameOf(d.texture_atlas).c_str() : "?"); continue; }
             new_batch.rw_storage_textures.push_back({ a, d.mip_level, d.layer });
         }
-        new_batch.ro_storage_textures = resolve_atlases(sp->ro_storage_texture_names, "ro");
-        new_batch.texture_binding     = resolve_atlases(sp->texture_sampler_names, "sampler");
+        new_batch.ro_storage_textures = resolve_atlases(sp->ro_storage_texture_ids, "ro");
+        new_batch.texture_binding     = resolve_atlases(sp->texture_sampler_ids, "sampler");
         new_batch.push_instructions = sm->CollectComputePushInstructions(slot.name);
         new_batch.dispatch_func = sm->GetDispatchInstruction(slot.name);
 

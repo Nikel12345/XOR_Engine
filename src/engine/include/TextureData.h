@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include "ResourceTags.h"
+#include "Aliases.h"
 
 // Конвенция упаковки ИСХОДНОГО файла текстуры. Канон движка: G = linear roughness (ORM),
 // A нормал-карты = HEIGHT (яркое = выше; POM марчит depth = 1 - A).
@@ -72,7 +73,7 @@ struct TextureAtlas{
 	// Слияние — чистый union. Опоздавшая декларация (атлас уже создан) флаг на GPU не изменит —
 	// детекторы USAGE VIOLATION называют виновника, иначе SDL абортит анонимно.
 	SDL_GPUTextureCreateInfo tci{};
-	std::string debug_name;   // = ключ в atlases_data; нужен диагностике (назвать атлас в логе)
+	std::string name;   // человеческое имя: диагностике достался голый TextureAtlas*, до реестра ей не дотянуться
 	// != nullptr — атлас ДЕЛИТ GPU-текстуру с другим (CreateTextureAtlas от existing_atlas):
 	// своей не создаёт, на бейке копирует чужую. Владелец текстуры — источник.
 	TextureAtlas* shares_with = nullptr;
@@ -98,7 +99,7 @@ struct TextureHandle : std::enable_shared_from_this<TextureHandle> {
 	// Авторские данные (для редактора/сериализации): ресурс самоописываем — знает, откуда и как
 	// загружен, чтобы форма правки заполнялась, а сцена могла его сохранить и переинициализировать.
 	// source_path ПУСТ у текстур из сырых пикселей (сгенерированы кодом) — из файла не пересоздаются.
-	std::string       atlas_name;
+	AtlasId           atlas_id;
 	std::string       source_path;
 	ChannelConvention conv = ChannelConvention::AsIs;
 	ResourceTag       tags = ResourceTag::None;

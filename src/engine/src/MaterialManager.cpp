@@ -7,7 +7,7 @@ MaterialManager::MaterialManager()
 {
 }
 
-Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::vector<ShaderName> shaders)
+Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> textures, std::vector<ShaderName> shaders)
 {
 	auto it = materials.find(name);
 	if (it != materials.end()) {
@@ -15,14 +15,14 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 		return it->second.get();
 	}
 
-	// Материал держит только имена; резолв в указатели и проверку required_slots уже сделал
-	// EngineContext::CreateMaterial. Здесь — чистое хранение (см. правило name-based ссылок).
+	// Материал держит только ссылки; перевод имён в id и проверку required_slots уже сделал
+	// EngineContext::CreateMaterial. Здесь — чистое хранение.
 	auto data = std::make_unique<Material>();
 	// Ячейка на каждую sp; данных у неё пока нет (их кладёт SetMaterialParams по имени sp).
 	data->shader_programs.reserve(shaders.size());
 	for (ShaderName& sp_name : shaders) data->shader_programs.push_back(SpBinding{ std::move(sp_name), nullptr, {} });
-	for (auto& [role, tex_names] : textures) {
-		data->textures[role] = std::move(tex_names);
+	for (auto& [role, tex_ids] : textures) {
+		data->textures[role] = std::move(tex_ids);
 	}
 	materials[name] = std::move(data);
 	return materials[name].get();
@@ -37,7 +37,7 @@ size_t MaterialManager::ClearSceneMaterials()
 	return before - materials.size();
 }
 
-size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries)
+size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries, TextureManager* tm)
 {
 	size_t n = 0;
 	for (const SceneMaterialEntry& e : entries) {
@@ -49,7 +49,13 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 		            : CreateMaterial(e.name, {}, {});   // пустой под этим именем
 		if (!m) continue;
 		m->textures.clear();
-		for (auto& [role, tex] : e.textures) m->textures[role] = tex;   // список вариантов целиком
+		// Манифест хранит имена — реестр отдаёт по ним ячейки. Intern, а не Find: текстуры сцены
+		// грузятся своим этапом и материал вправе приехать раньше них.
+		for (const auto& [role, tex_names] : e.textures) {
+			std::vector<TextureId>& ids = m->textures[role];   // список вариантов целиком
+			ids.reserve(tex_names.size());
+			for (const TextureName& tn : tex_names) ids.push_back(tm ? tm->InternTexture(tn) : TextureId{});
+		}
 		m->shader_programs.clear();
 		m->shader_programs.reserve(e.shaders.size());
 		for (const SceneShaderEntry& se : e.shaders) {
@@ -68,13 +74,12 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 void MaterialManager::CollectSamplerUsage(const Material* m, TextureManager* tm, const std::string& material_name)
 {
 	if (!m || !tm) return;
-	const auto& handles = tm->GetTextureHandles();
 	// ВСЕ варианты слота, а не только [0]: переключить можно любой, значит сэмплиться будет любой.
-	for (const auto& [role, tex_names] : m->textures)
-	for (const TextureName& tex_name : tex_names) {
-		auto it = handles.find(tex_name);   // не GetTextureHandle: тот шумит логом на промах
-		if (it == handles.end() || !it->second) continue;   // имя ещё не создано — атлас неизвестен
-		TextureAtlas* atlas = it->second->atlas;
+	for (const auto& [role, tex_ids] : m->textures)
+	for (TextureId tex_id : tex_ids) {
+		TextureHandle* h = tm->GetTextureHandle(tex_id);
+		if (!h) continue;   // текстуру ещё не создали — атлас неизвестен
+		TextureAtlas* atlas = h->atlas;
 		if (!atlas) continue;
 
 		// ── Диагностика ОПОЗДАВШЕЙ декларации (проверка ДО доливки флага) ──
@@ -90,9 +95,9 @@ void MaterialManager::CollectSamplerUsage(const Material* m, TextureManager* tm,
 				"but its GPU texture was ALREADY CREATED without SDL_GPU_TEXTUREUSAGE_SAMPLER - "
 				"usage can no longer change, the bind WILL abort. "
 				"Declare SAMPLER at atlas creation (use a material-atlas preset).",
-				atlas->debug_name.c_str(),
+				atlas->name.c_str(),
 				material_name.empty() ? "<unnamed>" : material_name.c_str(),
-				static_cast<int>(role), tex_name.c_str());
+				static_cast<int>(role), tm->TextureNameOf(tex_id).c_str());
 		}
 
 		atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;   // декларация: слот материала = сэмплер

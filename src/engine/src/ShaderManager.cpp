@@ -91,10 +91,14 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
 
     result->ro_storage_buffer_names = std::move(ro_storage_buffers);
     result->rw_storage_buffer_names = std::move(rw_storage_buffers);
-    result->rw_storage_textures = std::move(rw_storage_textures);
 
-    result->ro_storage_texture_names = std::move(ro_storage_textures);
-    result->texture_sampler_names = std::move(texture_samplers);
+    // Имя → id ячейки реестра атласов делается ЗДЕСЬ, на границе: вызывающий печатает имя,
+    // программа хранит ссылку. Intern, а не Find: атлас может быть создан позже программы.
+    auto intern = [tm](const AtlasName& n) { return tm ? tm->InternAtlas(n) : AtlasId{}; };
+    for (const AtlasName& n : ro_storage_textures) result->ro_storage_texture_ids.push_back(intern(n));
+    for (const AtlasName& n : texture_samplers)    result->texture_sampler_ids.push_back(intern(n));
+    for (const ComputeRWTextureBindingParametr& b : rw_storage_textures)
+        result->rw_storage_textures.push_back({ intern(b.texture_atlas), b.mip_level, b.layer, b.need_simultaneous });
 
     auto buf = [bm](BufferDataName n) -> BufferData* {
         if (!bm) return nullptr;
@@ -102,10 +106,10 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
         if (!bd) SDL_Log("ShaderManager::CreateComputeShaderProgram: storage buffer '%s' not found - usage flag not declared", n);
         return bd;
     };
-    auto atlas = [tm](const AtlasName& n) -> TextureAtlas* {
+    auto atlas = [tm](AtlasId id) -> TextureAtlas* {
         if (!tm) return nullptr;
-        TextureAtlas* a = tm->GetTextureAtlas(n);
-        if (!a) SDL_Log("ShaderManager::CreateComputeShaderProgram: texture atlas '%s' not found - usage flag not declared", n.c_str());
+        TextureAtlas* a = tm->GetTextureAtlas(id);
+        if (!a) SDL_Log("ShaderManager::CreateComputeShaderProgram: texture atlas '%s' not found - usage flag not declared", tm->AtlasNameOf(id).c_str());
         return a;
     };
 
@@ -114,17 +118,17 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     for (BufferDataName n : result->rw_storage_buffer_names)
         if (BufferData* bd = buf(n)) bd->usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 
-    for (const AtlasName& n : result->ro_storage_texture_names)
-        if (TextureAtlas* a = atlas(n)) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
-    for (const ComputeRWTextureBindingParametr& b : result->rw_storage_textures) {
+    for (AtlasId id : result->ro_storage_texture_ids)
+        if (TextureAtlas* a = atlas(id)) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
+    for (const ComputeRWTextureBinding& b : result->rw_storage_textures) {
         TextureAtlas* a = atlas(b.texture_atlas);
         if (!a) continue;
         a->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
         if (b.need_simultaneous)
             a->tci.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE;
     }
-    for (const AtlasName& n : result->texture_sampler_names)
-        if (TextureAtlas* a = atlas(n)) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    for (AtlasId id : result->texture_sampler_ids)
+        if (TextureAtlas* a = atlas(id)) a->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
 
     ComputeShaderProgram* ptr = result.get();

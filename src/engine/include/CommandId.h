@@ -26,7 +26,7 @@ enum class CommandId : uint32_t {
                         // sim-поток правит Material::textures[role] + взводит пересборку батчей
     UpsertTexture,      // payload: UpsertTextureCmd* на куче (имя+атлас+путь+old_name). Создать/заменить
                         // текстуру; если old_name != name — это переименование, старую снимаем
-    DeleteTexture,      // payload: DeleteTextureCmd* — удалить текстуру (материалы по имени → dummy)
+    DeleteTexture,      // payload: DeleteTextureCmd* — удалить текстуру (материалы → dummy)
     CreateMaterial,       // payload: CreateMaterialCmd* (имя из UI). Новый материал с sp "Lit" + дефолты
     AddMaterialShader,    // payload: MaterialShaderCmd* — добавить sp материалу (+ дефолты НОВЫХ ролей)
     RemoveMaterialShader, // payload: MaterialShaderCmd* — убрать sp у материала

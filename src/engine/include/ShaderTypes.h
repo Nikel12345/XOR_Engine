@@ -6,6 +6,7 @@
 #include <SDL3/SDL_gpu.h>
 #include <glm/glm.hpp>
 #include "Utils.h"
+#include "Aliases.h"
 
 
 // Слепок группы draw'а — только по указателю в PushInput (полный тип у потребителя).
@@ -160,6 +161,15 @@ inline constexpr uint32_t MAX_UVL_BLOCKS = 32;
 
 struct ComputeRWTextureBindingParametr {
     std::string texture_atlas = "";
+    Uint32 mip_level = 0;
+    Uint32 layer = 0;
+    bool need_simultaneous = false;
+};
+
+// Хранимый вид того же биндинга: параметр приезжает с ИМЕНЕМ атласа (его печатает вызывающий),
+// программа держит id ячейки реестра.
+struct ComputeRWTextureBinding {
+    AtlasId texture_atlas;
     Uint32 mip_level = 0;
     Uint32 layer = 0;
     bool need_simultaneous = false;

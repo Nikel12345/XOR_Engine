@@ -48,14 +48,14 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
             }
         };
 
-        // Превью текстуры ПО ИМЕНИ: ячейка превью-атласа подсистемы PreviewPacker. Хэндл не нужен —
-        // это и снимает моргание при LoadScene: пока sim декодит файл (хэндла ещё нет), слот превью
-        // по имени жив, и плитка показывает прежнюю картинку. Невалидный UV → плитка нарисует затычку.
+        // Превью текстуры ПО ЯЧЕЙКЕ реестра: слот превью-атласа подсистемы PreviewPacker. Хэндл не
+        // нужен — это и снимает моргание при LoadScene: пока sim декодит файл (хэндла ещё нет), слот
+        // превью у ячейки жив, и плитка показывает прежнюю картинку. Невалидный UV → затычка.
         TextureManager* tm = ctx->GetTextureManager();
-        auto texture_preview = [&](const std::string& texName) -> TilePreview
+        auto texture_preview = [&](TextureId id) -> TilePreview
         {
             TilePreview pv{};
-            PreviewPacker::UV uv = tm->GetPreviewUV(texName);
+            PreviewPacker::UV uv = tm->GetPreviewUV(id);
             if (!uv.valid) return pv;
             pv.tex = (ImTextureID)(intptr_t)tm->GetPreviewAtlasTexture();
             pv.uv0 = ImVec2(uv.u0, uv.v0);
@@ -99,7 +99,7 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
                     if (tinted) break;
                 }
             }
-            else pv = texture_preview("NoTextureDummy");           // битая ссылка → dummy, БЕЗ тинта
+            else pv = texture_preview(tm->TextureIdOf("NoTextureDummy"));   // битая ссылка → dummy, БЕЗ тинта
             return pv;
         };
 
@@ -151,9 +151,12 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
         if (ImGui::BeginTabItem("Textures")) {
             tiles(SelKind::Texture, true,
                 [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Texture; g_sel.name = ""; },   // + = форма новой текстуры
-                [&](auto&& emit) { for (auto& [name, h] : ctx->GetTextureManager()->GetTextureHandles())
-                                       if (h && (g_show_internal || !HasTag(h->tags, ResourceTag::System))) emit(name); },
-                texture_preview);
+                [&](auto&& emit) { const TextureRegistry& reg = ctx->GetTextureManager()->Textures();
+                                   for (uint32_t i = 1; i < reg.Count(); ++i) {
+                                       const TextureRegistry::Cell& c = reg.At(i);
+                                       if (c.object && (g_show_internal || !HasTag(c.object->tags, ResourceTag::System))) emit(c.name);
+                                   } },
+                [&](const std::string& n) { return texture_preview(tm->TextureIdOf(n)); });
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Models")) {

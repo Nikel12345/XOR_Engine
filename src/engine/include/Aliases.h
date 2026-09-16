@@ -1,5 +1,7 @@
+#pragma once
 #include <string>
 #include <cstdint>
+#include "ResourceRegistry.h"
 
 using RenderPassName = std::string;
 using ComputePassName = std::string;
@@ -13,6 +15,11 @@ using TextureName = std::string;
 using ShaderName = std::string;
 
 using BufferDataName = const char*;
+
+struct AtlasIdTag;
+struct TextureIdTag;
+using AtlasId   = ResourceId<AtlasIdTag>;
+using TextureId = ResourceId<TextureIdTag>;
 
 namespace BatchKeys {
 	using ModelBatchKey = uint64_t;

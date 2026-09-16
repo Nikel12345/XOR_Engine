@@ -131,7 +131,7 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 	}
 
 	TextureHandle* h = texture_manager->CreateTexture(name, atlas, img.width, img.height, std::move(img.pixels));
-	if (h) { h->atlas_name = atlas_name; h->source_path = path; h->conv = conv; h->tags = tags; }   // самоописание для редактора/сериализации
+	if (h) { h->atlas_id = texture_manager->AtlasIdOf(atlas_name); h->source_path = path; h->conv = conv; h->tags = tags; }   // самоописание для редактора/сериализации
 	return h;
 }
 
@@ -167,32 +167,39 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 	}
 
 	TextureHandle* h = texture_manager->CreateTexture(name, atlas, cube.faceSize, cube.faceSize, std::move(cube.pixels), 6);
-	if (h) { h->atlas_name = atlas_name; h->source_path = path; h->tags = tags; }   // самоописание для редактора/сериализации
+	if (h) { h->atlas_id = texture_manager->AtlasIdOf(atlas_name); h->source_path = path; h->tags = tags; }   // самоописание для редактора/сериализации
 	return h;
 }
 
 Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::initializer_list<ShaderName> shaders, ResourceTag tags)
 {
-	// Материал хранит ИМЕНА (name-based ссылки, резолв отложен на сборку батча). Здесь sp резолвим
-	// лишь для авторской валидации: у каждого required_slot шейдера должна быть текстура в материале.
-	// Проверка best-effort (варнинг, не отказ): текстуру могут добавить/создать позже.
-	std::vector<std::pair<TextureSlotRole, std::vector<TextureName>>> texture_names(textures.begin(), textures.end());
+	// Имя → id ячейки реестра текстур делается ЗДЕСЬ: менеджер материалов чужих реестров не знает.
+	// Intern, а не Find: материал вправе сослаться на текстуру, которую создадут позже.
+	std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> texture_ids;
+	texture_ids.reserve(textures.size());
+	for (const auto& [role, names] : textures) {
+		std::vector<TextureId> ids;
+		ids.reserve(names.size());
+		for (const TextureName& tn : names)
+			ids.push_back(texture_manager ? texture_manager->InternTexture(tn) : TextureId{});
+		texture_ids.emplace_back(role, std::move(ids));
+	}
 	std::vector<ShaderName> shader_names(shaders.begin(), shaders.end());
 
 	// ВСЕ варианты одного слота обязаны лежать в ОДНОМ атласе: на слот биндится один
 	// Texture2DArray, а UVL адресует слой внутри него — вариант из чужого атласа переключить
 	// нечем (он молча сэмплился бы из соседнего). Варнинг, а не отказ: имя могут создать позже,
 	// и тогда проверять тут нечего — она best-effort, как и проверка required_slots ниже.
-	for (const auto& [role, names] : texture_names) {
+	for (const auto& [role, ids] : texture_ids) {
 		const TextureAtlas* first = nullptr;
-		for (const TextureName& tn : names) {
-			TextureHandle* h = texture_manager ? texture_manager->GetTextureHandle(tn) : nullptr;
+		for (TextureId tid : ids) {
+			TextureHandle* h = texture_manager ? texture_manager->GetTextureHandle(tid) : nullptr;
 			if (!h || !h->atlas) continue;
 			if (!first) { first = h->atlas; continue; }
 			if (h->atlas != first)
 				SDL_Log("Material '%s': slot %d variant '%s' lives in another atlas than the default "
 				        "- it cannot be switched to (one Texture2DArray is bound per slot)",
-					name.c_str(), static_cast<int>(role), tn.c_str());
+					name.c_str(), static_cast<int>(role), texture_manager->TextureNameOf(tid).c_str());
 		}
 	}
 
@@ -204,14 +211,14 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 		}
 		for (const auto& required_role : sp->required_slots) {
 			bool found = false;
-			for (const auto& [role, tex_name] : texture_names)
+			for (const auto& [role, tex_ids] : texture_ids)
 				if (role == required_role) { found = true; break; }
 			if (!found)
 				SDL_Log("Material '%s': missing texture for required slot %d", name.c_str(), static_cast<int>(required_role));
 		}
 	}
 	const std::string material_name = name;   // name уходит по move — копию держим для диагностики
-	Material* m = material_manager->CreateMaterial(std::move(name), std::move(texture_names), std::move(shader_names));
+	Material* m = material_manager->CreateMaterial(std::move(name), std::move(texture_ids), std::move(shader_names));
 	if (m) m->tags = tags;
 	// Слот материала = фрагментный сэмплер → атласы его текстур получают SAMPLER (сбор usage-флагов).
 	material_manager->CollectSamplerUsage(m, texture_manager, material_name);

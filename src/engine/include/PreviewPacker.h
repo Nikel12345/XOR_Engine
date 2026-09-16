@@ -4,6 +4,7 @@
 #include <vector>
 #include <unordered_map>
 #include <cstdint>
+#include "Aliases.h"
 
 struct TextureAtlas;   // источник блита (его GPU-текстура + регион); полный тип нужен только в .cpp
 
@@ -11,13 +12,14 @@ struct TextureAtlas;   // источник блита (его GPU-текстур
 // (самодостаточный упаковщик). Один 2D-атлас (ImGui сэмплит только texture2D), нарезанный на
 // фиксированную сетку ячеек; регион исходного атласа блитится в ячейку.
 //
-// КЛЮЧ — ИМЯ текстуры, а НЕ TextureHandle*. Из этого вытекает всё ценное:
+// КЛЮЧ — id ЯЧЕЙКИ реестра текстур, а НЕ TextureHandle* и не имя. Из этого вытекает всё ценное:
 //   • TextureHandle не несёт UI-специфичного поля (preview_cell удалён) — он про GPU-раскладку, и только;
-//   • пересоздание имени (LoadScene/replace) сохраняет ячейку: слот живёт, пока имя не Release-нут
-//     явно, поэтому плитка браузера НЕ мигает затычкой — она показывает прежнюю картинку, пока не
-//     ляжет новый блит. Раньше ячейка жила в экземпляре хэндла и терялась на каждом delete+create,
-//     а LIFO-фрилист отдавал новому хэндлу ЧУЖУЮ ячейку → рябь по плиткам при загрузке сцены;
-//   • UI резолвит превью по имени (GetUV), не через хэндл, — а хэндла нет всё время декода файла.
+//   • пересоздание текстуры (LoadScene/replace) попадает в ТУ ЖЕ ячейку, поэтому слот живёт, пока
+//     его не Release-нут явно, и плитка браузера НЕ мигает затычкой — она показывает прежнюю
+//     картинку, пока не ляжет новый блит. Раньше ячейка жила в экземпляре хэндла и терялась на
+//     каждом delete+create, а LIFO-фрилист отдавал новому хэндлу ЧУЖУЮ ячейку → рябь по плиткам;
+//   • переименование текстуры превью не касается вовсе — id ячейки от имени не зависит;
+//   • UI резолвит превью по id (GetUV), не через хэндл, — а хэндла нет всё время декода файла.
 //
 // ПОТОКИ. И Request (_PlaceTask на prepare), и Blit идут с ОДНОГО потока — sim: блит это
 // отрисовка, копировальная очередь её не исполнит, поэтому текстурная работа берёт отдельный
@@ -36,16 +38,16 @@ public:
     static constexpr uint32_t PER_ROW    = ATLAS_SIZE / CELL;   // 32×32 = 1024 ячейки
     static constexpr uint32_t CAPACITY   = PER_ROW * PER_ROW;
 
-    // UV ячейки имени в превью-атласе (для ImGui::Image). valid=false — превью для имени нет.
+    // UV ячейки текстуры в превью-атласе (для ImGui::Image). valid=false — превью нет.
     struct UV { bool valid = false; float u0 = 0, v0 = 0, u1 = 0, v1 = 0; };
 
     void Create(SDL_GPUDevice* dev);    // выделить GPU-текстуру (в конструкторе TextureManager)
     void Destroy(SDL_GPUDevice* dev);   // release (в деструкторе TextureManager)
 
-    // Заявка: превью имени должно показывать регион src-атласа (пиксельный прямоугольник + слой).
-    // Выделяет ячейку под имя (если ещё нет) и ставит слот в дёрти — блит произойдёт в ближайший
-    // Blit. Повторный Request того же имени переиспользует ту же ячейку (перезапись картинки на месте).
-    void Request(const std::string& name, TextureAtlas* src,
+    // Заявка: превью текстуры должно показывать регион src-атласа (прямоугольник + слой).
+    // Выделяет ячейку (если ещё нет) и ставит слот в дёрти — блит произойдёт в ближайший Blit.
+    // Повторный Request той же текстуры переиспользует ту же ячейку (перезапись на месте).
+    void Request(TextureId id, TextureAtlas* src,
                  uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t layer);
 
     // Разрешить дёрти-заявки в самодостаточные BlitTask. Источник без GPU-текстуры (атлас ещё не
@@ -60,12 +62,12 @@ public:
     // (см. TextureManager::IsDirty) — сама запись пустой очереди безвредна, сабмит нет.
     bool HasPendingBlits() const { return !blits_.empty(); }
 
-    UV              GetUV(const std::string& name) const;
+    UV              GetUV(TextureId id) const;
     SDL_GPUTexture* Texture() const { return atlas_; }
 
-    // Освободить ячейку имени (реальное удаление текстуры из UI/переименование). При replace под
-    // тем же именем НЕ звать — иначе вернётся моргание. Нет такого имени — no-op.
-    void Release(const std::string& name);
+    // Освободить ячейку (реальное удаление текстуры из UI). При replace той же ячейки НЕ звать —
+    // иначе вернётся моргание. Нет такой ячейки — no-op.
+    void Release(TextureId id);
 
 private:
     struct Slot {
@@ -84,8 +86,8 @@ private:
     SDL_GPUTexture* atlas_ = nullptr;   // создаётся/уничтожается на init/teardown
 
     // ── собственность sim ──
-    std::unordered_map<std::string, Slot>  slots_;
-    std::vector<std::string>               dirty_;       // имена, ждущие разрешения в Publish
+    std::unordered_map<TextureId, Slot>    slots_;
+    std::vector<TextureId>                 dirty_;       // ждут разрешения в Publish
     std::vector<int32_t>                   free_cells_;
     int32_t                                next_cell_ = 0;
 

@@ -308,6 +308,14 @@ static void WriteStrArray(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* 
 	for (const auto& n : names) yyjson_mut_arr_add_strcpy(doc, arr, CStrOf(n));
 }
 
+// Ссылки-id: в файл идёт ИМЯ, поэтому реестр переводит их обратно на записи (см. ResourceRegistry.h).
+template<class Range, class NameOf>
+static void WriteIdArray(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* key, const Range& ids, NameOf name_of)
+{
+	yyjson_mut_val* arr = yyjson_mut_obj_add_arr(doc, obj, key);
+	for (const auto& id : ids) yyjson_mut_arr_add_strcpy(doc, arr, name_of(id).c_str());
+}
+
 static std::vector<BufferDataName> ReadBufferNames(BufferManager* bm, yyjson_val* obj, const char* key)
 {
 	std::vector<BufferDataName> out;
@@ -351,7 +359,10 @@ static void SaveTextures(const std::string& dir, TextureManager* tm)
 	MutDoc d;
 	yyjson_mut_val* arr = d.Arr("textures");
 	size_t saved = 0;
-	for (auto& [name, h] : tm->GetTextureHandles()) {
+	for (uint32_t i = 1; i < tm->Textures().Count(); ++i) {
+		const TextureRegistry::Cell& cell = tm->Textures().At(i);
+		const std::string& name = cell.name;
+		const std::shared_ptr<TextureHandle>& h = cell.object;
 		if (!h || HasTag(h->tags, ResourceTag::CodeOwned) || h->source_path.empty()) continue;
 		yyjson_mut_val* t = yyjson_mut_arr_add_obj(d.doc, arr);
 		// Кубмапа — обычный хэндл на 6 слоёв, отличает её ТИП АТЛАСА: он же определяет путь
@@ -360,7 +371,7 @@ static void SaveTextures(const std::string& dir, TextureManager* tm)
 		const bool cube = h->atlas && (h->atlas->texture_type == SDL_GPU_TEXTURETYPE_CUBE
 		                            || h->atlas->texture_type == SDL_GPU_TEXTURETYPE_CUBE_ARRAY);
 		yyjson_mut_obj_add_strcpy(d.doc, t, "name",  name.c_str());
-		yyjson_mut_obj_add_strcpy(d.doc, t, "atlas", h->atlas_name.c_str());
+		yyjson_mut_obj_add_strcpy(d.doc, t, "atlas", tm->AtlasNameOf(h->atlas_id).c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, t, "path",  h->source_path.c_str());
 		yyjson_mut_obj_add_str   (d.doc, t, "conv",  ConvToStr(h->conv));
 		if (cube) yyjson_mut_obj_add_bool(d.doc, t, "cube", true);
@@ -399,7 +410,7 @@ static void SaveModels(const std::string& dir, ModelManager* mm)
 }
 
 // Скип CodeOwned и пустых путей у SD.
-static void SaveShaders(const std::string& dir, ShaderManager* sm)
+static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManager* tm)
 {
 	MutDoc d;
 
@@ -462,13 +473,14 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm)
 		yyjson_mut_val* rwt = yyjson_mut_obj_add_arr(d.doc, e, "rw_textures");
 		for (const auto& t : csp->rw_storage_textures) {
 			yyjson_mut_val* te = yyjson_mut_arr_add_obj(d.doc, rwt);
-			yyjson_mut_obj_add_strcpy(d.doc, te, "atlas", t.texture_atlas.c_str());
+			yyjson_mut_obj_add_strcpy(d.doc, te, "atlas", tm->AtlasNameOf(t.texture_atlas).c_str());
 			yyjson_mut_obj_add_uint(d.doc, te, "mip",   t.mip_level);
 			yyjson_mut_obj_add_uint(d.doc, te, "layer", t.layer);
 			yyjson_mut_obj_add_bool(d.doc, te, "simultaneous", t.need_simultaneous);
 		}
-		WriteStrArray(d.doc, e, "ro_textures", csp->ro_storage_texture_names);
-		WriteStrArray(d.doc, e, "samplers",    csp->texture_sampler_names);
+		auto atlas_name = [tm](AtlasId id) -> const std::string& { return tm->AtlasNameOf(id); };
+		WriteIdArray(d.doc, e, "ro_textures", csp->ro_storage_texture_ids, atlas_name);
+		WriteIdArray(d.doc, e, "samplers",    csp->texture_sampler_ids,    atlas_name);
 	}
 
 	d.Write(dir, "shaders.json", "shaders", MutDoc::kNoCount);
@@ -476,7 +488,7 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm)
 
 // Скип CodeOwned (кодовая инфраструктура). Текстуры — по роли, sp — по имени, params — объект
 // именованных полей по схеме типа (params_type).
-static void SaveMaterials(const std::string& dir, MaterialManager* mtm)
+static void SaveMaterials(const std::string& dir, MaterialManager* mtm, TextureManager* tm)
 {
 	MutDoc d;
 	yyjson_mut_val* arr = d.Arr("materials");
@@ -509,7 +521,7 @@ static void SaveMaterials(const std::string& dir, MaterialManager* mtm)
 			yyjson_mut_obj_add_str(d.doc, t, "role", RoleToStr(role));
 			// [0] — дефолт, дальше варианты. Скалярное "texture" из старых сцен читается на
 			// загрузке, но больше не пишется — формат один.
-			WriteStrArray(d.doc, t, "textures", tns);
+			WriteIdArray(d.doc, t, "textures", tns, [tm](TextureId id) -> const std::string& { return tm->TextureNameOf(id); });
 		}
 		++saved;
 	}
@@ -539,8 +551,8 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& scenes_ro
 
 	SaveTextures (dir, texture_manager);
 	SaveModels   (dir, model_manager);
-	SaveShaders  (dir, shader_manager);
-	SaveMaterials(dir, material_manager);
+	SaveShaders  (dir, shader_manager, texture_manager);
+	SaveMaterials(dir, material_manager, texture_manager);
 
 	SDL_Log("SaveScene: wrote scene '%s' to '%s'", scene_name.c_str(), dir.c_str());
 }
@@ -740,7 +752,7 @@ static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 		entries.push_back(std::move(me));
 	});
 
-	const size_t n = mtm->LoadSceneMaterials(entries);
+	const size_t n = mtm->LoadSceneMaterials(entries, tm);
 	// Сбор usage-флагов: текстуры сцены загружены РАНЬШЕ материалов, поэтому имена уже резолвятся
 	// в атласы, и те получают SAMPLER до ближайшего бейка.
 	for (const SceneMaterialEntry& e : entries)

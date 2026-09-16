@@ -37,34 +37,34 @@ int32_t PreviewPacker::Alloc()
     return -1;   // сетка исчерпана
 }
 
-void PreviewPacker::Request(const std::string& name, TextureAtlas* src,
+void PreviewPacker::Request(TextureId id, TextureAtlas* src,
                             uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t layer)
 {
-    if (!atlas_ || name.empty()) return;
+    if (!atlas_ || !id) return;
 
-    Slot& s = slots_[name];   // существующий переиспользуем (ячейка на месте), новый — заводим
+    Slot& s = slots_[id];   // существующий переиспользуем (ячейка на месте), новый — заводим
     if (s.cell < 0) {
         s.cell = Alloc();
-        if (s.cell < 0) { slots_.erase(name); SDL_Log("PreviewPacker: full - no preview for '%s'", name.c_str()); return; }
+        if (s.cell < 0) { slots_.erase(id); SDL_Log("PreviewPacker: full - no preview for texture #%u", id.v); return; }
     }
     s.src = src; s.x = x; s.y = y; s.w = w; s.h = h; s.layer = layer;
 
-    if (std::find(dirty_.begin(), dirty_.end(), name) == dirty_.end())
-        dirty_.push_back(name);
+    if (std::find(dirty_.begin(), dirty_.end(), id) == dirty_.end())
+        dirty_.push_back(id);
 }
 
 void PreviewPacker::Publish()
 {
     if (dirty_.empty()) return;
 
-    std::vector<BlitTask>    ready;
-    std::vector<std::string> retry;   // источники без готовой GPU-текстуры — оставить на потом
-    for (const std::string& name : dirty_) {
-        auto it = slots_.find(name);
+    std::vector<BlitTask>  ready;
+    std::vector<TextureId> retry;   // источники без готовой GPU-текстуры — оставить на потом
+    for (TextureId id : dirty_) {
+        auto it = slots_.find(id);
         if (it == slots_.end() || it->second.cell < 0) continue;   // Release-нут между Request и Publish
         const Slot& s = it->second;
         SDL_GPUTexture* src = s.src ? s.src->texture_binding.texture : nullptr;
-        if (!src) { retry.push_back(name); continue; }              // атлас ещё не забейкан
+        if (!src) { retry.push_back(id); continue; }              // атлас ещё не забейкан
 
         BlitTask t{};
         t.src = src;
@@ -111,10 +111,10 @@ void PreviewPacker::Blit(SDL_GPUCommandBuffer* cb)
     blits_.clear();
 }
 
-PreviewPacker::UV PreviewPacker::GetUV(const std::string& name) const
+PreviewPacker::UV PreviewPacker::GetUV(TextureId id) const
 {
     UV r{};
-    auto it = slots_.find(name);
+    auto it = slots_.find(id);
     if (!atlas_ || it == slots_.end() || it->second.cell < 0) return r;
     const float cell = 1.0f / (float)PER_ROW;
     r.valid = true;
@@ -125,11 +125,11 @@ PreviewPacker::UV PreviewPacker::GetUV(const std::string& name) const
     return r;
 }
 
-void PreviewPacker::Release(const std::string& name)
+void PreviewPacker::Release(TextureId id)
 {
-    auto it = slots_.find(name);
+    auto it = slots_.find(id);
     if (it == slots_.end()) return;
     if (it->second.cell >= 0) free_cells_.push_back(it->second.cell);
     slots_.erase(it);
-    dirty_.erase(std::remove(dirty_.begin(), dirty_.end(), name), dirty_.end());
+    dirty_.erase(std::remove(dirty_.begin(), dirty_.end(), id), dirty_.end());
 }

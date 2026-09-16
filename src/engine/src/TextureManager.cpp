@@ -86,15 +86,15 @@ TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_
 
 TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler, ResourceTag tags)
 {
-	auto it = atlases_data.find(name);
-    if (it != atlases_data.end()) {
+	const AtlasId id = atlases_data.Intern(name);
+    if (TextureAtlas* existing = atlases_data.Get(id)) {
         SDL_Log("Texture atlas '%s' already exists, returning existing atlas.", name.c_str());
-        return it->second.get();
+        return existing;
 	}
 	auto atlas = std::make_unique<TextureAtlas>();
 
     atlas->tci = tci;
-    atlas->debug_name = name;
+    atlas->name = name;
     atlas->tags = tags;
     atlas->tci.usage &= SDL_GPU_TEXTUREUSAGE_SAMPLER;
     if (tci.num_levels > 1)
@@ -117,7 +117,7 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
     atlas->texture_type = tci.type;
 
 	TextureAtlas* ptr = atlas.get();
-	atlases_data[name] = std::move(atlas);
+	atlases_data.Put(id, std::move(atlas));
 	pending_atlas_bakes.push_back(ptr);
 	return ptr;
 }
@@ -128,16 +128,16 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, Textur
         SDL_Log("Invalid existing atlas provided for new atlas '%s'", name.c_str());
         return nullptr;
     }
-    auto it = atlases_data.find(name);
-    if (it != atlases_data.end()) {
+    const AtlasId id = atlases_data.Intern(name);
+    if (TextureAtlas* existing = atlases_data.Get(id)) {
         SDL_Log("Texture atlas '%s' already exists, returning existing atlas.", name.c_str());
-        return it->second.get();
+        return existing;
     }
     auto atlas = std::make_unique<TextureAtlas>();
 
     atlas->shares_with = existing_atlas;
     atlas->tci = existing_atlas->tci;
-    atlas->debug_name = name;
+    atlas->name = name;
     atlas->tags = tags;
     atlas->texture_binding.sampler = sampler;
     atlas->width = existing_atlas->width;
@@ -149,7 +149,7 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, Textur
     atlas->format = existing_atlas->format;
 
     TextureAtlas* ptr = atlas.get();
-    atlases_data[name] = std::move(atlas);
+    atlases_data.Put(id, std::move(atlas));
     pending_atlas_bakes.push_back(ptr);
 	return ptr;
 }
@@ -173,7 +173,7 @@ void TextureManager::BakePending()
         if (!atlas->texture_binding.texture)
             SDL_Log("TextureManager::BakePending: atlas creation failed: %s", SDL_GetError());
         else
-            SDL_SetGPUTextureName(dev, atlas->texture_binding.texture, atlas->debug_name.c_str()); 
+            SDL_SetGPUTextureName(dev, atlas->texture_binding.texture, atlas->name.c_str()); 
     }
     for (TextureAtlas* atlas : pending_atlas_bakes) {
         if (!atlas || !atlas->shares_with || atlas->texture_binding.texture) continue;
@@ -187,14 +187,14 @@ void TextureManager::BakePending()
 
 TextureHandle* TextureManager::CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span)
 {
-	auto atlas_it = atlases_data.find(atlas_name);
-    if (atlas_it == atlases_data.end()) {
+	const AtlasId aid = atlases_data.Find(atlas_name);
+	TextureAtlas* atlas = atlases_data.Get(aid);
+    if (!atlas) {
         SDL_Log("Texture atlas '%s' not found for texture '%s'", atlas_name.c_str(), name.c_str());
         return nullptr;
 	}
-	TextureAtlas* atlas = atlas_it->second.get();
 	TextureHandle* th = CreateTexture(name, atlas, w, h, std::move(pixels), layer_span);
-	if (th) th->atlas_name = atlas_name;   // самоописание: имя атласа для редактора/сериализации
+	if (th) th->atlas_id = aid;   // самоописание: имя атласа для редактора/сериализации
 	return th;
 }
 
@@ -206,10 +206,10 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtl
 	}
 	if (layer_span == 0) layer_span = 1;
 
-	auto it = handles_data.find(name);
-    if (it != handles_data.end()) {
+	const TextureId id = handles_data.Intern(name);
+    if (TextureHandle* existing = handles_data.Get(id)) {
         SDL_Log("Texture '%s' already exists, returning existing texture.", name.c_str());
-        return it->second.get();
+        return existing;
     }
 
     auto texture_handle = std::make_shared<TextureHandle>();
@@ -219,11 +219,11 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtl
     ptr->width = w;
     ptr->height = h;
     ptr->texture_data.layer_span = layer_span;   // свойство ЗАПРОСА, известно до укладки
-    handles_data[name] = std::move(texture_handle);
+    handles_data.Put(id, std::move(texture_handle));
 	atlas->textures.push_back(&ptr->texture_data); 
 
 
-	CreateUploadTask(ptr, w, h, std::move(pixels), name, layer_span);
+	CreateUploadTask(id, ptr, w, h, std::move(pixels), name, layer_span);
 
 	return ptr;
 }
@@ -303,9 +303,10 @@ static uint32_t PackUnorm16x2(float x, float y) {
     return static_cast<uint32_t>(lx) | (static_cast<uint32_t>(ly) << 16);
 }
 
-void TextureManager::CreateUploadTask(TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name, uint32_t layer_span)
+void TextureManager::CreateUploadTask(TextureId id, TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name, uint32_t layer_span)
 {
     UploadTaskTexture task;
+    task.id = id;
     task.name = name;
     task.pixels = std::move(pixels);
     task.target_handle = handle;
@@ -337,7 +338,7 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
       || atlas->texture_type == SDL_GPU_TEXTURETYPE_CUBE_ARRAY) && task.layer_span == 1) {
         SDL_Log("Task '%s': single-layer texture rejected from cube atlas '%s' - its layers are cube "
                 "FACES; load the file as a cubemap (scene entry needs \"cube\": true)",
-                task.name.c_str(), atlas->debug_name.c_str());
+                task.name.c_str(), atlas->name.c_str());
         return false;
     }
 
@@ -375,7 +376,7 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
             }
         }
         if (base == UINT32_MAX) {
-            SDL_Log("Failed to pack task '%s' (%u layers) - atlas '%s' full", task.name.c_str(), span, atlas->debug_name.c_str());
+            SDL_Log("Failed to pack task '%s' (%u layers) - atlas '%s' full", task.name.c_str(), span, atlas->name.c_str());
             return false;
         }
         for (uint32_t i = 0; i < span; ++i)
@@ -388,7 +389,7 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
 
         // Превью — БАЗОВЫЙ слой: какой из слоёв «лицо» записи, знает только её создатель, а TM
         // про кубы (и про то, что база — это +X) не знает намеренно.
-        preview.Request(task.name, atlas, 0, 0, w, h, base);
+        preview.Request(task.id, atlas, 0, 0, w, h, base);
 
         task.dst.texture   = atlas->texture_binding.texture;
         task.dst.x         = 0;
@@ -460,7 +461,7 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
 
     // Превью-заявка ПО ИМЕНИ: внутренний регион (без gutter'а) в пикселях — то, что видит материал.
     // UVL уже записан, размещение фиксировано (task.placed ниже), так что регион больше не сдвинется.
-    preview.Request(task.name, atlas, outer.x + padX, outer.y + padY, w, h, placed_layer);
+    preview.Request(task.id, atlas, outer.x + padX, outer.y + padY, w, h, placed_layer);
 
     // Заполняем gutter репликацией кромки: грузим (w+2padX)×(h+2padY) вместо w×h. Без этого паддинг
     // остаётся мусором/чёрным, и мип-генерация (она идёт по атласу целиком) подмешивает его в
@@ -582,7 +583,7 @@ void TextureManager::_BuildUploadTasks() {
         const uint32_t expect = SDL_CalculateGPUTextureFormatSize(a->format, t.width, t.height, t.layer_span);
         if (t.size != expect)
             SDL_Log("Upload '%s': %u байт, а формат атласа '%s' ждёт %u (%ux%u, %u слоёв)",
-                t.name.c_str(), t.size, a->debug_name.c_str(), expect, t.width, t.height, t.layer_span);
+                t.name.c_str(), t.size, a->name.c_str(), expect, t.width, t.height, t.layer_span);
     }
 }
 
@@ -702,14 +703,13 @@ SDL_GPUSampler* TextureManager::GetSampler(const std::string& name)
     }
 }
 
-void TextureManager::DeleteTextureHandle(const std::string& name)
+bool TextureManager::DeleteTextureHandle(TextureId id)
 {
-    auto it = handles_data.find(name);
-    if (it == handles_data.end()) {
-        SDL_Log("Texture handle '%s' not found, cannot delete", name.c_str());
-        return;
+    TextureHandle* handle = handles_data.Get(id);
+    if (!handle) {
+        SDL_Log("Texture handle '%s' not found, cannot delete", handles_data.NameOf(id).c_str());
+        return false;
     }
-    TextureHandle* handle = it->second.get();
     TextureData* td = &handle->texture_data;
 
     if (TextureAtlas* atlas = handle->atlas) {
@@ -744,16 +744,30 @@ void TextureManager::DeleteTextureHandle(const std::string& name)
     // Превью НЕ трогаем: его подсистема ключуется ИМЕНЕМ, а не хэндлом. При replace (пересоздание
     // того же имени) слот обязан пережить удаление — иначе плитка мигнёт. Реальное удаление
     // освобождает превью отдельным ReleasePreview(name) в вызывающем (DeleteTexture-команда).
-    handles_data.erase(it);   // уничтожает TextureHandle вместе с его TextureData (по значению)
+    return handles_data.Erase(id);   // уничтожает TextureHandle вместе с его TextureData (по значению)
+}
+
+bool TextureManager::RenameTexture(TextureId id, const std::string& new_name)
+{
+    if (!handles_data.Get(id) || new_name.empty()) return false;
+    const TextureId taken = handles_data.Find(new_name);
+    if (taken && taken != id) {
+        SDL_Log("RenameTexture: '%s' is already taken", new_name.c_str());
+        return false;
+    }
+    handles_data.Rename(id, new_name);
+    return true;
 }
 
 size_t TextureManager::ClearSceneTextures()
 {
-    std::vector<std::string> doomed;
-    for (const auto& [name, h] : handles_data)
-        if (!h || (!HasTag(h->tags, ResourceTag::CodeOwned) && !h->source_path.empty()))
-            doomed.push_back(name);
-    for (const std::string& n : doomed) { DeleteTextureHandle(n); ReleasePreview(n); }
+    std::vector<TextureId> doomed;
+    for (uint32_t i = 1; i < handles_data.Count(); ++i) {
+        const TextureHandle* h = handles_data.At(i).object.get();
+        if (h && !HasTag(h->tags, ResourceTag::CodeOwned) && !h->source_path.empty())
+            doomed.push_back(TextureId{ i });
+    }
+    for (TextureId id : doomed) { DeleteTextureHandle(id); ReleasePreview(id); }
     return doomed.size();
 }
 
@@ -769,8 +783,8 @@ size_t TextureManager::LoadSceneTextures(const std::vector<SceneTextureEntry>& e
         }
         // Куб снимается ровно как всё остальное — он ОДИН хэндл под своим именем. Без снятия
         // CreateTexture вернул бы существующий и заливки бы не было (тихий stale).
-        if (handles_data.count(e.name))
-            DeleteTextureHandle(e.name);   // replace под тем же именем (материалы перепривяжутся по имени)
+        if (const TextureId id = handles_data.Find(e.name))
+            DeleteTextureHandle(id);   // replace в той же ячейке (материалы перепривяжутся по её id)
         if (create_from_file(e)) ++created;
         else SDL_Log("LoadSceneTextures: failed to create '%s' from '%s'", e.name.c_str(), e.path.c_str());
     }
