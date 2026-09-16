@@ -13,8 +13,6 @@ struct AtlasPacker {
             free_spaces.push_back(rectpack2D::rect_xywh(0, 0, width, height));
         }
 
-        // Свободен ЦЕЛИКОМ: пересборка слоя идёт начисто, поэтому «пустой, но раздробленный»
-        // слой невозможен, и одного прямоугольника во всю площадь достаточно.
         bool empty(int width, int height) const {
             return free_spaces.size() == 1 && free_spaces[0].x == 0 && free_spaces[0].y == 0
                 && free_spaces[0].w == width && free_spaces[0].h == height;
@@ -105,7 +103,6 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
     atlas->width = tci.width;
     atlas->height = tci.height;
     atlas->layers = tci.layer_count_or_depth;
-    // Одна величина на рамку в _PlaceTask и на ужатие текстуры при импорте — рассинхрона нет.
     atlas->padding = (tci.num_levels > 1) ? 16 : 0;
     atlas->mip_levels = tci.num_levels;
     atlas->format = tci.format;
@@ -469,8 +466,6 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
 }
 
 static rectpack2D::rect_xywh _DecodeOuterRect(const TextureData& placement, const TextureAtlas* atlas) {
-    // Ещё не размещённая текстура места не занимает: без этой ветки её нулевой прямоугольник
-    // раздулся бы рамкой до (0,0,P,P) и навсегда вырезал место в углу нулевого слоя.
     if (placement.uv_packed_scale == 0) return rectpack2D::rect_xywh(0, 0, 0, 0);
     auto unpack_lo = [](uint32_t packed) { return (float)(packed & 0xFFFFu) / 65535.0f; };
     auto unpack_hi = [](uint32_t packed) { return (float)(packed >> 16)     / 65535.0f; };
@@ -515,8 +510,8 @@ void TextureManager::_BuildUploadTasks() {
     for (auto& task : texture_upload_tasks)
         _PlaceTask(task);
 
-    // Расхождение размера с форматом назначения даёт не ошибку валидации, а сдвиг строк или
-    // чтение за границей TB, поэтому сверяем здесь.
+    // Расхождение размера с форматом назначения не поймает валидация: будет сдвиг строк или
+    // чтение за границей transfer-буфера.
     for (auto& task : texture_upload_tasks) {
         const TextureAtlas* atlas = task.atlas;
         if (!atlas) continue;
@@ -537,10 +532,8 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* copy_pas
     constexpr SDL_GPUTextureUsageFlags kMipUsage =
         SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 
-    // Смещение задачи обязано быть кратно размеру текселя формата НАЗНАЧЕНИЯ, а в одном буфере
-    // едут разные форматы: R8-глиф с нечётным размером сбивает выравнивание всем 4-байтовым
-    // атласам за собой, и копия читается со сдвигом на байт. Считаем здесь, а не на упаковке:
-    // в векторе могли накопиться задачи нескольких кадров.
+    // Смещение обязано быть кратно текселю формата НАЗНАЧЕНИЯ: в одном буфере едут R8-глифы и
+    // BGRA-тайлы, и нечётная задача сбивает выравнивание всем следующим за ней.
     uint32_t offset = 0;
     for (auto& task : texture_upload_tasks) {
         const uint32_t align = task.atlas ? SDL_GPUTextureFormatTexelBlockSize(task.atlas->format) : 16;
@@ -558,7 +551,6 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* copy_pas
         return nullptr;
     }
 
-    // Решение про мипы — одно на атлас за пачку: у шрифтового атласа задача на каждый глиф.
     std::unordered_set<SDL_GPUTexture*> mip_decided;
 
     for (auto& task : texture_upload_tasks) {
@@ -602,8 +594,6 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* copy_pas
 
 void TextureManager::GenerateMipmaps(SDL_GPUCommandBuffer* cb)
 {
-    // В очереди лежат готовые хэндлы SDL, живого состояния менеджера дренаж не читает — поэтому
-    // он не привязан ни к потоку, ни к командбуферу заливки.
     for (SDL_GPUTexture* tex : mip_tasks)
         SDL_GenerateMipmapsForGPUTexture(cb, tex);
     mip_tasks.clear();

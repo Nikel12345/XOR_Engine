@@ -8,9 +8,8 @@
 
 struct TextureAtlas;   // источник блита; полный тип нужен только в .cpp
 
-// ПОТОКИ. И Request, и Blit зовутся с ОДНОГО потока — sim: замков внутри нет, со второго потока
-// blits_ порвётся. GetUV дёргает UI-поток на каждую плитку браузера, и он тоже без замка — тот же
-// размен «редактор читает живое», что и в остальных панелях.
+// Замков внутри нет: Request и Blit зовутся с одного потока (sim), а GetUV с UI-потока читает
+// живое состояние — тот же размен, что и в остальных панелях редактора.
 class PreviewPacker {
 public:
     static constexpr uint32_t ATLAS_SIZE = 2048;
@@ -23,7 +22,6 @@ public:
     void Create(SDL_GPUDevice* dev);
     void Destroy(SDL_GPUDevice* dev);
 
-    // Повторный Request той же текстуры переиспользует её ячейку — перезапись на месте.
     void Request(TextureId id, TextureAtlas* src,
                  uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t layer);
 

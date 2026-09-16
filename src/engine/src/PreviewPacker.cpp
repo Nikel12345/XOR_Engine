@@ -59,10 +59,10 @@ void PreviewPacker::Publish()
     std::vector<TextureId> retry;   // источники без готовой GPU-текстуры — оставить на потом
     for (TextureId id : dirty_) {
         auto it = slots_.find(id);
-        if (it == slots_.end() || it->second.cell < 0) continue;   // Release между Request и Publish
+        if (it == slots_.end() || it->second.cell < 0) continue;
         const Slot& slot = it->second;
         SDL_GPUTexture* src = slot.src ? slot.src->texture_binding.texture : nullptr;
-        if (!src) { retry.push_back(id); continue; }              // атлас ещё не забейкан
+        if (!src) { retry.push_back(id); continue; }
 
         BlitTask blit{};
         blit.src = src;
