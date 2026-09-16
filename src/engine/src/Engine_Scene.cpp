@@ -633,8 +633,7 @@ static void LoadRenderPrograms(yyjson_val* root, ShaderManager* sm, BufferManage
 	ForEachIn(root, "render_shader_programs", [&](yyjson_val* e) {
 		const std::string name = JsonStr(e, "name");
 		if (name.empty()) return;
-		// Снос уже убрал сценовые sp, так что занятым имя осталось только у кодовой программы —
-		// манифест её перекрывает (erase на отсутствующем имени — no-op).
+		// Занятое имя = delete+create (erase на отсутствующем имени — no-op).
 		// push-инструкции НЕ переносим: их вернёт реестр код-байндингов по имени (внутри
 		// CreateShaderProgram) — перенос со старой sp ломался бы на переименовании.
 		sm->DeleteShaderProgram(name);
@@ -749,9 +748,6 @@ static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 	SDL_Log("LoadScene: %zu/%zu materials from manifest", n, entries.size());
 }
 
-// Сносим ровно то, что пишет SaveScene — тогда потерять невосстановимое нельзя по построению.
-// Отвечает на два вопроса сразу: ресурсы разных сцен больше не делят имён, и порядок
-// создания внутри сцены задаёт манифест, а не история предыдущих загрузок.
 static void ClearSceneResources(TextureManager* tm, ModelManager* mm, ShaderManager* sm, MaterialManager* mtm)
 {
 	const size_t mat = mtm->ClearSceneMaterials();
@@ -789,8 +785,6 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 		}
 	}
 
-	// Снос ПОСЛЕ успешного чтения scene.json: кривой путь не должен обезресурсивать текущую
-	// сцену — тот же принцип, что у clear у ECS ниже.
 	{ PhaseTimer t(wipe_ms); ClearSceneResources(texture_manager, model_manager, shader_manager, material_manager); }
 
 	// Ресурсы ПЕРЕД ECS: сущности ссылаются на них по имени, и резолв идёт по словарям менеджеров.

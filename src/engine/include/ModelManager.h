@@ -50,8 +50,6 @@ public:
 
 	size_t LoadSceneModels(const std::vector<SceneModelEntry>& entries);
 
-	// Снос сценовых моделей перед загрузкой: уходит ровно то, что пишет SaveScene — процедурные
-	// (пустой model_path) остаются: их манифест не возит. Возвращает число снесённых.
 	size_t ClearSceneModels();
 
 	uint32_t CalculateModelsVerticesSize(const GeometryPool* pool, uint32_t stream_stride);

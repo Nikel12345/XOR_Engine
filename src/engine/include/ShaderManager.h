@@ -38,9 +38,6 @@ public:
 		const ComputePassName& compute_pass_name,
 		BufferManager* bm, TextureManager* tm, ResourceTag tags = ResourceTag::None);
 
-	// Снос сценовых шейдеров перед загрузкой: уходит ровно то, что пишет SaveScene. Порядок
-	// внутри значим: сначала программы, потом их данные — Delete*Shader отказывают, пока
-	// на шейдер ссылается хоть одна sp. Возвращает число снесённых записей.
 	size_t ClearSceneShaders();
 
 	VertexShaderData*   GetVertexShader(const std::string& name);

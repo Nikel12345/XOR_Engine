@@ -36,7 +36,6 @@ public:
 	// манифеста не трогаются. Возвращает число обработанных.
 	size_t LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries);
 
-	// Снос сценовых материалов перед загрузкой: уходит ровно то, что пишет SaveScene. Возвращает число снесённых.
 	size_t ClearSceneMaterials();
 
 	// Сбор usage-флагов. Обходит ВСЕ варианты слота, а не только дефолт: пропущенный вариант
