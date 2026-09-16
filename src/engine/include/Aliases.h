@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include <cstdint>
-#include "ResourceRegistry.h"
+#include <functional>
 
 using RenderPassName = std::string;
 using ComputePassName = std::string;
@@ -16,10 +16,22 @@ using ShaderName = std::string;
 
 using BufferDataName = const char*;
 
-struct AtlasIdTag;
-struct TextureIdTag;
-using AtlasId   = ResourceId<AtlasIdTag>;
-using TextureId = ResourceId<TextureIdTag>;
+// Ссылка на ресурс = индекс его ЯЧЕЙКИ в реестре менеджера; 0 — ссылки нет. Тип на каждый реестр
+// свой, поэтому id текстуры не подставится туда, где ждут id атласа.
+struct TextureId {
+	uint32_t v = 0;
+	explicit operator bool() const { return v != 0; }
+	bool operator==(const TextureId&) const = default;
+};
+struct AtlasId {
+	uint32_t v = 0;
+	explicit operator bool() const { return v != 0; }
+	bool operator==(const AtlasId&) const = default;
+};
+
+template <> struct std::hash<TextureId> {
+	size_t operator()(TextureId id) const noexcept { return std::hash<uint32_t>{}(id.v); }
+};
 
 namespace BatchKeys {
 	using ModelBatchKey = uint64_t;

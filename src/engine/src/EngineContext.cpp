@@ -466,7 +466,7 @@ void EngineContext::CreateComputeShader(const std::string& name, const char* hls
 ComputeShaderProgram* EngineContext::CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
 	std::initializer_list<BufferDataName> rw_storage_buffers,
 	std::initializer_list<BufferDataName> ro_storage_buffers,
-	std::initializer_list<ComputeShaderProgram::ComputeRWTextureBindingParametr> rw_storage_textures,
+	std::initializer_list<ComputeRWTextureBindingParametr> rw_storage_textures,
 	std::initializer_list<AtlasName> ro_storage_textures,
 	std::initializer_list<AtlasName> texture_samplers,
 	const ComputePassName& associated_compute_pass, ResourceTag tags)

@@ -4,6 +4,7 @@
 #include <string>
 #include <cstddef>
 #include <deque>
+#include <string_view>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -35,8 +36,105 @@ struct UploadTaskTexture {
 
 struct AtlasPacker;
 
-using AtlasRegistry   = ResourceRegistry<std::unique_ptr<TextureAtlas>,  AtlasIdTag>;
-using TextureRegistry = ResourceRegistry<std::shared_ptr<TextureHandle>, TextureIdTag>;
+// Реестр текстур: ячейка = {человеческое имя, хэндл}, а ссылающиеся держат её id. Поэтому
+// переименование — запись в одно поле ячейки, а не обход всех, кто на текстуру сослался.
+//
+// Ячейка ПЕРЕЖИВАЕТ удаление хэндла, и это условие, а не экономия: id обязан оставаться разрешимым
+// в имя (сохранение сцены пишет имена, диагностика их печатает), а пересоздание под тем же именем
+// обязано попасть в ТУ ЖЕ ячейку — иначе replace из редактора и снос сценовых ресурсов перед
+// загрузкой оставляли бы ссылающихся ни с чем.
+//
+// deque, а не vector: NameOf отдаёт ссылку, которую UI-поток читает, пока sim может завести новую
+// текстуру, — переселение элементов сделало бы её висячей.
+class TextureRegistry {
+public:
+	struct Cell {
+		std::string name;
+		std::shared_ptr<TextureHandle> object;
+	};
+
+	TextureRegistry() { cells_.emplace_back(); }
+
+	TextureId Intern(std::string_view name) {
+		if (TextureId id = Find(name)) return id;
+		cells_.push_back(Cell{ std::string(name), {} });
+		return TextureId{ static_cast<uint32_t>(cells_.size() - 1) };
+	}
+	// Линейно, и этого достаточно: по имени ищут только загрузка манифеста и редактор. Индекс
+	// «имя → id» рядом с ячейками был бы вторым источником истины про одно и то же.
+	TextureId Find(std::string_view name) const {
+		for (uint32_t i = 1; i < cells_.size(); ++i)
+			if (cells_[i].name == name) return TextureId{ i };
+		return TextureId{};
+	}
+
+	const std::string& NameOf(TextureId id) const {
+		static const std::string none;
+		return Valid(id) ? cells_[id.v].name : none;
+	}
+	void Rename(TextureId id, std::string_view name) { if (Valid(id)) cells_[id.v].name.assign(name); }
+
+	TextureHandle* Get(TextureId id) const { return Valid(id) ? cells_[id.v].object.get() : nullptr; }
+	void Put(TextureId id, std::shared_ptr<TextureHandle> handle) { if (Valid(id)) cells_[id.v].object = std::move(handle); }
+	bool Erase(TextureId id) {
+		if (!Valid(id) || !cells_[id.v].object) return false;
+		cells_[id.v].object.reset();
+		return true;
+	}
+
+	// Индекс ячейки И ЕСТЬ её id, поэтому обход счётчиком: range-for отдал бы ячейку без id.
+	uint32_t Count() const { return static_cast<uint32_t>(cells_.size()); }
+	const Cell& At(uint32_t i) const { return cells_[i]; }
+
+private:
+	bool Valid(TextureId id) const { return id.v != 0 && id.v < cells_.size(); }
+
+	std::deque<Cell> cells_;
+};
+
+// Устройство и инварианты те же, что у TextureRegistry.
+class AtlasRegistry {
+public:
+	struct Cell {
+		std::string name;
+		std::unique_ptr<TextureAtlas> object;
+	};
+
+	AtlasRegistry() { cells_.emplace_back(); }
+
+	AtlasId Intern(std::string_view name) {
+		if (AtlasId id = Find(name)) return id;
+		cells_.push_back(Cell{ std::string(name), {} });
+		return AtlasId{ static_cast<uint32_t>(cells_.size() - 1) };
+	}
+	AtlasId Find(std::string_view name) const {
+		for (uint32_t i = 1; i < cells_.size(); ++i)
+			if (cells_[i].name == name) return AtlasId{ i };
+		return AtlasId{};
+	}
+
+	const std::string& NameOf(AtlasId id) const {
+		static const std::string none;
+		return Valid(id) ? cells_[id.v].name : none;
+	}
+	void Rename(AtlasId id, std::string_view name) { if (Valid(id)) cells_[id.v].name.assign(name); }
+
+	TextureAtlas* Get(AtlasId id) const { return Valid(id) ? cells_[id.v].object.get() : nullptr; }
+	void Put(AtlasId id, std::unique_ptr<TextureAtlas> atlas) { if (Valid(id)) cells_[id.v].object = std::move(atlas); }
+	bool Erase(AtlasId id) {
+		if (!Valid(id) || !cells_[id.v].object) return false;
+		cells_[id.v].object.reset();
+		return true;
+	}
+
+	uint32_t Count() const { return static_cast<uint32_t>(cells_.size()); }
+	const Cell& At(uint32_t i) const { return cells_[i]; }
+
+private:
+	bool Valid(AtlasId id) const { return id.v != 0 && id.v < cells_.size(); }
+
+	std::deque<Cell> cells_;
+};
 
 namespace DefaultSamplersNames {
 	inline constexpr const char* DEFAULT_SAMPLER = "DefaultSampler";

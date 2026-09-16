@@ -85,9 +85,6 @@ struct ShaderProgram {
 
 
 struct ComputeShaderProgram {
-    using ComputeRWTextureBindingParametr = ::ComputeRWTextureBindingParametr;
-    using ComputeRWTextureBinding         = ::ComputeRWTextureBinding;
-
     std::string cs_name;
     std::vector<BufferDataName> rw_storage_buffer_names;
     std::vector<BufferDataName> ro_storage_buffer_names;
