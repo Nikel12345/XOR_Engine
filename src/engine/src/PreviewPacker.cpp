@@ -6,8 +6,6 @@
 
 void PreviewPacker::Create(SDL_GPUDevice* dev)
 {
-    // Обычный 2D (ImGui сэмплит только texture2D). COLOR_TARGET — приёмник SDL_BlitGPUTexture
-    // (блит рендерит в назначение), SAMPLER — чтение ImGui-конвейером.
     SDL_GPUTextureCreateInfo pci{};
     pci.type = SDL_GPU_TEXTURETYPE_2D;
     pci.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
@@ -42,7 +40,7 @@ void PreviewPacker::Request(TextureId id, TextureAtlas* src,
 {
     if (!atlas_ || !id) return;
 
-    Slot& s = slots_[id];   // существующий переиспользуем (ячейка на месте), новый — заводим
+    Slot& s = slots_[id];
     if (s.cell < 0) {
         s.cell = Alloc();
         if (s.cell < 0) { slots_.erase(id); SDL_Log("PreviewPacker: full - no preview for texture #%u", id.v); return; }
@@ -61,7 +59,7 @@ void PreviewPacker::Publish()
     std::vector<TextureId> retry;   // источники без готовой GPU-текстуры — оставить на потом
     for (TextureId id : dirty_) {
         auto it = slots_.find(id);
-        if (it == slots_.end() || it->second.cell < 0) continue;   // Release-нут между Request и Publish
+        if (it == slots_.end() || it->second.cell < 0) continue;   // Release между Request и Publish
         const Slot& s = it->second;
         SDL_GPUTexture* src = s.src ? s.src->texture_binding.texture : nullptr;
         if (!src) { retry.push_back(id); continue; }              // атлас ещё не забейкан
@@ -69,8 +67,6 @@ void PreviewPacker::Publish()
         BlitTask t{};
         t.src = src;
         t.sx = s.x; t.sy = s.y; t.sw = s.w; t.sh = s.h; t.layer = s.layer;
-        // Индекс ячейки (row-major) → её пиксельный угол. Считаем здесь, чтобы render получил
-        // готовые координаты и не знал ни про сетку, ни про то, что ячейка бывает -1.
         t.dx = safe_i_u32(s.cell % safe_u32t_i(PER_ROW)) * CELL;
         t.dy = safe_i_u32(s.cell / safe_u32t_i(PER_ROW)) * CELL;
         ready.push_back(t);
@@ -83,9 +79,7 @@ void PreviewPacker::Publish()
 
 void PreviewPacker::Blit(SDL_GPUCommandBuffer* cb)
 {
-    // Запись на текстурный cb ПОСЛЕ заливки пикселей и мипов того же cb: порядок внутри cb
-    // гарантирует, что источник уже содержит пиксели. ImGui рисует превью-атлас позже и ДРУГИМ
-    // cb (render-поток) — там порядок держит уже очередь: этот cb сабмичен раньше кадра.
+    // Писать ПОСЛЕ заливки и мипов того же cb: порядок внутри cb и гарантирует источнику пиксели.
     if (blits_.empty()) return;
     if (!atlas_) { blits_.clear(); return; }
 
@@ -101,10 +95,8 @@ void PreviewPacker::Blit(SDL_GPUCommandBuffer* cb)
         bi.destination.w = CELL;
         bi.destination.h = CELL;
         bi.load_op = SDL_GPU_LOADOP_LOAD;   // соседние ячейки не трогаем
-        // Мелкий источник (меньше ячейки по обеим осям — дефолты 2×2/4×4, иконки) в LINEAR
-        // растягивается в мыльный градиент и подмешивает соседей по кромке региона → NEAREST даёт
-        // чёткие тексели без утечки. Крупный (уменьшение до CELL) оставляем LINEAR: NEAREST на
-        // даунскейле 2048→64 алиасит. Порог — ровно CELL: увеличение → NEAREST, уменьшение → LINEAR.
+        // Увеличение мелкого источника идёт NEAREST (LINEAR размывает его в градиент и тянет
+        // соседей по кромке), уменьшение крупного — LINEAR (NEAREST на 2048→64 алиасит).
         bi.filter = (t.sw < CELL && t.sh < CELL) ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
         SDL_BlitGPUTexture(cb, &bi);
     }

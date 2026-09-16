@@ -6,17 +6,15 @@
 
 struct AtlasPacker {
     struct Layer {
-        std::vector<rectpack2D::space_rect> free_spaces;   // свободные прямоугольники слоя
+        std::vector<rectpack2D::space_rect> free_spaces;
 
         void reset(int w, int h) {
             free_spaces.clear();
             free_spaces.push_back(rectpack2D::rect_xywh(0, 0, w, h));
         }
 
-        // Слой свободен ЦЕЛИКОМ — единственный свободный прямоугольник во всю площадь. Надёжно
-        // именно так: _ReleasePendingRegions пересобирает слой начисто (reset + carve выживших),
-        // поэтому «пустой, но раздробленный на куски» слой невозможен. Нужно многослойной записи,
-        // которая берёт слои целиком и не может сесть в остаток.
+        // Свободен ЦЕЛИКОМ: пересборка слоя идёт начисто, поэтому «пустой, но раздробленный»
+        // слой невозможен, и одного прямоугольника во всю площадь достаточно.
         bool empty(int w, int h) const {
             return free_spaces.size() == 1 && free_spaces[0].x == 0 && free_spaces[0].y == 0
                 && free_spaces[0].w == w && free_spaces[0].h == h;
@@ -28,10 +26,10 @@ struct AtlasPacker {
             for (int i = (int)free_spaces.size() - 1; i >= 0; --i) {
                 const space_rect candidate = free_spaces[i];
                 const auto splits = insert_and_split(rect_wh(w, h), candidate);
-                if (!splits) continue;                         // не помещается — ищем дальше
-                free_spaces[i] = free_spaces.back();           // удаляем кандидата (swap-with-back)
+                if (!splits) continue;
+                free_spaces[i] = free_spaces.back();
                 free_spaces.pop_back();
-                for (int s = 0; s < splits.count; ++s)         // добавляем остатки-сплиты
+                for (int s = 0; s < splits.count; ++s)
                     free_spaces.push_back(splits.spaces[s]);
                 return rect_xywh(candidate.x, candidate.y, w, h);
             }
@@ -47,16 +45,16 @@ struct AtlasPacker {
                 const int iy = std::max(f.y, o.y);
                 const int ir = std::min(f.x + f.w, o.x + o.w);
                 const int ib = std::min(f.y + f.h, o.y + o.h);
-                if (ir <= ix || ib <= iy) { out.push_back(f); continue; }   // не пересекаются
-                if (ix > f.x)         out.push_back(rect_xywh(f.x, f.y, ix - f.x, f.h));          // левый (полная высота)
-                if (ir < f.x + f.w)   out.push_back(rect_xywh(ir, f.y, f.x + f.w - ir, f.h));      // правый (полная высота)
-                if (iy > f.y)         out.push_back(rect_xywh(ix, f.y, ir - ix, iy - f.y));        // верх (средняя колонка)
-                if (ib < f.y + f.h)   out.push_back(rect_xywh(ix, ib, ir - ix, f.y + f.h - ib));   // низ (средняя колонка)
+                if (ir <= ix || ib <= iy) { out.push_back(f); continue; }
+                if (ix > f.x)         out.push_back(rect_xywh(f.x, f.y, ix - f.x, f.h));
+                if (ir < f.x + f.w)   out.push_back(rect_xywh(ir, f.y, f.x + f.w - ir, f.h));
+                if (iy > f.y)         out.push_back(rect_xywh(ix, f.y, ir - ix, iy - f.y));
+                if (ib < f.y + f.h)   out.push_back(rect_xywh(ix, ib, ir - ix, f.y + f.h - ib));
             }
             free_spaces.swap(out);
         }
     };
-    std::vector<Layer> layers;   // растёт лениво, size() <= atlas->layers
+    std::vector<Layer> layers;
 };
 
 TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_manager): dev(device), trm(transfer_manager){
@@ -81,7 +79,7 @@ TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_
         text_atlas->padding = 0;
     }
 
-    preview.Create(dev);   // подсистема превью ассетов UI (владеет своей GPU-текстурой)
+    preview.Create(dev);
 }
 
 TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler, ResourceTag tags)
@@ -104,13 +102,7 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, SDL_GP
     atlas->width = tci.width;
     atlas->height = tci.height;
     atlas->layers = tci.layer_count_or_depth;
-    // Рамка (gutter) нужна ТОЛЬКО мипованному атласу: GenerateMipmaps мипует атлас ЦЕЛИКОМ, и на
-    // мипе L кромка тайла усредняется с соседями в радиусе ~2^L текселей. P=2px/сторону — и это же
-    // ЕДИНСТВЕННЫЙ источник величины и для рамки в _PlaceTask, и для ужатия текстуры в
-    // CreateTextureFromFile, поэтому рассинхрона рамки и сжатия нет by design. Немипованный атлас
-    // усреднения по атласу не делает → P=0, рамки нет и ужатия нет. Ключевое: текстуры-степени-двойки
-    // ужимаются на 2·P в CreateTextureFromFile, поэтому след контент+2·P остаётся ровно степенью
-    // двойки и тайлится впритык.
+    // Одна величина на рамку в _PlaceTask и на ужатие текстуры при импорте — рассинхрона нет.
     atlas->padding = (tci.num_levels > 1) ? 16 : 0;
     atlas->mip_levels = tci.num_levels;
     atlas->format = tci.format;
@@ -154,7 +146,6 @@ TextureAtlas* TextureManager::CreateTextureAtlas(const std::string& name, Textur
 	return ptr;
 }
 
-// Дренаж отложенных созданий (каждый кадр, начало PrepareFunc). См. TextureManager.h.
 void TextureManager::BakePending()
 {
     if (pending_atlas_bakes.empty()) return;
@@ -194,7 +185,7 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, const std:
         return nullptr;
 	}
 	TextureHandle* th = CreateTexture(name, atlas, w, h, std::move(pixels), layer_span, tags);
-	if (th) th->atlas_id = aid;   // самоописание: атлас для редактора/сериализации
+	if (th) th->atlas_id = aid;
 	return th;
 }
 
@@ -219,7 +210,7 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtl
     ptr->width = w;
     ptr->height = h;
     ptr->tags = tags;
-    ptr->texture_data.layer_span = layer_span;   // свойство ЗАПРОСА, известно до укладки
+    ptr->texture_data.layer_span = layer_span;
     handles_data.Put(id, std::move(texture_handle));
 	atlas->textures.push_back(&ptr->texture_data); 
 
@@ -240,7 +231,7 @@ std::vector<std::byte> TextureManager::SurfaceToPixels(SDL_Surface* surface, SDL
     std::vector<std::byte> out;
     if (!surface) return out;
 
-    SDL_Surface* c = SDL_ConvertSurface(surface, format);   // не трогает вход; c — новая поверхность
+    SDL_Surface* c = SDL_ConvertSurface(surface, format);
     if (!c) { SDL_Log("TextureManager::SurfaceToPixels: SDL_ConvertSurface failed: %s", SDL_GetError()); return out; }
 
     const int    w   = c->w, h = c->h;
@@ -292,10 +283,10 @@ void TextureManager::RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCre
     tci.usage = atlas->tci.usage;
     SDL_GPUTexture* old_tex = atlas->texture_binding.texture;
     atlas->texture_binding.texture = CreateGPU_Texture(tci);
-    atlas->tci    = tci;              // источник истины для будущих пересозданий
+    atlas->tci    = tci;
     atlas->width  = tci.width;
     atlas->height = tci.height;
-    QueueDeleteTexture(old_tex);      // старую — в отложенное удаление (кадры in-flight)
+    QueueDeleteTexture(old_tex);
 }
 
 static uint32_t PackUnorm16x2(float x, float y) {
@@ -320,21 +311,18 @@ void TextureManager::CreateUploadTask(TextureId id, TextureHandle* handle, uint3
 
 bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     using namespace rectpack2D;
-    if (task.placed) return true;             // идемпотентность: повторный PackAtlases не сдвинет тайл
+    if (task.placed) return true;             // повторный PackAtlases не сдвинет уложенный тайл
 
     TextureAtlas* atlas = task.target_handle->atlas;
-    task.atlas = atlas;   // с этого момента задача самодостаточна — см. UploadTaskTexture::atlas
+    task.atlas = atlas;
     auto& packer_uptr = atlas_packers[atlas];
     if (!packer_uptr) packer_uptr = std::make_unique<AtlasPacker>();
     AtlasPacker& packer = *packer_uptr;
 
     const uint32_t w = task.width, h = task.height;   // нативный размер (до gutter'а)
-    if (w == 0 || h == 0) { task.placed = true; return true; }  // пустышка — задачу не грузим
+    if (w == 0 || h == 0) { task.placed = true; return true; }
 
-    // Слой cube-атласа — это ГРАНЬ, поэтому одиночный тайл в нём означает картинку, вклеенную
-    // внутрь грани: куб портится молча, а виноватой выглядит кубмапа. Отказываем здесь, в
-    // единственной точке размещения, — форма редактора фильтрует атласы по виду, но запись сцены
-    // без "cube": true сюда доедет.
+    // Слой cube-атласа — это ГРАНЬ: одиночный тайл вклеился бы внутрь грани и портил куб молча.
     if ((atlas->texture_type == SDL_GPU_TEXTURETYPE_CUBE
       || atlas->texture_type == SDL_GPU_TEXTURETYPE_CUBE_ARRAY) && task.layer_span == 1) {
         SDL_Log("Task '%s': single-layer texture rejected from cube atlas '%s' - its layers are cube "
@@ -343,21 +331,16 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
         return false;
     }
 
-    // Многослойная запись: единица размещения — СЛОЙ, а не прямоугольник в нём. Прямоугольный
-    // упаковщик здесь не при чём (и gutter тоже: тайл полнослойный, padX/padY были бы 0).
     if (task.layer_span > 1) {
         const uint32_t span = task.layer_span;
-        // Полнослойность — инвариант, а не пожелание: сядь запись в остаток слоя, соседний тайл
-        // делил бы с ней слой, а освобождение всей записи вернуло бы упаковщику чужое место.
+        // Полнослойность — инвариант: сядь запись в остаток, освобождение вернуло бы чужое место.
         if (w != atlas->width || h != atlas->height) {
             SDL_Log("Task '%s': %u-layer upload must be full-layer sized (%ux%u, atlas layer %ux%u)",
                     task.name.c_str(), span, w, h, atlas->width, atlas->height);
             return false;
         }
 
-        // База кратна span: у cube-array слой куба = base/6, и выравнивание держит грани одного
-        // куба в одном слоте массива. Сначала ищем среди УЖЕ заведённых слоёв (перезагрузка сцены
-        // — это delete+create, освобождённые слои обязаны переиспользоваться), потом хвост.
+        // База кратна span: у cube-array это держит грани одного куба в одном слоте массива.
         uint32_t base = UINT32_MAX;
         for (uint32_t L = 0; L + span <= packer.layers.size(); L += span) {
             bool all_free = true;
@@ -368,7 +351,7 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
         if (base == UINT32_MAX) {
             const uint32_t start = safe_u32((packer.layers.size() + span - 1) / span) * span;
             if (start + span <= atlas->layers) {
-                while (packer.layers.size() < start + span) {   // пропуск до выравнивания — обычные слои
+                while (packer.layers.size() < start + span) {
                     AtlasPacker::Layer lp;
                     lp.reset((int)atlas->width, (int)atlas->height);
                     packer.layers.push_back(std::move(lp));
@@ -381,15 +364,13 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
             return false;
         }
         for (uint32_t i = 0; i < span; ++i)
-            packer.layers[base + i].free_spaces.clear();   // слой занят целиком — соседей не будет
+            packer.layers[base + i].free_spaces.clear();
 
         TextureData& td = task.target_handle->texture_data;
         td.uv_packed_offset = PackUnorm16x2(0.0f, 0.0f);
         td.uv_packed_scale  = PackUnorm16x2(1.0f, 1.0f);   // != 0 → запись считается размещённой
         td.layer = base;
 
-        // Превью — БАЗОВЫЙ слой: какой из слоёв «лицо» записи, знает только её создатель, а TM
-        // про кубы (и про то, что база — это +X) не знает намеренно.
         preview.Request(task.id, atlas, 0, 0, w, h, base);
 
         task.dst.texture   = atlas->texture_binding.texture;
@@ -406,20 +387,11 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
         return true;
     }
 
-    // Рамка (gutter) — ПО-ОСЕВАЯ и завязана на ОДНУ переменную atlas->padding (P): та же P задаёт
-    // величину сжатия текстуры в CreateTextureFromFile, поэтому рассинхрона рамки и сжатия нет
-    // by design. Правило на ось: размер == размеру атласа → 0 (полнослойная/кубмап-грань: сосед по
-    // этой оси не появится, рамка не влезет и не нужна), иначе → P. padX/padY — ЧИСТАЯ функция от
-    // (w,h,atlas) и в точности повторяется в _DecodeOuterRect: извлечение восстанавливает ровно тот
-    // внешний прямоугольник, что уложен здесь (симметрия → carve при удалении освобождает точно
-    // занятое, без over-carve и утечки). Fallback'а на 0 нет — он бы сломал эту симметрию.
+    // padX/padY — чистая функция от (w,h,atlas), повторённая в _DecodeOuterRect: декод обязан
+    // дать РОВНО уложенный здесь прямоугольник, иначе освобождение вернёт чужое место.
     const uint32_t padX = (w >= atlas->width)  ? 0 : atlas->padding;
     const uint32_t padY = (h >= atlas->height) ? 0 : atlas->padding;
 
-    // Ищем ВНЕШНИЙ (с gutter'ом) прямоугольник слой за слоем от 0-го: текстура садится в ПЕРВЫЙ
-    // слой, где помещается → ранние слои заполняются максимально, а очередь не «перескакивает» на
-    // новый слой из-за одной не влезшей текстуры. Свободные места персистентны, так что новые
-    // текстуры (в т.ч. после загрузки) садятся в остаток, а не поверх уже размещённых.
     uint32_t placed_layer = 0;
     rect_xywh outer{};
 
@@ -439,9 +411,6 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
         return false;
     };
 
-    // ВСЕГДА с рамкой (внешний прямоугольник) — симметрично _DecodeOuterRect. Почти-полнослойный
-    // тайл (w+2padX > width, но w < width) честно не влезет — при P=2 это лишь w ∈ {width-4..width-1},
-    // практически недостижимо; точно-в-размер (w >= width) сядет с padX=0 выше.
     const bool ok = try_place(w + padX * 2, h + padY * 2, /*allow_new_layer=*/true);
 
     if (!ok) {
@@ -449,8 +418,7 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
         return false;
     }
 
-    // UVL считаем от ВНУТРЕННЕГО прямоугольника (outer + pad) и ДО расширения пикселей. Позицию
-    // отдельно НЕ храним — регион точно восстанавливается из UVL при удалении (см. _DecodeOuterRect).
+    // UVL считаем от ВНУТРЕННЕГО прямоугольника и ДО расширения пикселей.
     TextureData& td = task.target_handle->texture_data;
     float ox = (float)(outer.x + padX) / (float)atlas->width;
     float oy = (float)(outer.y + padY) / (float)atlas->height;
@@ -460,14 +428,10 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     td.uv_packed_scale  = PackUnorm16x2(sx, sy);
     td.layer = placed_layer;
 
-    // Превью-заявка ПО ИМЕНИ: внутренний регион (без gutter'а) в пикселях — то, что видит материал.
-    // UVL уже записан, размещение фиксировано (task.placed ниже), так что регион больше не сдвинется.
     preview.Request(task.id, atlas, outer.x + padX, outer.y + padY, w, h, placed_layer);
 
-    // Заполняем gutter репликацией кромки: грузим (w+2padX)×(h+2padY) вместо w×h. Без этого паддинг
-    // остаётся мусором/чёрным, и мип-генерация (она идёт по атласу целиком) подмешивает его в
-    // кромку тайла на грубых мипах → тёмная рамка по периметру меша и битая POM-глубина у края.
-    // По-осевое: вертикаль реплицируется clamp'ом sy_row (padY), горизонталь — левой/правой кромкой (padX).
+    // Рамка заполняется репликацией кромки: незаполненную мип-генерация подмешала бы в тайл
+    // тёмной каймой по периметру меша.
     if (padX > 0 || padY > 0) {
         const uint32_t bpp   = (uint32_t)(task.pixels.size() / ((size_t)w * h));
         const uint32_t new_w = w + padX * 2;
@@ -477,10 +441,10 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
             const uint32_t sy_row = (uint32_t)SDL_clamp((int)y - (int)padY, 0, (int)h - 1);
             const std::byte* srow = task.pixels.data() + (size_t)sy_row * w * bpp;
             std::byte* drow = padded.data() + (size_t)y * new_w * bpp;
-            for (uint32_t x = 0; x < padX; ++x)                      // левая кромка
+            for (uint32_t x = 0; x < padX; ++x)
                 SDL_memcpy(drow + (size_t)x * bpp, srow, bpp);
-            SDL_memcpy(drow + (size_t)padX * bpp, srow, (size_t)w * bpp);   // центр
-            for (uint32_t x = 0; x < padX; ++x)                      // правая кромка
+            SDL_memcpy(drow + (size_t)padX * bpp, srow, (size_t)w * bpp);
+            for (uint32_t x = 0; x < padX; ++x)
                 SDL_memcpy(drow + ((size_t)padX + w + x) * bpp, srow + (size_t)(w - 1) * bpp, bpp);
         }
         task.pixels = std::move(padded);
@@ -489,8 +453,6 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
         task.size   = (uint32_t)task.pixels.size();
     }
 
-    // Грузим от угла ВНЕШНЕГО прямоугольника: при pad>0 картинка уже расширена gutter'ом до
-    // (w+2p)×(h+2p), при pad==0 внутренний прямоугольник совпадает с внешним.
     task.dst.texture   = atlas->texture_binding.texture;
     task.dst.x         = (Uint32)outer.x;
     task.dst.y         = (Uint32)outer.y;
@@ -505,17 +467,9 @@ bool TextureManager::_PlaceTask(UploadTaskTexture& task) {
     return true;
 }
 
-// Распаковать ВНЕШНИЙ (с gutter'ом) прямоугольник размещения из UVL. unorm16 при размере атласа
-// ≤ ~4096 даёт пиксель-в-пиксель (шаг unorm ≫ 1 текселя), поэтому отдельно позицию не храним.
-// padX/padY восстанавливаем ТОЙ ЖЕ по-осевой формулой, что и при укладке (_PlaceTask) — чистая
-// функция от (w,h,atlas), поэтому декод даёт РОВНО уложенный внешний прямоугольник (без over-/under-
-// оценки): carve при удалении освобождает точно занятое место.
 static rectpack2D::rect_xywh _DecodeOuterRect(const TextureData& td, const TextureAtlas* atlas) {
-    // Нет UVL — текстура ещё НЕ размещалась (создана после прошлого PackAtlases), места в слое не
-    // занимает: honest zero. Иначе нулевой внутренний прямоугольник раздулся бы gutter'ом до
-    // (0,0,P,P) — фантомный тайл в углу слоя 0, который вырезает у него место навсегда. Для
-    // мипованного КУБА (P=16, слой = ровно одна грань) это ломало перезагрузку сцены: грань не
-    // влезала в свой слой, все шесть съезжали на +1, шестая не помещалась вовсе.
+    // Ещё не размещённая текстура места не занимает: без этой ветки её нулевой прямоугольник
+    // раздулся бы рамкой до (0,0,P,P) и навсегда вырезал место в углу нулевого слоя.
     if (td.uv_packed_scale == 0) return rectpack2D::rect_xywh(0, 0, 0, 0);
     auto unpack_lo = [](uint32_t p) { return (float)(p & 0xFFFFu) / 65535.0f; };
     auto unpack_hi = [](uint32_t p) { return (float)(p >> 16)      / 65535.0f; };
@@ -534,53 +488,36 @@ static rectpack2D::rect_xywh _DecodeOuterRect(const TextureData& td, const Textu
 }
 
 void TextureManager::_ReleasePendingRegions() {
-    // Массовое освобождение — зеркало массового размещения ниже, и обязано идти ПЕРЕД ним: только
-    // так новые текстуры этого же кадра садятся в место, освободившееся от снятых (перезагрузка
-    // сцены — это delete+create одних и тех же имён). Пара (атлас, слой) в списке одна, сколько бы
-    // текстур из слоя ни сняли, — в этом весь смысл переноса: пересборка слоя одна на пачку.
+    // Обязано идти ПЕРЕД размещением: только так новые текстуры кадра садятся в место, которое
+    // освободили снятые.
     for (const auto& [atlas, layer] : pending_region_release_) {
         auto pit = atlas_packers.find(atlas);
-        if (pit == atlas_packers.end() || !pit->second) continue;   // в атласе ничего не размещали
+        if (pit == atlas_packers.end() || !pit->second) continue;
         auto& layers = pit->second->layers;
         if (layer >= layers.size()) continue;
 
-        // Пересборка «начисто»: слой снова один целый прямоугольник минус выжившие. Так место
-        // снятых сливается в крупный остаток, а не остаётся набором дыр по их форме. Выжившие
-        // не двигаются — их регионы точно восстанавливаются из UVL (см. _DecodeOuterRect).
         auto& lp = layers[layer];
         lp.reset((int)atlas->width, (int)atlas->height);
-        // Диапазон, а не равенство: многослойная запись значится ТОЛЬКО на своём базовом слое,
-        // и по равенству она не нашлась бы на остальных — те стали бы «свободны» под живыми
-        // пикселями. Её UVL полнослойный, поэтому carve съедает слой целиком.
+        // Диапазон, а не равенство: многослойная запись значится только на своём базовом слое, и
+        // по равенству остальные её слои стали бы «свободны» под живыми пикселями.
         for (TextureData* s : atlas->textures)
             if (layer >= s->layer && layer < s->layer + s->layer_span) {
                 rectpack2D::rect_xywh o = _DecodeOuterRect(*s, atlas);
-                if (o.w > 0 && o.h > 0) lp.carve(o);   // ещё не размещённые дают нулевой прямоугольник
+                if (o.w > 0 && o.h > 0) lp.carve(o);
             }
     }
     pending_region_release_.clear();
 }
 
 void TextureManager::_BuildUploadTasks() {
-    // Каждую новую задачу вставляем в ПЕРСИСТЕНТНЫЙ упаковщик её атласа. Уже размещённые задачи
-    // (placed) пропускаются, поэтому существующие тайлы не двигаются, а новые садятся в остаток —
-    // ни пересборки атласа, ни наложения на старое содержимое.
     for (auto& task : texture_upload_tasks)
         _PlaceTask(task);
 
-    // Размер задачи ДОЛЖЕН совпадать с тем, сколько байт ждёт формат назначения: сюда приходят
-    // два разных пути (CreateTexture с BGRA от TextureLoader и FontManager с R8, собранным руками
-    // из альфы), и расхождение форматов даст не ошибку валидации, а тихую порчу — сдвиг строк или
-    // чтение за границей TB. Ловим здесь, а не по цвету на экране. Размеры уже с gutter'ом:
-    // _PlaceTask обновляет width/height/size вместе.
-    // Оффсеты в transfer-буфере здесь НЕ считаются: их назначает ExecuteUploadTasks, потому что
-    // она может забрать несколько пачек разом (кадры со skip'ом) — нумеровать их по-пачечно
-    // значило бы наложить задачи разных пачек друг на друга в одном TB.
+    // Расхождение размера с форматом назначения даёт не ошибку валидации, а сдвиг строк или
+    // чтение за границей TB, поэтому сверяем здесь.
     for (auto& t : texture_upload_tasks) {
         const TextureAtlas* a = t.atlas;
         if (!a) continue;
-        // Последний аргумент — depth_or_layer_count: у многослойной задачи пиксели держат span
-        // слоёв стопкой, поэтому и ждём в span раз больше.
         const uint32_t expect = SDL_CalculateGPUTextureFormatSize(a->format, t.width, t.height, t.layer_span);
         if (t.size != expect)
             SDL_Log("Upload '%s': %u байт, а формат атласа '%s' ждёт %u (%ux%u, %u слоёв)",
@@ -596,21 +533,12 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
     constexpr SDL_GPUTextureUsageFlags kMipUsage =
         SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 
-    // Раскладка задач в transfer-буфере. Оффсет обязан быть кратен размеру текселя формата
-    // НАЗНАЧЕНИЯ (VUID-vkCmdCopyBufferToImage-dstImage-07975), а задачи РАЗНЫХ форматов лежат в
-    // ОДНОМ буфере: глифы шрифта грузятся в R8-атлас (TextAtlas) задачами размером w*h — сплошь
-    // и рядом нечётным, — и первая же такая задача сбивает выравнивание ВСЕМ следующим за ней
-    // 4-байтовым атласам (albedo/normal/env_skybox). Копия с невыровненного оффсета — UB: один
-    // драйвер её вытягивает, другой читает со сдвигом на байт, и каналы уезжают (альфа 255
-    // попадает в синий → вся текстурированная картинка в «синем фильтре»). Шаг берём у САМОГО
-    // формата (SDL знает: 1 у R8, 4 у BGRA8, 8/16 у 16F/32F и BC), а не константой сверху — тогда
-    // R8-глифы пакуются впритык, а платят выравниванием только те, кому оно правда нужно.
-    // Считаем ЗДЕСЬ, а не на упаковке: в векторе могли накопиться задачи нескольких кадров
-    // (прошлая аренда TB не удалась), и пер-кадровая нумерация с нуля наложила бы их друг на друга.
+    // Смещение задачи обязано быть кратно размеру текселя формата НАЗНАЧЕНИЯ, а в одном буфере
+    // едут разные форматы: R8-глиф с нечётным размером сбивает выравнивание всем 4-байтовым
+    // атласам за собой, и копия читается со сдвигом на байт. Шаг берём у самого формата, чтобы
+    // R8 паковался впритык. Считаем здесь: в векторе могли накопиться задачи нескольких кадров.
     uint32_t off = 0;
     for (auto& t : texture_upload_tasks) {
-        // Атлас у размещённой задачи есть всегда; проверка — чтобы оффсеты остались монотонными,
-        // а не «залипли» на нуле, если задача не разместилась.
         const uint32_t align = t.atlas ? SDL_GPUTextureFormatTexelBlockSize(t.atlas->format) : 16;
         if (align > 1) off = (off + align - 1) / align * align;
         t.offset = off;
@@ -620,32 +548,27 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
 
     TransferBufferData* tbd = total ? trm->AcquireUploadTB(total) : nullptr;
     if (!tbd) {
-        // total == 0 — все задачи пустые, грузить нечего: чистим, иначе они копились бы вечно.
-        // Иначе аренда TB реально провалилась (драйверная аллокация или маппинг) — задачи
-        // ОСТАВЛЯЕМ на следующий кадр: места в атласе им уже розданы и не вернутся (_PlaceTask
-        // идемпотентен по placed), так что потеря пикселей = мусор в этих регионах навсегда.
+        // Аренда не удалась — задачи ОСТАВЛЯЕМ: места в атласе им уже розданы и не вернутся,
+        // так что потерянные пиксели остались бы мусором в этих регионах навсегда.
         if (total == 0) texture_upload_tasks.clear();
         return nullptr;
     }
 
-    // Решение про мипы принимаем ОДИН раз на атлас за пачку: у шрифтового атласа задача на
-    // каждый глиф, и без этого промах по usage залил бы лог сотнями одинаковых строк.
+    // Решение про мипы — одно на атлас за пачку: у шрифтового атласа задача на каждый глиф.
     std::unordered_set<SDL_GPUTexture*> mip_decided;
 
     for (auto& task : texture_upload_tasks) {
-        if (!task.dst.texture) continue;   // задача не разместилась (атлас переполнен) — не грузим
-        // Пиксели уже декодированы TextureLoader'ом (BGRA32, плотно) — просто копируем.
+        if (!task.dst.texture) continue;   // не разместилась (атлас переполнен)
         SDL_GPUTextureTransferInfo src{};
         src.transfer_buffer = tbd->tb;
         src.offset = task.offset;
-        src.pixels_per_row = task.width;    // размер ОДНОГО слоя: у многослойной задачи слои
-        src.rows_per_layer = task.height;   // лежат стопкой и адресуются шагом layer_bytes
+        src.pixels_per_row = task.width;    // размер ОДНОГО слоя: слои лежат стопкой
+        src.rows_per_layer = task.height;
 
         std::byte* base = static_cast<std::byte*>(tbd->mapped);
-        SDL_memcpy(base + task.offset, task.pixels.data(), task.size);   // вся стопка разом
+        SDL_memcpy(base + task.offset, task.pixels.data(), task.size);
 
-        // Копия — ПО СЛОЮ: SDL кладёт в imageSubresource.layerCount жёсткую 1 (SDL_gpu_vulkan.c),
-        // многослойного копирования в API нет вовсе. Размещение при этом одно на всю запись.
+        // Копия — ПО СЛОЮ: многослойного копирования в API нет вовсе.
         const uint32_t span = task.layer_span ? task.layer_span : 1;
         const uint32_t layer_bytes = task.size / span;
         for (uint32_t i = 0; i < span; ++i) {
@@ -656,10 +579,9 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
             SDL_UploadToGPUTexture(cp, &layer_src, &layer_dst, false);
         }
 
-        // Заявка на мипы — здесь, где известно, что пиксели этого атласа реально поехали.
         const TextureAtlas* a = task.atlas;
-        if (!a || a->mip_levels <= 1) continue;                    // мипов нет — генерировать нечего
-        if (!mip_decided.insert(task.dst.texture).second) continue; // по этому атласу уже решили
+        if (!a || a->mip_levels <= 1) continue;
+        if (!mip_decided.insert(task.dst.texture).second) continue;
 
         if ((a->tci.usage & kMipUsage) != kMipUsage) {
             SDL_Log("TextureManager::ExecuteUploadTasks: atlas has num_levels=%u but usage lacks "
@@ -676,10 +598,8 @@ TransferBufferData* TextureManager::ExecuteUploadTasks(SDL_GPUCopyPass* cp) {
 
 void TextureManager::GenerateMipmaps(SDL_GPUCommandBuffer* cb)
 {
-    // Заявки ставит ExecuteUploadTasks (там же и вся валидация usage-флагов) — здесь только
-    // дренаж. Живое состояние менеджера (атласы, хэндлы) не читается вообще: в mip_tasks лежат
-    // готовые хэндлы текстур, поэтому метод можно звать с другого потока, чем тот, что
-    // ставил заявки, и переносить между командбуферами независимо от заливки.
+    // В очереди лежат готовые хэндлы SDL, живого состояния менеджера дренаж не читает — поэтому
+    // он не привязан ни к потоку, ни к командбуферу заливки.
     for (SDL_GPUTexture* tex : mip_tasks)
         SDL_GenerateMipmapsForGPUTexture(cb, tex);
     mip_tasks.clear();
@@ -719,11 +639,7 @@ bool TextureManager::DeleteTextureHandle(TextureId id, NameSlot slot)
         auto& v = atlas->textures;
         v.erase(std::remove(v.begin(), v.end(), td), v.end());
 
-        // Возврат места упаковщику — отложенно: помечаем слой, пересоберёт его один раз на всю
-        // пачку удалений _ReleasePendingRegions (см. pending_region_release_).
-        // uv_packed_scale == 0 — текстура ещё не размещалась (создана после прошлого PackAtlases),
-        // места в слое не занимает, освобождать нечего.
-        // Все слои записи, а не только базовый: у многослойной пересобрать надо каждый.
+        // Возврат места упаковщику отложен: помечаем ВСЕ слои записи, пересборка одна на пачку.
         for (uint32_t i = 0; td->uv_packed_scale != 0 && i < td->layer_span; ++i) {
             const std::pair<TextureAtlas*, uint32_t> key{ atlas, td->layer + i };
             if (std::find(pending_region_release_.begin(), pending_region_release_.end(), key)
@@ -732,19 +648,13 @@ bool TextureManager::DeleteTextureHandle(TextureId id, NameSlot slot)
         }
     }
 
-    // Вектор один, поэтому снимаются ВСЕ незалитые задачи хэндла — раньше половину было не
-    // достать (уже переданные render'у пачки), и держалось это на том, что место удалённой
-    // текстуры достаётся новой задаче ПОЗЖЕ по порядку, а значит её пиксели лягут последними.
-    // Порядок по-прежнему такой, просто лишней заливки байт, которые тут же перезапишутся,
-    // теперь не происходит вовсе.
     texture_upload_tasks.erase(
         std::remove_if(texture_upload_tasks.begin(), texture_upload_tasks.end(),
                        [handle](const UploadTaskTexture& t) { return t.target_handle == handle; }),
         texture_upload_tasks.end());
 
-    // Превью НЕ трогаем: его подсистема ключуется id ЯЧЕЙКИ, а не хэндлом. При replace (пересоздание
-    // того же имени) слот обязан пережить удаление — иначе плитка мигнёт. Реальное удаление
-    // освобождает превью отдельным ReleasePreview(id) в вызывающем (DeleteTexture-команда).
+    // Превью не трогаем: при замене его ячейка обязана пережить удаление, иначе плитка мигнёт.
+    // Настоящее удаление освобождает её отдельным ReleasePreview у вызывающего.
     return slot == NameSlot::Release ? handles_data.Drop(id) : handles_data.Clear(id);
 }
 
@@ -773,7 +683,6 @@ size_t TextureManager::ClearSceneTextures()
 size_t TextureManager::LoadSceneTextures(const std::vector<SceneTextureEntry>& entries,
     const std::function<TextureHandle*(const SceneTextureEntry&)>& create_from_file)
 {
-    // Merge-upsert (см. заголовок): семантика UpsertTexture-команды, только пачкой из манифеста.
     size_t created = 0;
     for (const SceneTextureEntry& e : entries) {
         if (e.name.empty() || e.atlas.empty() || e.path.empty()) {
@@ -787,8 +696,7 @@ size_t TextureManager::LoadSceneTextures(const std::vector<SceneTextureEntry>& e
             SDL_Log("LoadSceneTextures: '%s' is code-owned - entry skipped", e.name.c_str());
             continue;
         }
-        // Куб снимается ровно как всё остальное — он ОДИН хэндл под своим именем. Без снятия
-        // CreateTexture вернул бы существующий и заливки бы не было (тихий stale).
+        // Без снятия CreateTexture вернул бы существующий хэндл и заливки не случилось бы.
         if (const TextureId id = handles_data.Find(e.name))
             DeleteTextureHandle(id, NameSlot::Keep);   // replace в той же ячейке (материалы перепривяжутся по её id)
         if (create_from_file(e)) ++created;
@@ -804,9 +712,8 @@ void TextureManager::DeleteTexture(SDL_GPUTexture* texture)
 
 TextureManager::~TextureManager()
 {
-    preview.Destroy(dev);   // подсистема превью ассетов UI
+    preview.Destroy(dev);
 
-    // Дочищаем то, что ещё висело в отложенном удалении.
     for (auto& pending : texture_trash) {
         if (pending.tex) SDL_ReleaseGPUTexture(dev, pending.tex);
     }

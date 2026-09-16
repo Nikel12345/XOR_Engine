@@ -26,10 +26,7 @@ struct UploadTaskTexture {
 	Uint32 offset = 0;
 	Uint32 size = 0;
 	Uint32 width = 0, height = 0, pitch = 0;
-	// Сколько ПОДРЯД идущих слоёв заливает задача (dst.layer — первый). pixels держит их стопкой:
-	// width×height — размер ОДНОГО слоя, поэтому pixels_per_row/rows_per_layer остаются пер-слойными,
-	// а слои развёрстываются шагом size/layer_span. Больше одного слоя за копию SDL не умеет
-	// (imageSubresource.layerCount жёстко 1) — заливка идёт циклом, размещение остаётся одним.
+	// Слои лежат в pixels стопкой, width×height — размер ОДНОГО слоя: копия SDL берёт ровно слой.
 	Uint32 layer_span = 1;
 	bool placed = false;
 };
@@ -68,16 +65,11 @@ struct PendingTextureDestroy {
 	uint64_t ready_at = 0;
 };
 
-// Запись манифеста текстур сцены (textures.json): чего достаточно для пересоздания из файла.
-// Парсит/пишет json верхний слой (Engine::Save/LoadScene) — TM получает уже разобранный список.
 struct SceneTextureEntry {
 	std::string name;
 	std::string atlas;
 	std::string path;
 	ChannelConvention conv = ChannelConvention::AsIs;
-	// Кубмапа-крест 4×3: пересоздание идёт через CreateCubeMapTexture (один хэндл на 6 слоёв
-	// cube-атласа), conv не применяется. Для словарной семантики TM ничем не отличается от
-	// обычной записи — имя одно.
 	bool cube = false;
 };
 
@@ -87,12 +79,13 @@ public:
 	TextureManager(SDL_GPUDevice* device, TransferManager* transfer_manager);
 
 	TextureAtlas* CreateTextureAtlas(const std::string& name, SDL_GPUTextureCreateInfo tci, SDL_GPUSampler* sampler, ResourceTag tags = ResourceTag::None);
-	// Create TextureAtlas from an already existing TextureAtlas
+	// Вторая обёртка над ЧУЖОЙ GPU-текстурой: своё имя и свой сэмплер, тело забирается у источника
+	// на бейке (до этого в источник вливается usage, объявленный этой обёртке).
+	// ТОЛЬКО для атласов, которые не ресайзятся: указатель на текстуру копируется один раз, а
+	// RecreateAtlasTexture у источника отправит прежнюю в отложенное удаление, и обёртка останется
+	// с освобождённой. Вызывающих сейчас нет.
 	TextureAtlas* CreateTextureAtlas(const std::string& name, TextureAtlas* existing_atlas, SDL_GPUSampler* sampler, ResourceTag tags = ResourceTag::None);
-	// Загрузку с диска делает TextureLoader; оркестрация — в EngineContext.
-	// layer_span > 1 — одна текстура на НЕСКОЛЬКИХ подряд идущих слоях (грани кубмапы): w/h тогда
-	// обязаны совпасть с размером слоя, а pixels держать слои стопкой. Про кубы TM не знает
-	// намеренно — знание про них живёт в EngineContext::CreateCubeMapTexture, здесь только слои.
+	// layer_span > 1 (грани кубмапы): w/h обязаны совпасть с размером слоя, pixels держат слои стопкой.
 	TextureHandle* CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span = 1, ResourceTag tags = ResourceTag::None);
 	TextureHandle* CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span = 1, ResourceTag tags = ResourceTag::None);
 
@@ -118,11 +111,6 @@ public:
 	bool DeleteTextureHandle(TextureId id, NameSlot slot);
 	bool RenameTexture(TextureId id, const std::string& new_name);
 
-	// Merge-upsert текстур из манифеста сцены (см. SceneTextureEntry): занятое имя снимается
-	// (replace, как UpsertTexture), затем create_from_file — декод файла остаётся верхнему слою
-	// (EngineContext::CreateTextureFromFile), TM владеет только словарной семантикой. Ресурсы,
-	// которых нет в манифесте, НЕ трогаются (кодовая инфраструктура переживает загрузку).
-	// Возвращает число успешно созданных.
 	size_t LoadSceneTextures(const std::vector<SceneTextureEntry>& entries,
 		const std::function<TextureHandle*(const SceneTextureEntry&)>& create_from_file);
 
@@ -131,22 +119,15 @@ public:
 	void QueueDeleteTexture(SDL_GPUTexture* texture);
 	void TrashTextures(uint64_t fences_done);
 
-	// (w,h) — размер НАЗНАЧЕНИЯ (свопчейн/панель), а не размер таргета: своё разрешение каждый таргет
-	// выводит сам, в замыкании (внутреннее оно, эффектное или доля пирамиды). Менеджер про домены не
-	// знает и знать не должен — он лишь раздаёт всем инструкциям одну исходную величину.
+	// (w,h) — размер НАЗНАЧЕНИЯ: своё разрешение каждый таргет выводит сам, в замыкании.
 	using TextureResizeFunc = std::function<void(TextureManager&, uint32_t w, uint32_t h)>;
 	void CreateResizeInstruction(const std::string& texture_name, TextureResizeFunc fn);
 	void ExecuteResizeInstructions(uint32_t w, uint32_t h);
 
 	void RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci);
 
-	// Есть ли для GPU незаписанная работа: заливки, мипы, блиты превью. Этим гейтится САБМИТ
-	// текстурного cb, а не запись в него. Текстурный cb уходит на ГРАФИЧЕСКУЮ очередь (порядок
-	// «залили → нарисовали» держит она, а не барьеры), и даже пустой он встаёт в неё ЗА кадром:
-	// его фенс отстреливает только когда кадр дорисован. Стадия заливки ждёт оба своих фенса,
-	// поэтому пустой сабмит удлиняет оборот слота на пол-кадра и тормозит НЕ рендер, а sim.
-	// Три слагаемых, а не одно: превью публикуются независимо от заливок, а мипы могут остаться
-	// от заливки, записанной другим cb (Engine_Frame — не единственная реализация кадра).
+	// Гейт САБМИТА текстурного cb: пустой сабмит стоит пол-оборота слота, потому что его фенс
+	// отстреливает только после дорисованного кадра.
 	bool IsDirty() const {
 		return !texture_upload_tasks.empty() || !mip_tasks.empty() || preview.HasPendingBlits();
 	}
@@ -185,18 +166,11 @@ private:
 
 	void _ReleasePendingRegions();
 	void _BuildUploadTasks();
-	// Разместить одну upload-задачу в персистентном упаковщике её атласа (слой за слоем от 0-го,
-	// с переиспользованием освобождённых регионов). При успехе пишет UVL/placement в handle,
-	// gutter'ит пиксели и заполняет task.dst. См. TextureManager.cpp.
 	bool _PlaceTask(UploadTaskTexture& task);
 	AtlasRegistry atlases_data;
-	// shared_ptr — владелец хэндла; материалы ссылаются на текстуру по id ЯЧЕЙКИ (не держат указатель).
-	// Поэтому DeleteTextureHandle(Keep) = опустошение ячейки: материалы на следующей сборке батча
-	// получат из неё nullptr → подставят dummy, а наполнение той же ячейки их перепривяжет.
-	// DeleteTextureHandle(Release) отпускает и имя: ссылки остаются без него навсегда.
 	TextureRegistry handles_data;
 	std::unordered_map<std::string, SDL_GPUSampler*> samplers_data;
-	std::unordered_map<TextureAtlas*, std::unique_ptr<AtlasPacker>> atlas_packers;  // персистентное состояние упаковки
+	std::unordered_map<TextureAtlas*, std::unique_ptr<AtlasPacker>> atlas_packers;
 
 	std::vector<std::pair<TextureAtlas*, uint32_t>> pending_region_release_;
 
