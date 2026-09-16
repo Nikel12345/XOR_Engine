@@ -386,7 +386,10 @@ static void SaveModels(const std::string& dir, ModelManager* mm)
 	MutDoc d;
 	yyjson_mut_val* arr = d.Arr("models");
 	size_t saved = 0;
-	for (auto& [name, m] : mm->GetModels()) {
+	for (int32_t mi = 0; mi < mm->Models().Count(); ++mi) {
+		const ModelCell& cell = mm->Models().At(mi);
+		const ModelData* m = cell.object.get();
+		const std::string& name = cell.name;
 		if (!m || HasTag(m->tags, ResourceTag::CodeOwned) || m->model_path.empty()) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, arr);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name",   name.c_str());

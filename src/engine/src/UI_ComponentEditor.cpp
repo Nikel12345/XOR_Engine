@@ -142,7 +142,11 @@ bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec
             if (ro || !target.ctx) { ImGui::LabelText(f.key, "%s", sel.c_str()); break; }
             if (ImGui::BeginCombo(f.key, sel.empty() ? "(none)" : sel.c_str())) {
                 if (ImGui::Selectable("(none)", sel.empty())) put_str(f, {});
-                for (auto& [nm, m] : target.ctx->GetModelManager()->GetModels()) {
+                const ModelRegistry& mdreg = target.ctx->GetModelManager()->Models();
+                for (int32_t mdi = 0; mdi < mdreg.Count(); ++mdi) {
+                    const std::string& nm = mdreg.At(mdi).name;
+                    const auto& m = mdreg.At(mdi).object;
+                    if (!m) continue;
                     if (m && !g_show_internal && HasTag(m->tags, ResourceTag::System)) continue;
                     if (ImGui::Selectable(nm.c_str(), nm == sel)) put_str(f, nm);
                 }
@@ -251,7 +255,7 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
     if (!t.live()) {
         size_t sub_count = 0;
         if (auto* mdl_arr = arch.get_array<ModelComponent>()) {
-            if (const ModelData* m = t.ctx->GetModelManager()->FindModel((*mdl_arr)[row].name))
+            if (const ModelData* m = t.ctx->GetModelManager()->FindModel((*mdl_arr)[row].model))
                 sub_count = m->submeshes.size();
         }
         if (mats.materials.size() != sub_count) mats.materials.resize(sub_count);

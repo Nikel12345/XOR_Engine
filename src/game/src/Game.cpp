@@ -365,7 +365,7 @@ void Game::CreateDebugColliders()
     ModelManager* mm = ctx->GetModelManager();
     std::vector<DebugColliderSystem::DebugShape> shapes = DebugColliderSystem::CollectDebugShapes(
         *objectManager, scene,
-        [mm](const std::string& n) -> const ModelData* { return mm->FindModel(n); });
+        [mm](ModelId id) -> const ModelData* { return mm->FindModel(id); });
     if (shapes.empty()) return;
 
     for (const DebugColliderSystem::DebugShape& s : shapes) {
@@ -374,7 +374,7 @@ void Game::CreateDebugColliders()
         for (int i = 0; i < 16; ++i) lm.m[i] = s.local[i];
         ctx->CreateEntity(kStartScene,
             MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial("debug_collider") } } },
-            ModelComponent{ model_name },
+            ModelComponent{ ctx->GetModelManager()->InternModel(model_name) },
             PositionProxy16{},          // перезапишется композицией parent × local
             ParentComponent{ s.owner },
             lm,
@@ -541,7 +541,7 @@ void Game::SimulateGravity()
         // kTouchMargin.
         float hx = 0.0f, hy = 0.0f, hz = 0.0f;
         if (objectManager->Has<ModelComponent>(scene, e)) {
-            const ModelData* m = modelManager->FindModel(objectManager->GetComponent<ModelComponent>(scene, e).name);
+            const ModelData* m = modelManager->FindModel(objectManager->GetComponent<ModelComponent>(scene, e).model);
             if (m) for (const SubMeshData& sm : m->submeshes) {
                 hx = std::max(hx, std::fabs(sm.aabb_center.x) + sm.aabb_half.x);
                 hy = std::max(hy, std::fabs(sm.aabb_center.y) + sm.aabb_half.y);

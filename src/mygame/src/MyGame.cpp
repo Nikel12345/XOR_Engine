@@ -120,7 +120,7 @@ SDL_AppResult MyGame::MainInit()
         root_pos.local = glm::dvec3(3.0, 0.0, 0.0);
         ctx->CreateEntity(scene_name,
             MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial(kAnchorMaterial) } } },
-            ModelComponent{ kAnchorModel },
+            ModelComponent{ ctx->GetModelManager()->InternModel(kAnchorModel) },
             PositionProxy16{ 0,0,0,0,  0,0,0,0,  0,0,0,0,  0,0,0,1 },
             DrawComponent{},
             GeneratedComponent{},
@@ -208,7 +208,7 @@ SDL_AppResult MyGame::MainIterate()
                     p.sigma  = 0.5 * cam.sigma;
                     ctx->CreateEntity("scene_fractal",
                         MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial(kAnchorMaterial) } } },
-                        ModelComponent{ kAnchorModel },
+                        ModelComponent{ ctx->GetModelManager()->InternModel(kAnchorModel) },
                         PositionProxy16{ 0,0,0,0,  0,0,0,0,  0,0,0,0,  0,0,0,1 },
                         DrawComponent{},
                         GeneratedComponent{},
@@ -329,7 +329,7 @@ SDL_AppResult MyGame::MainIterate()
             // получается прежний √3). Пер-осевое растяжение гизмо в отсев входит максимумом
             // (консервативно), а в правило размера — НЕ входит (см. MengerObjectScaleTick).
             // Модель у энтити — имя, поэтому ищем её в словаре: якорей десятки, поиск на тик копеечный.
-            const ModelData* model = modelManager->FindModel(mc.name);
+            const ModelData* model = modelManager->FindModel(mc.model);
             double r_model = 0.0;
             if (model)
                 for (const SubMeshData& sm : model->submeshes)

@@ -7,6 +7,7 @@
 #include <functional>
 #include "PositionStructure.h"
 #include "ModelData.h"
+#include "ResourceRegistry.h"
 
 class BufferManager;
 struct UploadTask;
@@ -22,6 +23,9 @@ struct SceneModelEntry {
 	// остаётся (0,0) = «границ нет».
 	std::vector<SubMeshSpan> screen_size_span;
 };
+
+struct ModelCell { std::string name; std::unique_ptr<ModelData> object; };
+using ModelRegistry = ResourceRegistry<ModelCell, ModelId>;
 
 class ModelManager
 {
@@ -46,7 +50,9 @@ public:
 	                             AnchorShift anchor = AnchorShift::Keep, GeometryPool* pool = nullptr);
 
 
-	void DeleteModel(const std::string& name);
+	bool DeleteModel(ModelId id);
+	// Имя — поле ЯЧЕЙКИ; ссылающиеся держат её id, поэтому переименование их не касается.
+	bool RenameModel(ModelId id, const std::string& new_name);
 
 	size_t LoadSceneModels(const std::vector<SceneModelEntry>& entries);
 
@@ -76,11 +82,12 @@ public:
 	ModelData* operator[](const std::string& name);
 	// Тихий резолв: промах не логируется. Нужен там, где промах законен или част — резолв на
 	// каждую сущность при сборке батчей. Кто ждёт модель наверняка, берёт operator[].
-	ModelData* FindModel(const std::string& name) const {
-		auto it = models_data.find(name);
-		return it != models_data.end() ? it->second.get() : nullptr;
-	}
-	const std::unordered_map<std::string, std::unique_ptr<ModelData>>& GetModels() const { return models_data; }
+	ModelData* FindModel(const std::string& name) const { return models_data.Get(models_data.Find(name)); }
+	ModelData* FindModel(ModelId id) const              { return models_data.Get(id); }
+	ModelId            ModelIdOf(const std::string& name) const { return models_data.Find(name); }
+	ModelId            InternModel(const std::string& name)     { return models_data.Intern(name); }
+	const std::string& ModelNameOf(ModelId id) const            { return models_data.NameOf(id); }
+	const ModelRegistry& Models() const { return models_data; }
 	~ModelManager();
 
 private:
@@ -94,7 +101,7 @@ private:
 	PoolResidency& _Residency(const GeometryPool* pool);
 	const PoolResidency* _FindResidency(const GeometryPool* pool) const;
 
-	std::unordered_map<std::string, std::unique_ptr<ModelData>> models_data;
+	ModelRegistry models_data;
 	std::unordered_map<std::string, std::unique_ptr<GeometryPool>> pools;
 	std::unordered_map<const GeometryPool*, std::unique_ptr<PoolResidency>> residency;
 	GeometryPool* default_pool = nullptr;

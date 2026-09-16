@@ -164,8 +164,9 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
         if (ImGui::BeginTabItem("Models")) {
             tiles(SelKind::Model, true,
                 [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Model; g_sel.name = ""; },   // + = форма новой модели
-                [&](auto&& emit) { for (auto& [name, m] : ctx->GetModelManager()->GetModels())
-                                       if (m && (g_show_internal || !HasTag(m->tags, ResourceTag::System))) emit(name); });
+                [&](auto&& emit) { const ModelRegistry& reg = ctx->GetModelManager()->Models();
+                                   for (int32_t i = 0; i < reg.Count(); ++i) { const ModelCell& c = reg.At(i); if (!c.object) continue; const std::string& name = c.name; const auto& m = c.object;
+                                       if (g_show_internal || !HasTag(m->tags, ResourceTag::System)) emit(name); } });
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Shaders")) {                                        // graphics sp (создание/правка в UI)

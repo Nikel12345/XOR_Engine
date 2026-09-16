@@ -246,7 +246,7 @@ void EngineContext::ChangeModel(Entity e, const ModelName& model_name)
 	SceneData* scene = object_manager ? object_manager->GetActiveScene() : nullptr;
 	if (!scene || !object_manager->Has<ModelComponent>(scene, e)) return;
 
-	object_manager->GetComponent<ModelComponent>(scene, e).name = model_name;
+	object_manager->GetComponent<ModelComponent>(scene, e).model = model_manager->InternModel(model_name);
 
 	// Длина списка материалов = число сабмешей НОВОЙ модели. Резолв ТИХИЙ: неразрешённое имя
 	// здесь законно (ассет мог ещё не догрузиться) — о нём скажет BatchBuilder на сборке.

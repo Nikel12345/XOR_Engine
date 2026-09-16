@@ -160,7 +160,7 @@ struct LocalOffsetProxy {
 // параметром. ECS про менеджеры ресурсов не знает, и фиксапа после загрузки сцены нет — в файле
 // и в рантайме лежит одно и то же.
 struct ModelComponent {
-    std::string name;
+    ModelId model;
 };
 
 // Тот же enum, что в ShaderTypes.h, но объявленный без определения намеренно: scoped enum и так

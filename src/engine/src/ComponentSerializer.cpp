@@ -231,13 +231,6 @@ void RegisterBuiltinComponentSpecs()
             FieldSpec::Num("k", F32, SOA_NUM(Positions, k)), FieldSpec::Num("l", F32, SOA_NUM(Positions, l)),
         } });
 
-    reg.Register({ .name = "Model", .sig_type = typeid(ModelComponent),
-        .add_default = AddDefaultAoS<ModelComponent>,
-        // Смена модели меняет состав батчей И число сабмешей, то есть длину списка материалов:
-        // одной записью строки с UI-потока не обойтись, отсюда .Cmd.
-        .fields = { FieldSpec::Str("name", AOS_STR(ModelComponent, name), AssetModel)
-                        .Cmd(CommandId::SetEntityModel) } });
-
     reg.Register({ .name = "Draw", .sig_type = typeid(DrawComponent),
         .add_default = AddDefaultAoS<DrawComponent>,
         .fields = {

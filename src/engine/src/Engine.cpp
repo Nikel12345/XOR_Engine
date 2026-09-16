@@ -13,6 +13,7 @@
 #include "SlotController.h"
 #include "ThreadController.h"
 #include "MaterialManager.h"
+#include "ModelManager.h"
 #include "InputManager.h"
 #include "FontManager.h"
 #include "TextureLoader.h"
@@ -34,6 +35,7 @@
 #include "ComponentSerializer.h"
 #include "BaseComponents.h"
 #include "MaterialManager.h"
+#include "ModelManager.h"
 #include "ParamsSpec.h"
 #include "PositionStructure.h"
 #include "DefaultCommandSet.h"
@@ -124,11 +126,24 @@ return [mtm](Archetype& arch, yyjson_val* comp, size_t count, ScenePool* pool)
 
 // Спек ресурсного компонента регистрирует слой, у которого есть менеджер: хук держит его
 // захватом, поэтому EngineEcs про менеджеры по-прежнему не знает.
-static void RegisterResourceComponentSpecs(MaterialManager* mtm)
+static void RegisterResourceComponentSpecs(MaterialManager* mtm, ModelManager* mdm)
 {
 	ComponentSpecRegistry::Get().Register({ .name = "Material", .sig_type = typeid(MaterialComponent),
 		.add_default = AddDefaultAoS<MaterialComponent>,
 		.custom_save = MakeSaveMaterial(mtm), .custom_load = MakeLoadMaterial(mtm) });
+
+	ComponentSpecRegistry::Get().Register({ .name = "Model", .sig_type = typeid(ModelComponent),
+		.add_default = AddDefaultAoS<ModelComponent>,
+		// Смена модели меняет состав батчей И число сабмешей, то есть длину списка материалов:
+		// одной записью строки с UI-потока не обойтись, отсюда .Cmd.
+		.fields = { FieldSpec::Str("name",
+			[mdm](Archetype& a, size_t i) -> const std::string& {
+				return mdm->ModelNameOf((*a.get_array<ModelComponent>())[i].model);
+			},
+			[mdm](Archetype& a, size_t i, std::string v) {
+				(*a.get_array<ModelComponent>())[i].model = mdm->InternModel(v);
+			},
+			FieldKind::AssetModel).Cmd(CommandId::SetEntityModel) } });
 }
 
 void Engine::OnWindowResized(Sint32 window_w, Sint32 window_h)
@@ -244,7 +259,7 @@ Engine::Engine(const EngineConfig& cfg)
 	InitPasses();
 	DefaultCommandSet::SetAll(*input_manager);
 	RegisterBuiltinComponentSpecs();
-	RegisterResourceComponentSpecs(material_manager);
+	RegisterResourceComponentSpecs(material_manager, model_manager);
 	RegisterBuiltinMaterialParamsSpecs();
 	object_manager->CreateScene("staging")->is_active = false;
 	pass_manager->FillRenderPasses();

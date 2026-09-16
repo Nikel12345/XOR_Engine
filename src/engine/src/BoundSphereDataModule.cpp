@@ -57,13 +57,13 @@ void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, Ob
 	// Память на одно последнее имя: без неё это поиск в словаре на КАЖДУЮ строку, а на 1М объектов
 	// он дороже всего остального заполнения. Указатель на строку компонента жив до конца вызова —
 	// ECS в этом проходе не мутируется.
-	const std::string* memo_name = nullptr;
+	ModelId memo_model{};
 	glm::vec4 memo_sphere(0.0f, 0.0f, 0.0f, -1.0f);
-	auto sphere_of = [&](const std::string& name) -> glm::vec4 {
-		if (memo_name && *memo_name == name) return memo_sphere;
-		const ModelData* model = mm ? mm->FindModel(name) : nullptr;
+	auto sphere_of = [&](ModelId model_id) -> glm::vec4 {
+		if (memo_model && memo_model == model_id) return memo_sphere;
+		const ModelData* model = mm ? mm->FindModel(model_id) : nullptr;
 		memo_sphere = ModelSphere(model);
-		memo_name   = &name;
+		memo_model  = model_id;
 		return memo_sphere;
 	};
 
@@ -84,6 +84,6 @@ void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, Ob
 
 		for (size_t i = 0; i < n; ++i)
 			dst[i] = (is_ui || !model_arr) ? glm::vec4(0.0f, 0.0f, 0.0f, -1.0f)
-			                               : sphere_of((*model_arr)[i].name);
+			                               : sphere_of((*model_arr)[i].model);
 	}
 }

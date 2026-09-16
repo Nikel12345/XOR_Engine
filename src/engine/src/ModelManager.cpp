@@ -272,41 +272,47 @@ const PoolResidency* ModelManager::_FindResidency(const GeometryPool* pool) cons
 
 ModelData* ModelManager::CreateModel(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor, GeometryPool* pool)
 {
-    auto it = models_data.find(name);
-    if (it != models_data.end()) {
+    const ModelId id = models_data.Intern(name);
+    if (ModelData* existing = models_data.Get(id)) {
         SDL_Log("Model '%s' already exists, returning existing model data.", name.c_str());
-        return it->second.get();
+        return existing;
     }
 
     auto model_data = std::make_unique<ModelData>();
     ModelData* ptr = model_data.get();
-    models_data[name] = std::move(model_data);
+    models_data.Put(id, std::move(model_data));
     return _LoadModelFile(ptr, _ResolvePool(pool), path_vert, path_ind, anchor);
 }
 
 // Перезагрузка идёт В ТОТ ЖЕ объект: сырой указатель на модель может быть у кода игры.
 ModelData* ModelManager::LoadModelFromFile(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor, GeometryPool* pool)
 {
-    ModelData* ptr;
-    auto it = models_data.find(name);
-    if (it != models_data.end()) {
-        ptr = it->second.get();   // старая геометрия остаётся в буфере
-    }
-    else {
+    const ModelId id = models_data.Intern(name);
+    ModelData* ptr = models_data.Get(id);   // старая геометрия остаётся в буфере
+    if (!ptr) {
         auto model_data = std::make_unique<ModelData>();
         ptr = model_data.get();
-        models_data[name] = std::move(model_data);
+        models_data.Put(id, std::move(model_data));
     }
     return _LoadModelFile(ptr, _ResolvePool(pool), path_vert, path_ind, anchor);
 }
 
-void ModelManager::DeleteModel(const std::string& name)
+bool ModelManager::DeleteModel(ModelId id)
 {
-    auto it = models_data.find(name);
-    if (it == models_data.end()) return;
+    ModelData* m = models_data.Get(id);
+    if (!m) return false;
 
-    _ReleaseModelRanges(it->second.get());
-    models_data.erase(it);
+    _ReleaseModelRanges(m);
+    return models_data.Erase(id);
+}
+
+bool ModelManager::RenameModel(ModelId id, const std::string& new_name)
+{
+    if (!models_data.Get(id) || new_name.empty()) return false;
+    const ModelId taken = models_data.Find(new_name);
+    if (taken && taken != id) return false;
+    models_data.Rename(id, new_name);
+    return true;
 }
 
 void ModelManager::SetSubmeshSpan(const std::string& name, size_t submesh, SubMeshSpan span)
@@ -320,12 +326,13 @@ void ModelManager::SetSubmeshSpan(const std::string& name, size_t submesh, SubMe
 
 size_t ModelManager::ClearSceneModels()
 {
-    std::vector<std::string> doomed;
-    for (const auto& [name, m] : models_data)
-        if (!m || (!HasTag(m->tags, ResourceTag::CodeOwned) && !m->model_path.empty()))
-            doomed.push_back(name);
-    for (const std::string& n : doomed) DeleteModel(n);
-    return doomed.size();
+    size_t removed = 0;
+    for (int32_t i = 0; i < models_data.Count(); ++i) {
+        const ModelData* m = models_data.At(i).object.get();
+        if (m && !HasTag(m->tags, ResourceTag::CodeOwned) && !m->model_path.empty())
+            removed += DeleteModel(ModelId{ i }) ? 1 : 0;
+    }
+    return removed;
 }
 
 size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries)
@@ -338,11 +345,11 @@ size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries
         }
         GeometryPool* pool = GetPool(e.pool);
         // Битый файл стирает прежнюю геометрию: замена под тем же именем — это снос и создание.
-        if (models_data.count(e.name)) DeleteModel(e.name);
+        DeleteModel(models_data.Find(e.name));
         if (!CreateModel(e.name, e.vertex_path, e.index_path, e.anchor, pool)) continue;
         ++loaded;
         // Диапазоны приходят из манифеста, а не из .bin, и в построении геометрии не участвуют.
-        ModelData* md = models_data.at(e.name).get();
+        ModelData* md = models_data.Get(models_data.Find(e.name));
         const size_t n = std::min(e.screen_size_span.size(), md->submeshes.size());
         for (size_t i = 0; i < n; ++i) md->submeshes[i].screen_size_span = e.screen_size_span[i];
     }
@@ -456,10 +463,10 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
 
 ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn generator, AnchorShift anchor, GeometryPool* pool)
 {
-    auto it = models_data.find(name);
-    if (it != models_data.end()) {
+    const ModelId id = models_data.Intern(name);
+    if (ModelData* existing = models_data.Get(id)) {
         SDL_Log("Model '%s' already exists, returning existing model data.", name.c_str());
-        return it->second.get();
+        return existing;
     }
 
     GeometryPool* p = _ResolvePool(pool);
@@ -467,7 +474,7 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
 
     auto model_data = std::make_unique<ModelData>();
     ModelData* ptr = model_data.get();
-    models_data[name] = std::move(model_data);
+    models_data.Put(id, std::move(model_data));
     ptr->pool_name = p->Name();
 
     PoolResidency& res = _Residency(p);
@@ -657,17 +664,13 @@ bool ModelManager::CheckDirty() const
 
 ModelData* ModelManager::operator[](const std::string& name)
 {
-    auto it = models_data.find(name);
-    if (it != models_data.end()) {
-        return it->second.get();
-    }
-    SDL_Log("Model '%s' not found", name.c_str());
-    return nullptr;
+    ModelData* m = models_data.Get(models_data.Find(name));
+    if (!m) SDL_Log("Model '%s' not found", name.c_str());
+    return m;
 }
 
 ModelManager::~ModelManager()
 {
-    models_data.clear();
     residency.clear();
     pools.clear();
 }

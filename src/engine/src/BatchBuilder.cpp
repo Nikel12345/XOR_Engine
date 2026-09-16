@@ -20,8 +20,8 @@ using namespace BatchKeys;
 using namespace ShaderBase;
 
 
-ModelBatchKey HashModelBatchKey(const std::string& model_name, uint32_t submesh_index) {
-    ModelBatchKey key = std::hash<std::string>{}(model_name);
+ModelBatchKey HashModelBatchKey(ModelId model, uint32_t submesh_index) {
+    ModelBatchKey key = std::hash<ModelId>{}(model);
     key ^= static_cast<ModelBatchKey>(submesh_index) + 0x9e3779b97f4a7c15ull + (key << 6) + (key >> 2);
 
     key ^= key >> 33;
@@ -278,7 +278,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
     // Резолв ТИХИЙ (FindModel, а не логирующий operator[]): он идёт на КАЖДУЮ сущность, и одно
     // битое имя в сцене на миллион объектов дало бы миллион строк лога.
-    ModelData* model = mdm ? mdm->FindModel(model_component.name) : nullptr;
+    ModelData* model = mdm ? mdm->FindModel(model_component.model) : nullptr;
 
     if (!model) {
         return;
@@ -380,7 +380,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             }
 
             TextureBatchData& tex_batch = tex_map[tex_key];
-            ModelBatchKey model_key = HashModelBatchKey(model_component.name, si);
+            ModelBatchKey model_key = HashModelBatchKey(model_component.model, si);
 
             auto& model_map = tex_batch.model_batches;
             auto model_it = model_map.find(model_key);

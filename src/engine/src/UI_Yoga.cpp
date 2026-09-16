@@ -2,6 +2,7 @@
 #include "UI_Yoga.h"
 #include "EngineContext.h"
 #include "MaterialManager.h"
+#include "ModelManager.h"
 #include "ObjectManager.h"
 #include "BaseComponents.h"
 #include "FontManager.h"
@@ -270,14 +271,14 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
             if (!r.glyphs.empty())
                 e = ctx->CreateEntity(scene_name,
                         DrawComponent{ true, 1.0f, 0 },
-                        ModelComponent{ r.quad },
+                        ModelComponent{ ctx->GetModelManager()->InternModel(r.quad) },
                         MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial(r.material) } } },
                         m, UIComponent{}, GeneratedComponent{}, TextureStateComponent{},
                         UITextComponent{ r.glyphs, r.font });
             else
                 e = ctx->CreateEntity(scene_name,
                         DrawComponent{ true, 1.0f, 0 },
-                        ModelComponent{ r.quad },
+                        ModelComponent{ ctx->GetModelManager()->InternModel(r.quad) },
                         MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial(r.material) } } },
                         m, UIComponent{}, GeneratedComponent{}, TextureStateComponent{});
             r.entity = e;  r.has_entity = true;

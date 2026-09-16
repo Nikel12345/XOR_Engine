@@ -24,11 +24,11 @@
 namespace ColliderQuery {
 	using Entity = uint32_t;
 
-	// Резолвер «имя модели → геометрия». ModelComponent хранит ИМЯ, а словарь моделей живёт в
-	// ModelManager — он в либе Engine, которую Physics НЕ линкует (и не должна). Поэтому поиск
-	// приходит снаружи, вызовом: физика остаётся листовой, а зависимость от каталога ассетов
-	// становится явной в сигнатуре. Пустой резолвер = авто-коллайдеров по сабмешам не будет.
-	using ModelLookup = std::function<const ModelData*(const std::string&)>;
+	// Резолвер «ссылка на модель → геометрия». Словарь моделей живёт в ModelManager — он в либе
+	// Engine, которую Physics НЕ линкует (и не должна). Поэтому поиск приходит снаружи, вызовом:
+	// физика остаётся листовой, а зависимость от каталога ассетов становится явной в сигнатуре.
+	// Пустой резолвер = авто-коллайдеров по сабмешам не будет.
+	using ModelLookup = std::function<const ModelData*(ModelId)>;
 
 	template <typename Fn>
 	void ForEachActiveCollider(ObjectManager& om, SceneData* scene, const ModelLookup& model_of, Fn&& fn) {
@@ -47,7 +47,7 @@ namespace ColliderQuery {
 				if (om.Has<ColliderComponent>(scene, e) &&
 					!om.GetComponent<ColliderComponent>(scene, e).shapes.empty())
 					return;   // уже учтён явными формами
-				const ModelData* model = (model_of && !mc.name.empty()) ? model_of(mc.name) : nullptr;
+				const ModelData* model = (model_of && mc.model) ? model_of(mc.model) : nullptr;
 				if (!model || model->submeshes.empty()) return;
 
 				std::vector<Collider> autoShapes;
