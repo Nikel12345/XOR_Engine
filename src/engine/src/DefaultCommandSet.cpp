@@ -308,8 +308,7 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 			const UpsertTextureCmd* c = static_cast<const UpsertTextureCmd*>(data);
 			if (!c->name.empty() && !c->atlas.empty() && !c->path.empty()) {
 				TextureManager* tm = ctx->GetTextureManager();
-				if (!c->old_name.empty() && c->old_name != c->name)
-					tm->RenameTexture(tm->TextureIdOf(c->old_name), c->name);
+				tm->RenameTexture(tm->TextureIdOf(c->old_name), c->name);
 				tm->DeleteTextureHandle(tm->InternTexture(c->name));   // replace в той же ячейке (no-op, если пуста)
 				// ReleasePreview НЕ зовём: ячейка та же, слот превью должен пережить пересоздание
 				// (иначе плитка мигнёт затычкой до нового блита).
@@ -455,8 +454,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const UpsertVertexShaderCmd* c = static_cast<const UpsertVertexShaderCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
-				if (!c->oldName.empty() && c->oldName != c->name)
-					sm->RenameVertexShader(sm->VertexShaders().Find(c->oldName), c->name);
+				sm->RenameVertexShader(sm->VertexShaders().Find(c->oldName), c->name);
 				// UI говорит пулом + семантиками — тем же языком, что манифест; стримы резолвит пул.
 				sm->CreateVertexShader(c->name, c->path.c_str(), ctx->GetModelManager()->GetPool(c->pool),
 					c->pull, ctx->GetBufferManager(), c->defines);
@@ -476,8 +474,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const UpsertFragmentShaderCmd* c = static_cast<const UpsertFragmentShaderCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
-				if (!c->oldName.empty() && c->oldName != c->name)
-					sm->RenameFragmentShader(sm->FragmentShaders().Find(c->oldName), c->name);
+				sm->RenameFragmentShader(sm->FragmentShaders().Find(c->oldName), c->name);
 				sm->CreateFragmentShader(c->name, c->path.c_str(), c->defines);
 				const FragmentShaderId fs_id = sm->FragmentShaders().Find(c->name);
 				for (int32_t i = 0; i < sm->ShaderPrograms().Count(); ++i)
@@ -495,8 +492,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const UpsertComputeShaderCmd* c = static_cast<const UpsertComputeShaderCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
-				if (!c->oldName.empty() && c->oldName != c->name)
-					sm->RenameComputeShader(sm->ComputeShaders().Find(c->oldName), c->name);
+				sm->RenameComputeShader(sm->ComputeShaders().Find(c->oldName), c->name);
 				sm->CreateComputeShader(c->name, c->path.c_str(), c->defines);
 				const ComputeShaderId cs_id = sm->ComputeShaders().Find(c->name);
 				for (int32_t i = 0; i < sm->ComputePrograms().Count(); ++i)
