@@ -1,7 +1,6 @@
 ﻿#include "PCH.h"
 #include "Engine.h"
 #include "EngineProfiler.h"
-// Engine.h теперь только forward-декларации — полные типы тянет этот TU.
 #include "ObjectManager.h"
 #include "TextureManager.h"
 #include "ModelManager.h"
@@ -15,17 +14,13 @@
 #include "PositionStructure.h"
 #include "BatchBuilder.h"
 #include "EngineContext.h"
-#include "UI_Yoga.h"   // MarkSceneReset после ECS-swap (UI-энтити производны от дерева)
+#include "UI_Yoga.h"
 #include <fstream>
 #include <filesystem>
 #include "yyjson.h"
 
-using namespace ShaderBase;   // VertexSemantic/POSITION/VertexBufferBinding (в хедере using убран намеренно)
+using namespace ShaderBase;
 
-//  Сцена-папка: scene.scene (ECS) + файлы ресурсов рядом (json, по менеджерам — поэтапно).
-//  Публичная точка входа — ctx->Save/LoadScene (тонкий прокси сюда).
-
-// ChannelConvention ↔ строка манифеста (в json — читаемое имя, не число).
 static const char* ConvToStr(ChannelConvention c)
 {
 	switch (c) {
@@ -40,7 +35,6 @@ static ChannelConvention ConvFromStr(const char* s)
 	if (s && std::strcmp(s, "DepthInAlpha") == 0)      return ChannelConvention::DepthInAlpha;
 	return ChannelConvention::AsIs;
 }
-// Строковое поле json-объекта; отсутствие/не-строка → пустая строка (валидность решает потребитель).
 static const char* JsonStr(yyjson_val* obj, const char* key)
 {
 	const char* s = yyjson_get_str(yyjson_obj_get(obj, key));
@@ -59,7 +53,6 @@ static double JsonReal(yyjson_val* obj, const char* key, double dflt) {
 	return v ? yyjson_get_real(v) : dflt;
 }
 
-// VertexSemantic ↔ строка (набор фиксирован; реестра раскладок пока нет — как в UI VsdEditor).
 static const char* SemToStr(VertexSemantic s) {
 	switch (s) {
 	case UV:      return "UV";
@@ -75,8 +68,6 @@ static VertexSemantic SemFromStr(const char* s) {
 	return POSITION;
 }
 
-// TextureSlotRole ↔ строка (взаимоисключающие роли sp). ORM==MetallicRoughness (алиас), Custom0=1000
-// — поэтому round-trip строкой, а не числом.
 static const char* RoleToStr(TextureSlotRole r) {
 	switch (r) {
 	case TextureSlotRole::Albedo:   return "Albedo";
@@ -108,11 +99,6 @@ static bool RoleFromStr(const char* s, TextureSlotRole& out) {
 	return false;
 }
 
-// spd ↔ json-объект. spd-подэнумы (cull/fill/primitive) — числа (SDL_GPU*-энумы, стабильны и
-// малоинформативны строкой); тумблеры/биас — bool/real.
-// Дефайны компиляции шейдера — объектом NAME: VALUE. Объект, а не массив пар: имя тут ключ
-// (повтор бессмысленен), и читается такой манифест глазами лучше. Пустая строка = дефайн без
-// значения. Пустой набор поле не пишет — старые сцены и большинство шейдеров без дефайнов.
 static void WriteDefines(yyjson_mut_doc* doc, yyjson_mut_val* obj, const std::vector<ShaderDefine>& defs) {
 	if (defs.empty()) return;
 	yyjson_mut_val* d = yyjson_mut_obj_add_obj(doc, obj, "defines");
@@ -120,7 +106,6 @@ static void WriteDefines(yyjson_mut_doc* doc, yyjson_mut_val* obj, const std::ve
 		yyjson_mut_obj_add_strcpy(doc, d, def.name.c_str(), def.value.c_str());
 }
 
-// Порядок чтения не важен: Create*Shader канонизирует набор сортировкой (NormalizeDefines).
 static std::vector<ShaderDefine> ReadDefines(yyjson_val* obj) {
 	std::vector<ShaderDefine> out;
 	yyjson_val* d = yyjson_obj_get(obj, "defines");
@@ -148,12 +133,6 @@ static void WriteSpd(yyjson_mut_doc* doc, yyjson_mut_val* obj, const ShaderProgr
 	yyjson_mut_obj_add_real(doc, obj, "bias_slope",     d.rasterizer_bias.depth_bias_slope_factor);
 	yyjson_mut_obj_add_real(doc, obj, "bias_clamp",     d.rasterizer_bias.depth_bias_clamp);
 }
-// ── params материала ↔ json ПО СХЕМЕ ТИПА (ParamsSpec) ──
-// Тип называет себя строкой (params_type = имя в реестре), поля пишутся ПО ИМЕНАМ: скаляр —
-// числом/булем, вектор/цвет — массивом лейнов. Раскладку блоба знает схема, а не этот файл,
-// поэтому тип, зарегистрированный кодом игры, сериализуется здесь без единой правки движка.
-// Плюс к читаемости — устойчивость: поле, добавленное/удалённое/переставленное в структуре,
-// не ломает старые сцены (на загрузке недостающее остаётся дефолтом, лишнее игнорируется).
 static bool JsonNum(yyjson_val* v, double& out) {
 	if (yyjson_is_real(v)) { out = yyjson_get_real(v); return true; }
 	if (yyjson_is_sint(v)) { out = (double)yyjson_get_sint(v); return true; }
@@ -166,7 +145,7 @@ static void WriteMaterialParams(yyjson_mut_doc* doc, yyjson_mut_val* obj,
 {
 	for (const ParamsFieldSpec& f : s.fields) {
 		const void* p = ParamsFieldPtr(blob, f);
-		if (!p) continue;                       // блоб короче схемы — поле пропускаем
+		if (!p) continue;
 		const uint32_t lanes = ParamsFieldLanes(f.kind);
 		if (lanes > 1) {
 			yyjson_mut_val* arr = yyjson_mut_obj_add_arr(doc, obj, f.key);
@@ -181,13 +160,12 @@ static void WriteMaterialParams(yyjson_mut_doc* doc, yyjson_mut_val* obj,
 			yyjson_mut_obj_add_real(doc, obj, f.key, *static_cast<const float*>(p));
 	}
 }
-// Блоб приходит уже заполненным дефолтами типа (s.defaults) — здесь только перекрываем найденное.
 static void ReadMaterialParams(yyjson_val* obj, const ParamsSpec& s, std::vector<uint8_t>& blob)
 {
 	if (!obj) return;
 	for (const ParamsFieldSpec& f : s.fields) {
 		yyjson_val* v = yyjson_obj_get(obj, f.key);
-		if (!v) continue;                       // ключа нет → остаётся дефолт
+		if (!v) continue;
 		void* p = ParamsFieldPtr(blob, f);
 		if (!p) continue;
 		auto put = [&](uint32_t lane, double d) {
@@ -201,7 +179,7 @@ static void ReadMaterialParams(yyjson_val* obj, const ParamsSpec& s, std::vector
 		if (lanes > 1) {
 			size_t i, max; yyjson_val* e;
 			yyjson_arr_foreach(v, i, max, e) {
-				if (i >= lanes) break;          // длиннее схемы → усечь
+				if (i >= lanes) break;
 				double d; if (JsonNum(e, d)) put((uint32_t)i, d);
 			}
 		}
@@ -209,9 +187,6 @@ static void ReadMaterialParams(yyjson_val* obj, const ParamsSpec& s, std::vector
 	}
 }
 
-// Имя буфера из файла (std::string) → КАНОНИЧНЫЙ BufferDataName (ключ реестра = const char*
-// статического литерала). Карта ищет по содержимому, но ХРАНИТ указатель: c_str() временной строки
-// в ссылки sp не положишь — отдаём сам ключ, он живёт столько же, сколько буфер. nullptr — нет.
 static BufferDataName ResolveBufferName(BufferManager* bm, const std::string& s) {
 	const BufferDataRegistry& reg = bm->GetBuffersData();
 	auto it = reg.find(s.c_str());
@@ -236,9 +211,6 @@ static ShaderProgramDescription ReadSpd(yyjson_val* obj) {
 	return d;
 }
 
-// ── Обход json ────────────────────────────────────────────────────────────────────────────────
-// yyjson_arr_foreach требует три собственные переменные на каждый цикл; в этом файле циклов два
-// десятка, и имена у курсоров расходились от места к месту. Здесь они прячутся.
 template<class Fn> static void ForEachVal(yyjson_val* arr, Fn&& fn)
 {
 	if (!arr) return;
@@ -250,7 +222,6 @@ template<class Fn> static void ForEachIn(yyjson_val* obj, const char* key, Fn&& 
 	ForEachVal(yyjson_obj_get(obj, key), std::forward<Fn>(fn));
 }
 
-// ── Документ манифеста ────────────────────────────────────────────────────────────────────────
 struct MutDoc {
 	yyjson_mut_doc* doc  = yyjson_mut_doc_new(nullptr);
 	yyjson_mut_val* root = yyjson_mut_obj(doc);
@@ -276,7 +247,6 @@ struct MutDoc {
 	static constexpr size_t kNoCount = static_cast<size_t>(-1);
 };
 
-// Отсутствие файла — валидная частичная папка сцены, поэтому «нет» здесь не ошибка, а лог.
 struct ReadDoc {
 	yyjson_doc* doc = nullptr;
 
@@ -295,9 +265,6 @@ struct ReadDoc {
 	yyjson_val* root() const { return yyjson_doc_get_root(doc); }
 };
 
-// ── Массивы строк ─────────────────────────────────────────────────────────────────────────────
-// Имена ресурсов — либо std::string (AtlasName/TextureName), либо const char* (BufferDataName,
-// ключ реестра), поэтому запись через перегрузку, а не через .c_str() на месте вызова.
 static const char* CStrOf(const std::string& s) { return s.c_str(); }
 static const char* CStrOf(const char* s)        { return s; }
 
@@ -319,7 +286,7 @@ static std::vector<BufferDataName> ReadBufferNames(BufferManager* bm, yyjson_val
 {
 	std::vector<BufferDataName> out;
 	ForEachIn(obj, key, [&](yyjson_val* v) {
-		if (const char* s = yyjson_get_str(v))                    // null → не std::string(nullptr)
+		if (const char* s = yyjson_get_str(v))
 			if (BufferDataName n = ResolveBufferName(bm, s)) out.push_back(n);
 	});
 	return out;
@@ -340,8 +307,6 @@ static std::vector<TextureSlotRole> ReadRoles(yyjson_val* obj, const char* key)
 	return out;
 }
 
-// ── Замер фазы загрузки ───────────────────────────────────────────────────────────────────────
-// Load — событие разовое, поэтому не через кадровый Prof, а прямым SDL_Log в конце.
 struct PhaseTimer {
 	double& out;
 	Prof::Clock::time_point start = Prof::Clock::now();
@@ -349,10 +314,6 @@ struct PhaseTimer {
 	~PhaseTimer() { out = Prof::MsSince(start); }
 };
 
-// ── Этапы сохранения ──────────────────────────────────────────────────────────────────────────
-
-// Скип: CodeOwned и байтовые (пустой source_path — из файла не пересоздаются,
-// их делает код).
 static void SaveTextures(const std::string& dir, TextureManager* tm)
 {
 	MutDoc d;
@@ -364,9 +325,6 @@ static void SaveTextures(const std::string& dir, TextureManager* tm)
 		const std::shared_ptr<TextureHandle>& h = cell.object;
 		if (!h || HasTag(h->tags, ResourceTag::CodeOwned) || h->source_path.empty()) continue;
 		yyjson_mut_val* t = yyjson_mut_arr_add_obj(d.doc, arr);
-		// Кубмапа — обычный хэндл на 6 слоёв, отличает её ТИП АТЛАСА: он же определяет путь
-		// загрузки (крест 4×3 через CreateCubeMapTexture). Спрашиваем атлас, а не хэндл: у хэндла
-		// своего признака «я куб» нет и заводить его незачем.
 		const bool cube = h->atlas && (h->atlas->texture_type == SDL_GPU_TEXTURETYPE_CUBE
 		                            || h->atlas->texture_type == SDL_GPU_TEXTURETYPE_CUBE_ARRAY);
 		yyjson_mut_obj_add_strcpy(d.doc, t, "name",  name.c_str());
@@ -379,8 +337,6 @@ static void SaveTextures(const std::string& dir, TextureManager* tm)
 	d.Write(dir, "textures.json", "textures", saved);
 }
 
-// Скип: CodeOwned и процедурные (пустой model_path). anchor — числом (стабильный enum, редко
-// инспектируется).
 static void SaveModels(const std::string& dir, ModelManager* mm)
 {
 	MutDoc d;
@@ -397,9 +353,6 @@ static void SaveModels(const std::string& dir, ModelManager* mm)
 		yyjson_mut_obj_add_strcpy(d.doc, e, "index",  m->index_path.c_str());
 		yyjson_mut_obj_add_int   (d.doc, e, "anchor", (int)m->anchor);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "pool",   m->pool_name.c_str());
-		// Пара ступеней на сабмеш, в порядке сабмешей: позиция в массиве И ЕСТЬ адрес сабмеша,
-		// своего имени у него нет. Пишем всегда, даже когда всё нулевое, — иначе поле не из чего
-		// было бы править руками до появления UI.
 		yyjson_mut_val* span = yyjson_mut_obj_add_arr(d.doc, e, "screen_size_span");
 		for (const SubMeshData& sm : m->submeshes) {
 			yyjson_mut_val* pair = yyjson_mut_arr_add_arr(d.doc, span);
@@ -411,7 +364,6 @@ static void SaveModels(const std::string& dir, ModelManager* mm)
 	d.Write(dir, "models.json", "models", saved);
 }
 
-// Скип CodeOwned и пустых путей у SD.
 static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManager* tm)
 {
 	MutDoc d;
@@ -427,8 +379,6 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManage
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", cell.name.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "path", vs.source_path.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "pool", vs.pool_name.c_str());
-		// Все биндинги, не только первый: со стримами пула их несколько (Pos/UV/NormTan — по слоту
-		// на стрим), а pull манифеста — объединение семантик по всем слотам.
 		yyjson_mut_val* pull = yyjson_mut_obj_add_arr(d.doc, e, "pull");
 		for (const auto& b : vs.bindings)
 			for (VertexSemantic s : b.pull)
@@ -451,7 +401,6 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManage
 	write_sd("fragment_shaders", sm->FragmentShaders());
 	write_sd("compute_shaders",  sm->ComputeShaders());
 
-	// SP сгруппированы ПО ТИПУ (как SD), без поля "kind" внутри записи.
 	yyjson_mut_val* spa = d.Arr("render_shader_programs");
 	for (int32_t spi = 0; spi < sm->ShaderPrograms().Count(); ++spi) {
 		const ShaderProgramCell& spcell = sm->ShaderPrograms().At(spi);
@@ -470,8 +419,6 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManage
 		WriteSpd(d.doc, yyjson_mut_obj_add_obj(d.doc, e, "spd"), sp->spd);
 	}
 
-	// ПОРЯДОК МАССИВА ЗНАЧИМ: он же порядок исполнения внутри прохода. Пишем в порядке вектора —
-	// ровно в том, в каком программы создавались.
 	yyjson_mut_val* cspa = d.Arr("compute_shader_programs");
 	for (int32_t cspi = 0; cspi < sm->ComputePrograms().Count(); ++cspi) {
 		const ComputeProgramCell& cspcell = sm->ComputePrograms().At(cspi);
@@ -500,8 +447,6 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManage
 	d.Write(dir, "shaders.json", "shaders", MutDoc::kNoCount);
 }
 
-// Скип CodeOwned (кодовая инфраструктура). Текстуры — по роли, sp — по имени, params — объект
-// именованных полей по схеме типа (params_type).
 static void SaveMaterials(const std::string& dir, MaterialManager* mtm, TextureManager* tm, ShaderManager* sm)
 {
 	MutDoc d;
@@ -520,8 +465,6 @@ static void SaveMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 			yyjson_mut_val* so = yyjson_mut_arr_add_obj(d.doc, sh);
 			yyjson_mut_obj_add_strcpy(d.doc, so, "name", sm->ShaderProgramNameOf(b.sp).c_str());
 			if (!b.params || b.params->empty()) continue;
-			// Незарегистрированный тип сохранить нечем (раскладка неизвестна) — громко говорим
-			// об этом, а не пишем молча битую запись: sp загрузится без params.
 			if (const ParamsSpec* ps = ParamsSpecRegistry::Materials().ByName(b.params_type)) {
 				yyjson_mut_obj_add_strcpy(d.doc, so, "params_type", b.params_type.c_str());
 				WriteMaterialParams(d.doc, yyjson_mut_obj_add_obj(d.doc, so, "params"), *ps, *b.params);
@@ -536,8 +479,6 @@ static void SaveMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 		for (auto& [role, tns] : m->textures) {
 			yyjson_mut_val* t = yyjson_mut_arr_add_obj(d.doc, tex);
 			yyjson_mut_obj_add_str(d.doc, t, "role", RoleToStr(role));
-			// [0] — дефолт, дальше варианты. Скалярное "texture" из старых сцен читается на
-			// загрузке, но больше не пишется — формат один.
 			WriteIdArray(d.doc, t, "textures", tns, [tm](TextureId id) -> const std::string& { return tm->TextureNameOf(id); });
 		}
 		++saved;
@@ -550,8 +491,6 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& scenes_ro
 	SceneData* scene = object_manager->GetScene(scene_name);
 	if (!scene) { SDL_Log("SaveScene: scene '%s' not found", scene_name.c_str()); return; }
 
-	// Папку сцены складываем ЗДЕСЬ: имя папки = имя сцены. Вызывающий (кнопка редактора, игра)
-	// знает корень и имя — раскладку по каталогу знает движок.
 	const std::string dir = scenes_root + "/" + scene_name;
 
 	std::error_code ec;
@@ -574,11 +513,6 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& scenes_ro
 	SDL_Log("SaveScene: wrote scene '%s' to '%s'", scene_name.c_str(), dir.c_str());
 }
 
-// ── Этапы загрузки ────────────────────────────────────────────────────────────────────────────
-// Им предшествует ClearSceneResources, поэтому они создают с нуля, а не мержат. Переживают
-// снос ровно те, кого SaveScene не пишет: CodeOwned и процедурные (без пути к файлу).
-
-// Словарная семантика — у TextureManager, декод файла — колбэком через ctx.
 static void LoadTextures(const std::string& dir, TextureManager* tm, EngineContext* ctx)
 {
 	ReadDoc d(dir, "textures.json");
@@ -591,7 +525,6 @@ static void LoadTextures(const std::string& dir, TextureManager* tm, EngineConte
 	});
 
 	const size_t created = tm->LoadSceneTextures(entries, [ctx](const SceneTextureEntry& e) {
-		// Кубмапа-крест грузится своим путём: нарезка на 6 граней + слои cube-атласа.
 		if (e.cube) return ctx->CreateCubeMapTexture(e.name, e.atlas, e.path.c_str());
 		return ctx->CreateTextureFromFile(e.name, e.atlas, e.path.c_str(), e.conv);
 	});
@@ -607,7 +540,6 @@ static void LoadModels(const std::string& dir, ModelManager* mm)
 	ForEachIn(d.root(), "models", [&](yyjson_val* m) {
 		SceneModelEntry entry{ JsonStr(m, "name"), JsonStr(m, "vertex"), JsonStr(m, "index"),
 		                       (AnchorShift)JsonInt(m, "anchor", 0), JsonStr(m, "pool") };
-		// Нет поля (сцена старше него) → пустой список → все сабмеши останутся с (0,0).
 		ForEachIn(m, "screen_size_span", [&](yyjson_val* pair) {
 			entry.screen_size_span.push_back(
 				{ safe_i_u8((int)yyjson_get_int(yyjson_arr_get(pair, 0))),
@@ -620,12 +552,8 @@ static void LoadModels(const std::string& dir, ModelManager* mm)
 	SDL_Log("LoadScene: %zu/%zu models from manifest", loaded, entries.size());
 }
 
-// SD (vertex/fragment/compute) ДО программ: sp ссылается на них по имени. Create* перезаписывают
-// запись реестра по имени, то есть merge-upsert выходит сам собой.
 static void LoadShaderData(yyjson_val* root, ShaderManager* sm, ModelManager* mm, BufferManager* bm)
 {
-	// Пайплайны sp, ссылающихся на перезагруженный SD, сбрасываем: иначе sp удержал бы пайплайн,
-	// собранный из старых данных шейдера.
 	auto invalidate = [sm](const std::string& name, bool vertex) {
 		const VertexShaderId   vs_id = sm->VertexShaders().Find(name);
 		const FragmentShaderId fs_id = sm->FragmentShaders().Find(name);
@@ -639,9 +567,6 @@ static void LoadShaderData(yyjson_val* root, ShaderManager* sm, ModelManager* mm
 		if (name.empty() || path.empty()) return;
 		std::vector<VertexSemantic> pull;
 		ForEachIn(e, "pull", [&](yyjson_val* s) { pull.push_back(SemFromStr(yyjson_get_str(s))); });
-		// Манифест говорит ПУЛОМ и СЕМАНТИКАМИ — язык стабилен, файлы сцен не мигрируются (нет
-		// поля "pool" → дефолтный). Резолв семантик в стримы и порядок слотов — дело пула:
-		// shadow_vs [POSITION] получит один Pos-стрим, 12 байт/вершину.
 		sm->CreateVertexShader(name, path.c_str(), mm->GetPool(JsonStr(e, "pool")), pull, bm, ReadDefines(e));
 		invalidate(name, /*vertex=*/true);
 	});
@@ -665,9 +590,6 @@ static void LoadRenderPrograms(yyjson_val* root, ShaderManager* sm, BufferManage
 	ForEachIn(root, "render_shader_programs", [&](yyjson_val* e) {
 		const std::string name = JsonStr(e, "name");
 		if (name.empty()) return;
-		// Занятое имя = delete+create (erase на отсутствующем имени — no-op).
-		// push-инструкции НЕ переносим: их вернёт реестр код-байндингов по имени (внутри
-		// CreateShaderProgram) — перенос со старой sp ломался бы на переименовании.
 		sm->DeleteShaderProgram(sm->ShaderProgramIdOf(name));
 		sm->CreateShaderProgram(name, ReadSpd(yyjson_obj_get(e, "spd")), JsonStr(e, "pass"),
 			JsonStr(e, "vs"), ReadBufferNames(bm, e, "vs_buffers"),
@@ -676,8 +598,6 @@ static void LoadRenderPrograms(yyjson_val* root, ShaderManager* sm, BufferManage
 	});
 }
 
-// Для csp снос-до-загрузки не удобство, а обязательное условие: порядок csp внутри прохода =
-// порядок создания и он значим, а upsert по имени переставил бы пересозданную в конец вектора.
 static void LoadComputePrograms(yyjson_val* root, ShaderManager* sm, BufferManager* bm, TextureManager* tm)
 {
 	size_t made = 0, total = 0;
@@ -721,8 +641,6 @@ static void LoadShaders(const std::string& dir, ShaderManager* sm, ModelManager*
 	SDL_Log("LoadScene: shaders from manifest");
 }
 
-// ПОСЛЕ шейдеров и текстур: ссылается на них по имени, хотя резолв всё равно ленивый на сборке
-// батча.
 static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureManager* tm, ShaderManager* sm)
 {
 	ReadDoc d(dir, "materials.json");
@@ -733,10 +651,6 @@ static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 		SceneMaterialEntry me;
 		me.name = JsonStr(e, "name");
 
-		// sp — объекты {name, params_type?, params?}: блоб адресован ИМЕННО этой программе.
-		// params: стартуем с ДЕФОЛТОВ типа (member-инициализаторы структуры) и накатываем поля из
-		// файла по именам. Тип не зарегистрирован → params нет: раскладки нет, а гадать про байты
-		// нельзя (сообщаем, чтобы это не выглядело как «поля потерялись»).
 		ForEachIn(e, "shaders", [&](yyjson_val* s) {
 			SceneShaderEntry se;
 			se.name = JsonStr(s, "name");
@@ -763,8 +677,6 @@ static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 			if (yyjson_val* arr = yyjson_obj_get(t, "textures"))
 				ForEachVal(arr, [&](yyjson_val* s) { if (const char* str = yyjson_get_str(s)) names.emplace_back(str); });
 			else
-				// Старый формат: "texture" скаляром = единственный вариант. Читается, чтобы
-				// существующие сцены не переписывались; SaveScene пишет уже массивом.
 				names.emplace_back(JsonStr(t, "texture"));
 			me.textures.emplace_back(role, std::move(names));
 		});
@@ -773,8 +685,6 @@ static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 	});
 
 	const size_t n = mtm->LoadSceneMaterials(entries, tm, sm);
-	// Сбор usage-флагов: текстуры сцены загружены РАНЬШЕ материалов, поэтому имена уже резолвятся
-	// в атласы, и те получают SAMPLER до ближайшего бейка.
 	for (const SceneMaterialEntry& e : entries)
 		mtm->CollectSamplerUsage(mtm->GetMaterial(e.name), tm, e.name);
 	SDL_Log("LoadScene: %zu/%zu materials from manifest", n, entries.size());
@@ -791,9 +701,6 @@ static void ClearSceneResources(TextureManager* tm, ModelManager* mm, ShaderMana
 
 void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_root)
 {
-	// Рендер-поток встаёт на всю загрузку (см. Engine::scene_swap_mutex). На всю, а не только на
-	// ECS-своп: фазы манифестов перезаливают словари TextureManager/ModelManager/MaterialManager/
-	// ShaderManager, а панели редактора их перечисляют с рендер-потока.
 	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
 
 	const std::string dir = scenes_root + "/" + scene_name;
@@ -804,48 +711,31 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 	{
 		PhaseTimer t(read_ms);
 		const std::string scene_path = dir + "/scene.json";
-		std::ifstream f(scene_path, std::ios::binary | std::ios::ate);   // ate: сразу в конец — узнать размер
+		std::ifstream f(scene_path, std::ios::binary | std::ios::ate);
 		if (!f) { SDL_Log("LoadScene: cannot open '%s'", scene_path.c_str()); return; }
-		// Читаем ФАЙЛ ОДНОЙ аллокацией прямо в строку (без stringstream → без тройной копии 43 МБ:
-		// rdbuf-буфер + ss.str()). Одна аллокация точного размера + один read.
 		const std::streamoff sz = f.tellg();
 		if (sz > 0) {
 			text.resize(static_cast<size_t>(sz));
 			f.seekg(0);
 			f.read(text.data(), sz);
-			text.resize(static_cast<size_t>(f.gcount()));   // усечь до реально прочитанного
+			text.resize(static_cast<size_t>(f.gcount()));
 		}
 	}
 
 	{ PhaseTimer t(wipe_ms); ClearSceneResources(texture_manager, model_manager, shader_manager, material_manager); }
 
-	// Ресурсы ПЕРЕД ECS: сущности ссылаются на них по имени, и резолв идёт по словарям менеджеров.
 	{ PhaseTimer t(tex_ms); LoadTextures (dir, texture_manager, engine_context); }
 	{ PhaseTimer t(mdl_ms); LoadModels   (dir, model_manager); }
 	{ PhaseTimer t(shd_ms); LoadShaders  (dir, shader_manager, model_manager, buffer_manager, texture_manager); }
 	{ PhaseTimer t(mat_ms); LoadMaterials(dir, material_manager, texture_manager, shader_manager); }
 
-	// Replace-on-load: сносим прежнее содержимое сцены ДО наполнения — иначе загрузка дописала бы
-	// поверх (дубликаты сущностей). Делаем это только после успешного открытия файла, чтобы кривой
-	// путь не обнулял текущую сцену.
-	//
-	// Замок на ECS-swap не нужен: рендер-проходы/каллинг читают пер-слотовые слепки, а не ECS.
-	// Единственный живой читатель ECS на рендер-потоке — UI (осознанный компромисс, см.
-	// Engine::RenderFunc; правильное закрытие — UI-слепок или построение UI в sim).
 	size_t loaded_count = 0;
 	{
 		{
 			PhaseTimer t(clear_ms);
-			// Одним запросом: GetScene на ещё не созданной сцене пишет в лог «not found» (первая
-			// загрузка — штатный путь, сцену заведёт om->LoadScene ниже), и второй такой же вызов
-			// удвоил бы это сообщение.
 			SceneData* target = object_manager->GetScene(scene_name);
 			if (target) target->clear();
 
-			// ПЕРЕКЛЮЧЕНИЕ сцен (грузим не ту, что сейчас активна): прежняя активная уходит целиком
-			// — сносим и её содержимое. Активная в движке ровно одна (на неё смотрят дата-модули,
-			// сборка батчей и редактор), так что оставленные сущности были бы невидимой копией
-			// сцены в памяти — на миллионе энтити это гигабайты. Генераторы сцены переживают clear.
 			if (SceneData* prev_active = object_manager->GetActiveScene(); prev_active && prev_active != target)
 				prev_active->clear();
 		}
@@ -856,24 +746,14 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 		}
 
 		if (SceneData* scene = object_manager->GetScene(scene_name)) {
-			// ИСКЛЮЧИТЕЛЬНАЯ активация: прочие сцены гаснут. SetSceneState(name,true) оставлял бы
-			// активной ещё и предыдущую (у SceneData is_active=true по умолчанию), а GetActiveScene
-			// отдаёт первую попавшуюся активную — переключение сцен было бы лотереей.
 			object_manager->SetActiveScene(scene_name);
 
-			// UI — часть сцены и уходит вместе с ней: clear выше снёс его энтити, здесь сносим
-			// дерево. Раньше дерево переживало загрузку (живёт в UI_Yoga, не в ECS) — на экране UI
-			// пропадал, а его узлы продолжали висеть в панели иерархии. Новый UI появится, когда
-			// дерево начнёт грузиться из файлов сцены.
 			if (ui_yoga) ui_yoga->Reset();
 		}
 	}
 
 	shader_manager->ReportOrphanCodeBindings();
 
-	// Бейк GPU-ресурсов здесь НЕ делается: он дренируется каждый кадр в начале Engine::PrepareFunc
-	// (BakePending). Всё, что объявила эта загрузка (атласы, буферы, sp, материалы), попадёт в
-	// ближайший prepare — игровой апдейт и prepare идут последовательно на одном sim-потоке.
 	batch_builder->SetDirtyBatches(true);
 	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), dir.c_str());
 	SDL_Log("LoadScene TIMING [%zu ent, %.1f MB]: read=%.1f  wipe=%.1f  tex=%.1f  mdl=%.1f  shd=%.1f  mat=%.1f  clear=%.1f  ecs=%.1f  | total=%.1f ms",
