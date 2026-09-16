@@ -330,9 +330,12 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             auto it = shader_map.find(sp_key);
             if (it == shader_map.end())
             {
+                auto pipe = pm->GetGraphicPipeline(sp);
+                if (!pipe) continue;
+
                 ShaderBatchData new_batch{};
                 new_batch.push_instructions = sm->CollectPushInstructions(*resolved_name);
-                new_batch.pipeline = pm->GetGraphicPipeline(sp);
+                new_batch.pipeline = std::move(pipe);
                 auto resolve_buffers = [bm](const std::vector<BufferDataName>& names) {
                     std::vector<BufferData*> out; out.reserve(names.size());
                     for (BufferDataName n : names)
