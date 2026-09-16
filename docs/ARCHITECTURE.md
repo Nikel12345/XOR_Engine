@@ -33,7 +33,7 @@ XOR Engine — набор статических библиотек. Прило�
 
 | цель | что внутри | почему отдельно |
 |---|---|---|
-| **EngineEcs** | `ObjectManager` (+`.inl`), `BaseComponents`, `ComponentSerializer`, `SceneData`, `Aliases.h` | ECS обязан оставаться листом: его линкует и `Engine`, и `Physics`. Тянет только SDL3 и `yyjson` (колоночная сериализация сцены) |
+| **EngineEcs** | `ObjectManager` (+`.inl`), `BaseComponents`, `ComponentSerializer`, `SceneData`, `Aliases.h`, `ResourceId.h` | ECS обязан оставаться листом: его линкует и `Engine`, и `Physics`. Тянет только SDL3 и `yyjson` (колоночная сериализация сцены) |
 | **EngineGpu** | `QueueManager`, `TransferManager`, `BufferManager` (+`_Binds`/`_Update`/`_Utils`), `ShaderManager` (+`_ShadersCreate`/`_SPVLoad`), `TextureManager`, `PreviewPacker`, `PassManager`, `RenderCommandData`, `GpuTaskContext`, `SparseRankChannel`, `EngineProfiler` | Буферы, шейдеры, текстуры, проходы — без единого знания о сцене и рендер-логике |
 | **Engine** | менеджеры, data-модули, `BatchBuilder`, `EngineContext`, дефолт-сеты, UI, цикл кадра | Линкует `EngineGpu` и `EngineEcs` как PUBLIC и склеивает их |
 | **Physics** | `PhysicsBufferSet`, `PhysicsComputeSet`, `CollisionShapes`, `ContactSystem`, `DebugColliderSystem` | Линкует **только** `EngineGpu` + `EngineEcs`, без `Engine`, рендера и ImGui. Своего PCH не имеет намеренно — это работающая проверка, что слоение не протекло |
@@ -91,11 +91,26 @@ XOR Engine — набор статических библиотек. Прило�
 | проходы | `PassManager::CreateRenderPass` / `CreateComputePass` / `CreateComputePrepass` / `CreateBlitPass` | тело прохода и его место в порядке |
 | команды ввода | `InputManager::RegisterCommand` / `PushCommand` | единственный законный способ мутировать ECS не из sim-потока |
 
-Второй сквозной приём — **ссылки по имени, а не указателем**: `ShaderName`, `MaterialName`,
-`AtlasName`, `RenderPassName` (все — `std::string`, см. `Aliases.h`). Имя переживает сериализацию
-сцены и перезагрузку реестров; указатель добывается на месте использования. Поле `debug_name` в
-этом не участвует — оно подпись для логов и редактора, а не ключ: восстанавливать по нему имя
-значит завести вторую систему идентичности, которая разойдётся с реестром.
+Второй сквозной приём — **реестр ячеек**. Каждый менеджер держит свои ресурсы в
+`ResourceRegistry`, где ячейка — это имя плюс сам объект, а ссылкой между ресурсами служит
+`ResourceId`: индекс ячейки в реестре её владельца. Тип id свой у каждого реестра (`TextureId`,
+`AtlasId`, `MaterialId`, `ModelId`, `ShaderProgramId`, шейдерные — все в `ResourceId.h`), и
+компилятор их различает. Так адресуются текстуры, атласы, шейдеры, программы, материалы и модели.
+
+Держится приём на том, что **ячейка живёт дольше объекта**. Удаление очищает объект и оставляет
+имя, поэтому пересоздание под тем же именем занимает ту же ячейку, и ссылающиеся продолжают
+показывать на неё. Пока ячейка пуста, реестр отдаёт `nullptr`, а сборка батчей подставляет
+фолбэк-программу или dummy-текстуру. Ячейки не исчезают и не меняют порядок, поэтому id верен до
+конца запуска.
+
+Имя остаётся человеческим полем ячейки: его показывает редактор, его меняет переименование (id при
+этом прежний), и оно же уезжает в файлы сцены. Обратно имя читается через `Intern`, который заводит
+под незнакомое имя пустую ячейку: ссылка получает id раньше, чем появится сам ресурс.
+
+Имя как ссылку держат буферы и проходы (`BufferDataName`, `RenderPassName`, `ComputePassName`, см.
+`Aliases.h`): их реестры — словари. Поле `debug_name` в ссылках не участвует: это подпись для логов
+и редактора, чтобы код, которому досталась голая ссылка на ресурс, мог назвать его в сообщении об
+ошибке.
 
 ---
 
