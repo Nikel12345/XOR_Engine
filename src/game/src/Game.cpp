@@ -97,7 +97,7 @@ SDL_AppResult Game::MainInit()
 	// (InitDefaultShaders) — к MainInit она уже есть.
 	{
 		Material* ui_mat = ctx->CreateMaterial("ui_mat",
-			{ { TextureSlotRole::Albedo, { "default_albedo" } } }, { "UI" }, ResourceTag::DontSave);
+			{ { TextureSlotRole::Albedo, { "default_albedo" } } }, { "UI" }, ResourceTag::CodeOwned);
 		// Посадку/размер теперь считает Yoga (rect узла), поэтому text_height/anchor нейтральны
 		// (1,0) — шейдер просто заливает узел текстом. Цвета: тёмный фон + золотой текст.
 		ctx->SetMaterialParams(ui_mat, "UI", UIMaterialParams{ { 0.10f, 0.10f, 0.15f, 1.0f }, { 1.0f, 0.85f, 0.2f, 1.0f }, 1.0f, 0.0f });
@@ -193,7 +193,7 @@ SDL_AppResult Game::MainInit()
                 idx.push_back(vbase + 0); idx.push_back(vbase + 1); idx.push_back(vbase + 2);
                 idx.push_back(vbase + 0); idx.push_back(vbase + 2); idx.push_back(vbase + 3);
             }
-        }, AnchorShift::Keep, ResourceTag::DontSave);   // процедурные кубы игры — в models.json не идут
+        }, AnchorShift::Keep, ResourceTag::CodeOwned);   // процедурные кубы игры — в models.json не идут
     }
 
     // --- "two_quads": ОДИН меш из двух НЕСВЯЗАННЫХ островов (ни общих вершин, ни общих рёбер). ---
@@ -216,7 +216,7 @@ SDL_AppResult Game::MainInit()
             i.insert(i.end(), { vbase + 0, vbase + 1, vbase + 2,
                                 vbase + 0, vbase + 2, vbase + 3 });
         }
-    }, AnchorShift::Keep, ResourceTag::DontSave);
+    }, AnchorShift::Keep, ResourceTag::CodeOwned);
 
     ctx->RegisterGenerator(kStartScene, [this] { CreateDebugColliders(); });
     ctx->LoadScene(kStartScene);   // папка сцены saved_scene/scene1 (scene.json + ресурсы внутри)

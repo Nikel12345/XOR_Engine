@@ -69,7 +69,7 @@ FontData* FontManager::CreateFont(TextureManager* tm,
 					g.handle = tm->CreateTexture("glyph_" + name + "_" + std::to_string(cp),
 					                             fd.atlas, static_cast<uint32_t>(s->w), static_cast<uint32_t>(s->h),
 					                             std::move(r8));
-					if (g.handle) g.handle->tags = ResourceTag::DontSave | ResourceTag::Default | ResourceTag::System;
+					if (g.handle) g.handle->tags = ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System;
 				}
 			}
 			if (s) SDL_DestroySurface(s);   // пробел/пустой глиф: без пикселей, остаётся advance

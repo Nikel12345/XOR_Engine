@@ -98,7 +98,7 @@ SDL_AppResult MyGame::MainInit()
     objectManager->CreateScene(scene_name);
     ctx->LoadScene(scene_name);   // папка сцены saved_scene/<имя> (scene.json + ресурсы)
 
-    // ── Якорённые кубы (этапы 3-4). Модель — процедурный куб полу-размера 1, dont_save;
+    // ── Якорённые кубы (этапы 3-4). Модель — процедурный куб полу-размера 1, CodeOwned;
     // материал/sp — из манифестов сцены (iron_block/AnchorObject: штатный main-суржейс — свет
     // в сцене нулевой, куб живёт на полу AMBIENT_LIGHT). Модель и материал захватываются в
     // члены: клавиша N в MainIterate спавнит из них новые кубы. Все кубы — кодовые энтити с

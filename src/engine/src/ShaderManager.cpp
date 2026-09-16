@@ -264,7 +264,7 @@ void ShaderManager::ClearSavableComputeShaderPrograms()
 {
     const size_t before = compute_shader_programs.size();
     std::erase_if(compute_shader_programs,
-        [](const ComputeProgramSlot& s) { return !s.program || !HasTag(s.program->tags, ResourceTag::DontSave); });
+        [](const ComputeProgramSlot& s) { return !s.program || !HasTag(s.program->tags, ResourceTag::CodeOwned); });
     const size_t removed = before - compute_shader_programs.size();
     if (removed) {
         dirty_compute_pipelines = true;

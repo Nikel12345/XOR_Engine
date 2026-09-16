@@ -52,7 +52,7 @@ namespace {
             { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
               camera_buffer, DEFAULT_TRANSFORM_BUFFER },
             {}, {}, {},
-            RP::CULLING_PASS, ResourceTag::DontSave | ResourceTag::Default);
+            RP::CULLING_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
 
         sm->CreateComputePushInstruction<RP::CullingPibUniform>(program_name,
             [pm, pass_ordinal, screen_target, invert_span](const PushConstantBinder& binder, RP::CullingPibUniform data) {
@@ -123,27 +123,27 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 	// пережить удаление любого шейдера из редактора. Одинаковый байткод дедуплицируется по хэшу SPIR-V.
 	ctx->CreateVertexShader("fallback_vs",
 		"../engine/shaders_code/main_pass/main_pass.vert.hlsl",
-		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::DontSave | ResourceTag::Default | ResourceTag::System);
+		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
 	ctx->CreateFragmentShader("fallback_fs",
-		"../engine/shaders_code/main_pass/untextured/surface.hlsl", ResourceTag::DontSave | ResourceTag::Default | ResourceTag::System);
+		"../engine/shaders_code/main_pass/untextured/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
 	{
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry()->DoesNotCull();
 		ctx->CreateShaderProgram("Fallback", spd, RP::MAIN_PASS,
 			"fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"fallback_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
-			{ }, ResourceTag::DontSave | ResourceTag::Default | ResourceTag::System);
+			{ }, ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
 		ctx->GetBatchBuilder()->SetFallbackShader("Fallback");
 	}
 
 	ctx->CreateVertexShader("main_pass_vs", "../engine/shaders_code/main_pass/main_pass.vert.hlsl",
-		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::DontSave | ResourceTag::Default);
+		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::CodeOwned | ResourceTag::Default);
 	ctx->CreateVertexShader("shadow_vs", "../engine/shaders_code/shadow_pass/shadow_pass.vert.hlsl",
-		POS_UV_NORM_POOL, { POSITION }, ResourceTag::DontSave | ResourceTag::Default);
+		POS_UV_NORM_POOL, { POSITION }, ResourceTag::CodeOwned | ResourceTag::Default);
 	ctx->CreateVertexShader("skybox_vs", "../engine/shaders_code/skybox/skybox.vert.hlsl",
-		POS_UV_NORM_POOL, { POSITION }, ResourceTag::DontSave | ResourceTag::Default);
+		POS_UV_NORM_POOL, { POSITION }, ResourceTag::CodeOwned | ResourceTag::Default);
 	ctx->CreateVertexShader("debug_collider_vs", "../engine/shaders_code/debug/debug_collider.vert.hlsl",
-		POS_UV_NORM_POOL, { POSITION }, ResourceTag::DontSave | ResourceTag::Default);
+		POS_UV_NORM_POOL, { POSITION }, ResourceTag::CodeOwned | ResourceTag::Default);
 
 	const ShaderDefines kVariantDefines = {
 		{ "TEXTURE_VARIANTS",    "1" },
@@ -151,24 +151,24 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		{ "MAX_SLOTS",           std::to_string(MAX_SLOTS) },
 		{ "MAX_UVL_BLOCKS",      std::to_string(MAX_UVL_BLOCKS) },
 	};
-	ctx->CreateFragmentShader("main_surface_fs",        "../engine/shaders_code/main_pass/surface.hlsl", ResourceTag::DontSave | ResourceTag::Default, kVariantDefines);
-	ctx->CreateFragmentShader("untextured_surface_fs",  "../engine/shaders_code/main_pass/untextured/surface.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateFragmentShader("transparent_surface_fs", "../engine/shaders_code/transparent_pass/surface.hlsl", ResourceTag::DontSave | ResourceTag::Default, kVariantDefines);
-	ctx->CreateFragmentShader("shadow_fs",              "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateFragmentShader("skybox_fs",              "../engine/shaders_code/skybox/skybox.frag.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateFragmentShader("debug_collider_fs",      "../engine/shaders_code/debug/debug_collider.frag.hlsl", ResourceTag::DontSave | ResourceTag::Default);
+	ctx->CreateFragmentShader("main_surface_fs",        "../engine/shaders_code/main_pass/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
+	ctx->CreateFragmentShader("untextured_surface_fs",  "../engine/shaders_code/main_pass/untextured/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateFragmentShader("transparent_surface_fs", "../engine/shaders_code/transparent_pass/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
+	ctx->CreateFragmentShader("shadow_fs",              "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateFragmentShader("skybox_fs",              "../engine/shaders_code/skybox/skybox.frag.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateFragmentShader("debug_collider_fs",      "../engine/shaders_code/debug/debug_collider.frag.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
 
-	ctx->CreateComputeShader("bloom_prefilter_cs", "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateComputeShader("bloom_down_cs",      "../engine/shaders_code/comp/bloom_down.comp.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateComputeShader("bloom_up_cs",        "../engine/shaders_code/comp/bloom_up.comp.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateComputeShader("bloom_composite_cs", "../engine/shaders_code/comp/bloom_composite.comp.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateComputeShader("ssao_cs",            "../engine/shaders_code/comp/ssao.comp.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateComputeShader("ssao_blur_h_cs",     "../engine/shaders_code/comp/ssao_blur_h.comp.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateComputeShader("ssao_blur_v_cs",     "../engine/shaders_code/comp/ssao_blur_v.comp.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateComputeShader("ao_composite_cs",    "../engine/shaders_code/comp/ao_composite.comp.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateComputeShader("fog_cs",             "../engine/shaders_code/comp/fog.comp.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateComputeShader("culling_clear_cs",   "../engine/shaders_code/comp/culling_clear.comp.hlsl", ResourceTag::DontSave | ResourceTag::Default);
-	ctx->CreateComputeShader("culling_pib_cs",     "../engine/shaders_code/comp/culling_pib.comp.hlsl", ResourceTag::DontSave | ResourceTag::Default);
+	ctx->CreateComputeShader("bloom_prefilter_cs", "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("bloom_down_cs",      "../engine/shaders_code/comp/bloom_down.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("bloom_up_cs",        "../engine/shaders_code/comp/bloom_up.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("bloom_composite_cs", "../engine/shaders_code/comp/bloom_composite.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("ssao_cs",            "../engine/shaders_code/comp/ssao.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("ssao_blur_h_cs",     "../engine/shaders_code/comp/ssao_blur_h.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("ssao_blur_v_cs",     "../engine/shaders_code/comp/ssao_blur_v.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("ao_composite_cs",    "../engine/shaders_code/comp/ao_composite.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("fog_cs",             "../engine/shaders_code/comp/fog.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("culling_clear_cs",   "../engine/shaders_code/comp/culling_clear.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("culling_pib_cs",     "../engine/shaders_code/comp/culling_pib.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
 
 	{
 		ShaderProgramDescription spd;
@@ -180,12 +180,12 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 			// «Missing vertex storage buffer binding».
 			"main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive },
-			ResourceTag::DontSave | ResourceTag::Default);
+			ResourceTag::CodeOwned | ResourceTag::Default);
 
 		ctx->CreateShaderProgram("LitColor", spd, RP::MAIN_PASS,
 			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"untextured_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
-			{ }, ResourceTag::DontSave | ResourceTag::Default);
+			{ }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 	{
 		ShaderProgramDescription spd;
@@ -193,21 +193,21 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ctx->CreateShaderProgram("LitTransparent", spd, RP::TRANSPARENT_PASS,
 			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
 			"transparent_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
-			{ TextureSlotRole::Albedo, TextureSlotRole::Normal }, ResourceTag::DontSave | ResourceTag::Default);
+			{ TextureSlotRole::Albedo, TextureSlotRole::Normal }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 	{
 		ShaderProgramDescription spd;
 		spd.BehavesAsShadowCaster();
 		ctx->CreateShaderProgram("ShadowCaster", spd, RP::SHADOW_PASS,
 			"shadow_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-			"shadow_fs", { }, { }, ResourceTag::DontSave | ResourceTag::Default);
+			"shadow_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 	{
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry()->IgnoresDepth()->AsLineList();
 		ctx->CreateShaderProgram("Wireframe", spd, RP::DEBUG_PASS,
 			"debug_collider_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
-			"debug_collider_fs", { }, { }, ResourceTag::DontSave | ResourceTag::Default);
+			"debug_collider_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 	// Сплат ВЫКЛЮЧЕН вместе со своим проходом (см. Engine::Init). Держать sp живой нельзя:
 	// её render_pass_name указывал бы на незарегистрированный SPLAT_PASS, а PipeManager на такое
@@ -218,7 +218,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 	//		spd.BehavesAsOpaqueGeometry()->AsPointList();
 	//		ctx->CreateShaderProgram("Splat", spd, RP::SPLAT_PASS,
 	//			"splat_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
-	//			"splat_fs", { }, { }, ResourceTag::DontSave | ResourceTag::Default);
+	//			"splat_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	//	}
 	{
 		ShaderProgramDescription spd;
@@ -226,13 +226,13 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		spd.BehavesAsOpaqueGeometry()->ReadsDepthOnly()->WithDepthCompare(SDL_GPU_COMPAREOP_LESS_OR_EQUAL);
 		ctx->CreateShaderProgram("Skybox", spd, RP::MAIN_PASS,
 			"skybox_vs", { DEFAULT_CAMERA_BUFFER },
-			"skybox_fs", { }, { }, ResourceTag::DontSave | ResourceTag::Default);
+			"skybox_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 
 	{
 		ctx->CreateVertexShader("ui_vs", "../engine/shaders_code/ui/ui.vert.hlsl",
-			POS_UV_NORM_POOL, { POSITION, UV }, ResourceTag::DontSave | ResourceTag::Default);
-		ctx->CreateFragmentShader("ui_fs", "../engine/shaders_code/ui/ui.frag.hlsl", ResourceTag::DontSave | ResourceTag::Default, kVariantDefines);
+			POS_UV_NORM_POOL, { POSITION, UV }, ResourceTag::CodeOwned | ResourceTag::Default);
+		ctx->CreateFragmentShader("ui_fs", "../engine/shaders_code/ui/ui.frag.hlsl", ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
 
 		ShaderProgramDescription spd;
 		spd.BehavesAsUIOverlay();
@@ -240,7 +240,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_INSTANCE_BUFFER },
 			"ui_fs", { UI_TEXT_RANK_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER,
 			           DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
-			{ TextureSlotRole::Albedo }, ResourceTag::DontSave | ResourceTag::Default);
+			{ TextureSlotRole::Albedo }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 
 }
@@ -260,7 +260,7 @@ void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx)
     ComputeShaderProgram* csp_clear = ctx->CreateComputeShaderProgram("csp_culling_clear", "culling_clear_cs",
         { DEFAULT_INDIRECT_BUFFER },
         {}, {}, {}, {},
-        RP::CULLING_PASS, ResourceTag::DontSave | ResourceTag::Default);
+        RP::CULLING_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
     sm->CreateComputePushInstruction<RP::CullingClearUniform>("csp_culling_clear",
         [pm](const PushConstantBinder& binder, RP::CullingClearUniform data) {
         data.total_slots = pm->AskRegions(binder.frame).total_commands;
@@ -305,7 +305,7 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
             { { SHADOW_MOMENTS_BLUR_TEMP, 0, 0 } },
             {},
             { SHADOW_MOMENTS_ARRAY },
-            SHADOW_BLUR_PASS, ResourceTag::DontSave | ResourceTag::Default);
+            SHADOW_BLUR_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
 
         sm->CreateComputePushInstruction<ShadowBlurUniform>(name_h,
             [L](const PushConstantBinder& binder, ShadowBlurUniform data) {
@@ -327,7 +327,7 @@ void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDat
             { { SHADOW_MOMENTS_ARRAY, 0, L } },
             {},
             { SHADOW_MOMENTS_BLUR_TEMP },
-            SHADOW_BLUR_PASS, ResourceTag::DontSave | ResourceTag::Default);
+            SHADOW_BLUR_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
 
         sm->CreateDispatchInstruction<DummyDispatchData>(name_v,
             [L, moments_atlas, ldm](DispatchSizeBinder& binder, DummyDispatchData) {
@@ -354,28 +354,28 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
         { { SSAO_TEXTURE, 0, 0 } },
         {},
         { std::string("main_depth") },
-        AO_PASS, ResourceTag::DontSave | ResourceTag::Default);
+        AO_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
 
     ctx->CreateComputeShaderProgram("ssao_blur_h", "ssao_blur_h_cs",
         {}, { DEFAULT_CAMERA_BUFFER },
         { { SSAO_TEMP, 0, 0 } },
         {},
         { SSAO_TEXTURE, std::string("main_depth") },
-        AO_PASS, ResourceTag::DontSave | ResourceTag::Default);
+        AO_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
 
     ctx->CreateComputeShaderProgram("ssao_blur_v", "ssao_blur_v_cs",
         {}, { DEFAULT_CAMERA_BUFFER },
         { { SSAO_TEXTURE, 0, 0 } },
         {},
         { SSAO_TEMP, std::string("main_depth") },
-        AO_PASS, ResourceTag::DontSave | ResourceTag::Default);
+        AO_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
 
     ctx->CreateComputeShaderProgram("ao_composite", "ao_composite_cs",
         {}, {},
         { { std::string("scene_hdr"), 0, 0 } },
         {},
         { SCENE_AMBIENT, SSAO_TEXTURE },
-        AO_PASS, ResourceTag::DontSave | ResourceTag::Default);
+        AO_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
 
     const char* programs[] = { "ssao", "ssao_blur_h", "ssao_blur_v", "ao_composite" };
     for (const char* name : programs) {
@@ -419,7 +419,7 @@ void DefaultShaderProgramSet::SetFogProgram(EngineContext* ctx)
         { { std::string("scene_hdr"), 0, 0 } },
         {},
         { std::string("main_depth") },
-        FOG_PASS, ResourceTag::DontSave | ResourceTag::Default);
+        FOG_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
 
     sm->CreateComputePushInstruction<FogState>("fog", [](const PushConstantBinder& b, FogState st) {
         b.Push(st);
@@ -450,7 +450,7 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
         { { L(0), 0, 0 } },
         {},
         { std::string("scene_hdr"), std::string("scene_emission") },
-        BLOOM_PASS, ResourceTag::DontSave | ResourceTag::Default);
+        BLOOM_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
     sm->CreateComputePushInstruction<BloomState>("bloom_down_0",[](const PushConstantBinder& b, BloomState st) {
         BloomParams d{};
         d.threshold = st.threshold;
@@ -475,7 +475,7 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             { { L(i), 0, 0 } },
             {},
             { L(i - 1) },
-            BLOOM_PASS, ResourceTag::DontSave | ResourceTag::Default);
+            BLOOM_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
         sm->CreateComputePushInstruction<BloomState>(down_name,[](const PushConstantBinder& b, BloomState st) {
             BloomParams d{}; d.useKaris = st.karis_down; b.Push(d);
         });
@@ -493,7 +493,7 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             { { .texture_atlas = L((uint32_t)i), .need_simultaneous = true } },
             {},
             { L((uint32_t)i + 1) },
-            BLOOM_PASS, ResourceTag::DontSave | ResourceTag::Default);
+            BLOOM_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
         sm->CreateComputePushInstruction<BloomState>(up_name,[](const PushConstantBinder& b, BloomState) {
             b.Push(BloomParams{});
         });
@@ -511,7 +511,7 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
             { { std::string("scene_hdr"), 0, 0 } },
             {},
             { L(0) },
-            BLOOM_PASS, ResourceTag::DontSave | ResourceTag::Default);
+            BLOOM_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
         sm->CreateComputePushInstruction<BloomState>("bloom_composite",[](const PushConstantBinder& b, BloomState st) {
             BloomParams d{};
             d.intensity = st.glow_intensity;

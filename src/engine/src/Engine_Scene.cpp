@@ -344,7 +344,7 @@ struct PhaseTimer {
 
 // ── Этапы сохранения ──────────────────────────────────────────────────────────────────────────
 
-// Скип: DontSave и байтовые (пустой source_path — из файла не пересоздаются,
+// Скип: CodeOwned и байтовые (пустой source_path — из файла не пересоздаются,
 // их делает код).
 static void SaveTextures(const std::string& dir, TextureManager* tm)
 {
@@ -352,7 +352,7 @@ static void SaveTextures(const std::string& dir, TextureManager* tm)
 	yyjson_mut_val* arr = d.Arr("textures");
 	size_t saved = 0;
 	for (auto& [name, h] : tm->GetTextureHandles()) {
-		if (!h || HasTag(h->tags, ResourceTag::DontSave) || h->source_path.empty()) continue;
+		if (!h || HasTag(h->tags, ResourceTag::CodeOwned) || h->source_path.empty()) continue;
 		yyjson_mut_val* t = yyjson_mut_arr_add_obj(d.doc, arr);
 		// Кубмапа — обычный хэндл на 6 слоёв, отличает её ТИП АТЛАСА: он же определяет путь
 		// загрузки (крест 4×3 через CreateCubeMapTexture). Спрашиваем атлас, а не хэндл: у хэндла
@@ -369,7 +369,7 @@ static void SaveTextures(const std::string& dir, TextureManager* tm)
 	d.Write(dir, "textures.json", "textures", saved);
 }
 
-// Скип: DontSave и процедурные (пустой model_path). anchor — числом (стабильный enum, редко
+// Скип: CodeOwned и процедурные (пустой model_path). anchor — числом (стабильный enum, редко
 // инспектируется).
 static void SaveModels(const std::string& dir, ModelManager* mm)
 {
@@ -377,7 +377,7 @@ static void SaveModels(const std::string& dir, ModelManager* mm)
 	yyjson_mut_val* arr = d.Arr("models");
 	size_t saved = 0;
 	for (auto& [name, m] : mm->GetModels()) {
-		if (!m || HasTag(m->tags, ResourceTag::DontSave) || m->model_path.empty()) continue;
+		if (!m || HasTag(m->tags, ResourceTag::CodeOwned) || m->model_path.empty()) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, arr);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name",   name.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "vertex", m->model_path.c_str());
@@ -398,14 +398,14 @@ static void SaveModels(const std::string& dir, ModelManager* mm)
 	d.Write(dir, "models.json", "models", saved);
 }
 
-// Скип DontSave и пустых путей у SD.
+// Скип CodeOwned и пустых путей у SD.
 static void SaveShaders(const std::string& dir, ShaderManager* sm)
 {
 	MutDoc d;
 
 	yyjson_mut_val* vsa = d.Arr("vertex_shaders");
 	for (auto& [name, vs] : sm->GetVertexShaders()) {
-		if (HasTag(vs.tags, ResourceTag::DontSave) || vs.source_path.empty()) continue;
+		if (HasTag(vs.tags, ResourceTag::CodeOwned) || vs.source_path.empty()) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, vsa);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "path", vs.source_path.c_str());
@@ -422,7 +422,7 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm)
 	auto write_sd = [&](const char* key, auto& registry) {
 		yyjson_mut_val* arr = d.Arr(key);
 		for (auto& [name, sd] : registry) {
-			if (HasTag(sd.tags, ResourceTag::DontSave) || sd.source_path.empty()) continue;
+			if (HasTag(sd.tags, ResourceTag::CodeOwned) || sd.source_path.empty()) continue;
 			yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, arr);
 			yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());
 			yyjson_mut_obj_add_strcpy(d.doc, e, "path", sd.source_path.c_str());
@@ -435,7 +435,7 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm)
 	// SP сгруппированы ПО ТИПУ (как SD), без поля "kind" внутри записи.
 	yyjson_mut_val* spa = d.Arr("render_shader_programs");
 	for (auto& [name, sp] : sm->GetShaderPrograms()) {
-		if (!sp || HasTag(sp->tags, ResourceTag::DontSave)) continue;
+		if (!sp || HasTag(sp->tags, ResourceTag::CodeOwned)) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, spa);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "vs",   sp->vs_name.c_str());
@@ -452,7 +452,7 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm)
 	// ровно в том, в каком программы создавались.
 	yyjson_mut_val* cspa = d.Arr("compute_shader_programs");
 	for (auto& [csp_name, csp] : sm->GetComputeShaderPrograms()) {
-		if (!csp || HasTag(csp->tags, ResourceTag::DontSave)) continue;
+		if (!csp || HasTag(csp->tags, ResourceTag::CodeOwned)) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, cspa);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", csp_name.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "cs",   csp->cs_name.c_str());
@@ -474,7 +474,7 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm)
 	d.Write(dir, "shaders.json", "shaders", MutDoc::kNoCount);
 }
 
-// Скип DontSave (кодовая инфраструктура). Текстуры — по роли, sp — по имени, params — объект
+// Скип CodeOwned (кодовая инфраструктура). Текстуры — по роли, sp — по имени, params — объект
 // именованных полей по схеме типа (params_type).
 static void SaveMaterials(const std::string& dir, MaterialManager* mtm)
 {
@@ -482,7 +482,7 @@ static void SaveMaterials(const std::string& dir, MaterialManager* mtm)
 	yyjson_mut_val* arr = d.Arr("materials");
 	size_t saved = 0;
 	for (auto& [name, m] : mtm->GetMaterials()) {
-		if (!m || HasTag(m->tags, ResourceTag::DontSave)) continue;
+		if (!m || HasTag(m->tags, ResourceTag::CodeOwned)) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, arr);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());
 
@@ -646,7 +646,7 @@ static void LoadRenderPrograms(yyjson_val* root, ShaderManager* sm, BufferManage
 
 // НЕ merge-upsert, а СНЕСТИ И СОЗДАТЬ ЗАНОВО: порядок csp внутри прохода = порядок создания и он
 // значим, а upsert по имени переставил бы пересозданную программу в конец вектора. Сносим только
-// сериализуемые (без DontSave) — кодовые/движковые переживают загрузку, как и прочие
+// сериализуемые (без CodeOwned) — кодовые/движковые переживают загрузку, как и прочие
 // ресурсы, которых нет в манифесте.
 static void LoadComputePrograms(yyjson_val* root, ShaderManager* sm, BufferManager* bm, TextureManager* tm)
 {

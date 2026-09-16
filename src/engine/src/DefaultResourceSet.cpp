@@ -13,7 +13,7 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 
 	ctx->CreateTextureAtlas("FallbackAtlas", TexturePresets::AlbedoAtlas(64, 1, 1), "SimpleSampler", ResourceTag::Default | ResourceTag::System);
 	ctx->CreateTextureFromFile("NoTextureDummy", "FallbackAtlas", "../engine/textures/dummy.png",
-		ChannelConvention::AsIs, ResourceTag::DontSave | ResourceTag::Default | ResourceTag::System);
+		ChannelConvention::AsIs, ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
 
 	ctx->GetBatchBuilder()->SetDummyTexture("NoTextureDummy", tm);
 
@@ -23,7 +23,7 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 		tm->CreateTexture("default_orm",      "FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF })),
 		tm->CreateTexture("default_emissive", "FallbackAtlas", 2, 2, std::vector<std::byte>(2 * 2 * 4, std::byte{ 0xFF })),
 	};
-	for (TextureHandle* h : def_tex) if (h) h->tags = ResourceTag::DontSave | ResourceTag::Default;
+	for (TextureHandle* h : def_tex) if (h) h->tags = ResourceTag::CodeOwned | ResourceTag::Default;
 
 	// КАНОН развёртки у всех трёх примитивов: начало текстуры top-left (как грузит SDL_GPU и как
 	// рисует ImGui) → V идёт ВНИЗ, v=0 у геометрического ВЕРХА. Развёртка при этом левосторонняя
@@ -37,7 +37,7 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 			{ 0,1,0,  0,0,  0,0,1,  1,0,0 },
 		};
 		i = { 0, 1, 2, 0, 2, 3 };
-	}, AnchorShift::Keep, ResourceTag::DontSave | ResourceTag::Default);
+	}, AnchorShift::Keep, ResourceTag::CodeOwned | ResourceTag::Default);
 
 	ctx->CreateModel<PosUVNormal>("sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
 		const uint32_t stacks = 32;
@@ -75,7 +75,7 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 				idx.push_back(a + 1); idx.push_back(b + 1); idx.push_back(b);
 			}
 		}
-	}, AnchorShift::Keep, ResourceTag::DontSave | ResourceTag::Default);
+	}, AnchorShift::Keep, ResourceTag::CodeOwned | ResourceTag::Default);
 
 	ctx->CreateModel<PosUVNormal>("cube", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
 		struct FaceDef { float c[3], U[3], V[3], N[3]; };
@@ -107,5 +107,5 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 			idx.push_back(vbase + 0); idx.push_back(vbase + 1); idx.push_back(vbase + 2);
 			idx.push_back(vbase + 0); idx.push_back(vbase + 2); idx.push_back(vbase + 3);
 		}
-	}, AnchorShift::Keep, ResourceTag::DontSave | ResourceTag::Default);
+	}, AnchorShift::Keep, ResourceTag::CodeOwned | ResourceTag::Default);
 }
