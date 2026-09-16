@@ -110,6 +110,11 @@ public:
 	size_t LoadSceneTextures(const std::vector<SceneTextureEntry>& entries,
 		const std::function<TextureHandle*(const SceneTextureEntry&)>& create_from_file);
 
+	// Снос сценовых текстур перед загрузкой: уходит ровно то, что пишет SaveScene — байтовые
+	// (пустой source_path) остаются. В отличие от replace в LoadSceneTextures это НАСТОЯЩЕЕ
+	// удаление, поэтому превью тоже освобождаются. Возвращает число снесённых.
+	size_t ClearSceneTextures();
+
 	void QueueDeleteTexture(SDL_GPUTexture* texture);
 	void TrashTextures(uint64_t fences_done);
 

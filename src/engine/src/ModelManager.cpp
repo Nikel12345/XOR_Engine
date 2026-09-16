@@ -318,6 +318,16 @@ void ModelManager::SetSubmeshSpan(const std::string& name, size_t submesh, SubMe
     dst = span;
 }
 
+size_t ModelManager::ClearSceneModels()
+{
+    std::vector<std::string> doomed;
+    for (const auto& [name, m] : models_data)
+        if (!m || (!HasTag(m->tags, ResourceTag::CodeOwned) && !m->model_path.empty()))
+            doomed.push_back(name);
+    for (const std::string& n : doomed) DeleteModel(n);
+    return doomed.size();
+}
+
 size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries)
 {
     size_t loaded = 0;

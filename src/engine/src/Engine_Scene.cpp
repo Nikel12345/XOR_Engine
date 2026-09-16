@@ -546,8 +546,8 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& scenes_ro
 }
 
 // ── Этапы загрузки ────────────────────────────────────────────────────────────────────────────
-// Все они merge-upsert: то, чего нет в манифесте, переживает загрузку (движковые дефолты,
-// созданные кодом ресурсы). Исключение — compute-программы, см. LoadComputePrograms.
+// Им предшествует ClearSceneResources, поэтому они создают с нуля, а не мержат. Переживают
+// снос ровно те, кого SaveScene не пишет: CodeOwned и процедурные (без пути к файлу).
 
 // Словарная семантика — у TextureManager, декод файла — колбэком через ctx.
 static void LoadTextures(const std::string& dir, TextureManager* tm, EngineContext* ctx)
@@ -633,7 +633,8 @@ static void LoadRenderPrograms(yyjson_val* root, ShaderManager* sm, BufferManage
 	ForEachIn(root, "render_shader_programs", [&](yyjson_val* e) {
 		const std::string name = JsonStr(e, "name");
 		if (name.empty()) return;
-		// Merge-upsert: занятое имя = delete+create (erase на отсутствующем имени — no-op).
+		// Снос уже убрал сценовые sp, так что занятым имя осталось только у кодовой программы —
+		// манифест её перекрывает (erase на отсутствующем имени — no-op).
 		// push-инструкции НЕ переносим: их вернёт реестр код-байндингов по имени (внутри
 		// CreateShaderProgram) — перенос со старой sp ломался бы на переименовании.
 		sm->DeleteShaderProgram(name);
@@ -644,14 +645,10 @@ static void LoadRenderPrograms(yyjson_val* root, ShaderManager* sm, BufferManage
 	});
 }
 
-// НЕ merge-upsert, а СНЕСТИ И СОЗДАТЬ ЗАНОВО: порядок csp внутри прохода = порядок создания и он
-// значим, а upsert по имени переставил бы пересозданную программу в конец вектора. Сносим только
-// сериализуемые (без CodeOwned) — кодовые/движковые переживают загрузку, как и прочие
-// ресурсы, которых нет в манифесте.
+// Для csp снос-до-загрузки не удобство, а обязательное условие: порядок csp внутри прохода =
+// порядок создания и он значим, а upsert по имени переставил бы пересозданную в конец вектора.
 static void LoadComputePrograms(yyjson_val* root, ShaderManager* sm, BufferManager* bm, TextureManager* tm)
 {
-	sm->ClearSavableComputeShaderPrograms();
-
 	size_t made = 0, total = 0;
 	ForEachIn(root, "compute_shader_programs", [&](yyjson_val* e) {
 		++total;
@@ -752,6 +749,18 @@ static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 	SDL_Log("LoadScene: %zu/%zu materials from manifest", n, entries.size());
 }
 
+// Сносим ровно то, что пишет SaveScene — тогда потерять невосстановимое нельзя по построению.
+// Отвечает на два вопроса сразу: ресурсы разных сцен больше не делят имён, и порядок
+// создания внутри сцены задаёт манифест, а не история предыдущих загрузок.
+static void ClearSceneResources(TextureManager* tm, ModelManager* mm, ShaderManager* sm, MaterialManager* mtm)
+{
+	const size_t mat = mtm->ClearSceneMaterials();
+	const size_t shd = sm->ClearSceneShaders();
+	const size_t mdl = mm->ClearSceneModels();
+	const size_t tex = tm->ClearSceneTextures();
+	SDL_Log("LoadScene: wiped %zu materials, %zu shader records, %zu models, %zu textures", mat, shd, mdl, tex);
+}
+
 void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_root)
 {
 	// Рендер-поток встаёт на всю загрузку (см. Engine::scene_swap_mutex). На всю, а не только на
@@ -761,7 +770,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 
 	const std::string dir = scenes_root + "/" + scene_name;
 
-	double read_ms = 0, tex_ms = 0, mdl_ms = 0, shd_ms = 0, mat_ms = 0, clear_ms = 0, ecs_ms = 0;
+	double read_ms = 0, wipe_ms = 0, tex_ms = 0, mdl_ms = 0, shd_ms = 0, mat_ms = 0, clear_ms = 0, ecs_ms = 0;
 
 	std::string text;
 	{
@@ -779,6 +788,10 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 			text.resize(static_cast<size_t>(f.gcount()));   // усечь до реально прочитанного
 		}
 	}
+
+	// Снос ПОСЛЕ успешного чтения scene.json: кривой путь не должен обезресурсивать текущую
+	// сцену — тот же принцип, что у clear у ECS ниже.
+	{ PhaseTimer t(wipe_ms); ClearSceneResources(texture_manager, model_manager, shader_manager, material_manager); }
 
 	// Ресурсы ПЕРЕД ECS: сущности ссылаются на них по имени, и резолв идёт по словарям менеджеров.
 	{ PhaseTimer t(tex_ms); LoadTextures (dir, texture_manager, engine_context); }
@@ -837,8 +850,8 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 	// ближайший prepare — игровой апдейт и prepare идут последовательно на одном sim-потоке.
 	batch_builder->SetDirtyBatches(true);
 	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), dir.c_str());
-	SDL_Log("LoadScene TIMING [%zu ent, %.1f MB]: read=%.1f  tex=%.1f  mdl=%.1f  shd=%.1f  mat=%.1f  clear=%.1f  ecs=%.1f  | total=%.1f ms",
+	SDL_Log("LoadScene TIMING [%zu ent, %.1f MB]: read=%.1f  wipe=%.1f  tex=%.1f  mdl=%.1f  shd=%.1f  mat=%.1f  clear=%.1f  ecs=%.1f  | total=%.1f ms",
 		loaded_count, text.size() / (1024.0 * 1024.0),
-		read_ms, tex_ms, mdl_ms, shd_ms, mat_ms, clear_ms, ecs_ms,
-		read_ms + tex_ms + mdl_ms + shd_ms + mat_ms + clear_ms + ecs_ms);
+		read_ms, wipe_ms, tex_ms, mdl_ms, shd_ms, mat_ms, clear_ms, ecs_ms,
+		read_ms + wipe_ms + tex_ms + mdl_ms + shd_ms + mat_ms + clear_ms + ecs_ms);
 }

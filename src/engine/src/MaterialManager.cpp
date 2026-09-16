@@ -28,6 +28,15 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 	return materials[name].get();
 }
 
+size_t MaterialManager::ClearSceneMaterials()
+{
+	const size_t before = materials.size();
+	std::erase_if(materials, [](const auto& kv) {
+		return !kv.second || !HasTag(kv.second->tags, ResourceTag::CodeOwned);
+	});
+	return before - materials.size();
+}
+
 size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries)
 {
 	size_t n = 0;

@@ -747,6 +747,16 @@ void TextureManager::DeleteTextureHandle(const std::string& name)
     handles_data.erase(it);   // уничтожает TextureHandle вместе с его TextureData (по значению)
 }
 
+size_t TextureManager::ClearSceneTextures()
+{
+    std::vector<std::string> doomed;
+    for (const auto& [name, h] : handles_data)
+        if (!h || (!HasTag(h->tags, ResourceTag::CodeOwned) && !h->source_path.empty()))
+            doomed.push_back(name);
+    for (const std::string& n : doomed) { DeleteTextureHandle(n); ReleasePreview(n); }
+    return doomed.size();
+}
+
 size_t TextureManager::LoadSceneTextures(const std::vector<SceneTextureEntry>& entries,
     const std::function<TextureHandle*(const SceneTextureEntry&)>& create_from_file)
 {

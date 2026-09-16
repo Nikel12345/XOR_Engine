@@ -260,17 +260,36 @@ void ShaderManager::ReportOrphanCodeBindings()
     }
 }
 
-void ShaderManager::ClearSavableComputeShaderPrograms()
+size_t ShaderManager::ClearSceneShaders()
 {
-    const size_t before = compute_shader_programs.size();
+    size_t removed = 0;
+
+    const size_t sp_before = shader_programs.size();
+    std::erase_if(shader_programs,
+        [](const auto& kv) { return !kv.second || !HasTag(kv.second->tags, ResourceTag::CodeOwned); });
+    removed += sp_before - shader_programs.size();
+
+    const size_t csp_before = compute_shader_programs.size();
     std::erase_if(compute_shader_programs,
         [](const ComputeProgramSlot& s) { return !s.program || !HasTag(s.program->tags, ResourceTag::CodeOwned); });
-    const size_t removed = before - compute_shader_programs.size();
+    removed += csp_before - compute_shader_programs.size();
+
+    auto doomed = [](const auto& registry) {
+        std::vector<std::string> out;
+        for (const auto& [name, data] : registry)
+            if (!HasTag(data.tags, ResourceTag::CodeOwned) && !data.source_path.empty()) out.push_back(name);
+        return out;
+    };
+    for (const std::string& n : doomed(vertex_shaders))   removed += DeleteVertexShader(n) ? 1 : 0;
+    for (const std::string& n : doomed(fragment_shaders)) removed += DeleteFragmentShader(n) ? 1 : 0;
+    for (const std::string& n : doomed(compute_shaders))  removed += DeleteComputeShader(n) ? 1 : 0;
+
     if (removed) {
+        dirty_graphics_pipelines = true;
         dirty_compute_pipelines = true;
         dirty_compute_batches = true;
-        SDL_Log("ShaderManager: %zu savable compute shader programs cleared", removed);
     }
+    return removed;
 }
 
 ShaderProgram* ShaderManager::GetShaderProgram(const ShaderName& name)
