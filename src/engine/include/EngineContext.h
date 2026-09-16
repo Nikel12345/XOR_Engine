@@ -68,7 +68,7 @@ public:
 	// через CreateTextureAtlas с tci.type=CUBE — характер атласа задаёт только tci). ctx здесь
 	// дирижёр: проверяет совместимость (что атлас и правда куб + квадратный) и делегирует
 	// нарезку/заливку 6 граней TextureLoader'у. Размер грани диктует tci атласа.
-	TextureHandle* CreateCubeMapTexture(const TextureName& name, const AtlasName& atlas_name, const char* path);
+	TextureHandle* CreateCubeMapTexture(const TextureName& name, const AtlasName& atlas_name, const char* path, ResourceTag tags = ResourceTag::None);
 	TextureAtlas* GetTextureAtlas(const AtlasName& name) const;
 
 	// Слот — СПИСОК имён: { { TextureSlotRole::Albedo, { "wood", "wood_cracked" } }, ... }.

@@ -135,7 +135,7 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 	return h;
 }
 
-TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, const AtlasName& atlas_name, const char* path) {
+TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, const AtlasName& atlas_name, const char* path, ResourceTag tags) {
 	TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
 	if (!atlas) return nullptr;   // GetTextureAtlas уже залогировал отсутствие
 
@@ -167,7 +167,7 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 	}
 
 	TextureHandle* h = texture_manager->CreateTexture(name, atlas, cube.faceSize, cube.faceSize, std::move(cube.pixels), 6);
-	if (h) { h->atlas_name = atlas_name; h->source_path = path; }   // самоописание для редактора/сериализации
+	if (h) { h->atlas_name = atlas_name; h->source_path = path; h->tags = tags; }   // самоописание для редактора/сериализации
 	return h;
 }
 
