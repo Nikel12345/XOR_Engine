@@ -173,8 +173,8 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 
 Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::initializer_list<ShaderName> shaders, ResourceTag tags)
 {
-	// Имя → id ячейки реестра текстур делается ЗДЕСЬ: менеджер материалов чужих реестров не знает.
-	// Intern, а не Find: материал вправе сослаться на текстуру, которую создадут позже.
+	// Здесь sp резолвим лишь для авторской валидации: у каждого required_slot шейдера должна быть
+	// текстура в материале. Проверка best-effort (варнинг, не отказ): её могут создать позже.
 	std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> texture_ids;
 	texture_ids.reserve(textures.size());
 	for (const auto& [role, names] : textures) {

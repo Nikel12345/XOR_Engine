@@ -92,8 +92,6 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     result->ro_storage_buffer_names = std::move(ro_storage_buffers);
     result->rw_storage_buffer_names = std::move(rw_storage_buffers);
 
-    // Имя → id ячейки реестра атласов делается ЗДЕСЬ, на границе: вызывающий печатает имя,
-    // программа хранит ссылку. Intern, а не Find: атлас может быть создан позже программы.
     auto intern = [tm](const AtlasName& n) { return tm ? tm->InternAtlas(n) : AtlasId{}; };
     for (const AtlasName& n : ro_storage_textures) result->ro_storage_texture_ids.push_back(intern(n));
     for (const AtlasName& n : texture_samplers)    result->texture_sampler_ids.push_back(intern(n));

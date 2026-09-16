@@ -37,8 +37,6 @@ struct UploadTaskTexture {
 
 struct AtlasPacker;
 
-// Ячейки текстурных реестров. Владение разное — хэндл шарится с материалами (weak_ptr на него),
-// атласом владеет только менеджер, — поэтому ячейки отдельные, а механика одна (ResourceRegistry.h).
 struct TextureCell {
 	std::string name;
 	std::shared_ptr<TextureHandle> object;
@@ -47,6 +45,9 @@ struct AtlasCell {
 	std::string name;
 	std::unique_ptr<TextureAtlas> object;
 };
+
+using TextureRegistry = ResourceRegistry<TextureCell, TextureId>;
+using AtlasRegistry   = ResourceRegistry<AtlasCell, AtlasId>;
 
 namespace DefaultSamplersNames {
 	inline constexpr const char* DEFAULT_SAMPLER = "DefaultSampler";
@@ -115,7 +116,6 @@ public:
 	void DeleteTexture(SDL_GPUTexture* texture);
 
 	bool DeleteTextureHandle(TextureId id);
-	// Имя — поле ЯЧЕЙКИ реестра, ссылающиеся держат id, поэтому переименование их не касается.
 	bool RenameTexture(TextureId id, const std::string& new_name);
 
 	// Merge-upsert текстур из манифеста сцены (см. SceneTextureEntry): занятое имя снимается
@@ -168,7 +168,7 @@ public:
 	TextureId          TextureIdOf(const std::string& name) const { return handles_data.Find(name); }
 	TextureId          InternTexture(const std::string& name)     { return handles_data.Intern(name); }
 	const std::string& TextureNameOf(TextureId id) const          { return handles_data.NameOf(id); }
-	const ResourceRegistry<TextureCell, TextureId>& Textures() const { return handles_data; }
+	const TextureRegistry& Textures() const { return handles_data; }
 
 	TextureAtlas* GetTextureAtlas(AtlasId id) const { return atlases_data.Get(id); }
 	TextureAtlas* GetTextureAtlas(const std::string& name) const {
@@ -179,7 +179,7 @@ public:
 	AtlasId            AtlasIdOf(const std::string& name) const { return atlases_data.Find(name); }
 	AtlasId            InternAtlas(const std::string& name)     { return atlases_data.Intern(name); }
 	const std::string& AtlasNameOf(AtlasId id) const            { return atlases_data.NameOf(id); }
-	const ResourceRegistry<AtlasCell, AtlasId>& Atlases() const { return atlases_data; }
+	const AtlasRegistry& Atlases() const { return atlases_data; }
 private:
 	void CreateUploadTask(TextureId id, TextureHandle* handle, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, const std::string& name, uint32_t layer_span);
 
@@ -189,11 +189,11 @@ private:
 	// с переиспользованием освобождённых регионов). При успехе пишет UVL/placement в handle,
 	// gutter'ит пиксели и заполняет task.dst. См. TextureManager.cpp.
 	bool _PlaceTask(UploadTaskTexture& task);
-	ResourceRegistry<AtlasCell, AtlasId> atlases_data;
+	AtlasRegistry atlases_data;
 	// shared_ptr — владелец хэндла; материалы ссылаются на текстуру по id ЯЧЕЙКИ (не держат указатель).
 	// Поэтому DeleteTextureHandle = опустошение ячейки: хэндл освобождается, а материалы на следующей
 	// сборке батча получат из неё nullptr → подставят dummy (и перепривяжутся, если её наполнят заново).
-	ResourceRegistry<TextureCell, TextureId> handles_data;
+	TextureRegistry handles_data;
 	std::unordered_map<std::string, SDL_GPUSampler*> samplers_data;
 	std::unordered_map<TextureAtlas*, std::unique_ptr<AtlasPacker>> atlas_packers;  // персистентное состояние упаковки
 

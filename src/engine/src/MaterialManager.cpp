@@ -15,8 +15,8 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 		return it->second.get();
 	}
 
-	// Материал держит только ссылки; перевод имён в id и проверку required_slots уже сделал
-	// EngineContext::CreateMaterial. Здесь — чистое хранение.
+	// Перевод имён в ссылки и проверку required_slots уже сделал EngineContext::CreateMaterial.
+	// Здесь — чистое хранение.
 	auto data = std::make_unique<Material>();
 	// Ячейка на каждую sp; данных у неё пока нет (их кладёт SetMaterialParams по имени sp).
 	data->shader_programs.reserve(shaders.size());
@@ -49,8 +49,6 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 		            : CreateMaterial(e.name, {}, {});   // пустой под этим именем
 		if (!m) continue;
 		m->textures.clear();
-		// Манифест хранит имена — реестр отдаёт по ним ячейки. Intern, а не Find: текстуры сцены
-		// грузятся своим этапом и материал вправе приехать раньше них.
 		for (const auto& [role, tex_names] : e.textures) {
 			std::vector<TextureId>& ids = m->textures[role];   // список вариантов целиком
 			ids.reserve(tex_names.size());

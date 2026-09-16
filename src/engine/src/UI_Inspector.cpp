@@ -179,7 +179,7 @@ namespace {
         const auto& specs = ParamsSpecRegistry::Materials().All();
 
         std::vector<std::string> texNames;                   // значения комбобокса текстур — по алфавиту
-        const auto& treg = ctx->GetTextureManager()->Textures();
+        const TextureRegistry& treg = ctx->GetTextureManager()->Textures();
         for (int32_t ti = 0; ti < treg.Count(); ++ti) {
             const TextureCell& c = treg.At(ti);
             if (c.object && (g_show_internal || !HasTag(c.object->tags, ResourceTag::System))) texNames.push_back(c.name);
@@ -567,7 +567,7 @@ namespace {
 
         // Атлас — дропдаун существующих (общий фильтр служебных с браузером), отфильтрованный по виду.
         if (ImGui::BeginCombo("Atlas", atlasSel.empty() ? "(select)" : atlasSel.c_str())) {
-            const auto& areg = ctx->GetTextureManager()->Atlases();
+            const AtlasRegistry& areg = ctx->GetTextureManager()->Atlases();
             for (int32_t ai = 0; ai < areg.Count(); ++ai) {
                 const AtlasCell& c = areg.At(ai);
                 if (!c.object) continue;

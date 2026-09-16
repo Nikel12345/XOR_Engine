@@ -73,7 +73,7 @@ struct TextureAtlas{
 	// Слияние — чистый union. Опоздавшая декларация (атлас уже создан) флаг на GPU не изменит —
 	// детекторы USAGE VIOLATION называют виновника, иначе SDL абортит анонимно.
 	SDL_GPUTextureCreateInfo tci{};
-	std::string name;   // человеческое имя: диагностике достался голый TextureAtlas*, до реестра ей не дотянуться
+	std::string name;   // нужен диагностике (назвать атлас в логе)
 	// != nullptr — атлас ДЕЛИТ GPU-текстуру с другим (CreateTextureAtlas от existing_atlas):
 	// своей не создаёт, на бейке копирует чужую. Владелец текстуры — источник.
 	TextureAtlas* shares_with = nullptr;

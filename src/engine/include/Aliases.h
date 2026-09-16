@@ -16,22 +16,23 @@ using ShaderName = std::string;
 
 using BufferDataName = const char*;
 
-// Ссылка на ресурс = индекс его ЯЧЕЙКИ в реестре менеджера; -1 — ссылки нет. Тип на каждый
-// реестр свой, поэтому id текстуры не подставится туда, где ждут id атласа.
-struct TextureId {
+struct TextureIdTag;
+struct AtlasIdTag;
+
+// -1, а не 0: нулевая ячейка реестра — обычный ресурс, заглушки под «ссылки нет» в нём нет.
+template <class Tag>
+struct ResourceId {
 	int32_t v = -1;
 	explicit operator bool() const { return v >= 0; }
-	bool operator==(const TextureId&) const = default;
-};
-struct AtlasId {
-	int32_t v = -1;
-	explicit operator bool() const { return v >= 0; }
-	bool operator==(const AtlasId&) const = default;
+	bool operator==(const ResourceId&) const = default;
 };
 
-template <> struct std::hash<TextureId> {
-	size_t operator()(TextureId id) const noexcept { return std::hash<int32_t>{}(id.v); }
+template <class Tag> struct std::hash<ResourceId<Tag>> {
+	size_t operator()(ResourceId<Tag> id) const noexcept { return std::hash<int32_t>{}(id.v); }
 };
+
+using TextureId = ResourceId<TextureIdTag>;
+using AtlasId   = ResourceId<AtlasIdTag>;
 
 namespace BatchKeys {
 	using ModelBatchKey = uint64_t;

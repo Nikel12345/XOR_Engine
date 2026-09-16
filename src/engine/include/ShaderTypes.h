@@ -166,8 +166,6 @@ struct ComputeRWTextureBindingParametr {
     bool need_simultaneous = false;
 };
 
-// Хранимый вид того же биндинга: параметр приезжает с ИМЕНЕМ атласа (его печатает вызывающий),
-// программа держит id ячейки реестра.
 struct ComputeRWTextureBinding {
     AtlasId texture_atlas;
     Uint32 mip_level = 0;

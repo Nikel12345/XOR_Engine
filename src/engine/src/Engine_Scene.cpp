@@ -308,7 +308,6 @@ static void WriteStrArray(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* 
 	for (const auto& n : names) yyjson_mut_arr_add_strcpy(doc, arr, CStrOf(n));
 }
 
-/// Ссылки-id: в файл идёт ИМЯ, поэтому реестр переводит их обратно (см. TextureRegistry::NameOf).
 template<class Range, class NameOf>
 static void WriteIdArray(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* key, const Range& ids, NameOf name_of)
 {

@@ -305,8 +305,6 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 			const UpsertTextureCmd* c = static_cast<const UpsertTextureCmd*>(data);
 			if (!c->name.empty() && !c->atlas.empty() && !c->path.empty()) {
 				TextureManager* tm = ctx->GetTextureManager();
-				// Переименование = правка имени ЯЧЕЙКИ: материалы держат её id, поэтому их ссылки
-				// переживают его сами — снимать и перевешивать больше нечего.
 				if (!c->old_name.empty() && c->old_name != c->name)
 					tm->RenameTexture(tm->TextureIdOf(c->old_name), c->name);
 				tm->DeleteTextureHandle(tm->InternTexture(c->name));   // replace в той же ячейке (no-op, если пуста)
