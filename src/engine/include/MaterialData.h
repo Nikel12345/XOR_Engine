@@ -40,8 +40,6 @@ struct Material {
     }
 };
 
-// Ячейка секции состояний = индекс в этом массиве, другого её определения нет. Читают двое,
-// BatchBuilder и TextureStateDataModule, и разъезд между ними молчит.
 struct VariativeRoles {
     TextureSlotRole role[MAX_VARIATIVE_SLOTS];
     uint32_t        count = 0;

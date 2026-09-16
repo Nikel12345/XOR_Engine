@@ -414,10 +414,14 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManage
 	MutDoc d;
 
 	yyjson_mut_val* vsa = d.Arr("vertex_shaders");
-	for (auto& [name, vs] : sm->GetVertexShaders()) {
+	for (int32_t i = 0; i < sm->VertexShaders().Count(); ++i) {
+		const VertexShaderCell& cell = sm->VertexShaders().At(i);
+		const VertexShaderData* vsp = cell.object.get();
+		if (!vsp) continue;
+		const VertexShaderData& vs = *vsp;
 		if (HasTag(vs.tags, ResourceTag::CodeOwned) || vs.source_path.empty()) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, vsa);
-		yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());
+		yyjson_mut_obj_add_strcpy(d.doc, e, "name", cell.name.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "path", vs.source_path.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "pool", vs.pool_name.c_str());
 		// Все биндинги, не только первый: со стримами пула их несколько (Pos/UV/NormTan — по слоту
@@ -429,18 +433,20 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManage
 		WriteDefines(d.doc, e, vs.defines);
 	}
 
-	auto write_sd = [&](const char* key, auto& registry) {
+	auto write_sd = [&](const char* key, const auto& registry) {
 		yyjson_mut_val* arr = d.Arr(key);
-		for (auto& [name, sd] : registry) {
-			if (HasTag(sd.tags, ResourceTag::CodeOwned) || sd.source_path.empty()) continue;
+		for (int32_t i = 0; i < registry.Count(); ++i) {
+			const auto& cell = registry.At(i);
+			const auto* sd = cell.object.get();
+			if (!sd || HasTag(sd->tags, ResourceTag::CodeOwned) || sd->source_path.empty()) continue;
 			yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, arr);
-			yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());
-			yyjson_mut_obj_add_strcpy(d.doc, e, "path", sd.source_path.c_str());
-			WriteDefines(d.doc, e, sd.defines);
+			yyjson_mut_obj_add_strcpy(d.doc, e, "name", cell.name.c_str());
+			yyjson_mut_obj_add_strcpy(d.doc, e, "path", sd->source_path.c_str());
+			WriteDefines(d.doc, e, sd->defines);
 		}
 	};
-	write_sd("fragment_shaders", sm->GetFragmentShaders());
-	write_sd("compute_shaders",  sm->GetComputeShaders());
+	write_sd("fragment_shaders", sm->FragmentShaders());
+	write_sd("compute_shaders",  sm->ComputeShaders());
 
 	// SP сгруппированы ПО ТИПУ (как SD), без поля "kind" внутри записи.
 	yyjson_mut_val* spa = d.Arr("render_shader_programs");
@@ -448,8 +454,8 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManage
 		if (!sp || HasTag(sp->tags, ResourceTag::CodeOwned)) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, spa);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());
-		yyjson_mut_obj_add_strcpy(d.doc, e, "vs",   sp->vs_name.c_str());
-		yyjson_mut_obj_add_strcpy(d.doc, e, "fs",   sp->fs_name.c_str());
+		yyjson_mut_obj_add_strcpy(d.doc, e, "vs",   sm->VertexShaders().NameOf(sp->vs_id).c_str());
+		yyjson_mut_obj_add_strcpy(d.doc, e, "fs",   sm->FragmentShaders().NameOf(sp->fs_id).c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "pass", sp->render_pass_name.c_str());
 		WriteStrArray(d.doc, e, "vs_buffers", sp->vertex_shader_buffer_names);
 		WriteStrArray(d.doc, e, "fs_buffers", sp->fragment_shader_buffer_names);
@@ -465,7 +471,7 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManage
 		if (!csp || HasTag(csp->tags, ResourceTag::CodeOwned)) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, cspa);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", csp_name.c_str());
-		yyjson_mut_obj_add_strcpy(d.doc, e, "cs",   csp->cs_name.c_str());
+		yyjson_mut_obj_add_strcpy(d.doc, e, "cs",   sm->ComputeShaders().NameOf(csp->cs_id).c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "pass", csp->compute_pass_name.c_str());
 		WriteStrArray(d.doc, e, "rw_buffers", csp->rw_storage_buffer_names);
 		WriteStrArray(d.doc, e, "ro_buffers", csp->ro_storage_buffer_names);
@@ -609,8 +615,10 @@ static void LoadShaderData(yyjson_val* root, ShaderManager* sm, ModelManager* mm
 	// Пайплайны sp, ссылающихся на перезагруженный SD, сбрасываем: иначе sp удержал бы пайплайн,
 	// собранный из старых данных шейдера.
 	auto invalidate = [sm](const std::string& name, bool vertex) {
+		const VertexShaderId   vs_id = sm->VertexShaders().Find(name);
+		const FragmentShaderId fs_id = sm->FragmentShaders().Find(name);
 		for (auto& [sp_name, sp] : sm->GetShaderPrograms())
-			if ((vertex ? sp->vs_name : sp->fs_name) == name) sp->pipeline.reset();
+			if (vertex ? (sp->vs_id == vs_id) : (sp->fs_id == fs_id)) sp->pipeline.reset();
 	};
 
 	ForEachIn(root, "vertex_shaders", [&](yyjson_val* e) {

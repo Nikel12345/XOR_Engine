@@ -287,7 +287,7 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
             ibd->usage |= SDL_GPU_BUFFERUSAGE_INDEX;
     }
 
-    vertex_shaders[name] = std::move(vs);
+    vertex_shaders.Put(vertex_shaders.Intern(name), std::make_unique<VertexShaderData>(std::move(vs)));
 }
 
 void ShaderManager::CreateFragmentShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines)
@@ -301,7 +301,7 @@ void ShaderManager::CreateFragmentShader(const std::string& name, const char* hl
     SDL_free(spv);
     fs.defines = std::move(norm);
     fs.push_kinds = std::move(push_kinds);
-    fragment_shaders[name] = std::move(fs);
+    fragment_shaders.Put(fragment_shaders.Intern(name), std::make_unique<FragmentShaderData>(std::move(fs)));
 }
 
 void ShaderManager::CreateComputeShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines)
@@ -312,12 +312,12 @@ void ShaderManager::CreateComputeShader(const std::string& name, const char* hls
     Uint8* spv = LoadOrCompileSPIRV(hlsl_path, SDL_SHADERCROSS_SHADERSTAGE_COMPUTE, n, norm, &push_kinds);
     if (!spv) return;
     // Реестр владеет сырым spv_code — при перезаписи имени старый освобождаем (иначе течёт).
-    auto it = compute_shaders.find(name);
-    if (it != compute_shaders.end() && it->second.spv_code) SDL_free(it->second.spv_code);
+    const ComputeShaderId id = compute_shaders.Intern(name);
+    if (ComputeShaderData* old = compute_shaders.Get(id); old && old->spv_code) SDL_free(old->spv_code);
     ComputeShaderData cs = BuildComputeShader(spv, n, hlsl_path);
     cs.defines = std::move(norm);
     cs.push_kinds = std::move(push_kinds);
-    compute_shaders[name] = std::move(cs);
+    compute_shaders.Put(id, std::make_unique<ComputeShaderData>(std::move(cs)));
 }
 
 std::shared_ptr<SDL_GPUShader> ShaderManager::LookupGpuShader(uint64_t key) const

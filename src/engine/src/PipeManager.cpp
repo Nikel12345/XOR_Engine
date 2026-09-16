@@ -44,11 +44,11 @@ std::shared_ptr<SDL_GPUGraphicsPipeline> PipeManager::GetOrCreatePipeline(Shader
         return {};
     }
 
-    // vs/fs — по имени из реестра ShaderManager (sp хранит только имена).
-    VertexShaderData*   vsd = sm->GetVertexShader(sp->vs_name);
-    FragmentShaderData* fsd = sm->GetFragmentShader(sp->fs_name);
-    if (!vsd) SDL_Log("Pipeline '%s': vertex shader '%s' not found in registry", sp->debug_name.c_str(), sp->vs_name.c_str());
-    if (!fsd) SDL_Log("Pipeline '%s': fragment shader '%s' not found in registry", sp->debug_name.c_str(), sp->fs_name.c_str());
+    // vs/fs — из реестра ShaderManager (sp хранит только ссылки).
+    VertexShaderData*   vsd = sm->GetVertexShader(sp->vs_id);
+    FragmentShaderData* fsd = sm->GetFragmentShader(sp->fs_id);
+    if (!vsd) SDL_Log("Pipeline '%s': vertex shader '%s' not found in registry", sp->debug_name.c_str(), sm->VertexShaders().NameOf(sp->vs_id).c_str());
+    if (!fsd) SDL_Log("Pipeline '%s': fragment shader '%s' not found in registry", sp->debug_name.c_str(), sm->FragmentShaders().NameOf(sp->fs_id).c_str());
     if (!vsd || !fsd) return {};
 
     SDL_GPUGraphicsPipelineCreateInfo pci;
@@ -142,9 +142,9 @@ std::shared_ptr<SDL_GPUComputePipeline> PipeManager::GetOrCreateComputePipeline(
 {
     if (sp->pipeline) return sp->pipeline;
 
-    ComputeShaderData* csd = sm->GetComputeShader(sp->cs_name);   // cs по имени из реестра
+    ComputeShaderData* csd = sm->GetComputeShader(sp->cs_id);   // cs из реестра
     if (!csd) {
-        SDL_Log("Compute pipeline '%s': cs '%s' not found in registry", sp->debug_name.c_str(), sp->cs_name.c_str());
+        SDL_Log("Compute pipeline '%s': cs '%s' not found in registry", sp->debug_name.c_str(), sm->ComputeShaders().NameOf(sp->cs_id).c_str());
         return {};
     }
 

@@ -826,8 +826,8 @@ namespace {
             syncedFor = spName;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", spName.c_str());
             if (sp) {
-                vsSel = sp->vs_name;
-                fsSel = sp->fs_name;
+                vsSel = smgr->VertexShaders().NameOf(sp->vs_id);
+                fsSel = smgr->FragmentShaders().NameOf(sp->fs_id);
                 passSel = sp->render_pass_name;
                 spdBuf = sp->spd;
                 vsBufSel = sp->vertex_shader_buffer_names;     // ссылки по имени — берём как есть
@@ -846,19 +846,23 @@ namespace {
 
         // Вершинный слот — только вершинники; фрагментный — только фрагментные (фильтр по типу реестра).
         if (ImGui::BeginCombo("Vertex", vsSel.c_str())) {
-            for (auto& [n, d] : smgr->GetVertexShaders()) {
-                if (!g_show_internal && HasTag(d.tags, ResourceTag::System)) continue;
-                bool is_cur = (n == vsSel);
-                if (ImGui::Selectable(n.c_str(), is_cur)) vsSel = n;
+            const VertexShaderRegistry& vreg = smgr->VertexShaders();
+            for (int32_t i = 0; i < vreg.Count(); ++i) {
+                const VertexShaderCell& c = vreg.At(i);
+                if (!c.object || (!g_show_internal && HasTag(c.object->tags, ResourceTag::System))) continue;
+                bool is_cur = (c.name == vsSel);
+                if (ImGui::Selectable(c.name.c_str(), is_cur)) vsSel = c.name;
                 if (is_cur) ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();
         }
         if (ImGui::BeginCombo("Fragment", fsSel.c_str())) {
-            for (auto& [n, d] : smgr->GetFragmentShaders()) {
-                if (!g_show_internal && HasTag(d.tags, ResourceTag::System)) continue;
-                bool is_cur = (n == fsSel);
-                if (ImGui::Selectable(n.c_str(), is_cur)) fsSel = n;
+            const FragmentShaderRegistry& freg = smgr->FragmentShaders();
+            for (int32_t i = 0; i < freg.Count(); ++i) {
+                const FragmentShaderCell& c = freg.At(i);
+                if (!c.object || (!g_show_internal && HasTag(c.object->tags, ResourceTag::System))) continue;
+                bool is_cur = (c.name == fsSel);
+                if (ImGui::Selectable(c.name.c_str(), is_cur)) fsSel = c.name;
                 if (is_cur) ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();
@@ -1114,7 +1118,7 @@ namespace {
         ImGui::EndDisabled();
         if (!g_sel.name.empty()) {
             ImGui::SameLine();
-            const bool used = ctx->GetShaderManager()->IsFragmentShaderUsed(g_sel.name);
+            const bool used = ctx->GetShaderManager()->IsFragmentShaderUsed(ctx->GetShaderManager()->FragmentShaders().Find(g_sel.name));
             ImGui::BeginDisabled(used);   // используемый SD удалять запрещено (см. ShaderManager)
             if (DangerButton("Delete")) {
                 ctx->GetInputManager()->PushCommand(CommandId::DeleteFragmentShader, new ShaderDataNameCmd{ g_sel.name });
@@ -1156,7 +1160,7 @@ namespace {
         ImGui::EndDisabled();
         if (!g_sel.name.empty()) {
             ImGui::SameLine();
-            const bool used = ctx->GetShaderManager()->IsComputeShaderUsed(g_sel.name);
+            const bool used = ctx->GetShaderManager()->IsComputeShaderUsed(ctx->GetShaderManager()->ComputeShaders().Find(g_sel.name));
             ImGui::BeginDisabled(used);   // используемый SD удалять запрещено (см. ShaderManager)
             if (DangerButton("Delete")) {
                 ctx->GetInputManager()->PushCommand(CommandId::DeleteComputeShader, new ShaderDataNameCmd{ g_sel.name });
@@ -1256,7 +1260,7 @@ namespace {
         ImGui::EndDisabled();
         if (!g_sel.name.empty()) {
             ImGui::SameLine();
-            const bool used = ctx->GetShaderManager()->IsVertexShaderUsed(g_sel.name);
+            const bool used = ctx->GetShaderManager()->IsVertexShaderUsed(ctx->GetShaderManager()->VertexShaders().Find(g_sel.name));
             ImGui::BeginDisabled(used);   // используемый SD удалять запрещено (см. ShaderManager)
             if (DangerButton("Delete")) {
                 ctx->GetInputManager()->PushCommand(CommandId::DeleteVertexShader, new ShaderDataNameCmd{ g_sel.name });

@@ -200,22 +200,31 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
         if (ImGui::BeginTabItem("VS")) {
             tiles(SelKind::Vsd, true,
                 [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Vsd; g_sel.name = ""; },   // + = форма нового vs
-                [&](auto&& emit) { for (auto& [n, d] : ctx->GetShaderManager()->GetVertexShaders())
-                                       if (g_show_internal || !HasTag(d.tags, ResourceTag::System)) emit(n); });
+                [&](auto&& emit) { const VertexShaderRegistry& reg = ctx->GetShaderManager()->VertexShaders();
+                                   for (int32_t i = 0; i < reg.Count(); ++i) {
+                                       const VertexShaderCell& c = reg.At(i);
+                                       if (c.object && (g_show_internal || !HasTag(c.object->tags, ResourceTag::System))) emit(c.name);
+                                   } });
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("FS")) {
             tiles(SelKind::Fsd, true,
                 [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Fsd; g_sel.name = ""; },
-                [&](auto&& emit) { for (auto& [n, d] : ctx->GetShaderManager()->GetFragmentShaders())
-                                       if (g_show_internal || !HasTag(d.tags, ResourceTag::System)) emit(n); });
+                [&](auto&& emit) { const FragmentShaderRegistry& reg = ctx->GetShaderManager()->FragmentShaders();
+                                   for (int32_t i = 0; i < reg.Count(); ++i) {
+                                       const FragmentShaderCell& c = reg.At(i);
+                                       if (c.object && (g_show_internal || !HasTag(c.object->tags, ResourceTag::System))) emit(c.name);
+                                   } });
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("CS")) {
             tiles(SelKind::Csd, true,
                 [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Csd; g_sel.name = ""; },
-                [&](auto&& emit) { for (auto& [n, d] : ctx->GetShaderManager()->GetComputeShaders())
-                                       if (g_show_internal || !HasTag(d.tags, ResourceTag::System)) emit(n); });
+                [&](auto&& emit) { const ComputeShaderRegistry& reg = ctx->GetShaderManager()->ComputeShaders();
+                                   for (int32_t i = 0; i < reg.Count(); ++i) {
+                                       const ComputeShaderCell& c = reg.At(i);
+                                       if (c.object && (g_show_internal || !HasTag(c.object->tags, ResourceTag::System))) emit(c.name);
+                                   } });
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

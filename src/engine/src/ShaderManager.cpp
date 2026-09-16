@@ -34,8 +34,8 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
     }
 
     auto program = std::make_unique<ShaderProgram>();
-    program->vs_name = vs_name;
-    program->fs_name = fs_name;
+    program->vs_id = vertex_shaders.Intern(vs_name);
+    program->fs_id = fragment_shaders.Intern(fs_name);
 	program->vertex_shader_buffer_names = std::move(vertex_shader_buffer_names);
 	program->fragment_shader_buffer_names = std::move(fragment_shader_buffer_names);
 	program->required_slots.reserve(texture_slots.size());
@@ -83,7 +83,7 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
     }
 
     auto result = std::make_unique<ComputeShaderProgram>();
-    result->cs_name = cs_name;
+    result->cs_id = compute_shaders.Intern(cs_name);
     result->compute_pass_name = compute_pass_name;
     result->debug_name = name;
 
@@ -186,24 +186,24 @@ PushInstructions ShaderManager::CollectPushInstructions(const std::string& sp_na
 
     if (auto sit = shader_programs.find(sp_name); sit != shader_programs.end()) {
         const ShaderProgram* sp = sit->second.get();
-        if (auto vit = vertex_shaders.find(sp->vs_name); vit != vertex_shaders.end())
-            AddKindInstructions(out, &slots, vit->second.push_kinds, sp->vs_name);
-        if (auto fit = fragment_shaders.find(sp->fs_name); fit != fragment_shaders.end())
-            AddKindInstructions(out, &slots, fit->second.push_kinds, sp->fs_name);
+        if (const VertexShaderData* vs = vertex_shaders.Get(sp->vs_id))
+            AddKindInstructions(out, &slots, vs->push_kinds, vertex_shaders.NameOf(sp->vs_id));
+        if (const FragmentShaderData* fs = fragment_shaders.Get(sp->fs_id))
+            AddKindInstructions(out, &slots, fs->push_kinds, fragment_shaders.NameOf(sp->fs_id));
     }
 
     for (const ShaderPushInstruction& instr : push_instructions_)
         if (instr.program_name == sp_name) slots.Add(out, instr.stage, instr.fn);
 
     if (auto sit = shader_programs.find(sp_name); sit != shader_programs.end()) {
-        if (auto fit = fragment_shaders.find(sit->second->fs_name); fit != fragment_shaders.end()) {
-            const Uint32 declared = fit->second.shader_data.num_uniform_buffers;
+        if (const FragmentShaderData* fs = fragment_shaders.Get(sit->second->fs_id)) {
+            const Uint32 declared = fs->shader_data.num_uniform_buffers;
             if (slots.next[static_cast<size_t>(PushStage::Fragment)] != declared)
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                     "sp '%s': fragment-инструкций %u, а шейдер '%s' объявил %u uniform-блоков "
                     "- проверь маркеры //@push (порядок и наличие)",
                     sp_name.c_str(), slots.next[static_cast<size_t>(PushStage::Fragment)],
-                    sit->second->fs_name.c_str(), declared);
+                    fragment_shaders.NameOf(sit->second->fs_id).c_str(), declared);
         }
     }
 
@@ -216,8 +216,8 @@ PushInstructions ShaderManager::CollectComputePushInstructions(const std::string
     SlotCounter slots;
 
     if (ComputeShaderProgram* csp = const_cast<ShaderManager*>(this)->GetComputeShaderProgram(csp_name))
-        if (auto cit = compute_shaders.find(csp->cs_name); cit != compute_shaders.end())
-            AddKindInstructions(out, &slots, cit->second.push_kinds, csp->cs_name);
+        if (const ComputeShaderData* cs = compute_shaders.Get(csp->cs_id))
+            AddKindInstructions(out, &slots, cs->push_kinds, compute_shaders.NameOf(csp->cs_id));
 
     for (const ShaderPushInstruction& instr : compute_push_instructions_)
         if (instr.program_name == csp_name) slots.Add(out, instr.stage, instr.fn);
@@ -277,14 +277,17 @@ size_t ShaderManager::ClearSceneShaders()
     removed += csp_before - compute_shader_programs.size();
 
     auto doomed = [](const auto& registry) {
-        std::vector<std::string> out;
-        for (const auto& [name, data] : registry)
-            if (!HasTag(data.tags, ResourceTag::CodeOwned) && !data.source_path.empty()) out.push_back(name);
+        std::vector<decltype(registry.Find(""))> out;
+        for (int32_t i = 0; i < registry.Count(); ++i) {
+            const auto* data = registry.At(i).object.get();
+            if (data && !HasTag(data->tags, ResourceTag::CodeOwned) && !data->source_path.empty())
+                out.push_back({ i });
+        }
         return out;
     };
-    for (const std::string& n : doomed(vertex_shaders))   removed += DeleteVertexShader(n) ? 1 : 0;
-    for (const std::string& n : doomed(fragment_shaders)) removed += DeleteFragmentShader(n) ? 1 : 0;
-    for (const std::string& n : doomed(compute_shaders))  removed += DeleteComputeShader(n) ? 1 : 0;
+    for (VertexShaderId id : doomed(vertex_shaders))   removed += DeleteVertexShader(id) ? 1 : 0;
+    for (FragmentShaderId id : doomed(fragment_shaders)) removed += DeleteFragmentShader(id) ? 1 : 0;
+    for (ComputeShaderId id : doomed(compute_shaders))  removed += DeleteComputeShader(id) ? 1 : 0;
 
     if (removed) {
         dirty_graphics_pipelines = true;
@@ -305,33 +308,29 @@ ShaderProgram* ShaderManager::GetShaderProgram(const ShaderName& name)
 
 VertexShaderData* ShaderManager::GetVertexShader(const std::string& name)
 {
-    auto it = vertex_shaders.find(name);
-    return it != vertex_shaders.end() ? &it->second : nullptr;
+    return vertex_shaders.Get(vertex_shaders.Find(name));
 }
 
 FragmentShaderData* ShaderManager::GetFragmentShader(const std::string& name)
 {
-    auto it = fragment_shaders.find(name);
-    return it != fragment_shaders.end() ? &it->second : nullptr;
+    return fragment_shaders.Get(fragment_shaders.Find(name));
 }
 
 ComputeShaderData* ShaderManager::GetComputeShader(const std::string& name)
 {
-    auto it = compute_shaders.find(name);
-    return it != compute_shaders.end() ? &it->second : nullptr;
+    return compute_shaders.Get(compute_shaders.Find(name));
 }
 
-bool ShaderManager::DeleteComputeShader(const std::string& name)
+bool ShaderManager::DeleteComputeShader(ComputeShaderId id)
 {
-    if (IsComputeShaderUsed(name)) {
-        SDL_Log("ShaderManager: compute shader '%s' is used by a compute program - delete refused", name.c_str());
+    if (IsComputeShaderUsed(id)) {
+        SDL_Log("ShaderManager: compute shader '%s' is used by a compute program - delete refused", compute_shaders.NameOf(id).c_str());
         return false;
     }
-    auto it = compute_shaders.find(name);
-    if (it == compute_shaders.end()) return false;
-    if (it->second.spv_code) SDL_free(it->second.spv_code);
-    compute_shaders.erase(it);
-    return true;
+    ComputeShaderData* cs = compute_shaders.Get(id);
+    if (!cs) return false;
+    if (cs->spv_code) SDL_free(cs->spv_code);
+    return compute_shaders.Erase(id);
 }
 
 ComputeShaderProgram* ShaderManager::GetComputeShaderProgram(const std::string& name)
@@ -343,8 +342,9 @@ ComputeShaderProgram* ShaderManager::GetComputeShaderProgram(const std::string& 
 
 ShaderManager::~ShaderManager()
 {
-    for (auto& [n, cs] : compute_shaders) {
-        if (cs.spv_code) SDL_free(cs.spv_code);
+    for (int32_t i = 0; i < compute_shaders.Count(); ++i) {
+        ComputeShaderData* cs = compute_shaders.At(i).object.get();
+        if (cs && cs->spv_code) SDL_free(cs->spv_code);
 	}
 	// Явного SDL_ReleaseGPUShader нет: шарящийся vs словил бы double-free. Шейдеры отпускают
 	// реестры при разрушении членов — device к этому моменту ещё жив (см. ~Engine).

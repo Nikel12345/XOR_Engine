@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "ShaderData.h"
+#include "ResourceRegistry.h"
 #include <unordered_map>
 #include <cstdint>
 #include <string>
@@ -11,6 +12,14 @@ class BufferManager;
 class TextureManager;
 class GeometryPool;
 struct RenderPassStep;
+
+struct VertexShaderCell   { std::string name; std::unique_ptr<VertexShaderData>   object; };
+struct FragmentShaderCell { std::string name; std::unique_ptr<FragmentShaderData> object; };
+struct ComputeShaderCell  { std::string name; std::unique_ptr<ComputeShaderData>  object; };
+
+using VertexShaderRegistry   = ResourceRegistry<VertexShaderCell,   VertexShaderId>;
+using FragmentShaderRegistry = ResourceRegistry<FragmentShaderCell, FragmentShaderId>;
+using ComputeShaderRegistry  = ResourceRegistry<ComputeShaderCell,  ComputeShaderId>;
 
 class ShaderManager
 {
@@ -40,35 +49,47 @@ public:
 
 	size_t ClearSceneShaders();
 
+	VertexShaderData*   GetVertexShader(VertexShaderId id) const   { return vertex_shaders.Get(id); }
+	FragmentShaderData* GetFragmentShader(FragmentShaderId id) const { return fragment_shaders.Get(id); }
+	ComputeShaderData*  GetComputeShader(ComputeShaderId id) const   { return compute_shaders.Get(id); }
 	VertexShaderData*   GetVertexShader(const std::string& name);
 	FragmentShaderData* GetFragmentShader(const std::string& name);
 	ComputeShaderData*  GetComputeShader(const std::string& name);
 
-	bool IsVertexShaderUsed(const std::string& name) const {
-		for (auto& [n, sp] : shader_programs) if (sp->vs_name == name) return true;
+	VertexShaderId   InternVertexShader(const std::string& name)   { return vertex_shaders.Intern(name); }
+	FragmentShaderId InternFragmentShader(const std::string& name) { return fragment_shaders.Intern(name); }
+	ComputeShaderId  InternComputeShader(const std::string& name)  { return compute_shaders.Intern(name); }
+
+	const VertexShaderRegistry&   VertexShaders() const   { return vertex_shaders; }
+	const FragmentShaderRegistry& FragmentShaders() const { return fragment_shaders; }
+	const ComputeShaderRegistry&  ComputeShaders() const  { return compute_shaders; }
+
+	bool IsVertexShaderUsed(VertexShaderId id) const {
+		for (auto& [n, sp] : shader_programs) if (sp->vs_id == id) return true;
 		return false;
 	}
-	bool IsFragmentShaderUsed(const std::string& name) const {
-		for (auto& [n, sp] : shader_programs) if (sp->fs_name == name) return true;
+	bool IsFragmentShaderUsed(FragmentShaderId id) const {
+		for (auto& [n, sp] : shader_programs) if (sp->fs_id == id) return true;
 		return false;
 	}
-	bool IsComputeShaderUsed(const std::string& name) const {
-		for (auto& slot : compute_shader_programs) if (slot.program && slot.program->cs_name == name) return true;
+	bool IsComputeShaderUsed(ComputeShaderId id) const {
+		for (auto& slot : compute_shader_programs) if (slot.program && slot.program->cs_id == id) return true;
 		return false;
 	}
 
-	bool DeleteVertexShader(const std::string& name) {
-		if (IsVertexShaderUsed(name)) { SDL_Log("ShaderManager: vertex shader '%s' is used by a shader program — delete refused", name.c_str()); return false; }
-		return vertex_shaders.erase(name) > 0;
+	bool DeleteVertexShader(VertexShaderId id) {
+		if (IsVertexShaderUsed(id)) { SDL_Log("ShaderManager: vertex shader '%s' is used by a shader program — delete refused", vertex_shaders.NameOf(id).c_str()); return false; }
+		return vertex_shaders.Erase(id);
 	}
-	bool DeleteFragmentShader(const std::string& name) {
-		if (IsFragmentShaderUsed(name)) { SDL_Log("ShaderManager: fragment shader '%s' is used by a shader program — delete refused", name.c_str()); return false; }
-		return fragment_shaders.erase(name) > 0;
+	bool DeleteFragmentShader(FragmentShaderId id) {
+		if (IsFragmentShaderUsed(id)) { SDL_Log("ShaderManager: fragment shader '%s' is used by a shader program — delete refused", fragment_shaders.NameOf(id).c_str()); return false; }
+		return fragment_shaders.Erase(id);
 	}
-	bool DeleteComputeShader(const std::string& name);
-	std::unordered_map<std::string, VertexShaderData>&   GetVertexShaders()   { return vertex_shaders; }
-	std::unordered_map<std::string, FragmentShaderData>& GetFragmentShaders() { return fragment_shaders; }
-	std::unordered_map<std::string, ComputeShaderData>&  GetComputeShaders()  { return compute_shaders; }
+	bool DeleteComputeShader(ComputeShaderId id);
+
+	bool RenameVertexShader(VertexShaderId id, const std::string& new_name)   { return Rename(vertex_shaders, id, new_name); }
+	bool RenameFragmentShader(FragmentShaderId id, const std::string& new_name) { return Rename(fragment_shaders, id, new_name); }
+	bool RenameComputeShader(ComputeShaderId id, const std::string& new_name)  { return Rename(compute_shaders, id, new_name); }
 
 	VertexShaderData CreateVertexShaderFromSPV(const char* path, std::initializer_list<ShaderBase::VertexBufferBinding> bindings);
 	FragmentShaderData CreateFragmentShaderFromSPV(const char* spv_path);
@@ -163,9 +184,18 @@ private:
 	std::vector<ComputeProgramSlot> compute_shader_programs;
 
 	// compute_shaders владеет сырым spv_code: free в деструкторе идёт отсюда.
-	std::unordered_map<std::string, VertexShaderData>   vertex_shaders;
-	std::unordered_map<std::string, FragmentShaderData> fragment_shaders;
-	std::unordered_map<std::string, ComputeShaderData>  compute_shaders;
+	VertexShaderRegistry   vertex_shaders;
+	FragmentShaderRegistry fragment_shaders;
+	ComputeShaderRegistry  compute_shaders;
+
+	template <class Registry, class Id>
+	static bool Rename(Registry& reg, Id id, const std::string& new_name) {
+		if (!reg.Get(id) || new_name.empty()) return false;
+		const Id taken = reg.Find(new_name);
+		if (taken && taken != id) { SDL_Log("ShaderManager: name '%s' is already taken", new_name.c_str()); return false; }
+		reg.Rename(id, new_name);
+		return true;
+	}
 
 	SDL_GPUDevice* dev;
 

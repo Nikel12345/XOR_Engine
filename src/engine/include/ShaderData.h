@@ -67,10 +67,10 @@ struct ComputeShaderData {
 };
 
 struct ShaderProgram {
-    std::string vs_name;
+    VertexShaderId vs_id;
     std::vector<BufferDataName> vertex_shader_buffer_names;
 
-    std::string fs_name;
+    FragmentShaderId fs_id;
     std::vector<BufferDataName> fragment_shader_buffer_names;
 
     std::vector<TextureSlotRole> required_slots;
@@ -86,7 +86,7 @@ struct ShaderProgram {
 
 
 struct ComputeShaderProgram {
-    std::string cs_name;
+    ComputeShaderId cs_id;
     std::vector<BufferDataName> rw_storage_buffer_names;
     std::vector<BufferDataName> ro_storage_buffer_names;
     std::vector<ComputeRWTextureBinding> rw_storage_textures;

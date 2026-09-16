@@ -340,7 +340,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
                 new_batch.vertexStorageBuffers   = resolve_buffers(sp->vertex_shader_buffer_names);
                 new_batch.fragmentStorageBuffers = resolve_buffers(sp->fragment_shader_buffer_names);
 
-                if (VertexShaderData* vsd = sm->GetVertexShader(sp->vs_name)) {
+                if (VertexShaderData* vsd = sm->GetVertexShader(sp->vs_id)) {
                     new_batch.vertexBuffers = resolve_buffers(vsd->vertex_buffer_names);
                     if (vsd->index_buffer)
                         new_batch.indexBuffer = bm->GetBufferData(vsd->index_buffer);
@@ -707,10 +707,10 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         new_batch.push_instructions = sm->CollectComputePushInstructions(slot.name);
         new_batch.dispatch_func = sm->GetDispatchInstruction(slot.name);
 
-        ComputeShaderData* csd = sm->GetComputeShader(sp->cs_name);
+        ComputeShaderData* csd = sm->GetComputeShader(sp->cs_id);
         if (!csd)
             SDL_Log("BuildComputeBatches '%s': compute shader '%s' not found in registry - dispatch falls back to 1x1x1",
-                slot.name.c_str(), sp->cs_name.c_str());
+                slot.name.c_str(), sm->ComputeShaders().NameOf(sp->cs_id).c_str());
         new_batch.threadcount_x = csd ? csd->threadcount_x : 1u;
         new_batch.threadcount_y = csd ? csd->threadcount_y : 1u;
         new_batch.threadcount_z = csd ? csd->threadcount_z : 1u;

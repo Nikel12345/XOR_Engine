@@ -408,8 +408,8 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const std::vector<BufferDataName>   vbufs = c->vsBuffers;
 			const std::vector<BufferDataName>   fbufs = c->fsBuffers;
 			const std::vector<TextureSlotRole>  slots = c->slots;   // роли из формы (дубли отсеет CreateShaderProgram)
-			const std::string vsName = !c->vsName.empty() ? c->vsName : (old ? old->vs_name : std::string());
-			const std::string fsName = !c->fsName.empty() ? c->fsName : (old ? old->fs_name : std::string());
+			const std::string vsName = !c->vsName.empty() ? c->vsName : (old ? sm->VertexShaders().NameOf(old->vs_id) : std::string());
+			const std::string fsName = !c->fsName.empty() ? c->fsName : (old ? sm->FragmentShaders().NameOf(old->fs_id) : std::string());
 
 			if (old) {
 				sm->DeleteShaderProgram(c->oldName);
@@ -449,12 +449,14 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const UpsertVertexShaderCmd* c = static_cast<const UpsertVertexShaderCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
-				if (!c->oldName.empty() && c->oldName != c->name) sm->DeleteVertexShader(c->oldName);
+				if (!c->oldName.empty() && c->oldName != c->name)
+					sm->RenameVertexShader(sm->VertexShaders().Find(c->oldName), c->name);
 				// UI говорит пулом + семантиками — тем же языком, что манифест; стримы резолвит пул.
 				sm->CreateVertexShader(c->name, c->path.c_str(), ctx->GetModelManager()->GetPool(c->pool),
 					c->pull, ctx->GetBufferManager(), c->defines);
+				const VertexShaderId vs_id = sm->VertexShaders().Find(c->name);
 				for (auto& [sn, spp] : sm->GetShaderPrograms())   // пересобрать пайплайны sp на этом vs
-					if (spp->vs_name == c->name || spp->vs_name == c->oldName)
+					if (spp->vs_id == vs_id)
 						spp->pipeline.reset();
 				sm->SetDirtyGraphicsPipelines(true);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
@@ -468,10 +470,12 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const UpsertFragmentShaderCmd* c = static_cast<const UpsertFragmentShaderCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
-				if (!c->oldName.empty() && c->oldName != c->name) sm->DeleteFragmentShader(c->oldName);
+				if (!c->oldName.empty() && c->oldName != c->name)
+					sm->RenameFragmentShader(sm->FragmentShaders().Find(c->oldName), c->name);
 				sm->CreateFragmentShader(c->name, c->path.c_str(), c->defines);
+				const FragmentShaderId fs_id = sm->FragmentShaders().Find(c->name);
 				for (auto& [sn, spp] : sm->GetShaderPrograms())
-					if (spp->fs_name == c->name || spp->fs_name == c->oldName)
+					if (spp->fs_id == fs_id)
 						spp->pipeline.reset();
 				sm->SetDirtyGraphicsPipelines(true);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
@@ -485,10 +489,12 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const UpsertComputeShaderCmd* c = static_cast<const UpsertComputeShaderCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
-				if (!c->oldName.empty() && c->oldName != c->name) sm->DeleteComputeShader(c->oldName);
+				if (!c->oldName.empty() && c->oldName != c->name)
+					sm->RenameComputeShader(sm->ComputeShaders().Find(c->oldName), c->name);
 				sm->CreateComputeShader(c->name, c->path.c_str(), c->defines);
+				const ComputeShaderId cs_id = sm->ComputeShaders().Find(c->name);
 				for (auto& slot : sm->GetComputeShaderPrograms())
-					if (slot.program && (slot.program->cs_name == c->name || slot.program->cs_name == c->oldName))
+					if (slot.program && slot.program->cs_id == cs_id)
 						slot.program->pipeline.reset();
 				sm->SetDirtyComputePipelines(true);
 				sm->SetDirtyComputeBatches(true);
@@ -502,7 +508,8 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const ShaderDataNameCmd* c = static_cast<const ShaderDataNameCmd*>(data);
 			// Используемый SD менеджер удалить откажется (пайплайн собран из его данных, fallback
 			// с чужой раскладкой невозможен); неиспользуемый ничего не рисует — dirty-флаги не нужны.
-			ctx->GetShaderManager()->DeleteVertexShader(c->name);
+			ShaderManager* sm = ctx->GetShaderManager();
+			sm->DeleteVertexShader(sm->VertexShaders().Find(c->name));
 			delete c;
 		});
 
@@ -510,7 +517,8 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 		[](EngineContext* ctx, const void* data)
 		{
 			const ShaderDataNameCmd* c = static_cast<const ShaderDataNameCmd*>(data);
-			ctx->GetShaderManager()->DeleteFragmentShader(c->name);   // отказ/чистое удаление — см. DeleteVertexShader
+			ShaderManager* sm = ctx->GetShaderManager();
+			sm->DeleteFragmentShader(sm->FragmentShaders().Find(c->name));   // отказ/чистое удаление — см. DeleteVertexShader
 			delete c;
 		});
 
@@ -518,7 +526,8 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 		[](EngineContext* ctx, const void* data)
 		{
 			const ShaderDataNameCmd* c = static_cast<const ShaderDataNameCmd*>(data);
-			ctx->GetShaderManager()->DeleteComputeShader(c->name);   // отказ/чистое удаление — см. DeleteVertexShader
+			ShaderManager* sm = ctx->GetShaderManager();
+			sm->DeleteComputeShader(sm->ComputeShaders().Find(c->name));   // отказ/чистое удаление — см. DeleteVertexShader
 			delete c;
 		});
 }
