@@ -29,7 +29,6 @@ struct TextureAtlas{
 	// .texture пуст до бейка, поэтому копировать биндинг на setup нельзя — держи TextureAtlas*
 	// и резолви на исполнении.
 	SDL_GPUTextureSamplerBinding texture_binding;
-	// Источник истины об usage и размерах: по нему создаёт бейк и пересоздаёт ресайз.
 	SDL_GPUTextureCreateInfo tci{};
 	std::string name;
 	TextureAtlas* shares_with = nullptr;
@@ -42,7 +41,7 @@ struct TextureAtlas{
 	uint8_t mip_levels = 1;
 };
 
-struct TextureHandle : std::enable_shared_from_this<TextureHandle> {
+struct TextureHandle {
 	TextureAtlas* atlas = nullptr;
 	TextureData texture_data{};
 	uint32_t width = 0;

@@ -40,12 +40,12 @@ void PreviewPacker::Request(TextureId id, TextureAtlas* src,
 {
     if (!atlas_ || !id) return;
 
-    Slot& s = slots_[id];
-    if (s.cell < 0) {
-        s.cell = Alloc();
-        if (s.cell < 0) { slots_.erase(id); SDL_Log("PreviewPacker: full - no preview for texture #%u", id.v); return; }
+    Slot& slot = slots_[id];
+    if (slot.cell < 0) {
+        slot.cell = Alloc();
+        if (slot.cell < 0) { slots_.erase(id); SDL_Log("PreviewPacker: full - no preview for texture #%u", id.v); return; }
     }
-    s.src = src; s.x = x; s.y = y; s.w = w; s.h = h; s.layer = layer;
+    slot.src = src; slot.x = x; slot.y = y; slot.w = w; slot.h = h; slot.layer = layer;
 
     if (std::find(dirty_.begin(), dirty_.end(), id) == dirty_.end())
         dirty_.push_back(id);
@@ -60,16 +60,16 @@ void PreviewPacker::Publish()
     for (TextureId id : dirty_) {
         auto it = slots_.find(id);
         if (it == slots_.end() || it->second.cell < 0) continue;   // Release между Request и Publish
-        const Slot& s = it->second;
-        SDL_GPUTexture* src = s.src ? s.src->texture_binding.texture : nullptr;
+        const Slot& slot = it->second;
+        SDL_GPUTexture* src = slot.src ? slot.src->texture_binding.texture : nullptr;
         if (!src) { retry.push_back(id); continue; }              // атлас ещё не забейкан
 
-        BlitTask t{};
-        t.src = src;
-        t.sx = s.x; t.sy = s.y; t.sw = s.w; t.sh = s.h; t.layer = s.layer;
-        t.dx = safe_i_u32(s.cell % safe_u32t_i(PER_ROW)) * CELL;
-        t.dy = safe_i_u32(s.cell / safe_u32t_i(PER_ROW)) * CELL;
-        ready.push_back(t);
+        BlitTask blit{};
+        blit.src = src;
+        blit.sx = slot.x; blit.sy = slot.y; blit.sw = slot.w; blit.sh = slot.h; blit.layer = slot.layer;
+        blit.dx = safe_i_u32(slot.cell % safe_u32t_i(PER_ROW)) * CELL;
+        blit.dy = safe_i_u32(slot.cell / safe_u32t_i(PER_ROW)) * CELL;
+        ready.push_back(blit);
     }
     dirty_.swap(retry);
 
@@ -83,38 +83,38 @@ void PreviewPacker::Blit(SDL_GPUCommandBuffer* cb)
     if (blits_.empty()) return;
     if (!atlas_) { blits_.clear(); return; }
 
-    for (const BlitTask& t : blits_) {
-        SDL_GPUBlitInfo bi{};
-        bi.source.texture = t.src;
-        bi.source.mip_level = 0;
-        bi.source.layer_or_depth_plane = t.layer;
-        bi.source.x = t.sx; bi.source.y = t.sy; bi.source.w = t.sw; bi.source.h = t.sh;
-        bi.destination.texture = atlas_;
-        bi.destination.x = t.dx;
-        bi.destination.y = t.dy;
-        bi.destination.w = CELL;
-        bi.destination.h = CELL;
-        bi.load_op = SDL_GPU_LOADOP_LOAD;   // соседние ячейки не трогаем
+    for (const BlitTask& blit : blits_) {
+        SDL_GPUBlitInfo info{};
+        info.source.texture = blit.src;
+        info.source.mip_level = 0;
+        info.source.layer_or_depth_plane = blit.layer;
+        info.source.x = blit.sx; info.source.y = blit.sy; info.source.w = blit.sw; info.source.h = blit.sh;
+        info.destination.texture = atlas_;
+        info.destination.x = blit.dx;
+        info.destination.y = blit.dy;
+        info.destination.w = CELL;
+        info.destination.h = CELL;
+        info.load_op = SDL_GPU_LOADOP_LOAD;   // соседние ячейки не трогаем
         // Увеличение мелкого источника идёт NEAREST (LINEAR размывает его в градиент и тянет
         // соседей по кромке), уменьшение крупного — LINEAR (NEAREST на 2048→64 алиасит).
-        bi.filter = (t.sw < CELL && t.sh < CELL) ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
-        SDL_BlitGPUTexture(cb, &bi);
+        info.filter = (blit.sw < CELL && blit.sh < CELL) ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+        SDL_BlitGPUTexture(cb, &info);
     }
     blits_.clear();
 }
 
 PreviewPacker::UV PreviewPacker::GetUV(TextureId id) const
 {
-    UV r{};
+    UV uv{};
     auto it = slots_.find(id);
-    if (!atlas_ || it == slots_.end() || it->second.cell < 0) return r;
-    const float cell = 1.0f / (float)PER_ROW;
-    r.valid = true;
-    r.u0 = safe_sint32_f(it->second.cell % safe_u32t_i(PER_ROW)) * cell;
-    r.v0 = safe_sint32_f(it->second.cell / safe_u32t_i(PER_ROW)) * cell;
-    r.u1 = r.u0 + cell;
-    r.v1 = r.v0 + cell;
-    return r;
+    if (!atlas_ || it == slots_.end() || it->second.cell < 0) return uv;
+    const float cell_uv = 1.0f / (float)PER_ROW;
+    uv.valid = true;
+    uv.u0 = safe_sint32_f(it->second.cell % safe_u32t_i(PER_ROW)) * cell_uv;
+    uv.v0 = safe_sint32_f(it->second.cell / safe_u32t_i(PER_ROW)) * cell_uv;
+    uv.u1 = uv.u0 + cell_uv;
+    uv.v1 = uv.v0 + cell_uv;
+    return uv;
 }
 
 void PreviewPacker::Release(TextureId id)

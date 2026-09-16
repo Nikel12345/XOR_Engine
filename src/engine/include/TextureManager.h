@@ -98,14 +98,13 @@ public:
 
 	void GenerateMipmaps(SDL_GPUCommandBuffer* cb);
 
-	TransferBufferData* ExecuteUploadTasks(SDL_GPUCopyPass* cp);
+	TransferBufferData* ExecuteUploadTasks(SDL_GPUCopyPass* copy_pass);
 
 	void PackAtlases() { _ReleasePendingRegions(); _BuildUploadTasks(); preview.Publish(); }
 
 	SDL_GPUSampler* CreateSampler(const std::string& name, SDL_GPUSamplerCreateInfo sci);
 	SDL_GPUSampler* GetSampler(const std::string& name);
 	
-	// Немедленное освобождение GPU-текстуры (как QueueDeleteTexture, но без отложенной очереди).
 	void DeleteTexture(SDL_GPUTexture* texture);
 
 	bool DeleteTextureHandle(TextureId id, NameSlot slot);
@@ -119,15 +118,12 @@ public:
 	void QueueDeleteTexture(SDL_GPUTexture* texture);
 	void TrashTextures(uint64_t fences_done);
 
-	// (w,h) — размер НАЗНАЧЕНИЯ: своё разрешение каждый таргет выводит сам, в замыкании.
-	using TextureResizeFunc = std::function<void(TextureManager&, uint32_t w, uint32_t h)>;
+	using TextureResizeFunc = std::function<void(TextureManager&, uint32_t new_width, uint32_t new_height)>;
 	void CreateResizeInstruction(const std::string& texture_name, TextureResizeFunc fn);
-	void ExecuteResizeInstructions(uint32_t w, uint32_t h);
+	void ExecuteResizeInstructions(uint32_t new_width, uint32_t new_height);
 
 	void RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci);
 
-	// Гейт САБМИТА текстурного cb: пустой сабмит стоит пол-оборота слота, потому что его фенс
-	// отстреливает только после дорисованного кадра.
 	bool IsDirty() const {
 		return !texture_upload_tasks.empty() || !mip_tasks.empty() || preview.HasPendingBlits();
 	}

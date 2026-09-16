@@ -22,14 +22,13 @@ DecodedImage TextureLoader::LoadFromFile(const char* path, SDL_PixelFormat targe
 
 	out.width = (uint32_t)converted->w;
 	out.height = (uint32_t)converted->h;
-	const uint32_t row = out.width * SDL_BYTESPERPIXEL(target_format);
-	out.pixels.resize((size_t)row * out.height);
+	const uint32_t row_bytes = out.width * SDL_BYTESPERPIXEL(target_format);
+	out.pixels.resize((size_t)row_bytes * out.height);
 
 	const std::byte* src = static_cast<const std::byte*>(converted->pixels);
 	std::byte* dst = out.pixels.data();
-	for (uint32_t y = 0; y < out.height; ++y) {
-		SDL_memcpy(dst + (size_t)y * row, src + (size_t)y * converted->pitch, row);
-	}
+	for (uint32_t y = 0; y < out.height; ++y)
+		SDL_memcpy(dst + (size_t)y * row_bytes, src + (size_t)y * converted->pitch, row_bytes);
 
 	SDL_DestroySurface(converted);
 	return out;
@@ -43,30 +42,29 @@ DecodedCubeMap TextureLoader::LoadCubeMapFromFile(const char* path, uint32_t fac
 	DecodedImage img = LoadFromFile(path, target_format);
 	if (!img.ok()) { SDL_Log("LoadCubeMapFromFile: failed to load '%s'", path); return out; }
 
-	const uint32_t cellW = img.width / 4;
-	const uint32_t cellH = img.height / 3;
-	if (cellW == 0 || cellH == 0) { SDL_Log("LoadCubeMapFromFile: '%s' too small for 4x3 cross (%ux%u)", path, img.width, img.height); return out; }
+	const uint32_t cell_width  = img.width / 4;
+	const uint32_t cell_height = img.height / 3;
+	if (cell_width == 0 || cell_height == 0) { SDL_Log("LoadCubeMapFromFile: '%s' too small for 4x3 cross (%ux%u)", path, img.width, img.height); return out; }
 
 	const uint32_t bpp = SDL_BYTESPERPIXEL(target_format);
-	const uint32_t srcStride = img.width * bpp;
-	// Ячейка креста (col,row) для слоя SDL cube: 0:+X 1:-X 2:+Y 3:-Y 4:+Z 5:-Z.
-	// Полоса -X +Z +X -Z даёт непрерывный горизонт; +Y верх (col1,row0), -Y низ (col1,row2).
-	const int cell[6][2] = { {2,1}, {0,1}, {1,0}, {1,2}, {1,1}, {3,1} };
+	const uint32_t src_stride = img.width * bpp;
+	// Ячейка креста (колонка, строка) для слоя SDL cube: 0:+X 1:-X 2:+Y 3:-Y 4:+Z 5:-Z.
+	const int cross_cell[6][2] = { {2,1}, {0,1}, {1,0}, {1,2}, {1,1}, {3,1} };
 	const size_t face_bytes = (size_t)faceSize * faceSize * bpp;
-	out.pixels.resize(face_bytes * 6);   // грани стопкой: смещение грани f = f·face_bytes
-	for (int f = 0; f < 6; ++f) {
-		const uint32_t ox = (uint32_t)cell[f][0] * cellW;
-		const uint32_t oy = (uint32_t)cell[f][1] * cellH;
-		std::byte* face = out.pixels.data() + (size_t)f * face_bytes;
-		for (uint32_t dj = 0; dj < faceSize; ++dj) {
-			uint32_t sy = oy + (uint32_t)(((dj + 0.5f) / faceSize) * cellH);
-			if (sy >= img.height) sy = img.height - 1;
-			for (uint32_t di = 0; di < faceSize; ++di) {
-				uint32_t sx = ox + (uint32_t)(((di + 0.5f) / faceSize) * cellW);
-				if (sx >= img.width) sx = img.width - 1;
-				const std::byte* s = img.pixels.data() + (size_t)sy * srcStride + (size_t)sx * bpp;
-				std::byte* d = face + ((size_t)dj * faceSize + di) * bpp;
-				SDL_memcpy(d, s, bpp);   // пиксель как есть (формат совпал с атласом)
+	out.pixels.resize(face_bytes * 6);
+	for (int face_index = 0; face_index < 6; ++face_index) {
+		const uint32_t cell_x = (uint32_t)cross_cell[face_index][0] * cell_width;
+		const uint32_t cell_y = (uint32_t)cross_cell[face_index][1] * cell_height;
+		std::byte* face = out.pixels.data() + (size_t)face_index * face_bytes;
+		for (uint32_t dst_y = 0; dst_y < faceSize; ++dst_y) {
+			uint32_t src_y = cell_y + (uint32_t)(((dst_y + 0.5f) / faceSize) * cell_height);
+			if (src_y >= img.height) src_y = img.height - 1;
+			for (uint32_t dst_x = 0; dst_x < faceSize; ++dst_x) {
+				uint32_t src_x = cell_x + (uint32_t)(((dst_x + 0.5f) / faceSize) * cell_width);
+				if (src_x >= img.width) src_x = img.width - 1;
+				const std::byte* src_pixel = img.pixels.data() + (size_t)src_y * src_stride + (size_t)src_x * bpp;
+				std::byte* dst_pixel = face + ((size_t)dst_y * faceSize + dst_x) * bpp;
+				SDL_memcpy(dst_pixel, src_pixel, bpp);
 			}
 		}
 	}
