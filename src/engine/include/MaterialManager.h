@@ -34,7 +34,7 @@ public:
 	// Материал хранит ссылки: текстуры — по id ячейки, sp — по имени. Перевод имён в id и валидация
 	// required_slots — у вызывающего (EngineContext::CreateMaterial): сюда приходят уже готовые
 	// ссылки, менеджер их просто складывает. Пустая/неразрешимая сейчас — допустима (резолв на сборке батча).
-	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> textures, std::vector<ShaderProgramId> shaders);
+	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> textures, std::vector<ShaderProgramId> shaders, ResourceTag tags = ResourceTag::None);
 
 	// Merge-upsert материалов из манифеста (см. SceneMaterialEntry). Существующий обновляется
 	// В МЕСТЕ, новый создаётся. params/params_type проставляются напрямую. Материалы вне

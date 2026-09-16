@@ -185,7 +185,7 @@ void TextureManager::BakePending()
     std::erase_if(pending_atlas_bakes, [](TextureAtlas* a) { return !a || a->texture_binding.texture; });
 }
 
-TextureHandle* TextureManager::CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span)
+TextureHandle* TextureManager::CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span, ResourceTag tags)
 {
 	const AtlasId aid = atlases_data.Find(atlas_name);
 	TextureAtlas* atlas = atlases_data.Get(aid);
@@ -193,12 +193,12 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, const std:
         SDL_Log("Texture atlas '%s' not found for texture '%s'", atlas_name.c_str(), name.c_str());
         return nullptr;
 	}
-	TextureHandle* th = CreateTexture(name, atlas, w, h, std::move(pixels), layer_span);
+	TextureHandle* th = CreateTexture(name, atlas, w, h, std::move(pixels), layer_span, tags);
 	if (th) th->atlas_id = aid;   // самоописание: атлас для редактора/сериализации
 	return th;
 }
 
-TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span)
+TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span, ResourceTag tags)
 {
 	if (!atlas) {
         SDL_Log("Invalid atlas provided for texture '%s'", name.c_str());
@@ -218,6 +218,7 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtl
     TextureHandle* ptr = texture_handle.get();
     ptr->width = w;
     ptr->height = h;
+    ptr->tags = tags;
     ptr->texture_data.layer_span = layer_span;   // свойство ЗАПРОСА, известно до укладки
     handles_data.Put(id, std::move(texture_handle));
 	atlas->textures.push_back(&ptr->texture_data); 

@@ -25,7 +25,7 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
     const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& render_pass_name,
     const std::string& vs_name, std::vector<BufferDataName> vertex_shader_buffer_names,
     const std::string& fs_name, std::vector<BufferDataName> fragment_shader_buffer_names,
-    const std::vector<TextureSlotRole>& texture_slots, BufferManager* bm)
+    const std::vector<TextureSlotRole>& texture_slots, BufferManager* bm, ResourceTag tags)
 {
     const ShaderProgramId id = shader_programs.Intern(name);
     if (ShaderProgram* existing = shader_programs.Get(id)) {
@@ -49,6 +49,7 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
 	program->spd = spd;
     program->render_pass_name = render_pass_name;
     program->debug_name = name;
+    program->tags = tags;
 
 
     if (bm) {

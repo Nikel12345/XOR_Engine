@@ -93,8 +93,8 @@ public:
 	// layer_span > 1 — одна текстура на НЕСКОЛЬКИХ подряд идущих слоях (грани кубмапы): w/h тогда
 	// обязаны совпасть с размером слоя, а pixels держать слои стопкой. Про кубы TM не знает
 	// намеренно — знание про них живёт в EngineContext::CreateCubeMapTexture, здесь только слои.
-	TextureHandle* CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span = 1);
-	TextureHandle* CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span = 1);
+	TextureHandle* CreateTexture(const std::string& name, const std::string& atlas_name, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span = 1, ResourceTag tags = ResourceTag::None);
+	TextureHandle* CreateTexture(const std::string& name, TextureAtlas* atlas, uint32_t w, uint32_t h, std::vector<std::byte>&& pixels, uint32_t layer_span = 1, ResourceTag tags = ResourceTag::None);
 
 	SDL_GPUTexture* CreateGPU_Texture(SDL_GPUTextureCreateInfo tci);
 

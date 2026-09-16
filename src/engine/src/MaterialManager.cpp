@@ -8,7 +8,7 @@ MaterialManager::MaterialManager()
 {
 }
 
-Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> textures, std::vector<ShaderProgramId> shaders)
+Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> textures, std::vector<ShaderProgramId> shaders, ResourceTag tags)
 {
 	const MaterialId id = materials.Intern(name);
 	if (Material* existing = materials.Get(id)) {
@@ -19,6 +19,7 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 	// Перевод имён в ссылки и проверку required_slots уже сделал EngineContext::CreateMaterial.
 	// Здесь — чистое хранение.
 	auto data = std::make_unique<Material>();
+	data->tags = tags;
 	// Ячейка на каждую sp; данных у неё пока нет (их кладёт SetMaterialParams по имени sp).
 	data->shader_programs.reserve(shaders.size());
 	for (ShaderProgramId sp_id : shaders) data->shader_programs.push_back(SpBinding{ sp_id, nullptr, {} });

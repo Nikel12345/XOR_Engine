@@ -236,7 +236,7 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
 
 void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl_path,
     const GeometryPool* pool, const std::vector<VertexSemantic>& pull, BufferManager* bm,
-    const ShaderDefines& defines)
+    const ShaderDefines& defines, ResourceTag tags)
 {
     if (!pool) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -287,10 +287,11 @@ void ShaderManager::CreateVertexShader(const std::string& name, const char* hlsl
             ibd->usage |= SDL_GPU_BUFFERUSAGE_INDEX;
     }
 
+    vs.tags = tags;
     vertex_shaders.Put(vertex_shaders.Intern(name), std::make_unique<VertexShaderData>(std::move(vs)));
 }
 
-void ShaderManager::CreateFragmentShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines)
+void ShaderManager::CreateFragmentShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines, ResourceTag tags)
 {
     std::vector<ShaderDefine> norm = NormalizeDefines(defines);
     size_t n = 0;
@@ -301,10 +302,11 @@ void ShaderManager::CreateFragmentShader(const std::string& name, const char* hl
     SDL_free(spv);
     fs.defines = std::move(norm);
     fs.push_kinds = std::move(push_kinds);
+    fs.tags = tags;
     fragment_shaders.Put(fragment_shaders.Intern(name), std::make_unique<FragmentShaderData>(std::move(fs)));
 }
 
-void ShaderManager::CreateComputeShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines)
+void ShaderManager::CreateComputeShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines, ResourceTag tags)
 {
     std::vector<ShaderDefine> norm = NormalizeDefines(defines);
     size_t n = 0;
@@ -317,6 +319,7 @@ void ShaderManager::CreateComputeShader(const std::string& name, const char* hls
     ComputeShaderData cs = BuildComputeShader(spv, n, hlsl_path);
     cs.defines = std::move(norm);
     cs.push_kinds = std::move(push_kinds);
+    cs.tags = tags;
     compute_shaders.Put(id, std::make_unique<ComputeShaderData>(std::move(cs)));
 }
 

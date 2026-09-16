@@ -39,12 +39,12 @@ public:
 	const std::unordered_map<std::string, std::unique_ptr<GeometryPool>>& GetPools() const { return pools; }
 
 	ModelData* CreateModel(const std::string& name, const std::string& path, const std::string& path_ind,
-	                       AnchorShift anchor = AnchorShift::Keep, GeometryPool* pool = nullptr);
+	                       AnchorShift anchor = AnchorShift::Keep, GeometryPool* pool = nullptr, ResourceTag tags = ResourceTag::None);
 
 	// Генератор типизирован PosUVNormal, поэтому годится только пулу с такой же раскладкой —
 	// проверяется по VertexSize().
 	ModelData* CreateModel(const std::string& name, ModelGeneratorFn generator,
-	                       AnchorShift anchor = AnchorShift::Keep, GeometryPool* pool = nullptr);
+	                       AnchorShift anchor = AnchorShift::Keep, GeometryPool* pool = nullptr, ResourceTag tags = ResourceTag::None);
 
 	ModelData* LoadModelFromFile(const std::string& name, const std::string& path, const std::string& path_ind,
 	                             AnchorShift anchor = AnchorShift::Keep, GeometryPool* pool = nullptr);

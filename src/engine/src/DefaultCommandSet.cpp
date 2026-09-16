@@ -309,14 +309,17 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 			if (!c->name.empty() && !c->atlas.empty() && !c->path.empty()) {
 				TextureManager* tm = ctx->GetTextureManager();
 				tm->RenameTexture(tm->TextureIdOf(c->old_name), c->name);
-				tm->DeleteTextureHandle(tm->InternTexture(c->name));   // replace в той же ячейке (no-op, если пуста)
+				const TextureId tex_id = tm->InternTexture(c->name);
+				const TextureHandle* prev = tm->GetTextureHandle(tex_id);
+				const ResourceTag keep = prev ? prev->tags : ResourceTag::None;
+				tm->DeleteTextureHandle(tex_id);   // replace в той же ячейке (no-op, если пуста)
 				// ReleasePreview НЕ зовём: ячейка та же, слот превью должен пережить пересоздание
 				// (иначе плитка мигнёт затычкой до нового блита).
 				// Куб — это ОДИН хэндл на 6 слоёв, поэтому и снятие выше, и превью, и переименование
 				// работают для него теми же строками, что и для обычной текстуры: различие ровно в
 				// том, каким методом читается файл.
-				if (c->cube) ctx->CreateCubeMapTexture(c->name, c->atlas, c->path.c_str());
-				else         ctx->CreateTextureFromFile(c->name, c->atlas, c->path.c_str(), static_cast<ChannelConvention>(c->conv));
+				if (c->cube) ctx->CreateCubeMapTexture(c->name, c->atlas, c->path.c_str(), keep);
+				else         ctx->CreateTextureFromFile(c->name, c->atlas, c->path.c_str(), static_cast<ChannelConvention>(c->conv), keep);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 			delete c;
@@ -415,6 +418,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const std::string vsName = !c->vsName.empty() ? c->vsName : (old ? sm->VertexShaders().NameOf(old->vs_id) : std::string());
 			const std::string fsName = !c->fsName.empty() ? c->fsName : (old ? sm->FragmentShaders().NameOf(old->fs_id) : std::string());
 
+			const ResourceTag keep = old ? old->tags : ResourceTag::None;
 			if (old) {
 				if (finalName != c->oldName) sm->RenameShaderProgram(old_id, finalName);
 				sm->DeleteShaderProgram(old_id);
@@ -422,7 +426,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			// push-инструкции не переносим руками: CreateShaderProgram сам возьмёт код-байндинги из
 			// реестра ПО ИМЕНИ. Переименование = смена владельца функции — перенос со старого
 			// имени всё равно жил бы лишь до ближайшей LoadScene, где связывает имя.
-			ShaderProgram* nw = sm->CreateShaderProgram(finalName, c->spd, passName, vsName, vbufs, fsName, fbufs, slots, ctx->GetBufferManager());
+			ShaderProgram* nw = sm->CreateShaderProgram(finalName, c->spd, passName, vsName, vbufs, fsName, fbufs, slots, ctx->GetBufferManager(), keep);
 			sm->SetDirtyGraphicsPipelines(true);
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
@@ -455,9 +459,11 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
 				sm->RenameVertexShader(sm->VertexShaders().Find(c->oldName), c->name);
+				const VertexShaderData* prev = sm->GetVertexShader(sm->VertexShaders().Find(c->name));
+				const ResourceTag keep = prev ? prev->tags : ResourceTag::None;
 				// UI говорит пулом + семантиками — тем же языком, что манифест; стримы резолвит пул.
 				sm->CreateVertexShader(c->name, c->path.c_str(), ctx->GetModelManager()->GetPool(c->pool),
-					c->pull, ctx->GetBufferManager(), c->defines);
+					c->pull, ctx->GetBufferManager(), c->defines, keep);
 				const VertexShaderId vs_id = sm->VertexShaders().Find(c->name);
 				for (int32_t i = 0; i < sm->ShaderPrograms().Count(); ++i)   // пересобрать пайплайны sp на этом vs
 					if (ShaderProgram* spp = sm->ShaderPrograms().At(i).object.get(); spp && spp->vs_id == vs_id)
@@ -475,7 +481,9 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
 				sm->RenameFragmentShader(sm->FragmentShaders().Find(c->oldName), c->name);
-				sm->CreateFragmentShader(c->name, c->path.c_str(), c->defines);
+				const FragmentShaderData* prev = sm->GetFragmentShader(sm->FragmentShaders().Find(c->name));
+				const ResourceTag keep = prev ? prev->tags : ResourceTag::None;
+				sm->CreateFragmentShader(c->name, c->path.c_str(), c->defines, keep);
 				const FragmentShaderId fs_id = sm->FragmentShaders().Find(c->name);
 				for (int32_t i = 0; i < sm->ShaderPrograms().Count(); ++i)
 					if (ShaderProgram* spp = sm->ShaderPrograms().At(i).object.get(); spp && spp->fs_id == fs_id)
@@ -493,7 +501,9 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
 				sm->RenameComputeShader(sm->ComputeShaders().Find(c->oldName), c->name);
-				sm->CreateComputeShader(c->name, c->path.c_str(), c->defines);
+				const ComputeShaderData* prev = sm->GetComputeShader(sm->ComputeShaders().Find(c->name));
+				const ResourceTag keep = prev ? prev->tags : ResourceTag::None;
+				sm->CreateComputeShader(c->name, c->path.c_str(), c->defines, keep);
 				const ComputeShaderId cs_id = sm->ComputeShaders().Find(c->name);
 				for (int32_t i = 0; i < sm->ComputePrograms().Count(); ++i)
 					if (ComputeShaderProgram* csp = sm->ComputePrograms().At(i).object.get(); csp && csp->cs_id == cs_id)

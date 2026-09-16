@@ -29,16 +29,16 @@ public:
 	ShaderManager(SDL_GPUDevice* device);
 	// Повтор с тем же именем перезаписывает запись реестра.
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const GeometryPool* pool,
-	                        const std::vector<ShaderBase::VertexSemantic>& pull, BufferManager* bm, const ShaderDefines& defines = {});
-	void CreateFragmentShader(const std::string& name, const char* path, const ShaderDefines& defines = {});
+	                        const std::vector<ShaderBase::VertexSemantic>& pull, BufferManager* bm, const ShaderDefines& defines = {}, ResourceTag tags = ResourceTag::None);
+	void CreateFragmentShader(const std::string& name, const char* path, const ShaderDefines& defines = {}, ResourceTag tags = ResourceTag::None);
 
 	ShaderProgram* CreateShaderProgram(
 		const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& render_pass_name,
 		const std::string& vs_name, std::vector<BufferDataName> vertex_shader_buffer_names,
 		const std::string& fs_name, std::vector<BufferDataName> fragment_shader_buffer_names,
-		const std::vector<TextureSlotRole>& texture_slots, BufferManager* bm);
+		const std::vector<TextureSlotRole>& texture_slots, BufferManager* bm, ResourceTag tags = ResourceTag::None);
 
-	void CreateComputeShader(const std::string& name, const char* path, const ShaderDefines& defines = {});
+	void CreateComputeShader(const std::string& name, const char* path, const ShaderDefines& defines = {}, ResourceTag tags = ResourceTag::None);
 
 	ComputeShaderProgram* CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,
 		std::vector<BufferDataName> rw_storage_buffers,

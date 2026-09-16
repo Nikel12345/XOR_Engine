@@ -12,20 +12,20 @@ GpuTaskContext::GpuTaskContext(BufferManager* bm, ShaderManager* sm, PassManager
 {
 }
 
-void GpuTaskContext::CreateFragmentShader(const std::string& name, const char* path, const ShaderDefines& defines) {
-	shader_manager->CreateFragmentShader(name, path, defines);
+void GpuTaskContext::CreateFragmentShader(const std::string& name, const char* path, const ShaderDefines& defines, ResourceTag tags) {
+	shader_manager->CreateFragmentShader(name, path, defines, tags);
 }
 
 void GpuTaskContext::CreateVertexShader(const std::string& name, const char* hlsl_path, const GeometryPool* pool,
-	const std::vector<ShaderBase::VertexSemantic>& pull, const ShaderDefines& defines) {
+	const std::vector<ShaderBase::VertexSemantic>& pull, const ShaderDefines& defines, ResourceTag tags) {
 	// buffer_manager — сбор usage-флагов (VERTEX выбранным стримам, INDEX индексному буферу пула).
-	shader_manager->CreateVertexShader(name, hlsl_path, pool, pull, buffer_manager, defines);
+	shader_manager->CreateVertexShader(name, hlsl_path, pool, pull, buffer_manager, defines, tags);
 }
 
 ShaderProgram* GpuTaskContext::CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
 	const std::string& vs_name, std::initializer_list<BufferDataName> vertex_shader_buffers,
 	const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
-	std::initializer_list<TextureSlotRole> texture_slots) {
+	std::initializer_list<TextureSlotRole> texture_slots, ResourceTag tags) {
 
 	// Буферы sp — ССЫЛКИ ПО ИМЕНИ (BufferDataName, как vs/fs): храним сами ключи реестра, резолв
 	// в BufferData* отложен на сборку батча (BatchBuilder). Существование здесь не проверяем.
@@ -34,11 +34,11 @@ ShaderProgram* GpuTaskContext::CreateShaderProgram(const std::string& name, cons
 	// Проход — тоже ссылка по имени (резолв у PipeManager/BatchBuilder), поэтому здесь не ищется.
 	// buffer_manager — только чтобы sp записал GRAPHICS_STORAGE_READ в обёртки своих буферов
 	// (ShaderManager чужих менеджеров не хранит, получает на вызове).
-	return shader_manager->CreateShaderProgram(name, spd, associated_pass_name, vs_name, std::move(vertex_buffer_names), fs_name, std::move(fragment_buffer_names), texture_slots, buffer_manager);
+	return shader_manager->CreateShaderProgram(name, spd, associated_pass_name, vs_name, std::move(vertex_buffer_names), fs_name, std::move(fragment_buffer_names), texture_slots, buffer_manager, tags);
 }
 
-void GpuTaskContext::CreateComputeShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines) {
-	shader_manager->CreateComputeShader(name, hlsl_path, defines);
+void GpuTaskContext::CreateComputeShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines, ResourceTag tags) {
+	shader_manager->CreateComputeShader(name, hlsl_path, defines, tags);
 }
 
 ComputeShaderProgram* GpuTaskContext::CreateComputeShaderProgram(const std::string& name, const std::string& cs_name,

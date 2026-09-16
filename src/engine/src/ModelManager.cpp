@@ -270,7 +270,7 @@ const PoolResidency* ModelManager::_FindResidency(const GeometryPool* pool) cons
 }
 
 
-ModelData* ModelManager::CreateModel(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor, GeometryPool* pool)
+ModelData* ModelManager::CreateModel(const std::string& name, const std::string& path_vert, const std::string& path_ind, AnchorShift anchor, GeometryPool* pool, ResourceTag tags)
 {
     const ModelId id = models_data.Intern(name);
     if (ModelData* existing = models_data.Get(id)) {
@@ -280,6 +280,7 @@ ModelData* ModelManager::CreateModel(const std::string& name, const std::string&
 
     auto model_data = std::make_unique<ModelData>();
     ModelData* ptr = model_data.get();
+    ptr->tags = tags;
     models_data.Put(id, std::move(model_data));
     return _LoadModelFile(ptr, _ResolvePool(pool), path_vert, path_ind, anchor);
 }
@@ -461,7 +462,7 @@ ModelData* ModelManager::_LoadModelFile(ModelData* ptr, GeometryPool* pool, cons
     return ptr;
 }
 
-ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn generator, AnchorShift anchor, GeometryPool* pool)
+ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn generator, AnchorShift anchor, GeometryPool* pool, ResourceTag tags)
 {
     const ModelId id = models_data.Intern(name);
     if (ModelData* existing = models_data.Get(id)) {
@@ -474,6 +475,7 @@ ModelData* ModelManager::CreateModel(const std::string& name, ModelGeneratorFn g
 
     auto model_data = std::make_unique<ModelData>();
     ModelData* ptr = model_data.get();
+    ptr->tags = tags;
     models_data.Put(id, std::move(model_data));
     ptr->pool_name = p->Name();
 
