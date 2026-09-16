@@ -8,6 +8,7 @@
 #include <cstdint>
 #include "config.h"
 #include "Aliases.h"
+#include "ResourceId.h"
 #include "RenderCommandData.h"
 
 namespace RenderSnap { struct BatchLayout; }

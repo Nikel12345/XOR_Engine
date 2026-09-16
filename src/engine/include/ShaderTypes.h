@@ -6,7 +6,7 @@
 #include <SDL3/SDL_gpu.h>
 #include <glm/glm.hpp>
 #include "Utils.h"
-#include "Aliases.h"
+#include "ResourceId.h"
 
 
 // Слепок группы draw'а — только по указателю в PushInput (полный тип у потребителя).

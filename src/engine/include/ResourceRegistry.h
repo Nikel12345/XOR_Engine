@@ -5,6 +5,7 @@
 #include <string_view>
 #include <utility>
 #include "Utils.h"
+#include "ResourceId.h"
 
 template <class Cell, class Id>
 class ResourceRegistry {

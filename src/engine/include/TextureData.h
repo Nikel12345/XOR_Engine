@@ -4,7 +4,7 @@
 #include <memory>
 #include <string>
 #include "ResourceTags.h"
-#include "Aliases.h"
+#include "ResourceId.h"
 
 // Конвенция упаковки ИСХОДНОГО файла текстуры. Канон движка: G = linear roughness (ORM),
 // A нормал-карты = HEIGHT (яркое = выше; POM марчит depth = 1 - A).

@@ -7,6 +7,7 @@
 #include <SDL3/SDL_gpu.h>
 #include "ShaderTypes.h"
 #include "Aliases.h"
+#include "ResourceId.h"
 #include "ResourceTags.h"
 
 

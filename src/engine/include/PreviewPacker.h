@@ -4,7 +4,7 @@
 #include <vector>
 #include <unordered_map>
 #include <cstdint>
-#include "Aliases.h"
+#include "ResourceId.h"
 
 struct TextureAtlas;   // источник блита (его GPU-текстура + регион); полный тип нужен только в .cpp
 

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include "ShaderTypes.h"
 #include "Aliases.h"
+#include "ResourceId.h"
 #include "ResourceTags.h"
 
 struct SpBinding {
