@@ -9,10 +9,10 @@ MaterialManager::MaterialManager()
 
 Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> textures, std::vector<ShaderName> shaders)
 {
-	auto it = materials.find(name);
-	if (it != materials.end()) {
+	const MaterialId id = materials.Intern(name);
+	if (Material* existing = materials.Get(id)) {
 		SDL_Log("Material '%s' already exists.", name.c_str());
-		return it->second.get();
+		return existing;
 	}
 
 	// Перевод имён в ссылки и проверку required_slots уже сделал EngineContext::CreateMaterial.
@@ -24,17 +24,19 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 	for (auto& [role, tex_ids] : textures) {
 		data->textures[role] = std::move(tex_ids);
 	}
-	materials[name] = std::move(data);
-	return materials[name].get();
+	Material* ptr = data.get();
+	materials.Put(id, std::move(data));
+	return ptr;
 }
 
 size_t MaterialManager::ClearSceneMaterials()
 {
-	const size_t before = materials.size();
-	std::erase_if(materials, [](const auto& kv) {
-		return !kv.second || !HasTag(kv.second->tags, ResourceTag::CodeOwned);
-	});
-	return before - materials.size();
+	size_t removed = 0;
+	for (int32_t i = 0; i < materials.Count(); ++i) {
+		const Material* m = materials.At(i).object.get();
+		if (m && !HasTag(m->tags, ResourceTag::CodeOwned)) removed += materials.Erase(MaterialId{ i }) ? 1 : 0;
+	}
+	return removed;
 }
 
 size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries, TextureManager* tm)
@@ -44,9 +46,8 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 		if (e.name.empty()) continue;
 		// Обновление В МЕСТЕ (сохраняем адрес Material — если на него уже кто-то ссылается): если
 		// нет — создаём пустой. Затем переливаем все поля из записи манифеста.
-		auto it = materials.find(e.name);
-		Material* m = (it != materials.end()) ? it->second.get()
-		            : CreateMaterial(e.name, {}, {});   // пустой под этим именем
+		Material* m = materials.Get(materials.Find(e.name));
+		if (!m) m = CreateMaterial(e.name, {}, {});   // пустой под этим именем
 		if (!m) continue;
 		m->textures.clear();
 		for (const auto& [role, tex_names] : e.textures) {
@@ -102,24 +103,11 @@ void MaterialManager::CollectSamplerUsage(const Material* m, TextureManager* tm,
 	}
 }
 
-std::vector<Material*> MaterialManager::GetAllMaterials()
-{
-    std::vector<Material*> result;
-	result.reserve(materials.size());
-    for (auto& [name, material] : materials) {
-        result.push_back(material.get());
-	}
-	return result;
-}
-
 Material* MaterialManager::GetMaterial(const std::string& name)
 {
-	auto it = materials.find(name);
-	if (it != materials.end()) {
-		return it->second.get();
-	}
-	SDL_Log("Material '%s' not found.", name.c_str());
-	return nullptr;
+	Material* m = materials.Get(materials.Find(name));
+	if (!m) SDL_Log("Material '%s' not found.", name.c_str());
+	return m;
 }
 
 MaterialManager::~MaterialManager()

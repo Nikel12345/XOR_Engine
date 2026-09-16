@@ -269,7 +269,7 @@ void EngineContext::ChangeMaterial(Entity e, const MaterialName& material_name, 
 	auto& mats = object_manager->GetComponent<MaterialComponent>(scene, e).materials;
 	if (submesh >= mats.size()) return;
 
-	mats[submesh].name = material_name;
+	mats[submesh].material = material_manager->InternMaterial(material_name);
 	// Состояния адресованы РОЛЯМИ прежнего материала — у нового набор ролей свой, и сохранённый
 	// номер варианта означал бы уже другую текстуру. Смена материала = его дефолтный вид.
 	mats[submesh].states.clear();

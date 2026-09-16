@@ -3,6 +3,7 @@
 // путь SoA-прокси, по которому собраны Positions/Velocities/...). Игровые компоненты объявляются
 // в файлах игры и регистрируются там же (ComponentSpecRegistry::Register) — движок не правится.
 #include "ComponentStorage.h"
+#include "ResourceId.h"
 #include <cmath>
 #include <SDL3/SDL.h>
 
@@ -173,7 +174,7 @@ enum class TextureSlotRole;
 // инстанс-батче). states РАЗРЕЖЕННЫЕ и по РОЛИ, а не по номеру слота: номер зависит от набора
 // вариативных ролей материала и едет при его правке, роль — нет. Пусто = всюду дефолт.
 struct MaterialRef {
-    std::string                                       name;
+    MaterialId                                        material;
     std::vector<std::pair<TextureSlotRole, uint32_t>> states;   // роль -> номер варианта
 };
 

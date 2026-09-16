@@ -44,12 +44,13 @@ FieldSpec FieldSpec::Num(const char* key, FieldKind kind,
 }
 
 FieldSpec FieldSpec::Str(const char* key,
-                         const std::string& (*get)(Archetype&, size_t), void (*set)(Archetype&, size_t, std::string),
+                         std::function<const std::string&(Archetype&, size_t)> get,
+                         std::function<void(Archetype&, size_t, std::string)> set,
                          FieldKind kind)
 {
     FieldSpec f;
     f.key = key; f.kind = kind;
-    f.get_str = get; f.set_str = set;
+    f.get_str = std::move(get); f.set_str = std::move(set);
     return f;
 }
 
@@ -211,84 +212,6 @@ std::string FormatCascades(const DirectLightComponent::DirectLightData& d)
 
 } // namespace
 
-namespace {
-
-void SaveMaterial(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp, ScenePool* pool)
-{
-    auto& arr = *arch.get_array<MaterialComponent>();
-    // Имя списка литералом, а не через FieldPoolName: у Material нет FieldSpec, из которого его
-    // взять.
-    ScenePool::List* list = pool ? &(*pool)["materials"] : nullptr;
-    yyjson_mut_val* col = yyjson_mut_obj_add_arr(doc, comp, "names");
-    bool any_state = false;
-    for (size_t i = 0; i < count; ++i) {
-        yyjson_mut_val* row = yyjson_mut_arr_add_arr(doc, col);
-        for (const MaterialRef& m : arr[i].materials) {
-            if (list) yyjson_mut_arr_add_uint(doc, row, list->Intern(m.name));
-            else      yyjson_mut_arr_add_strcpy(doc, row, m.name.c_str());
-            any_state = any_state || !m.states.empty();
-        }
-    }
-    // Состояния вариантов — ОТДЕЛЬНАЯ колонка, параллельная "names" по позиции материала, и её
-    // нет вовсе, пока никто ничего не переключал. Внутри плоский список пар (роль, вариант), роль
-    // числом: её строковые имена ECS не знает.
-    if (!any_state) return;
-    yyjson_mut_val* scol = yyjson_mut_obj_add_arr(doc, comp, "states");
-    for (size_t i = 0; i < count; ++i) {
-        yyjson_mut_val* row = yyjson_mut_arr_add_arr(doc, scol);
-        for (const MaterialRef& m : arr[i].materials) {
-            yyjson_mut_val* pairs = yyjson_mut_arr_add_arr(doc, row);
-            for (const auto& [role, v] : m.states) {
-                yyjson_mut_arr_add_int(doc, pairs, static_cast<int>(role));
-                yyjson_mut_arr_add_uint(doc, pairs, v);
-            }
-        }
-    }
-}
-void LoadMaterial(Archetype& arch, yyjson_val* comp, size_t count, ScenePool* pool)
-{
-    arch.ensure_component<MaterialComponent>();
-    std::vector<MaterialComponent> rows(count);
-    ScenePool::List* list = pool ? pool->Find("materials") : nullptr;
-    yyjson_val* col = comp ? yyjson_obj_get(comp, "names") : nullptr;
-    if (col) {
-        size_t idx, max; yyjson_val* row;
-        yyjson_arr_foreach(col, idx, max, row) {
-            if (idx >= count) break;
-            size_t j, jm; yyjson_val* s;
-            yyjson_arr_foreach(row, j, jm, s) {
-                const char* str = pool ? pool->Cell(list, s) : yyjson_get_str(s);
-                if (str) rows[idx].materials.push_back(MaterialRef{ str, {} });
-            }
-        }
-    }
-    // Колонки может не быть — тогда states пусты и каждый слот показывает дефолт.
-    yyjson_val* scol = comp ? yyjson_obj_get(comp, "states") : nullptr;
-    if (scol) {
-        size_t idx, max; yyjson_val* row;
-        yyjson_arr_foreach(scol, idx, max, row) {
-            if (idx >= count) break;
-            size_t j, jm; yyjson_val* pairs;
-            yyjson_arr_foreach(row, j, jm, pairs) {
-                if (j >= rows[idx].materials.size()) break;   // колонки разъехались — лишнее молча отбрасываем
-                std::vector<std::pair<TextureSlotRole, uint32_t>>& st = rows[idx].materials[j].states;
-                size_t k, km; yyjson_val* v;
-                // Плоские пары: нечётный хвост (файл правили руками) отбрасываем целиком.
-                const size_t n = yyjson_arr_size(pairs) & ~size_t(1);
-                std::vector<int64_t> flat; flat.reserve(n);
-                yyjson_arr_foreach(pairs, k, km, v) { if (flat.size() >= n) break; flat.push_back(yyjson_get_sint(v)); }
-                for (size_t p = 0; p + 1 < flat.size(); p += 2)
-                    st.emplace_back(static_cast<TextureSlotRole>(flat[p]),
-                                    static_cast<uint32_t>(flat[p + 1] < 0 ? 0 : flat[p + 1]));
-            }
-        }
-    }
-    auto* a = arch.get_array<MaterialComponent>();
-    for (size_t i = 0; i < count; ++i) a->add(rows[i]);
-}
-
-} // namespace
-
 // Порядок fields — это порядок колонок в файле.
 void RegisterBuiltinComponentSpecs()
 {
@@ -314,10 +237,6 @@ void RegisterBuiltinComponentSpecs()
         // одной записью строки с UI-потока не обойтись, отсюда .Cmd.
         .fields = { FieldSpec::Str("name", AOS_STR(ModelComponent, name), AssetModel)
                         .Cmd(CommandId::SetEntityModel) } });
-
-    reg.Register({ .name = "Material", .sig_type = typeid(MaterialComponent),
-        .add_default = AddDefaultAoS<MaterialComponent>,
-        .custom_save = SaveMaterial, .custom_load = LoadMaterial });
 
     reg.Register({ .name = "Draw", .sig_type = typeid(DrawComponent),
         .add_default = AddDefaultAoS<DrawComponent>,

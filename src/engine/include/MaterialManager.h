@@ -4,6 +4,7 @@
 #include <cstring>
 #include <string>
 #include "MaterialData.h"
+#include "ResourceRegistry.h"
 #include "ParamsSpec.h"
 
 class TextureManager;   // только в сигнатуре CollectSamplerUsage — передаётся на вызове
@@ -22,6 +23,9 @@ struct SceneMaterialEntry {
 	std::vector<std::pair<TextureSlotRole, std::vector<TextureName>>> textures;
 	std::vector<SceneShaderEntry> shaders;
 };
+
+struct MaterialCell { std::string name; std::unique_ptr<Material> object; };
+using MaterialRegistry = ResourceRegistry<MaterialCell, MaterialId>;
 
 class MaterialManager {
 public:
@@ -54,20 +58,21 @@ public:
 	// поимённо, до краша. material_name — только для этого сообщения.
 	void CollectSamplerUsage(const Material* m, TextureManager* tm, const std::string& material_name);
 
-	std::vector<Material*> GetAllMaterials();
 	Material* GetMaterial(const std::string& name);
-	// Имя→материал (для UI/инспектора). Pointee не const — params можно крутить на лету.
-	const std::unordered_map<std::string, std::unique_ptr<Material>>& GetMaterials() const { return materials; }
+	Material* GetMaterial(MaterialId id) const        { return materials.Get(id); }
+	MaterialId         MaterialIdOf(const std::string& name) const { return materials.Find(name); }
+	MaterialId         InternMaterial(const std::string& name)     { return materials.Intern(name); }
+	const std::string& MaterialNameOf(MaterialId id) const         { return materials.NameOf(id); }
+	// Реестр материалов (для UI/инспектора). Pointee не const — params можно крутить на лету.
+	const MaterialRegistry& Materials() const { return materials; }
 
-	// Переименование = ре-кей узла словаря (сам Material сохраняется; путь «delete+create» на уровне
-	// ключа). false, если имена совпали / новое занято / старого нет. Ссылки по СТАРОМУ имени
-	// (MaterialComponent::materials) после этого не резолвятся — переименовывай до назначения материала.
-	bool RenameMaterial(const std::string& oldName, const std::string& newName) {
-		if (oldName == newName || materials.count(newName)) return false;
-		auto node = materials.extract(oldName);
-		if (node.empty()) return false;
-		node.key() = newName;
-		materials.insert(std::move(node));
+	// Имя — поле ЯЧЕЙКИ; ссылающиеся держат её id, поэтому переименование их не касается.
+	// false, если имена совпали / новое занято / старого нет.
+	bool RenameMaterial(MaterialId id, const std::string& newName) {
+		if (!materials.Get(id) || newName.empty()) return false;
+		const MaterialId taken = materials.Find(newName);
+		if (taken && taken != id) return false;
+		materials.Rename(id, newName);
 		return true;
 	}
 
@@ -79,5 +84,5 @@ public:
 
 	~MaterialManager();
 private:
-	std::unordered_map<std::string, std::unique_ptr<Material>> materials;
+	MaterialRegistry materials;
 };

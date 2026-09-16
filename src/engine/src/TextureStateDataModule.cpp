@@ -96,12 +96,7 @@ void TextureStateDataModule::StoreState(BufferManager* bm, UploadTask* task, Obj
 			uint32_t cells[MAX_VARIATIVE_SLOTS] = {};
 
 			// Резолв ТИХИЙ: GetMaterial логирует промах, а вызов идёт на каждую сущность.
-			const Material* mat = nullptr;
-			if (mtm && !m.name.empty()) {
-				const auto& materials = mtm->GetMaterials();
-				auto it = materials.find(m.name);
-				if (it != materials.end()) mat = it->second.get();
-			}
+			const Material* mat = mtm ? mtm->GetMaterial(m.material) : nullptr;
 
 			if (mat) {
 				const VariativeRoles vr = CollectVariativeRoles(*mat);

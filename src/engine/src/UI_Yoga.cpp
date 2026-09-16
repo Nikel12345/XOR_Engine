@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "UI_Yoga.h"
 #include "EngineContext.h"
+#include "MaterialManager.h"
 #include "ObjectManager.h"
 #include "BaseComponents.h"
 #include "FontManager.h"
@@ -270,14 +271,14 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
                 e = ctx->CreateEntity(scene_name,
                         DrawComponent{ true, 1.0f, 0 },
                         ModelComponent{ r.quad },
-                        MaterialComponent{ { MaterialRef{ r.material } } },
+                        MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial(r.material) } } },
                         m, UIComponent{}, GeneratedComponent{}, TextureStateComponent{},
                         UITextComponent{ r.glyphs, r.font });
             else
                 e = ctx->CreateEntity(scene_name,
                         DrawComponent{ true, 1.0f, 0 },
                         ModelComponent{ r.quad },
-                        MaterialComponent{ { MaterialRef{ r.material } } },
+                        MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial(r.material) } } },
                         m, UIComponent{}, GeneratedComponent{}, TextureStateComponent{});
             r.entity = e;  r.has_entity = true;
             impl->created.push_back(e);

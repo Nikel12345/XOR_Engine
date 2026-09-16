@@ -289,7 +289,8 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 		[](EngineContext* ctx, const void* data)
 		{
 			const RenameMaterialCmd* c = static_cast<const RenameMaterialCmd*>(data);
-			if (ctx->GetMaterialManager()->RenameMaterial(c->oldName, c->newName))
+			MaterialManager* mtm = ctx->GetMaterialManager();
+			if (mtm->RenameMaterial(mtm->MaterialIdOf(c->oldName), c->newName))
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
 		});

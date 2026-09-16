@@ -300,10 +300,10 @@ void Game::UpdateUIHover()
             // Узлы на невариативном материале (текст, фон панели) пропускаем: писать им состояние
             // значило бы затащить их в буфер состояний ради значения, которое шейдер всё равно
             // сожмёт клампом в дефолт.
-            auto mit = mm->GetMaterials().find(mc.materials[k].name);
-            if (mit == mm->GetMaterials().end()) continue;
-            auto tit = mit->second->textures.find(TextureSlotRole::Albedo);
-            if (tit == mit->second->textures.end() || tit->second.size() < 2) continue;
+            const Material* mat = mm->GetMaterial(mc.materials[k].material);
+            if (!mat) continue;
+            auto tit = mat->textures.find(TextureSlotRole::Albedo);
+            if (tit == mat->textures.end() || tit->second.size() < 2) continue;
 
             ctx->SetEntityTextureVariant(e, k, TextureSlotRole::Albedo, hit ? 1u : 0u);
         }
@@ -373,7 +373,7 @@ void Game::CreateDebugColliders()
         LocalMatrixProxy16 lm{};   // SoA-локаль: в CreateEntity едет как прокси (как PositionProxy16)
         for (int i = 0; i < 16; ++i) lm.m[i] = s.local[i];
         ctx->CreateEntity(kStartScene,
-            MaterialComponent{ { MaterialRef{ "debug_collider" } } },
+            MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial("debug_collider") } } },
             ModelComponent{ model_name },
             PositionProxy16{},          // перезапишется композицией parent × local
             ParentComponent{ s.owner },

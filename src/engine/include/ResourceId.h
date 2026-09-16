@@ -4,6 +4,8 @@
 
 struct TextureIdTag;
 struct AtlasIdTag;
+struct MaterialIdTag;
+struct ModelIdTag;
 struct VertexShaderIdTag;
 struct FragmentShaderIdTag;
 struct ComputeShaderIdTag;
@@ -22,6 +24,8 @@ template <class Tag> struct std::hash<ResourceId<Tag>> {
 
 using TextureId        = ResourceId<TextureIdTag>;
 using AtlasId          = ResourceId<AtlasIdTag>;
+using MaterialId       = ResourceId<MaterialIdTag>;
+using ModelId          = ResourceId<ModelIdTag>;
 using VertexShaderId   = ResourceId<VertexShaderIdTag>;
 using FragmentShaderId = ResourceId<FragmentShaderIdTag>;
 using ComputeShaderId  = ResourceId<ComputeShaderIdTag>;

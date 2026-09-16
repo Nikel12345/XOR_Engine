@@ -259,19 +259,24 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
 
     for (size_t k = 0; k < mats.materials.size(); ++k) {
         ImGui::PushID(static_cast<int>(k));
-        const std::string sel = mats.materials[k].name;   // копия: правка живой энтити идёт командой
+        MaterialManager* mmgr = t.ctx->GetMaterialManager();
+        const MaterialId sel_id = mats.materials[k].material;
+        const std::string sel = mmgr->MaterialNameOf(sel_id);   // копия: правка живой энтити идёт командой
         char label[32];
         snprintf(label, sizeof(label), "submesh %zu", k);
 
         if (ImGui::BeginCombo(label, sel.empty() ? "(none)" : sel.c_str())) {
-            for (auto& [nm, m] : t.ctx->GetMaterialManager()->GetMaterials()) {
-                if (m && !g_show_internal && HasTag(m->tags, ResourceTag::System)) continue;
-                if (!ImGui::Selectable(nm.c_str(), nm == sel)) continue;
+            const MaterialRegistry& mreg = mmgr->Materials();
+            for (int32_t mi = 0; mi < mreg.Count(); ++mi) {
+                const MaterialCell& mc = mreg.At(mi);
+                if (!mc.object) continue;
+                if (!g_show_internal && HasTag(mc.object->tags, ResourceTag::System)) continue;
+                if (!ImGui::Selectable(mc.name.c_str(), mc.name == sel)) continue;
                 if (t.live())
                     t.ctx->GetInputManager()->PushCommand(CommandId::SetEntityMaterial,
-                        new FieldEditCmd{ t.entity, "Material", "names", (double)k, nm });
+                        new FieldEditCmd{ t.entity, "Material", "names", (double)k, mc.name });
                 else
-                    mats.materials[k] = MaterialRef{ nm, {} };   // черновик: смена материала сбрасывает состояния (как в SetEntityMaterial)
+                    mats.materials[k] = MaterialRef{ MaterialId{ mi }, {} };   // черновик: смена материала сбрасывает состояния (как в SetEntityMaterial)
             }
             ImGui::EndCombo();
         }
@@ -282,12 +287,7 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
         // CollectVariativeRoles обрывается на MAX_VARIATIVE_SLOTS, и роль за этой границей
         // переключить нечем — предлагать её тут значило бы врать. Что такая роль есть, видно
         // в инспекторе материала (там у неё «(!)»).
-        const Material* mat = nullptr;
-        if (!sel.empty()) {
-            const auto& mm = t.ctx->GetMaterialManager()->GetMaterials();
-            auto mit = mm.find(sel);
-            if (mit != mm.end()) mat = mit->second.get();
-        }
+        const Material* mat = mmgr->GetMaterial(sel_id);
         if (mat) {
             const VariativeRoles vr = CollectVariativeRoles(*mat);
             for (uint32_t c = 0; c < vr.count; ++c) {

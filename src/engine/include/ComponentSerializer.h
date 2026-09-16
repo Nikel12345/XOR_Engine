@@ -9,6 +9,7 @@
 #include <vector>
 #include <map>
 #include <typeindex>
+#include <functional>
 #include <unordered_map>
 #include "ComponentStorage.h"
 #include "CommandId.h"
@@ -43,8 +44,10 @@ struct FieldSpec {
     // макросы ниже: каптурлесс-лямбды, поэтому это обычные указатели на функции.
     double (*get_num)(Archetype&, size_t) = nullptr;
     void   (*set_num)(Archetype&, size_t, double) = nullptr;
-    const std::string& (*get_str)(Archetype&, size_t) = nullptr;
-    void   (*set_str)(Archetype&, size_t, std::string) = nullptr;
+    // std::function, а не указатель: поле-ссылка на ресурс регистрируется слоем, который знает
+    // менеджер, и переводит id в имя захватом. EngineEcs менеджеры не называет.
+    std::function<const std::string&(Archetype&, size_t)> get_str;
+    std::function<void(Archetype&, size_t, std::string)>  set_str;
 
     // Диапазон: драг в UI и, при clamp_on_load, жёсткий кламп на загрузке — одно объявление на
     // оба пути. lo==hi значит «диапазон не задан».
@@ -73,7 +76,8 @@ struct FieldSpec {
                          double (*get)(Archetype&, size_t), void (*set)(Archetype&, size_t, double),
                          float lo = 0, float hi = 0, float speed = 0.05f);
     static FieldSpec Str(const char* key,
-                         const std::string& (*get)(Archetype&, size_t), void (*set)(Archetype&, size_t, std::string),
+                         std::function<const std::string&(Archetype&, size_t)> get,
+                         std::function<void(Archetype&, size_t, std::string)> set,
                          FieldKind kind = FieldKind::Str);
 
     FieldSpec&& Clamp()    && { clamp_on_load = true; return std::move(*this); }
@@ -178,8 +182,8 @@ struct ComponentSpec {
     void (*after_edit)(Archetype&, size_t) = nullptr;  // побочный эффект правки в UI (needsUpdate у света)
 
     // Escape hatch: заданы — и генераторы по fields не работают вовсе.
-    void (*custom_save)(Archetype&, size_t, yyjson_mut_doc*, yyjson_mut_val*, ScenePool*) = nullptr;
-    void (*custom_load)(Archetype&, yyjson_val*, size_t, ScenePool*) = nullptr;
+    std::function<void(Archetype&, size_t, yyjson_mut_doc*, yyjson_mut_val*, ScenePool*)> custom_save;
+    std::function<void(Archetype&, yyjson_val*, size_t, ScenePool*)>                       custom_load;
 
     // Память -> json: ВЕСЬ компонент архетипа (count строк) колонками по полям. pool == nullptr —
     // без словаря, строковые колонки пишутся и читаются именами.

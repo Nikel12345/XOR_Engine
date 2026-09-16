@@ -498,7 +498,10 @@ static void SaveMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 	MutDoc d;
 	yyjson_mut_val* arr = d.Arr("materials");
 	size_t saved = 0;
-	for (auto& [name, m] : mtm->GetMaterials()) {
+	for (int32_t mi = 0; mi < mtm->Materials().Count(); ++mi) {
+		const MaterialCell& cell = mtm->Materials().At(mi);
+		const Material* m = cell.object.get();
+		const std::string& name = cell.name;
 		if (!m || HasTag(m->tags, ResourceTag::CodeOwned)) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, arr);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());

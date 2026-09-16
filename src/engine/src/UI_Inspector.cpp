@@ -155,7 +155,7 @@ namespace {
         ImGui::InputText("Name", nameBuf, sizeof nameBuf);
         ImGui::SameLine();
         const bool nameChanged = nameBuf[0] && (matName != nameBuf)
-            && !ctx->GetMaterialManager()->GetMaterials().count(nameBuf);
+            && !ctx->GetMaterialManager()->MaterialIdOf(nameBuf);
         {
             const ImVec2 p0 = ImGui::GetCursorScreenPos();
             const float  sz = ImGui::GetFrameHeight();

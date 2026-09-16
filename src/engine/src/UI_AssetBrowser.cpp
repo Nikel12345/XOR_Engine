@@ -70,9 +70,8 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
         auto material_preview = [&](const std::string& matName) -> TilePreview
         {
             TilePreview pv{};
-            auto mit = ctx->GetMaterialManager()->GetMaterials().find(matName);
-            if (mit == ctx->GetMaterialManager()->GetMaterials().end() || !mit->second) return pv;
-            const Material* m = mit->second.get();
+            const Material* m = ctx->GetMaterialManager()->GetMaterial(ctx->GetMaterialManager()->MaterialIdOf(matName));
+            if (!m) return pv;
             auto tit = m->textures.find(TextureSlotRole::Albedo);
             if (tit == m->textures.end() || tit->second.empty()) return pv;   // безальбедный → затычка
             pv = texture_preview(tit->second[0]);                   // дефолт слота: варианты плитка не показывает
@@ -137,14 +136,17 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
             tiles(SelKind::Material, true,
                 [&]{
                     // Свободное имя считаем в UI → сразу ставим выбор на создаваемый материал.
-                    auto& mats = ctx->GetMaterialManager()->GetMaterials();
+                    MaterialManager* mm = ctx->GetMaterialManager();
                     std::string nm = "material";
-                    for (int i = 1; mats.count(nm); ++i) nm = "material_" + std::to_string(i);
+                    for (int i = 1; mm->MaterialIdOf(nm); ++i) nm = "material_" + std::to_string(i);
                     g_sel = Selection{}; g_sel.kind = SelKind::Material; g_sel.name = nm;
                     ctx->GetInputManager()->PushCommand(CommandId::CreateMaterial, new CreateMaterialCmd{ nm });
                 },
-                [&](auto&& emit) { for (auto& [name, mat] : ctx->GetMaterialManager()->GetMaterials())
-                                       if (mat && (g_show_internal || !HasTag(mat->tags, ResourceTag::System))) emit(name); },
+                [&](auto&& emit) { const MaterialRegistry& reg = ctx->GetMaterialManager()->Materials();
+                                   for (int32_t i = 0; i < reg.Count(); ++i) {
+                                       const MaterialCell& c = reg.At(i);
+                                       if (c.object && (g_show_internal || !HasTag(c.object->tags, ResourceTag::System))) emit(c.name);
+                                   } },
                 material_preview);
             ImGui::EndTabItem();
         }

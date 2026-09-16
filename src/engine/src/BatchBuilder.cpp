@@ -186,8 +186,9 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
 
     std::vector<const TextureHandle*> block_handles;
 
-    for (const auto& [mat_name, mat_owner] : mtm->GetMaterials()) {
-        Material* material = mat_owner.get();
+    const MaterialRegistry& mreg = mtm->Materials();
+    for (int32_t mi = 0; mi < mreg.Count(); ++mi) {
+        Material* material = mreg.At(mi).object.get();
         if (!material) continue;
 
         // Порядок ячеек — одно определение на движок: его же читает TextureStateDataModule.
@@ -292,13 +293,8 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
         if (submesh.material_index >= material_component.materials.size()) {
             continue;
         }
-        const std::string& material_name = material_component.materials[submesh.material_index].name;
-        Material* material = nullptr;
-        if (mtm && !material_name.empty()) {
-            const auto& materials = mtm->GetMaterials();
-            auto mit = materials.find(material_name);
-            if (mit != materials.end()) material = mit->second.get();
-        }
+        const MaterialId material_id = material_component.materials[submesh.material_index].material;
+        Material* material = mtm ? mtm->GetMaterial(material_id) : nullptr;
         if (!material) {
             continue;
         }
