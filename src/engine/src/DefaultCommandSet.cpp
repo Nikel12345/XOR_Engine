@@ -347,7 +347,9 @@ void DefaultCommandSet::SetModelCommands(InputManager& im)
 		{
 			const UpsertModelCmd* c = static_cast<const UpsertModelCmd*>(data);
 			if (!c->name.empty() && !c->model_path.empty() && !c->index_path.empty()) {
-				ctx->GetModelManager()->LoadModelFromFile(c->name, c->model_path, c->index_path,
+				ModelManager* mm = ctx->GetModelManager();
+				mm->RenameModel(mm->ModelIdOf(c->old_name), c->name);
+				mm->LoadModelFromFile(c->name, c->model_path, c->index_path,
 					static_cast<AnchorShift>(c->anchor));
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}

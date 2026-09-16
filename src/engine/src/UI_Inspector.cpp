@@ -745,9 +745,11 @@ namespace {
 
         const bool ready = nameBuf[0] && modelBuf[0] && indexBuf[0];
         ImGui::BeginDisabled(!ready);
-        if (ImGui::Button("Recreate", ImVec2(160, 0)))
+        if (ImGui::Button("Recreate", ImVec2(160, 0))) {
             ctx->GetInputManager()->PushCommand(CommandId::UpsertModel,
-                new UpsertModelCmd{ nameBuf, modelBuf, indexBuf, static_cast<uint32_t>(anchorSel) });
+                new UpsertModelCmd{ nameBuf, modelBuf, indexBuf, static_cast<uint32_t>(anchorSel), g_sel.name });
+            g_sel = Selection{}; g_sel.kind = SelKind::Model; g_sel.name = nameBuf;   // выбор следует за именем
+        }
         ImGui::EndDisabled();
 
         // Ниже кнопки намеренно: всё выше копится в буферах и коммитится «Recreate», а спаны

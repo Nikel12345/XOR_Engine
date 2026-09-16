@@ -75,6 +75,7 @@ struct UpsertModelCmd {
     std::string model_path;
     std::string index_path;
     uint32_t    anchor = 0;   // AnchorShift как uint32_t (без завязки заголовка на ModelData.h)
+    std::string old_name;     // ранее выбранная модель; != name → переименование ячейки реестра
 };
 
 // Имя нового материала считает UI (свободное material_N) — чтобы сразу выбрать созданный.
