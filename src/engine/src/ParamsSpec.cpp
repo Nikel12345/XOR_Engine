@@ -75,11 +75,11 @@ const std::string& MaterialParamsTypeName(std::type_index t)
     return kNone;
 }
 
-void SetMaterialParamsBlob(Material* m, const ShaderName& sp_name,
+void SetMaterialParamsBlob(Material* m, ShaderProgramId sp_id, const std::string& sp_name,
                            const void* data, size_t size, const std::string& type_name)
 {
     if (!m || !data) return;
-    SpBinding* b = m->FindBinding(sp_name);
+    SpBinding* b = m->FindBinding(sp_id);
     if (!b) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
             "SetMaterialParams: material has no shader program '%s' - params have no addressee "

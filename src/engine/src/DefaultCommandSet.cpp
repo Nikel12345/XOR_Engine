@@ -188,7 +188,7 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> texs;
 			if (sp) for (TextureSlotRole role : sp->required_slots)
 				texs.emplace_back(role, std::vector<TextureId>{ ctx->GetTextureManager()->InternTexture(DefaultTextureForRole(role)) });
-			Material* m = ctx->GetMaterialManager()->CreateMaterial(c->name, std::move(texs), std::vector<ShaderName>{ "Lit" });
+			Material* m = ctx->GetMaterialManager()->CreateMaterial(c->name, std::move(texs), std::vector<ShaderProgramId>{ ctx->GetShaderManager()->InternShaderProgram("Lit") });
 			if (m) ctx->SetMaterialParams(m, "Lit", OpaqueMaterialParams{});   // блоб адресован Lit: её MaterialBlock
 			ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c->name);
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
@@ -202,12 +202,13 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 		{
 			const MaterialShaderCmd* c = static_cast<const MaterialShaderCmd*>(data);
 			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
+				const ShaderProgramId sp_id = ctx->GetShaderManager()->InternShaderProgram(c->shader);
 				bool present = false;
-				for (auto& b : m->shader_programs) if (b.sp == c->shader) { present = true; break; }
+				for (auto& b : m->shader_programs) if (b.sp == sp_id) { present = true; break; }
 				if (!present) {
 					// Ячейка без params: чем их наполнить, знает только автор шейдера — тип выбирается
 					// в инспекторе (движок раскладку cbuffer не выводит и не угадывает).
-					m->shader_programs.push_back(SpBinding{ c->shader, nullptr, {} });
+					m->shader_programs.push_back(SpBinding{ sp_id, nullptr, {} });
 					if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader))
 						for (TextureSlotRole role : sp->required_slots)
 							if (!m->textures.count(role)) m->textures[role] = { ctx->GetTextureManager()->InternTexture(DefaultTextureForRole(role)) };
@@ -225,7 +226,8 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			const MaterialShaderCmd* c = static_cast<const MaterialShaderCmd*>(data);
 			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c->material)) {
 				auto& sps = m->shader_programs;
-				for (size_t i = 0; i < sps.size(); ++i) if (sps[i].sp == c->shader) {
+				const ShaderProgramId sp_id = ctx->GetShaderManager()->ShaderProgramIdOf(c->shader);
+				for (size_t i = 0; i < sps.size(); ++i) if (sps[i].sp == sp_id) {
 					sps.erase(sps.begin() + i);
 					break;
 				}
@@ -373,8 +375,9 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 		[](EngineContext* ctx, const void* data)
 		{
 			const RebuildShaderPipelineCmd* c = static_cast<const RebuildShaderPipelineCmd*>(data);
-			if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c->shader)) {
-				ctx->GetShaderManager()->DeleteShaderProgram(c->shader);
+			ShaderManager* smgr = ctx->GetShaderManager();
+			if (const ShaderProgramId id = smgr->ShaderProgramIdOf(c->shader); smgr->GetShaderProgram(id)) {
+				smgr->DeleteShaderProgram(id);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 			delete c;
@@ -388,7 +391,8 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 		{
 			const RecreateShaderCmd* c = static_cast<const RecreateShaderCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
-			ShaderProgram* old = sm->GetShaderProgram(c->oldName);   // nullptr = создание с нуля
+			const ShaderProgramId old_id = sm->ShaderProgramIdOf(c->oldName);
+			ShaderProgram* old = sm->GetShaderProgram(old_id);   // nullptr = создание с нуля
 
 			// Имя результата. Правка: свободное новое → ренейм, иначе прежнее (ссылки материалов по
 			// СТАРОМУ имени НЕ чиним — конвенция движка, на пересборке дадут fallback). Создание:
@@ -396,9 +400,9 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			std::string finalName;
 			if (old)
 				finalName = (!c->newName.empty() && c->newName != c->oldName
-					&& !sm->GetShaderPrograms().count(c->newName)) ? c->newName : c->oldName;
+					&& !sm->ShaderProgramIdOf(c->newName)) ? c->newName : c->oldName;
 			else {
-				if (c->newName.empty() || sm->GetShaderPrograms().count(c->newName)) { delete c; return; }
+				if (c->newName.empty() || sm->ShaderProgramIdOf(c->newName)) { delete c; return; }
 				finalName = c->newName;
 			}
 
@@ -413,7 +417,8 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const std::string fsName = !c->fsName.empty() ? c->fsName : (old ? sm->FragmentShaders().NameOf(old->fs_id) : std::string());
 
 			if (old) {
-				sm->DeleteShaderProgram(c->oldName);
+				if (finalName != c->oldName) sm->RenameShaderProgram(old_id, finalName);
+				sm->DeleteShaderProgram(old_id);
 			}
 			// push-инструкции не переносим руками: CreateShaderProgram сам возьмёт код-байндинги из
 			// реестра ПО ИМЕНИ. Переименование = смена владельца функции — перенос со старого
@@ -456,8 +461,8 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 				sm->CreateVertexShader(c->name, c->path.c_str(), ctx->GetModelManager()->GetPool(c->pool),
 					c->pull, ctx->GetBufferManager(), c->defines);
 				const VertexShaderId vs_id = sm->VertexShaders().Find(c->name);
-				for (auto& [sn, spp] : sm->GetShaderPrograms())   // пересобрать пайплайны sp на этом vs
-					if (spp->vs_id == vs_id)
+				for (int32_t i = 0; i < sm->ShaderPrograms().Count(); ++i)   // пересобрать пайплайны sp на этом vs
+					if (ShaderProgram* spp = sm->ShaderPrograms().At(i).object.get(); spp && spp->vs_id == vs_id)
 						spp->pipeline.reset();
 				sm->SetDirtyGraphicsPipelines(true);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
@@ -475,8 +480,8 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 					sm->RenameFragmentShader(sm->FragmentShaders().Find(c->oldName), c->name);
 				sm->CreateFragmentShader(c->name, c->path.c_str(), c->defines);
 				const FragmentShaderId fs_id = sm->FragmentShaders().Find(c->name);
-				for (auto& [sn, spp] : sm->GetShaderPrograms())
-					if (spp->fs_id == fs_id)
+				for (int32_t i = 0; i < sm->ShaderPrograms().Count(); ++i)
+					if (ShaderProgram* spp = sm->ShaderPrograms().At(i).object.get(); spp && spp->fs_id == fs_id)
 						spp->pipeline.reset();
 				sm->SetDirtyGraphicsPipelines(true);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
@@ -494,9 +499,9 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 					sm->RenameComputeShader(sm->ComputeShaders().Find(c->oldName), c->name);
 				sm->CreateComputeShader(c->name, c->path.c_str(), c->defines);
 				const ComputeShaderId cs_id = sm->ComputeShaders().Find(c->name);
-				for (auto& slot : sm->GetComputeShaderPrograms())
-					if (slot.program && slot.program->cs_id == cs_id)
-						slot.program->pipeline.reset();
+				for (int32_t i = 0; i < sm->ComputePrograms().Count(); ++i)
+					if (ComputeShaderProgram* csp = sm->ComputePrograms().At(i).object.get(); csp && csp->cs_id == cs_id)
+						csp->pipeline.reset();
 				sm->SetDirtyComputePipelines(true);
 				sm->SetDirtyComputeBatches(true);
 			}

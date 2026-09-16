@@ -38,6 +38,11 @@ EngineContext::~EngineContext()
 	delete gpu_ctx;
 }
 
+ShaderProgramId EngineContext::InternShaderProgram(const std::string& name)
+{
+	return shader_manager->InternShaderProgram(name);
+}
+
 TextureAtlas* EngineContext::GetTextureAtlas(const AtlasName& name) const
 {
 	return texture_manager->GetTextureAtlas(name);
@@ -185,6 +190,9 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 		texture_ids.emplace_back(role, std::move(ids));
 	}
 	std::vector<ShaderName> shader_names(shaders.begin(), shaders.end());
+	std::vector<ShaderProgramId> shader_ids;
+	shader_ids.reserve(shader_names.size());
+	for (const ShaderName& sn : shader_names) shader_ids.push_back(shader_manager->InternShaderProgram(sn));
 
 	// ВСЕ варианты одного слота обязаны лежать в ОДНОМ атласе: на слот биндится один
 	// Texture2DArray, а UVL адресует слой внутри него — вариант из чужого атласа переключить
@@ -218,7 +226,7 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 		}
 	}
 	const std::string material_name = name;   // name уходит по move — копию держим для диагностики
-	Material* m = material_manager->CreateMaterial(std::move(name), std::move(texture_ids), std::move(shader_names));
+	Material* m = material_manager->CreateMaterial(std::move(name), std::move(texture_ids), std::move(shader_ids));
 	if (m) m->tags = tags;
 	// Слот материала = фрагментный сэмплер → атласы его текстур получают SAMPLER (сбор usage-флагов).
 	material_manager->CollectSamplerUsage(m, texture_manager, material_name);
@@ -417,7 +425,7 @@ void EngineContext::CreateGraphicsPipelines()
 		return;
 	}
 	
-	auto& shader_programs = shader_manager->GetShaderPrograms();
+	auto& shader_programs = shader_manager->ShaderPrograms();
 	pipe_manager->CreateGraphicsPiplenes(shader_programs, shader_manager, pass_manager);
 	shader_manager->SetDirtyGraphicsPipelines(false);
 }
@@ -427,7 +435,7 @@ void EngineContext::CreateComputePipelines()
 	if (!shader_manager->IsDirtyComputePipelines()) {
 		return;
 	}
-	auto& compute_shader_programs = shader_manager->GetComputeShaderPrograms();
+	auto& compute_shader_programs = shader_manager->ComputePrograms();
 	pipe_manager->CreateComputePipelines(compute_shader_programs, shader_manager);
 	shader_manager->SetDirtyComputePipelines(false);
 }

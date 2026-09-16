@@ -20,6 +20,8 @@ struct ComputeShaderCell  { std::string name; std::unique_ptr<ComputeShaderData>
 using VertexShaderRegistry   = ResourceRegistry<VertexShaderCell,   VertexShaderId>;
 using FragmentShaderRegistry = ResourceRegistry<FragmentShaderCell, FragmentShaderId>;
 using ComputeShaderRegistry  = ResourceRegistry<ComputeShaderCell,  ComputeShaderId>;
+using ShaderProgramRegistry  = ResourceRegistry<ShaderProgramCell,  ShaderProgramId>;
+using ComputeProgramRegistry = ResourceRegistry<ComputeProgramCell, ComputeProgramId>;
 
 class ShaderManager
 {
@@ -65,15 +67,18 @@ public:
 	const ComputeShaderRegistry&  ComputeShaders() const  { return compute_shaders; }
 
 	bool IsVertexShaderUsed(VertexShaderId id) const {
-		for (auto& [n, sp] : shader_programs) if (sp->vs_id == id) return true;
+		for (int32_t i = 0; i < shader_programs.Count(); ++i)
+			if (const ShaderProgram* sp = shader_programs.At(i).object.get(); sp && sp->vs_id == id) return true;
 		return false;
 	}
 	bool IsFragmentShaderUsed(FragmentShaderId id) const {
-		for (auto& [n, sp] : shader_programs) if (sp->fs_id == id) return true;
+		for (int32_t i = 0; i < shader_programs.Count(); ++i)
+			if (const ShaderProgram* sp = shader_programs.At(i).object.get(); sp && sp->fs_id == id) return true;
 		return false;
 	}
 	bool IsComputeShaderUsed(ComputeShaderId id) const {
-		for (auto& slot : compute_shader_programs) if (slot.program && slot.program->cs_id == id) return true;
+		for (int32_t i = 0; i < compute_shader_programs.Count(); ++i)
+			if (const ComputeShaderProgram* p = compute_shader_programs.At(i).object.get(); p && p->cs_id == id) return true;
 		return false;
 	}
 
@@ -96,9 +101,17 @@ public:
 	ComputeShaderData CreateComputeShaderFromSPV(const char* spv_path);
 
 	ShaderProgram* GetShaderProgram(const ShaderName& name);
-	void DeleteShaderProgram(const std::string& name) { shader_programs.erase(name); }
+	ShaderProgram* GetShaderProgram(ShaderProgramId id) const { return shader_programs.Get(id); }
+	ShaderProgramId    ShaderProgramIdOf(const std::string& name) const { return shader_programs.Find(name); }
+	ShaderProgramId    InternShaderProgram(const std::string& name)     { return shader_programs.Intern(name); }
+	const std::string& ShaderProgramNameOf(ShaderProgramId id) const    { return shader_programs.NameOf(id); }
+	bool DeleteShaderProgram(ShaderProgramId id) { return shader_programs.Erase(id); }
+	bool RenameShaderProgram(ShaderProgramId id, const std::string& new_name) { return Rename(shader_programs, id, new_name); }
 
 	ComputeShaderProgram* GetComputeShaderProgram(const std::string& name);
+	ComputeShaderProgram* GetComputeShaderProgram(ComputeProgramId id) const { return compute_shader_programs.Get(id); }
+	ComputeProgramId   ComputeProgramIdOf(const std::string& name) const { return compute_shader_programs.Find(name); }
+	const std::string& ComputeProgramNameOf(ComputeProgramId id) const   { return compute_shader_programs.NameOf(id); }
 
 	using PushFunc     = ::PushFunc;
 	using DispatchFunc = std::function<void(DispatchSizeBinder&, const void*)>;
@@ -144,8 +157,8 @@ public:
 
 	void ReportOrphanCodeBindings();
 
-	std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& GetShaderPrograms() { return shader_programs; }
-	std::vector<ComputeProgramSlot>& GetComputeShaderPrograms() { return compute_shader_programs; };
+	ShaderProgramRegistry&  ShaderPrograms()  { return shader_programs; }
+	ComputeProgramRegistry& ComputePrograms() { return compute_shader_programs; }
 
 	bool IsDirtyGraphicsPipelines() const { return dirty_graphics_pipelines; }
 	void SetDirtyGraphicsPipelines(bool dirty) { dirty_graphics_pipelines = dirty; }
@@ -179,9 +192,8 @@ private:
 
 	std::string m_cacheBasePath;
 
-	std::unordered_map<std::string, std::unique_ptr<ShaderProgram>> shader_programs;
-
-	std::vector<ComputeProgramSlot> compute_shader_programs;
+	ShaderProgramRegistry  shader_programs;
+	ComputeProgramRegistry compute_shader_programs;
 
 	// compute_shaders владеет сырым spv_code: free в деструкторе идёт отсюда.
 	VertexShaderRegistry   vertex_shaders;

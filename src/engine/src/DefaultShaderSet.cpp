@@ -133,7 +133,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 			"fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"fallback_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
 			{ }, ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
-		ctx->GetBatchBuilder()->SetFallbackShader("Fallback");
+		ctx->GetBatchBuilder()->SetFallbackShader(ctx->GetShaderManager()->InternShaderProgram("Fallback"));
 	}
 
 	ctx->CreateVertexShader("main_pass_vs", "../engine/shaders_code/main_pass/main_pass.vert.hlsl",

@@ -172,14 +172,20 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
         if (ImGui::BeginTabItem("Shaders")) {                                        // graphics sp (создание/правка в UI)
             tiles(SelKind::Shader, true,
                 [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Shader; g_sel.name = ""; },   // + = форма новой sp
-                [&](auto&& emit) { for (auto& [name, sp] : ctx->GetShaderManager()->GetShaderPrograms())
-                                       if (g_show_internal || !HasTag(sp->tags, ResourceTag::System)) emit(name); });
+                [&](auto&& emit) { ShaderProgramRegistry& reg = ctx->GetShaderManager()->ShaderPrograms();
+                                   for (int32_t i = 0; i < reg.Count(); ++i) {
+                                       const ShaderProgramCell& c = reg.At(i);
+                                       if (c.object && (g_show_internal || !HasTag(c.object->tags, ResourceTag::System))) emit(c.name);
+                                   } });
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Compute")) {                                        // compute sp
             tiles(SelKind::Compute, false, []{},
-                [&](auto&& emit) { for (auto& slot : ctx->GetShaderManager()->GetComputeShaderPrograms())
-                                       if (slot.program && (g_show_internal || !HasTag(slot.program->tags, ResourceTag::System))) emit(slot.name); });
+                [&](auto&& emit) { ComputeProgramRegistry& reg = ctx->GetShaderManager()->ComputePrograms();
+                                   for (int32_t i = 0; i < reg.Count(); ++i) {
+                                       const ComputeProgramCell& c = reg.At(i);
+                                       if (c.object && (g_show_internal || !HasTag(c.object->tags, ResourceTag::System))) emit(c.name);
+                                   } });
             ImGui::EndTabItem();
         }
         // Шаги кадра в порядке исполнения. Редактируется их state (см. ComputePassStep::state)

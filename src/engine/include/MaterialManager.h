@@ -8,6 +8,7 @@
 #include "ParamsSpec.h"
 
 class TextureManager;   // только в сигнатуре CollectSamplerUsage — передаётся на вызове
+class ShaderManager;
 
 // Запись манифеста материалов сцены (materials.json): всё для пересоздания. params — блоб,
 // уже собранный по схеме типа params_type (разбор json ↔ поля — в Engine_Scene), и он
@@ -33,12 +34,12 @@ public:
 	// Материал хранит ссылки: текстуры — по id ячейки, sp — по имени. Перевод имён в id и валидация
 	// required_slots — у вызывающего (EngineContext::CreateMaterial): сюда приходят уже готовые
 	// ссылки, менеджер их просто складывает. Пустая/неразрешимая сейчас — допустима (резолв на сборке батча).
-	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> textures, std::vector<ShaderName> shaders);
+	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> textures, std::vector<ShaderProgramId> shaders);
 
 	// Merge-upsert материалов из манифеста (см. SceneMaterialEntry). Существующий обновляется
 	// В МЕСТЕ, новый создаётся. params/params_type проставляются напрямую. Материалы вне
 	// манифеста не трогаются. Возвращает число обработанных.
-	size_t LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries, TextureManager* tm);
+	size_t LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries, TextureManager* tm, ShaderManager* sm);
 
 	size_t ClearSceneMaterials();
 
@@ -66,8 +67,6 @@ public:
 	// Реестр материалов (для UI/инспектора). Pointee не const — params можно крутить на лету.
 	const MaterialRegistry& Materials() const { return materials; }
 
-	// Имя — поле ЯЧЕЙКИ; ссылающиеся держат её id, поэтому переименование их не касается.
-	// false, если имена совпали / новое занято / старого нет.
 	bool RenameMaterial(MaterialId id, const std::string& newName) {
 		if (!materials.Get(id) || newName.empty()) return false;
 		const MaterialId taken = materials.Find(newName);
@@ -79,8 +78,7 @@ public:
 	// Тип-безопасная упаковка per-sp факторов в блоб ячейки (непрозрачные байты для рендера).
 	// T должен совпадать по размеру/раскладке с cbuffer MaterialBlock ИМЕННО ЭТОЙ sp И быть
 	// зарегистрирован в ParamsSpecRegistry (оттуда берётся имя типа для тега).
-	template<class T>
-	void SetMaterialParams(Material* m, const ShaderName& sp_name, const T& p) { ::SetMaterialParams(m, sp_name, p); }
+
 
 	~MaterialManager();
 private:

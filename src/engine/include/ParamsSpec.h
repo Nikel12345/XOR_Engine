@@ -174,16 +174,16 @@ inline const void* ParamsFieldPtr(const std::vector<uint8_t>& blob, const Params
 // Запись блоба в ячейку sp: адресат — ИМЕННО эта sp материала, а не «материал вообще».
 // Нет такой sp у материала → блобу некому ехать, поэтому это ошибка, а не тихий no-op.
 // Не шаблон, чтобы заголовок не тянул SDL ради одного лога.
-void SetMaterialParamsBlob(Material* m, const ShaderName& sp_name,
+void SetMaterialParamsBlob(Material* m, ShaderProgramId sp_id, const std::string& sp_name,
                            const void* data, size_t size, const std::string& type_name);
 
 // Тип-безопасная упаковка per-sp факторов (T = раскладка cbuffer MaterialBlock этой sp).
 // Имя типа берётся из реестра — тег и блоб не могут разойтись.
 // Мутация байт на месте НЕ трогает адрес блоба → ключ texture-батча цел (правка без ребилда).
 template<class T>
-void SetMaterialParams(Material* m, const ShaderName& sp_name, const T& p)
+void SetMaterialParams(Material* m, ShaderProgramId sp_id, const std::string& sp_name, const T& p)
 {
-    SetMaterialParamsBlob(m, sp_name, &p, sizeof(T), MaterialParamsTypeName(std::type_index(typeid(T))));
+    SetMaterialParamsBlob(m, sp_id, sp_name, &p, sizeof(T), MaterialParamsTypeName(std::type_index(typeid(T))));
 }
 
 // Типизированное чтение блоба sp: nullptr, если sp нет у материала, тип другой/не зарегистрирован

@@ -10,24 +10,26 @@ PipeManager::PipeManager(SDL_GPUDevice* dev, SDL_Window* win) {
     this->dev = dev;
 }
 
-void PipeManager::CreateGraphicsPiplenes(std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& shader_programs, ShaderManager* sm, PassManager* pass_manager)
+void PipeManager::CreateGraphicsPiplenes(ShaderProgramRegistry& shader_programs, ShaderManager* sm, PassManager* pass_manager)
 {
-    for (auto& pair : shader_programs) {
-        ShaderProgram* sp = pair.second.get();
-        auto pipe = GetOrCreatePipeline(sp, sm, pass_manager);
+    for (int32_t i = 0; i < shader_programs.Count(); ++i) {
+        const ShaderProgramCell& cell = shader_programs.At(i);
+        if (!cell.object) continue;
+        auto pipe = GetOrCreatePipeline(cell.object.get(), sm, pass_manager);
         if (!pipe) {
-			SDL_Log("Failed to create pipeline for shader program: %s", pair.first.c_str());
+			SDL_Log("Failed to create pipeline for shader program: %s", cell.name.c_str());
         }
 	}
 }
 
-void PipeManager::CreateComputePipelines(std::vector<ComputeProgramSlot>& compute_shader_programs, ShaderManager* sm)
+void PipeManager::CreateComputePipelines(ComputeProgramRegistry& compute_shader_programs, ShaderManager* sm)
 {
-    for (auto& slot : compute_shader_programs) {
-        if (!slot.program) continue;
-		auto pipe = GetOrCreateComputePipeline(slot.program.get(), sm);
+    for (int32_t i = 0; i < compute_shader_programs.Count(); ++i) {
+        const ComputeProgramCell& cell = compute_shader_programs.At(i);
+        if (!cell.object) continue;
+		auto pipe = GetOrCreateComputePipeline(cell.object.get(), sm);
         if (!pipe) {
-            SDL_Log("Failed to create compute pipeline for shader program: %s", slot.name.c_str());
+            SDL_Log("Failed to create compute pipeline for shader program: %s", cell.name.c_str());
 		}
     }
 }

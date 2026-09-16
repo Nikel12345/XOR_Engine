@@ -2,12 +2,13 @@
 #include "MaterialManager.h"
 #include "TextureData.h"
 #include "TextureManager.h"
+#include "ShaderManager.h"
 
 MaterialManager::MaterialManager()
 {
 }
 
-Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> textures, std::vector<ShaderName> shaders)
+Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> textures, std::vector<ShaderProgramId> shaders)
 {
 	const MaterialId id = materials.Intern(name);
 	if (Material* existing = materials.Get(id)) {
@@ -20,7 +21,7 @@ Material* MaterialManager::CreateMaterial(std::string name, std::vector<std::pai
 	auto data = std::make_unique<Material>();
 	// Ячейка на каждую sp; данных у неё пока нет (их кладёт SetMaterialParams по имени sp).
 	data->shader_programs.reserve(shaders.size());
-	for (ShaderName& sp_name : shaders) data->shader_programs.push_back(SpBinding{ std::move(sp_name), nullptr, {} });
+	for (ShaderProgramId sp_id : shaders) data->shader_programs.push_back(SpBinding{ sp_id, nullptr, {} });
 	for (auto& [role, tex_ids] : textures) {
 		data->textures[role] = std::move(tex_ids);
 	}
@@ -39,7 +40,7 @@ size_t MaterialManager::ClearSceneMaterials()
 	return removed;
 }
 
-size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries, TextureManager* tm)
+size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>& entries, TextureManager* tm, ShaderManager* sm)
 {
 	size_t n = 0;
 	for (const SceneMaterialEntry& e : entries) {
@@ -59,7 +60,7 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 		m->shader_programs.reserve(e.shaders.size());
 		for (const SceneShaderEntry& se : e.shaders) {
 			SpBinding b;
-			b.sp = se.name;
+			b.sp = sm ? sm->InternShaderProgram(se.name) : ShaderProgramId{};
 			b.params_type = se.params_type;
 			if (!se.params.empty()) b.params = std::make_shared<std::vector<uint8_t>>(se.params);
 			m->shader_programs.push_back(std::move(b));

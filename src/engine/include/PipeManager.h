@@ -4,12 +4,9 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
 #include "config.h"
+#include "ShaderManager.h"
 
-class ShaderManager;
 class PassManager;
-struct ShaderProgram;
-struct ComputeShaderProgram;
-struct ComputeProgramSlot;
 
 class PipeManager
 {
@@ -17,8 +14,8 @@ public:
 	PipeManager(SDL_GPUDevice* device, SDL_Window* win);
 	// pass_manager — резолвер прохода sp по имени (sp хранит имя, не указатель), тем же
 	// параметром, что и ShaderManager: PipeManager чужих менеджеров не держит.
-	void CreateGraphicsPiplenes(std::unordered_map<std::string, std::unique_ptr<ShaderProgram>>& shader_programs, ShaderManager* sm, PassManager* pass_manager);
-	void CreateComputePipelines(std::vector<ComputeProgramSlot>& compute_shader_programs, ShaderManager* sm);
+	void CreateGraphicsPiplenes(ShaderProgramRegistry& shader_programs, ShaderManager* sm, PassManager* pass_manager);
+	void CreateComputePipelines(ComputeProgramRegistry& compute_shader_programs, ShaderManager* sm);
 
 	SDL_GPUColorTargetDescription MakeDefaultColorTarget();
 	SDL_GPUColorTargetDescription MakeNoColorTarget();

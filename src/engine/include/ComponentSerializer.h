@@ -44,8 +44,6 @@ struct FieldSpec {
     // макросы ниже: каптурлесс-лямбды, поэтому это обычные указатели на функции.
     double (*get_num)(Archetype&, size_t) = nullptr;
     void   (*set_num)(Archetype&, size_t, double) = nullptr;
-    // std::function, а не указатель: поле-ссылка на ресурс регистрируется слоем, который знает
-    // менеджер, и переводит id в имя захватом. EngineEcs менеджеры не называет.
     std::function<const std::string&(Archetype&, size_t)> get_str;
     std::function<void(Archetype&, size_t, std::string)>  set_str;
 

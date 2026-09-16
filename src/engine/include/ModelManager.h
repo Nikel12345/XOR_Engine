@@ -51,7 +51,6 @@ public:
 
 
 	bool DeleteModel(ModelId id);
-	// Имя — поле ЯЧЕЙКИ; ссылающиеся держат её id, поэтому переименование их не касается.
 	bool RenameModel(ModelId id, const std::string& new_name);
 
 	size_t LoadSceneModels(const std::vector<SceneModelEntry>& entries);

@@ -27,10 +27,10 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
     const std::string& fs_name, std::vector<BufferDataName> fragment_shader_buffer_names,
     const std::vector<TextureSlotRole>& texture_slots, BufferManager* bm)
 {
-    auto it = shader_programs.find(name);
-    if (it != shader_programs.end()) {
+    const ShaderProgramId id = shader_programs.Intern(name);
+    if (ShaderProgram* existing = shader_programs.Get(id)) {
         SDL_Log("Shader program '%s' already exists, returning existing program.", name.c_str());
-        return it->second.get();
+        return existing;
     }
 
     auto program = std::make_unique<ShaderProgram>();
@@ -63,7 +63,7 @@ ShaderProgram* ShaderManager::CreateShaderProgram(
 
     ShaderProgram* ptr = program.get();
 
-    shader_programs.emplace(name, std::move(program));
+    shader_programs.Put(id, std::move(program));
 
 	dirty_graphics_pipelines = true;
     return ptr;
@@ -130,7 +130,7 @@ ComputeShaderProgram* ShaderManager::CreateComputeShaderProgram(const std::strin
 
 
     ComputeShaderProgram* ptr = result.get();
-    compute_shader_programs.push_back({ name, std::move(result) });
+    compute_shader_programs.Put(compute_shader_programs.Intern(name), std::move(result));
 
     dirty_compute_pipelines = true;
     dirty_compute_batches = true;
@@ -184,8 +184,7 @@ PushInstructions ShaderManager::CollectPushInstructions(const std::string& sp_na
     PushInstructions out;
     SlotCounter slots;
 
-    if (auto sit = shader_programs.find(sp_name); sit != shader_programs.end()) {
-        const ShaderProgram* sp = sit->second.get();
+    if (const ShaderProgram* sp = shader_programs.Get(shader_programs.Find(sp_name))) {
         if (const VertexShaderData* vs = vertex_shaders.Get(sp->vs_id))
             AddKindInstructions(out, &slots, vs->push_kinds, vertex_shaders.NameOf(sp->vs_id));
         if (const FragmentShaderData* fs = fragment_shaders.Get(sp->fs_id))
@@ -195,15 +194,15 @@ PushInstructions ShaderManager::CollectPushInstructions(const std::string& sp_na
     for (const ShaderPushInstruction& instr : push_instructions_)
         if (instr.program_name == sp_name) slots.Add(out, instr.stage, instr.fn);
 
-    if (auto sit = shader_programs.find(sp_name); sit != shader_programs.end()) {
-        if (const FragmentShaderData* fs = fragment_shaders.Get(sit->second->fs_id)) {
+    if (const ShaderProgram* sp2 = shader_programs.Get(shader_programs.Find(sp_name))) {
+        if (const FragmentShaderData* fs = fragment_shaders.Get(sp2->fs_id)) {
             const Uint32 declared = fs->shader_data.num_uniform_buffers;
             if (slots.next[static_cast<size_t>(PushStage::Fragment)] != declared)
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                     "sp '%s': fragment-инструкций %u, а шейдер '%s' объявил %u uniform-блоков "
                     "- проверь маркеры //@push (порядок и наличие)",
                     sp_name.c_str(), slots.next[static_cast<size_t>(PushStage::Fragment)],
-                    fragment_shaders.NameOf(sit->second->fs_id).c_str(), declared);
+                    fragment_shaders.NameOf(sp2->fs_id).c_str(), declared);
         }
     }
 
@@ -244,10 +243,7 @@ void ShaderManager::ReportOrphanCodeBindings()
             if (!lookup(instr.program_name)) orphans.insert(instr.program_name);
     };
 
-    auto find_sp = [this](const std::string& n) -> ShaderProgram* {
-        auto it = shader_programs.find(n);
-        return it != shader_programs.end() ? it->second.get() : nullptr;
-    };
+    auto find_sp = [this](const std::string& n) { return shader_programs.Get(shader_programs.Find(n)); };
     auto find_csp = [this](const std::string& n) { return GetComputeShaderProgram(n); };
 
     check_named(push_instructions_, find_sp);
@@ -266,15 +262,14 @@ size_t ShaderManager::ClearSceneShaders()
 {
     size_t removed = 0;
 
-    const size_t sp_before = shader_programs.size();
-    std::erase_if(shader_programs,
-        [](const auto& kv) { return !kv.second || !HasTag(kv.second->tags, ResourceTag::CodeOwned); });
-    removed += sp_before - shader_programs.size();
-
-    const size_t csp_before = compute_shader_programs.size();
-    std::erase_if(compute_shader_programs,
-        [](const ComputeProgramSlot& s) { return !s.program || !HasTag(s.program->tags, ResourceTag::CodeOwned); });
-    removed += csp_before - compute_shader_programs.size();
+    for (int32_t i = 0; i < shader_programs.Count(); ++i) {
+        const ShaderProgram* sp = shader_programs.At(i).object.get();
+        if (sp && !HasTag(sp->tags, ResourceTag::CodeOwned)) removed += shader_programs.Erase(ShaderProgramId{ i }) ? 1 : 0;
+    }
+    for (int32_t i = 0; i < compute_shader_programs.Count(); ++i) {
+        const ComputeShaderProgram* csp = compute_shader_programs.At(i).object.get();
+        if (csp && !HasTag(csp->tags, ResourceTag::CodeOwned)) removed += compute_shader_programs.Erase(ComputeProgramId{ i }) ? 1 : 0;
+    }
 
     auto doomed = [](const auto& registry) {
         std::vector<decltype(registry.Find(""))> out;
@@ -299,11 +294,9 @@ size_t ShaderManager::ClearSceneShaders()
 
 ShaderProgram* ShaderManager::GetShaderProgram(const ShaderName& name)
 {
-    auto it = shader_programs.find(name);
-    if (it != shader_programs.end())
-        return it->second.get();
-    SDL_Log("Shader program '%s' not found", name.c_str());
-    return nullptr;
+    ShaderProgram* sp = shader_programs.Get(shader_programs.Find(name));
+    if (!sp) SDL_Log("Shader program '%s' not found", name.c_str());
+    return sp;
 }
 
 VertexShaderData* ShaderManager::GetVertexShader(const std::string& name)
@@ -335,9 +328,7 @@ bool ShaderManager::DeleteComputeShader(ComputeShaderId id)
 
 ComputeShaderProgram* ShaderManager::GetComputeShaderProgram(const std::string& name)
 {
-    for (auto& slot : compute_shader_programs)
-        if (slot.name == name) return slot.program.get();
-	return nullptr;
+    return compute_shader_programs.Get(compute_shader_programs.Find(name));
 }
 
 ShaderManager::~ShaderManager()
@@ -348,7 +339,7 @@ ShaderManager::~ShaderManager()
 	}
 	// Явного SDL_ReleaseGPUShader нет: шарящийся vs словил бы double-free. Шейдеры отпускают
 	// реестры при разрушении членов — device к этому моменту ещё жив (см. ~Engine).
-	shader_programs.clear();
+	for (int32_t i = 0; i < shader_programs.Count(); ++i) shader_programs.Erase(ShaderProgramId{ i });
 	SDL_ShaderCross_Quit();
 }
 

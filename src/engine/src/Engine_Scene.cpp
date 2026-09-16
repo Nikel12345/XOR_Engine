@@ -453,7 +453,10 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManage
 
 	// SP сгруппированы ПО ТИПУ (как SD), без поля "kind" внутри записи.
 	yyjson_mut_val* spa = d.Arr("render_shader_programs");
-	for (auto& [name, sp] : sm->GetShaderPrograms()) {
+	for (int32_t spi = 0; spi < sm->ShaderPrograms().Count(); ++spi) {
+		const ShaderProgramCell& spcell = sm->ShaderPrograms().At(spi);
+		const ShaderProgram* sp = spcell.object.get();
+		const std::string& name = spcell.name;
 		if (!sp || HasTag(sp->tags, ResourceTag::CodeOwned)) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, spa);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", name.c_str());
@@ -470,7 +473,10 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManage
 	// ПОРЯДОК МАССИВА ЗНАЧИМ: он же порядок исполнения внутри прохода. Пишем в порядке вектора —
 	// ровно в том, в каком программы создавались.
 	yyjson_mut_val* cspa = d.Arr("compute_shader_programs");
-	for (auto& [csp_name, csp] : sm->GetComputeShaderPrograms()) {
+	for (int32_t cspi = 0; cspi < sm->ComputePrograms().Count(); ++cspi) {
+		const ComputeProgramCell& cspcell = sm->ComputePrograms().At(cspi);
+		const ComputeShaderProgram* csp = cspcell.object.get();
+		const std::string& csp_name = cspcell.name;
 		if (!csp || HasTag(csp->tags, ResourceTag::CodeOwned)) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, cspa);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name", csp_name.c_str());
@@ -496,7 +502,7 @@ static void SaveShaders(const std::string& dir, ShaderManager* sm, TextureManage
 
 // Скип CodeOwned (кодовая инфраструктура). Текстуры — по роли, sp — по имени, params — объект
 // именованных полей по схеме типа (params_type).
-static void SaveMaterials(const std::string& dir, MaterialManager* mtm, TextureManager* tm)
+static void SaveMaterials(const std::string& dir, MaterialManager* mtm, TextureManager* tm, ShaderManager* sm)
 {
 	MutDoc d;
 	yyjson_mut_val* arr = d.Arr("materials");
@@ -512,7 +518,7 @@ static void SaveMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 		yyjson_mut_val* sh = yyjson_mut_obj_add_arr(d.doc, e, "shaders");
 		for (const SpBinding& b : m->shader_programs) {
 			yyjson_mut_val* so = yyjson_mut_arr_add_obj(d.doc, sh);
-			yyjson_mut_obj_add_strcpy(d.doc, so, "name", b.sp.c_str());
+			yyjson_mut_obj_add_strcpy(d.doc, so, "name", sm->ShaderProgramNameOf(b.sp).c_str());
 			if (!b.params || b.params->empty()) continue;
 			// Незарегистрированный тип сохранить нечем (раскладка неизвестна) — громко говорим
 			// об этом, а не пишем молча битую запись: sp загрузится без params.
@@ -523,7 +529,7 @@ static void SaveMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 			else
 				SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
 					"SaveScene: material '%s' sp '%s' has params of unregistered type '%s' (%zu bytes) - NOT saved",
-					name.c_str(), b.sp.c_str(), b.params_type.c_str(), b.params->size());
+					name.c_str(), sm->ShaderProgramNameOf(b.sp).c_str(), b.params_type.c_str(), b.params->size());
 		}
 
 		yyjson_mut_val* tex = yyjson_mut_obj_add_arr(d.doc, e, "textures");
@@ -563,7 +569,7 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& scenes_ro
 	SaveTextures (dir, texture_manager);
 	SaveModels   (dir, model_manager);
 	SaveShaders  (dir, shader_manager, texture_manager);
-	SaveMaterials(dir, material_manager, texture_manager);
+	SaveMaterials(dir, material_manager, texture_manager, shader_manager);
 
 	SDL_Log("SaveScene: wrote scene '%s' to '%s'", scene_name.c_str(), dir.c_str());
 }
@@ -623,8 +629,9 @@ static void LoadShaderData(yyjson_val* root, ShaderManager* sm, ModelManager* mm
 	auto invalidate = [sm](const std::string& name, bool vertex) {
 		const VertexShaderId   vs_id = sm->VertexShaders().Find(name);
 		const FragmentShaderId fs_id = sm->FragmentShaders().Find(name);
-		for (auto& [sp_name, sp] : sm->GetShaderPrograms())
-			if (vertex ? (sp->vs_id == vs_id) : (sp->fs_id == fs_id)) sp->pipeline.reset();
+		for (int32_t i = 0; i < sm->ShaderPrograms().Count(); ++i)
+			if (ShaderProgram* sp = sm->ShaderPrograms().At(i).object.get())
+				if (vertex ? (sp->vs_id == vs_id) : (sp->fs_id == fs_id)) sp->pipeline.reset();
 	};
 
 	ForEachIn(root, "vertex_shaders", [&](yyjson_val* e) {
@@ -661,7 +668,7 @@ static void LoadRenderPrograms(yyjson_val* root, ShaderManager* sm, BufferManage
 		// Занятое имя = delete+create (erase на отсутствующем имени — no-op).
 		// push-инструкции НЕ переносим: их вернёт реестр код-байндингов по имени (внутри
 		// CreateShaderProgram) — перенос со старой sp ломался бы на переименовании.
-		sm->DeleteShaderProgram(name);
+		sm->DeleteShaderProgram(sm->ShaderProgramIdOf(name));
 		sm->CreateShaderProgram(name, ReadSpd(yyjson_obj_get(e, "spd")), JsonStr(e, "pass"),
 			JsonStr(e, "vs"), ReadBufferNames(bm, e, "vs_buffers"),
 			JsonStr(e, "fs"), ReadBufferNames(bm, e, "fs_buffers"),
@@ -716,7 +723,7 @@ static void LoadShaders(const std::string& dir, ShaderManager* sm, ModelManager*
 
 // ПОСЛЕ шейдеров и текстур: ссылается на них по имени, хотя резолв всё равно ленивый на сборке
 // батча.
-static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureManager* tm)
+static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureManager* tm, ShaderManager* sm)
 {
 	ReadDoc d(dir, "materials.json");
 	if (!d) return;
@@ -765,7 +772,7 @@ static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 		entries.push_back(std::move(me));
 	});
 
-	const size_t n = mtm->LoadSceneMaterials(entries, tm);
+	const size_t n = mtm->LoadSceneMaterials(entries, tm, sm);
 	// Сбор usage-флагов: текстуры сцены загружены РАНЬШЕ материалов, поэтому имена уже резолвятся
 	// в атласы, и те получают SAMPLER до ближайшего бейка.
 	for (const SceneMaterialEntry& e : entries)
@@ -816,7 +823,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 	{ PhaseTimer t(tex_ms); LoadTextures (dir, texture_manager, engine_context); }
 	{ PhaseTimer t(mdl_ms); LoadModels   (dir, model_manager); }
 	{ PhaseTimer t(shd_ms); LoadShaders  (dir, shader_manager, model_manager, buffer_manager, texture_manager); }
-	{ PhaseTimer t(mat_ms); LoadMaterials(dir, material_manager, texture_manager); }
+	{ PhaseTimer t(mat_ms); LoadMaterials(dir, material_manager, texture_manager, shader_manager); }
 
 	// Replace-on-load: сносим прежнее содержимое сцены ДО наполнения — иначе загрузка дописала бы
 	// поверх (дубликаты сущностей). Делаем это только после успешного открытия файла, чтобы кривой

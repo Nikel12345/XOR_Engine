@@ -99,7 +99,12 @@ struct ComputeShaderProgram {
     std::string debug_name;
 };
 
-struct ComputeProgramSlot {
+struct ShaderProgramCell {
     std::string name;
-    std::unique_ptr<ComputeShaderProgram> program;
+    std::unique_ptr<ShaderProgram> object;
+};
+
+struct ComputeProgramCell {
+    std::string name;
+    std::unique_ptr<ComputeShaderProgram> object;
 };

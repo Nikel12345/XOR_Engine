@@ -80,7 +80,8 @@ public:
 	// Реализация одна на всех — свободный ::SetMaterialParams из ParamsSpec.h (он же
 	// проставляет имя типа из реестра); фасад лишь пробрасывает, не завися от MaterialManager.h.
 	template<class T>
-	void SetMaterialParams(Material* m, const ShaderName& sp_name, const T& p) { ::SetMaterialParams(m, sp_name, p); }
+	void SetMaterialParams(Material* m, const ShaderName& sp_name, const T& p) { ::SetMaterialParams(m, InternShaderProgram(sp_name), sp_name, p); }
+	ShaderProgramId InternShaderProgram(const std::string& name);
 
 	// Какой вариант слот-роли показывает сущность (MaterialRef::states). Правка поля НА МЕСТЕ:
 	// архетип не меняется, дерево батчей не трогается вовсе — в этом вся идея переключаемых

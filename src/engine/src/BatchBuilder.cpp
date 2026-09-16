@@ -182,7 +182,7 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
 
     TextureHandle* dummy = tm ? tm->GetTextureHandle(dummy_texture) : nullptr;
     if (dummy && !dummy->atlas) dummy = nullptr;
-    ShaderProgram* fallback = fallback_shader_name.empty() ? nullptr : sm->GetShaderProgram(fallback_shader_name);
+    ShaderProgram* fallback = sm->GetShaderProgram(fallback_sp);
 
     std::vector<const TextureHandle*> block_handles;
 
@@ -301,18 +301,18 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
         for (const SpBinding& binding : material->shader_programs)
         {
-            const ShaderName& sp_name = binding.sp;
             const std::shared_ptr<std::vector<uint8_t>>& sp_params =
                 (binding.params && !binding.params->empty()) ? binding.params : kNoParams;
-            ShaderProgram* sp = sm ? sm->GetShaderProgram(sp_name) : nullptr;
+            ShaderProgram* sp = sm ? sm->GetShaderProgram(binding.sp) : nullptr;
             // Имя РЕАЛЬНО взятой программы: по нему резолвятся push-инструкции, и на фолбэк-ветке
             // с запрошенным именем программа получила бы чужие пуши.
-            const ShaderName* resolved_name = &sp_name;
+            ShaderProgramId resolved_id = binding.sp;
             if (!sp) {
-                sp = (sm && !fallback_shader_name.empty()) ? sm->GetShaderProgram(fallback_shader_name) : nullptr;
+                sp = sm ? sm->GetShaderProgram(fallback_sp) : nullptr;
                 if (!sp) continue;
-                resolved_name = &fallback_shader_name;
+                resolved_id = fallback_sp;
             }
+            const ShaderName* resolved_name = &sm->ShaderProgramNameOf(resolved_id);
             RenderPassStep* rp = pass_manager->GetRenderPassStep(sp->render_pass_name);
             if (!rp) continue;
 
@@ -654,8 +654,9 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         rp->shader_batches.clear();
     }
 
-    for (auto& slot : sm->GetComputeShaderPrograms()) {
-        ComputeShaderProgram* sp = slot.program.get();
+    for (int32_t ci = 0; ci < sm->ComputePrograms().Count(); ++ci) {
+        const ComputeProgramCell& slot = sm->ComputePrograms().At(ci);
+        ComputeShaderProgram* sp = slot.object.get();
         if (!sp) continue;
         auto pipe = pm->GetComputePipeline(sp);
         if (!pipe) continue;

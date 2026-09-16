@@ -188,7 +188,7 @@ namespace {
 
         for (size_t si = 0; si < mat->shader_programs.size(); ++si) {
             SpBinding& binding = mat->shader_programs[si];
-            const std::string spName = binding.sp;
+            const std::string spName = sm->ShaderProgramNameOf(binding.sp);
             ImGui::PushID(static_cast<int>(si));
 
             if (ImGui::SmallButton("x"))                       // убрать этот sp
@@ -197,8 +197,7 @@ namespace {
             ImGui::TextUnformatted(spName.c_str());
 
             // Резолв sp через карту (GetShaderProgram логирует промах — спамил бы каждый кадр).
-            auto spIt = sm->GetShaderPrograms().find(spName);
-            ShaderProgram* sp = (spIt != sm->GetShaderPrograms().end()) ? spIt->second.get() : nullptr;
+            ShaderProgram* sp = sm->GetShaderProgram(binding.sp);
             if (!sp) MissingRefMark("shader program not found — renders with fallback");
 
             // Слоты этого sp; значение — из общей карты по роли (правка отражается во всех sp с этой ролью).
@@ -352,13 +351,16 @@ namespace {
 
         // Добавить sp (перечень graphics sp, ещё не добавленных материалу).
         if (ImGui::BeginCombo("+ Shader", "(add)")) {
-            for (auto& [spn, spp] : sm->GetShaderPrograms()) {
-                if (!g_show_internal && HasTag(spp->tags, ResourceTag::System)) continue;   // служебная: руками не выбирают
+            ShaderProgramRegistry& spreg = sm->ShaderPrograms();
+            for (int32_t i = 0; i < spreg.Count(); ++i) {
+                const ShaderProgramCell& spc = spreg.At(i);
+                if (!spc.object) continue;
+                if (!g_show_internal && HasTag(spc.object->tags, ResourceTag::System)) continue;   // служебная: руками не выбирают
                 bool present = false;
-                for (auto& b : mat->shader_programs) if (b.sp == spn) { present = true; break; }
+                for (auto& b : mat->shader_programs) if (b.sp == ShaderProgramId{ i }) { present = true; break; }
                 if (present) continue;
-                if (ImGui::Selectable(spn.c_str()))
-                    im->PushCommand(CommandId::AddMaterialShader, new MaterialShaderCmd{ matName, spn });
+                if (ImGui::Selectable(spc.name.c_str()))
+                    im->PushCommand(CommandId::AddMaterialShader, new MaterialShaderCmd{ matName, spc.name });
             }
             ImGui::EndCombo();
         }
@@ -919,7 +921,7 @@ namespace {
         // ===== Одна кнопка на ВСЮ композицию sp (имя/vs/fs/буферы/слоты/проход/spd) =====
         // Создание: имя обязано быть свободным (иначе кнопка гаснет — не молчаливая перезапись).
         ImGui::Separator();
-        const bool nameFree = !smgr->GetShaderPrograms().count(nameBuf);
+        const bool nameFree = !smgr->ShaderProgramIdOf(nameBuf);
         const bool ready = nameBuf[0] && !vsSel.empty() && !fsSel.empty() && !passSel.empty()
             && (!creating || nameFree);
         ImGui::BeginDisabled(!ready);

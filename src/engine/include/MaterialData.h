@@ -11,7 +11,7 @@
 #include "ResourceTags.h"
 
 struct SpBinding {
-    ShaderName sp;
+    ShaderProgramId sp;
 
     // ВЛАДЕНИЕ РАЗДЕЛЁННОЕ: на блоб смотрит ещё и слепок рендера, живущий несколько кадров после
     // того, как материал ячейку снял или пережил загрузку сцены. Кто отпустит последним, тот и
@@ -30,12 +30,12 @@ struct Material {
 
     ResourceTag tags = ResourceTag::None;
 
-    SpBinding* FindBinding(const ShaderName& sp_name) {
-        for (SpBinding& b : shader_programs) if (b.sp == sp_name) return &b;
+    SpBinding* FindBinding(ShaderProgramId sp_id) {
+        for (SpBinding& b : shader_programs) if (b.sp == sp_id) return &b;
         return nullptr;
     }
-    const SpBinding* FindBinding(const ShaderName& sp_name) const {
-        for (const SpBinding& b : shader_programs) if (b.sp == sp_name) return &b;
+    const SpBinding* FindBinding(ShaderProgramId sp_id) const {
+        for (const SpBinding& b : shader_programs) if (b.sp == sp_id) return &b;
         return nullptr;
     }
 };

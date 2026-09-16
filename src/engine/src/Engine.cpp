@@ -124,8 +124,6 @@ return [mtm](Archetype& arch, yyjson_val* comp, size_t count, ScenePool* pool)
 } // namespace
 
 
-// Спек ресурсного компонента регистрирует слой, у которого есть менеджер: хук держит его
-// захватом, поэтому EngineEcs про менеджеры по-прежнему не знает.
 static void RegisterResourceComponentSpecs(MaterialManager* mtm, ModelManager* mdm)
 {
 	ComponentSpecRegistry::Get().Register({ .name = "Material", .sig_type = typeid(MaterialComponent),

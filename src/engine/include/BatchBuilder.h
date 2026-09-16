@@ -57,7 +57,7 @@ public:
 	const RenderSnap::BatchLayout* AskLayout(uint8_t slot) const { return slot_layouts[slot].get(); }
 
 	void SetDummyTexture(const std::string& name, TextureManager* tm);
-	void SetFallbackShader(const std::string& name) { fallback_shader_name = name; };
+	void SetFallbackShader(ShaderProgramId id) { fallback_sp = id; };
 
 private:
 	struct PibSlot {
@@ -85,7 +85,7 @@ private:
 	void RemoveEntityFromBatches(Entity entity);
 
 	TextureId dummy_texture;
-	std::string fallback_shader_name;
+	ShaderProgramId fallback_sp;
 	std::unordered_map<Entity, std::vector<PibSlot>> entity_slots;
 
 	std::mutex          delta_mutex;
