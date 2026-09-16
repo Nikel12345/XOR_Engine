@@ -49,6 +49,10 @@ size_t MaterialManager::LoadSceneMaterials(const std::vector<SceneMaterialEntry>
 		// Обновление В МЕСТЕ (сохраняем адрес Material — если на него уже кто-то ссылается): если
 		// нет — создаём пустой. Затем переливаем все поля из записи манифеста.
 		Material* m = materials.Get(materials.Find(e.name));
+		if (m && HasTag(m->tags, ResourceTag::CodeOwned)) {
+			SDL_Log("LoadSceneMaterials: '%s' is code-owned - entry skipped", e.name.c_str());
+			continue;
+		}
 		if (!m) m = CreateMaterial(e.name, {}, {});   // пустой под этим именем
 		if (!m) continue;
 		m->textures.clear();

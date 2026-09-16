@@ -559,6 +559,14 @@ static void LoadModels(const std::string& dir, ModelManager* mm)
 	SDL_Log("LoadScene: %zu/%zu models from manifest", loaded, entries.size());
 }
 
+template<class T>
+static bool CodeOwnedLive(const T* res, const char* what, const std::string& name)
+{
+	if (!res || !HasTag(res->tags, ResourceTag::CodeOwned)) return false;
+	SDL_Log("LoadScene: %s '%s' is code-owned - entry skipped", what, name.c_str());
+	return true;
+}
+
 static void LoadShaderData(yyjson_val* root, ShaderManager* sm, ModelManager* mm, BufferManager* bm)
 {
 	auto invalidate = [sm](const std::string& name, bool vertex) {
@@ -572,6 +580,7 @@ static void LoadShaderData(yyjson_val* root, ShaderManager* sm, ModelManager* mm
 	ForEachIn(root, "vertex_shaders", [&](yyjson_val* e) {
 		const std::string name = JsonStr(e, "name"), path = JsonStr(e, "path");
 		if (name.empty() || path.empty()) return;
+		if (CodeOwnedLive(sm->GetVertexShader(sm->VertexShaders().Find(name)), "vertex shader", name)) return;
 		std::vector<VertexSemantic> pull;
 		ForEachIn(e, "pull", [&](yyjson_val* s) { pull.push_back(SemFromStr(yyjson_get_str(s))); });
 		sm->CreateVertexShader(name, path.c_str(), mm->GetPool(JsonStr(e, "pool")), pull, bm, ReadDefines(e));
@@ -581,6 +590,7 @@ static void LoadShaderData(yyjson_val* root, ShaderManager* sm, ModelManager* mm
 	ForEachIn(root, "fragment_shaders", [&](yyjson_val* e) {
 		const std::string name = JsonStr(e, "name"), path = JsonStr(e, "path");
 		if (name.empty() || path.empty()) return;
+		if (CodeOwnedLive(sm->GetFragmentShader(sm->FragmentShaders().Find(name)), "fragment shader", name)) return;
 		sm->CreateFragmentShader(name, path.c_str(), ReadDefines(e));
 		invalidate(name, /*vertex=*/false);
 	});
@@ -588,6 +598,7 @@ static void LoadShaderData(yyjson_val* root, ShaderManager* sm, ModelManager* mm
 	ForEachIn(root, "compute_shaders", [&](yyjson_val* e) {
 		const std::string name = JsonStr(e, "name"), path = JsonStr(e, "path");
 		if (name.empty() || path.empty()) return;
+		if (CodeOwnedLive(sm->GetComputeShader(sm->ComputeShaders().Find(name)), "compute shader", name)) return;
 		sm->CreateComputeShader(name, path.c_str(), ReadDefines(e));
 	});
 }
@@ -597,6 +608,7 @@ static void LoadRenderPrograms(yyjson_val* root, ShaderManager* sm, BufferManage
 	ForEachIn(root, "render_shader_programs", [&](yyjson_val* e) {
 		const std::string name = JsonStr(e, "name");
 		if (name.empty()) return;
+		if (CodeOwnedLive(sm->GetShaderProgram(sm->ShaderProgramIdOf(name)), "shader program", name)) return;
 		sm->DeleteShaderProgram(sm->ShaderProgramIdOf(name), NameSlot::Keep);
 		sm->CreateShaderProgram(name, ReadSpd(yyjson_obj_get(e, "spd")), JsonStr(e, "pass"),
 			JsonStr(e, "vs"), ReadBufferNames(bm, e, "vs_buffers"),
@@ -613,6 +625,7 @@ static void LoadComputePrograms(yyjson_val* root, ShaderManager* sm, BufferManag
 		const std::string name = JsonStr(e, "name");
 		if (name.empty()) return;
 
+		if (CodeOwnedLive(sm->GetComputeShaderProgram(sm->ComputeProgramIdOf(name)), "compute program", name)) return;
 		std::vector<ComputeRWTextureBindingParametr> rw_tex;
 		ForEachIn(e, "rw_textures", [&](yyjson_val* t) {
 			ComputeRWTextureBindingParametr b{};

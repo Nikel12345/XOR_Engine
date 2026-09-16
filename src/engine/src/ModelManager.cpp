@@ -341,6 +341,11 @@ size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries
             SDL_Log("LoadSceneModels: incomplete entry ('%s') - skipped", e.name.c_str());
             continue;
         }
+        if (const ModelData* live = models_data.Get(models_data.Find(e.name));
+            live && HasTag(live->tags, ResourceTag::CodeOwned)) {
+            SDL_Log("LoadSceneModels: '%s' is code-owned - entry skipped", e.name.c_str());
+            continue;
+        }
         GeometryPool* pool = GetPool(e.pool);
         // Битый файл стирает прежнюю геометрию: замена под тем же именем — это снос и создание.
         DeleteModel(models_data.Find(e.name), NameSlot::Keep);

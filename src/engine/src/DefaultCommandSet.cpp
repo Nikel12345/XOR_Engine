@@ -300,15 +300,21 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 
 void DefaultCommandSet::SetTextureCommands(InputManager& im)
 {
-	// Upsert текстуры — в sim-потоке: delete-if-exists + загрузка из файла (edit=create, без ветвлений).
-	// Ребилд батчей: материалы, ссылающиеся на это имя, перепривяжутся к новому хэндлу.
+	// Форма текстуры в sim-потоке: ячейку выбранной (old_name) переименовывает и перезаливает из
+	// файла, пустой old_name — создание. Живое чужое имя = отказ, ячейку у него не отнимаем.
+	// Ребилд батчей: материалы держат id ячейки и подхватят новый хэндл сами.
 	im.RegisterCommand(CommandId::UpsertTexture,
 		[](EngineContext* ctx, const void* data)
 		{
 			const UpsertTextureCmd* c = static_cast<const UpsertTextureCmd*>(data);
 			if (!c->name.empty() && !c->atlas.empty() && !c->path.empty()) {
 				TextureManager* tm = ctx->GetTextureManager();
-				tm->RenameTexture(tm->TextureIdOf(c->old_name), c->name);
+				const TextureId edited = tm->TextureIdOf(c->old_name);
+				if (const TextureId taken = tm->TextureIdOf(c->name); taken && taken != edited) {
+					SDL_Log("UpsertTexture: '%s' is taken by another texture - refused", c->name.c_str());
+					delete c; return;
+				}
+				tm->RenameTexture(edited, c->name);
 				const TextureId tex_id = tm->InternTexture(c->name);
 				const TextureHandle* prev = tm->GetTextureHandle(tex_id);
 				const ResourceTag keep = prev ? prev->tags : ResourceTag::None;
@@ -348,7 +354,12 @@ void DefaultCommandSet::SetModelCommands(InputManager& im)
 			const UpsertModelCmd* c = static_cast<const UpsertModelCmd*>(data);
 			if (!c->name.empty() && !c->model_path.empty() && !c->index_path.empty()) {
 				ModelManager* mm = ctx->GetModelManager();
-				mm->RenameModel(mm->ModelIdOf(c->old_name), c->name);
+				const ModelId edited = mm->ModelIdOf(c->old_name);
+				if (const ModelId taken = mm->ModelIdOf(c->name); taken && taken != edited) {
+					SDL_Log("UpsertModel: '%s' is taken by another model - refused", c->name.c_str());
+					delete c; return;
+				}
+				mm->RenameModel(edited, c->name);
 				mm->LoadModelFromFile(c->name, c->model_path, c->index_path,
 					static_cast<AnchorShift>(c->anchor));
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
@@ -460,7 +471,12 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const UpsertVertexShaderCmd* c = static_cast<const UpsertVertexShaderCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
-				sm->RenameVertexShader(sm->VertexShaders().Find(c->oldName), c->name);
+				const VertexShaderId edited = sm->VertexShaders().Find(c->oldName);
+				if (const VertexShaderId taken = sm->VertexShaders().Find(c->name); taken && taken != edited) {
+					SDL_Log("UpsertVertexShader: '%s' is taken by another shader - refused", c->name.c_str());
+					delete c; return;
+				}
+				sm->RenameVertexShader(edited, c->name);
 				const VertexShaderData* prev = sm->GetVertexShader(sm->VertexShaders().Find(c->name));
 				const ResourceTag keep = prev ? prev->tags : ResourceTag::None;
 				// UI говорит пулом + семантиками — тем же языком, что манифест; стримы резолвит пул.
@@ -482,7 +498,12 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const UpsertFragmentShaderCmd* c = static_cast<const UpsertFragmentShaderCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
-				sm->RenameFragmentShader(sm->FragmentShaders().Find(c->oldName), c->name);
+				const FragmentShaderId edited = sm->FragmentShaders().Find(c->oldName);
+				if (const FragmentShaderId taken = sm->FragmentShaders().Find(c->name); taken && taken != edited) {
+					SDL_Log("UpsertFragmentShader: '%s' is taken by another shader - refused", c->name.c_str());
+					delete c; return;
+				}
+				sm->RenameFragmentShader(edited, c->name);
 				const FragmentShaderData* prev = sm->GetFragmentShader(sm->FragmentShaders().Find(c->name));
 				const ResourceTag keep = prev ? prev->tags : ResourceTag::None;
 				sm->CreateFragmentShader(c->name, c->path.c_str(), c->defines, keep);
@@ -502,7 +523,12 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const UpsertComputeShaderCmd* c = static_cast<const UpsertComputeShaderCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
 			if (!c->name.empty() && !c->path.empty()) {
-				sm->RenameComputeShader(sm->ComputeShaders().Find(c->oldName), c->name);
+				const ComputeShaderId edited = sm->ComputeShaders().Find(c->oldName);
+				if (const ComputeShaderId taken = sm->ComputeShaders().Find(c->name); taken && taken != edited) {
+					SDL_Log("UpsertComputeShader: '%s' is taken by another shader - refused", c->name.c_str());
+					delete c; return;
+				}
+				sm->RenameComputeShader(edited, c->name);
 				const ComputeShaderData* prev = sm->GetComputeShader(sm->ComputeShaders().Find(c->name));
 				const ResourceTag keep = prev ? prev->tags : ResourceTag::None;
 				sm->CreateComputeShader(c->name, c->path.c_str(), c->defines, keep);

@@ -780,6 +780,13 @@ size_t TextureManager::LoadSceneTextures(const std::vector<SceneTextureEntry>& e
             SDL_Log("LoadSceneTextures: incomplete entry ('%s') - skipped", e.name.c_str());
             continue;
         }
+        // Имя кодового ресурса сцене не отдаём: он пережил бы снос (ClearScene*), но запись
+        // манифеста заняла бы его ячейку и подменила содержимое.
+        if (const TextureHandle* live = handles_data.Get(handles_data.Find(e.name));
+            live && HasTag(live->tags, ResourceTag::CodeOwned)) {
+            SDL_Log("LoadSceneTextures: '%s' is code-owned - entry skipped", e.name.c_str());
+            continue;
+        }
         // Куб снимается ровно как всё остальное — он ОДИН хэндл под своим именем. Без снятия
         // CreateTexture вернул бы существующий и заливки бы не было (тихий stale).
         if (const TextureId id = handles_data.Find(e.name))
