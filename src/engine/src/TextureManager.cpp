@@ -762,7 +762,7 @@ bool TextureManager::RenameTexture(TextureId id, const std::string& new_name)
 size_t TextureManager::ClearSceneTextures()
 {
     std::vector<TextureId> doomed;
-    for (uint32_t i = 1; i < handles_data.Count(); ++i) {
+    for (int32_t i = 0; i < handles_data.Count(); ++i) {
         const TextureHandle* h = handles_data.At(i).object.get();
         if (h && !HasTag(h->tags, ResourceTag::CodeOwned) && !h->source_path.empty())
             doomed.push_back(TextureId{ i });

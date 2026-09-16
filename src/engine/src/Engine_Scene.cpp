@@ -359,8 +359,8 @@ static void SaveTextures(const std::string& dir, TextureManager* tm)
 	MutDoc d;
 	yyjson_mut_val* arr = d.Arr("textures");
 	size_t saved = 0;
-	for (uint32_t i = 1; i < tm->Textures().Count(); ++i) {
-		const TextureRegistry::Cell& cell = tm->Textures().At(i);
+	for (int32_t i = 0; i < tm->Textures().Count(); ++i) {
+		const TextureCell& cell = tm->Textures().At(i);
 		const std::string& name = cell.name;
 		const std::shared_ptr<TextureHandle>& h = cell.object;
 		if (!h || HasTag(h->tags, ResourceTag::CodeOwned) || h->source_path.empty()) continue;

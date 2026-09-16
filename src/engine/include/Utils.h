@@ -28,6 +28,11 @@ inline Uint32 safe_f_u32(float val) {
     return static_cast<Uint32>(val);
 }
 
+inline int32_t safe_size_i(size_t val) {
+    assert(val <= static_cast<size_t>(std::numeric_limits<int32_t>::max()));
+    return static_cast<int32_t>(val);
+}
+
 inline int safe_u32t_i(uint32_t val) {
     constexpr uint32_t Imax = static_cast<uint32_t>(std::numeric_limits<int>::max());
     assert(val <= Imax);

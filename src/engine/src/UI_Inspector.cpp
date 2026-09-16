@@ -179,9 +179,9 @@ namespace {
         const auto& specs = ParamsSpecRegistry::Materials().All();
 
         std::vector<std::string> texNames;                   // значения комбобокса текстур — по алфавиту
-        const TextureRegistry& treg = ctx->GetTextureManager()->Textures();
-        for (uint32_t ti = 1; ti < treg.Count(); ++ti) {
-            const TextureRegistry::Cell& c = treg.At(ti);
+        const auto& treg = ctx->GetTextureManager()->Textures();
+        for (int32_t ti = 0; ti < treg.Count(); ++ti) {
+            const TextureCell& c = treg.At(ti);
             if (c.object && (g_show_internal || !HasTag(c.object->tags, ResourceTag::System))) texNames.push_back(c.name);
         }
         std::sort(texNames.begin(), texNames.end());
@@ -567,9 +567,9 @@ namespace {
 
         // Атлас — дропдаун существующих (общий фильтр служебных с браузером), отфильтрованный по виду.
         if (ImGui::BeginCombo("Atlas", atlasSel.empty() ? "(select)" : atlasSel.c_str())) {
-            const AtlasRegistry& areg = ctx->GetTextureManager()->Atlases();
-            for (uint32_t ai = 1; ai < areg.Count(); ++ai) {
-                const AtlasRegistry::Cell& c = areg.At(ai);
+            const auto& areg = ctx->GetTextureManager()->Atlases();
+            for (int32_t ai = 0; ai < areg.Count(); ++ai) {
+                const AtlasCell& c = areg.At(ai);
                 if (!c.object) continue;
                 if (!g_show_internal && HasTag(c.object->tags, ResourceTag::System)) continue;
                 if (IsCubeAtlas(c.object.get()) != cubeSel) continue;

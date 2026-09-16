@@ -151,9 +151,9 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
         if (ImGui::BeginTabItem("Textures")) {
             tiles(SelKind::Texture, true,
                 [&]{ g_sel = Selection{}; g_sel.kind = SelKind::Texture; g_sel.name = ""; },   // + = форма новой текстуры
-                [&](auto&& emit) { const TextureRegistry& reg = ctx->GetTextureManager()->Textures();
-                                   for (uint32_t i = 1; i < reg.Count(); ++i) {
-                                       const TextureRegistry::Cell& c = reg.At(i);
+                [&](auto&& emit) { const auto& reg = ctx->GetTextureManager()->Textures();
+                                   for (int32_t i = 0; i < reg.Count(); ++i) {
+                                       const TextureCell& c = reg.At(i);
                                        if (c.object && (g_show_internal || !HasTag(c.object->tags, ResourceTag::System))) emit(c.name);
                                    } },
                 [&](const std::string& n) { return texture_preview(tm->TextureIdOf(n)); });

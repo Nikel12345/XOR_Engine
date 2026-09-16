@@ -16,21 +16,21 @@ using ShaderName = std::string;
 
 using BufferDataName = const char*;
 
-// Ссылка на ресурс = индекс его ЯЧЕЙКИ в реестре менеджера; 0 — ссылки нет. Тип на каждый реестр
-// свой, поэтому id текстуры не подставится туда, где ждут id атласа.
+// Ссылка на ресурс = индекс его ЯЧЕЙКИ в реестре менеджера; -1 — ссылки нет. Тип на каждый
+// реестр свой, поэтому id текстуры не подставится туда, где ждут id атласа.
 struct TextureId {
-	uint32_t v = 0;
-	explicit operator bool() const { return v != 0; }
+	int32_t v = -1;
+	explicit operator bool() const { return v >= 0; }
 	bool operator==(const TextureId&) const = default;
 };
 struct AtlasId {
-	uint32_t v = 0;
-	explicit operator bool() const { return v != 0; }
+	int32_t v = -1;
+	explicit operator bool() const { return v >= 0; }
 	bool operator==(const AtlasId&) const = default;
 };
 
 template <> struct std::hash<TextureId> {
-	size_t operator()(TextureId id) const noexcept { return std::hash<uint32_t>{}(id.v); }
+	size_t operator()(TextureId id) const noexcept { return std::hash<int32_t>{}(id.v); }
 };
 
 namespace BatchKeys {
