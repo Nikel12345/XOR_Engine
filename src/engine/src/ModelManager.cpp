@@ -298,22 +298,19 @@ ModelData* ModelManager::LoadModelFromFile(const std::string& name, const std::s
     return _LoadModelFile(ptr, _ResolvePool(pool), path_vert, path_ind, anchor);
 }
 
-bool ModelManager::DeleteModel(ModelId id)
+bool ModelManager::DeleteModel(ModelId id, NameSlot slot)
 {
     ModelData* m = models_data.Get(id);
     if (!m) return false;
 
     _ReleaseModelRanges(m);
-    return models_data.Erase(id);
+    return slot == NameSlot::Release ? models_data.Drop(id) : models_data.Clear(id);
 }
 
 bool ModelManager::RenameModel(ModelId id, const std::string& new_name)
 {
     if (!models_data.Get(id) || new_name.empty()) return false;
-    const ModelId taken = models_data.Find(new_name);
-    if (taken && taken != id) return false;
-    models_data.Rename(id, new_name);
-    return true;
+    return models_data.Rename(id, new_name);
 }
 
 void ModelManager::SetSubmeshSpan(const std::string& name, size_t submesh, SubMeshSpan span)
@@ -331,7 +328,7 @@ size_t ModelManager::ClearSceneModels()
     for (int32_t i = 0; i < models_data.Count(); ++i) {
         const ModelData* m = models_data.At(i).object.get();
         if (m && !HasTag(m->tags, ResourceTag::CodeOwned) && !m->model_path.empty())
-            removed += DeleteModel(ModelId{ i }) ? 1 : 0;
+            removed += DeleteModel(ModelId{ i }, NameSlot::Keep) ? 1 : 0;
     }
     return removed;
 }
@@ -346,7 +343,7 @@ size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries
         }
         GeometryPool* pool = GetPool(e.pool);
         // Битый файл стирает прежнюю геометрию: замена под тем же именем — это снос и создание.
-        DeleteModel(models_data.Find(e.name));
+        DeleteModel(models_data.Find(e.name), NameSlot::Keep);
         if (!CreateModel(e.name, e.vertex_path, e.index_path, e.anchor, pool)) continue;
         ++loaded;
         // Диапазоны приходят из манифеста, а не из .bin, и в построении геометрии не участвуют.

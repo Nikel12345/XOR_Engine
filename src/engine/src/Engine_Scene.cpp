@@ -279,7 +279,8 @@ template<class Range, class NameOf>
 static void WriteIdArray(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* key, const Range& ids, NameOf name_of)
 {
 	yyjson_mut_val* arr = yyjson_mut_obj_add_arr(doc, obj, key);
-	for (const auto& id : ids) yyjson_mut_arr_add_strcpy(doc, arr, name_of(id).c_str());
+	for (const auto& id : ids)
+		if (const std::string& n = name_of(id); !n.empty()) yyjson_mut_arr_add_strcpy(doc, arr, n.c_str());
 }
 
 static std::vector<BufferDataName> ReadBufferNames(BufferManager* bm, yyjson_val* obj, const char* key)
@@ -462,8 +463,14 @@ static void SaveMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 
 		yyjson_mut_val* sh = yyjson_mut_obj_add_arr(d.doc, e, "shaders");
 		for (const SpBinding& b : m->shader_programs) {
+			const std::string& sp_name = sm->ShaderProgramNameOf(b.sp);
+			if (sp_name.empty()) {
+				SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+					"SaveScene: material '%s' holds a binding to a deleted shader program - NOT saved", name.c_str());
+				continue;
+			}
 			yyjson_mut_val* so = yyjson_mut_arr_add_obj(d.doc, sh);
-			yyjson_mut_obj_add_strcpy(d.doc, so, "name", sm->ShaderProgramNameOf(b.sp).c_str());
+			yyjson_mut_obj_add_strcpy(d.doc, so, "name", sp_name.c_str());
 			if (!b.params || b.params->empty()) continue;
 			if (const ParamsSpec* ps = ParamsSpecRegistry::Materials().ByName(b.params_type)) {
 				yyjson_mut_obj_add_strcpy(d.doc, so, "params_type", b.params_type.c_str());
@@ -472,7 +479,7 @@ static void SaveMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 			else
 				SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
 					"SaveScene: material '%s' sp '%s' has params of unregistered type '%s' (%zu bytes) - NOT saved",
-					name.c_str(), sm->ShaderProgramNameOf(b.sp).c_str(), b.params_type.c_str(), b.params->size());
+					name.c_str(), sp_name.c_str(), b.params_type.c_str(), b.params->size());
 		}
 
 		yyjson_mut_val* tex = yyjson_mut_obj_add_arr(d.doc, e, "textures");
@@ -590,7 +597,7 @@ static void LoadRenderPrograms(yyjson_val* root, ShaderManager* sm, BufferManage
 	ForEachIn(root, "render_shader_programs", [&](yyjson_val* e) {
 		const std::string name = JsonStr(e, "name");
 		if (name.empty()) return;
-		sm->DeleteShaderProgram(sm->ShaderProgramIdOf(name));
+		sm->DeleteShaderProgram(sm->ShaderProgramIdOf(name), NameSlot::Keep);
 		sm->CreateShaderProgram(name, ReadSpd(yyjson_obj_get(e, "spd")), JsonStr(e, "pass"),
 			JsonStr(e, "vs"), ReadBufferNames(bm, e, "vs_buffers"),
 			JsonStr(e, "fs"), ReadBufferNames(bm, e, "fs_buffers"),

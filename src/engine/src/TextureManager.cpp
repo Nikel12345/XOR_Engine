@@ -704,7 +704,7 @@ SDL_GPUSampler* TextureManager::GetSampler(const std::string& name)
     }
 }
 
-bool TextureManager::DeleteTextureHandle(TextureId id)
+bool TextureManager::DeleteTextureHandle(TextureId id, NameSlot slot)
 {
     TextureHandle* handle = handles_data.Get(id);
     if (!handle) {
@@ -742,21 +742,19 @@ bool TextureManager::DeleteTextureHandle(TextureId id)
                        [handle](const UploadTaskTexture& t) { return t.target_handle == handle; }),
         texture_upload_tasks.end());
 
-    // Превью НЕ трогаем: его подсистема ключуется ИМЕНЕМ, а не хэндлом. При replace (пересоздание
+    // Превью НЕ трогаем: его подсистема ключуется id ЯЧЕЙКИ, а не хэндлом. При replace (пересоздание
     // того же имени) слот обязан пережить удаление — иначе плитка мигнёт. Реальное удаление
-    // освобождает превью отдельным ReleasePreview(name) в вызывающем (DeleteTexture-команда).
-    return handles_data.Erase(id);   // уничтожает TextureHandle вместе с его TextureData (по значению)
+    // освобождает превью отдельным ReleasePreview(id) в вызывающем (DeleteTexture-команда).
+    return slot == NameSlot::Release ? handles_data.Drop(id) : handles_data.Clear(id);
 }
 
 bool TextureManager::RenameTexture(TextureId id, const std::string& new_name)
 {
     if (!handles_data.Get(id) || new_name.empty()) return false;
-    const TextureId taken = handles_data.Find(new_name);
-    if (taken && taken != id) {
+    if (!handles_data.Rename(id, new_name)) {
         SDL_Log("RenameTexture: '%s' is already taken", new_name.c_str());
         return false;
     }
-    handles_data.Rename(id, new_name);
     return true;
 }
 
@@ -768,7 +766,7 @@ size_t TextureManager::ClearSceneTextures()
         if (h && !HasTag(h->tags, ResourceTag::CodeOwned) && !h->source_path.empty())
             doomed.push_back(TextureId{ i });
     }
-    for (TextureId id : doomed) { DeleteTextureHandle(id); ReleasePreview(id); }
+    for (TextureId id : doomed) { DeleteTextureHandle(id, NameSlot::Keep); ReleasePreview(id); }
     return doomed.size();
 }
 
@@ -785,7 +783,7 @@ size_t TextureManager::LoadSceneTextures(const std::vector<SceneTextureEntry>& e
         // Куб снимается ровно как всё остальное — он ОДИН хэндл под своим именем. Без снятия
         // CreateTexture вернул бы существующий и заливки бы не было (тихий stale).
         if (const TextureId id = handles_data.Find(e.name))
-            DeleteTextureHandle(id);   // replace в той же ячейке (материалы перепривяжутся по её id)
+            DeleteTextureHandle(id, NameSlot::Keep);   // replace в той же ячейке (материалы перепривяжутся по её id)
         if (create_from_file(e)) ++created;
         else SDL_Log("LoadSceneTextures: failed to create '%s' from '%s'", e.name.c_str(), e.path.c_str());
     }

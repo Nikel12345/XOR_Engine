@@ -50,7 +50,7 @@ public:
 	                             AnchorShift anchor = AnchorShift::Keep, GeometryPool* pool = nullptr);
 
 
-	bool DeleteModel(ModelId id);
+	bool DeleteModel(ModelId id, NameSlot slot);
 	bool RenameModel(ModelId id, const std::string& new_name);
 
 	size_t LoadSceneModels(const std::vector<SceneModelEntry>& entries);

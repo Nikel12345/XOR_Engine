@@ -31,7 +31,7 @@ using MaterialRegistry = ResourceRegistry<MaterialCell, MaterialId>;
 class MaterialManager {
 public:
 	MaterialManager();
-	// Материал хранит ссылки: текстуры — по id ячейки, sp — по имени. Перевод имён в id и валидация
+	// Материал хранит ссылки: и текстуры, и sp — по id ячейки. Перевод имён в id и валидация
 	// required_slots — у вызывающего (EngineContext::CreateMaterial): сюда приходят уже готовые
 	// ссылки, менеджер их просто складывает. Пустая/неразрешимая сейчас — допустима (резолв на сборке батча).
 	Material* CreateMaterial(std::string name, std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> textures, std::vector<ShaderProgramId> shaders, ResourceTag tags = ResourceTag::None);
@@ -69,10 +69,7 @@ public:
 
 	bool RenameMaterial(MaterialId id, const std::string& newName) {
 		if (!materials.Get(id) || newName.empty()) return false;
-		const MaterialId taken = materials.Find(newName);
-		if (taken && taken != id) return false;
-		materials.Rename(id, newName);
-		return true;
+		return materials.Rename(id, newName);
 	}
 
 	// Тип-безопасная упаковка per-sp факторов в блоб ячейки (непрозрачные байты для рендера).

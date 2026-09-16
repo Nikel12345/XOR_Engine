@@ -82,15 +82,15 @@ public:
 		return false;
 	}
 
-	bool DeleteVertexShader(VertexShaderId id) {
+	bool DeleteVertexShader(VertexShaderId id, NameSlot slot) {
 		if (IsVertexShaderUsed(id)) { SDL_Log("ShaderManager: vertex shader '%s' is used by a shader program — delete refused", vertex_shaders.NameOf(id).c_str()); return false; }
-		return vertex_shaders.Erase(id);
+		return Release(vertex_shaders, id, slot);
 	}
-	bool DeleteFragmentShader(FragmentShaderId id) {
+	bool DeleteFragmentShader(FragmentShaderId id, NameSlot slot) {
 		if (IsFragmentShaderUsed(id)) { SDL_Log("ShaderManager: fragment shader '%s' is used by a shader program — delete refused", fragment_shaders.NameOf(id).c_str()); return false; }
-		return fragment_shaders.Erase(id);
+		return Release(fragment_shaders, id, slot);
 	}
-	bool DeleteComputeShader(ComputeShaderId id);
+	bool DeleteComputeShader(ComputeShaderId id, NameSlot slot);
 
 	bool RenameVertexShader(VertexShaderId id, const std::string& new_name)   { return Rename(vertex_shaders, id, new_name); }
 	bool RenameFragmentShader(FragmentShaderId id, const std::string& new_name) { return Rename(fragment_shaders, id, new_name); }
@@ -105,7 +105,7 @@ public:
 	ShaderProgramId    ShaderProgramIdOf(const std::string& name) const { return shader_programs.Find(name); }
 	ShaderProgramId    InternShaderProgram(const std::string& name)     { return shader_programs.Intern(name); }
 	const std::string& ShaderProgramNameOf(ShaderProgramId id) const    { return shader_programs.NameOf(id); }
-	bool DeleteShaderProgram(ShaderProgramId id) { return shader_programs.Erase(id); }
+	bool DeleteShaderProgram(ShaderProgramId id, NameSlot slot) { return Release(shader_programs, id, slot); }
 	bool RenameShaderProgram(ShaderProgramId id, const std::string& new_name) { return Rename(shader_programs, id, new_name); }
 
 	ComputeShaderProgram* GetComputeShaderProgram(const std::string& name);
@@ -203,10 +203,13 @@ private:
 	template <class Registry, class Id>
 	static bool Rename(Registry& reg, Id id, const std::string& new_name) {
 		if (!reg.Get(id) || new_name.empty()) return false;
-		const Id taken = reg.Find(new_name);
-		if (taken && taken != id) { SDL_Log("ShaderManager: name '%s' is already taken", new_name.c_str()); return false; }
-		reg.Rename(id, new_name);
+		if (!reg.Rename(id, new_name)) { SDL_Log("ShaderManager: name '%s' is already taken", new_name.c_str()); return false; }
 		return true;
+	}
+
+	template <class Registry, class Id>
+	static bool Release(Registry& reg, Id id, NameSlot slot) {
+		return slot == NameSlot::Release ? reg.Drop(id) : reg.Clear(id);
 	}
 
 	SDL_GPUDevice* dev;

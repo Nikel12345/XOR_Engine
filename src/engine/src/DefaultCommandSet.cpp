@@ -312,7 +312,7 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 				const TextureId tex_id = tm->InternTexture(c->name);
 				const TextureHandle* prev = tm->GetTextureHandle(tex_id);
 				const ResourceTag keep = prev ? prev->tags : ResourceTag::None;
-				tm->DeleteTextureHandle(tex_id);   // replace в той же ячейке (no-op, если пуста)
+				tm->DeleteTextureHandle(tex_id, NameSlot::Keep);   // replace в той же ячейке (no-op, если пуста)
 				// ReleasePreview НЕ зовём: ячейка та же, слот превью должен пережить пересоздание
 				// (иначе плитка мигнёт затычкой до нового блита).
 				// Куб — это ОДИН хэндл на 6 слоёв, поэтому и снятие выше, и превью, и переименование
@@ -332,7 +332,7 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 			const DeleteTextureCmd* c = static_cast<const DeleteTextureCmd*>(data);
 			TextureManager* tm = ctx->GetTextureManager();
 			const TextureId id = tm->TextureIdOf(c->name);
-			tm->DeleteTextureHandle(id);
+			tm->DeleteTextureHandle(id, NameSlot::Release);
 			tm->ReleasePreview(id);   // реальное удаление → освободить превью-ячейку
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			delete c;
@@ -381,7 +381,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const RebuildShaderPipelineCmd* c = static_cast<const RebuildShaderPipelineCmd*>(data);
 			ShaderManager* smgr = ctx->GetShaderManager();
 			if (const ShaderProgramId id = smgr->ShaderProgramIdOf(c->shader); smgr->GetShaderProgram(id)) {
-				smgr->DeleteShaderProgram(id);
+				smgr->DeleteShaderProgram(id, NameSlot::Release);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 			delete c;
@@ -423,7 +423,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const ResourceTag keep = old ? old->tags : ResourceTag::None;
 			if (old) {
 				if (finalName != c->oldName) sm->RenameShaderProgram(old_id, finalName);
-				sm->DeleteShaderProgram(old_id);
+				sm->DeleteShaderProgram(old_id, NameSlot::Keep);
 			}
 			// push-инструкции не переносим руками: CreateShaderProgram сам возьмёт код-байндинги из
 			// реестра ПО ИМЕНИ. Переименование = смена владельца функции — перенос со старого
@@ -523,7 +523,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			// Используемый SD менеджер удалить откажется (пайплайн собран из его данных, fallback
 			// с чужой раскладкой невозможен); неиспользуемый ничего не рисует — dirty-флаги не нужны.
 			ShaderManager* sm = ctx->GetShaderManager();
-			sm->DeleteVertexShader(sm->VertexShaders().Find(c->name));
+			sm->DeleteVertexShader(sm->VertexShaders().Find(c->name), NameSlot::Release);
 			delete c;
 		});
 
@@ -532,7 +532,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 		{
 			const ShaderDataNameCmd* c = static_cast<const ShaderDataNameCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
-			sm->DeleteFragmentShader(sm->FragmentShaders().Find(c->name));   // отказ/чистое удаление — см. DeleteVertexShader
+			sm->DeleteFragmentShader(sm->FragmentShaders().Find(c->name), NameSlot::Release);   // отказ/чистое удаление — см. DeleteVertexShader
 			delete c;
 		});
 
@@ -541,7 +541,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 		{
 			const ShaderDataNameCmd* c = static_cast<const ShaderDataNameCmd*>(data);
 			ShaderManager* sm = ctx->GetShaderManager();
-			sm->DeleteComputeShader(sm->ComputeShaders().Find(c->name));   // отказ/чистое удаление — см. DeleteVertexShader
+			sm->DeleteComputeShader(sm->ComputeShaders().Find(c->name), NameSlot::Release);   // отказ/чистое удаление — см. DeleteVertexShader
 			delete c;
 		});
 }

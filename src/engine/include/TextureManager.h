@@ -115,7 +115,7 @@ public:
 	// Немедленное освобождение GPU-текстуры (как QueueDeleteTexture, но без отложенной очереди).
 	void DeleteTexture(SDL_GPUTexture* texture);
 
-	bool DeleteTextureHandle(TextureId id);
+	bool DeleteTextureHandle(TextureId id, NameSlot slot);
 	bool RenameTexture(TextureId id, const std::string& new_name);
 
 	// Merge-upsert текстур из манифеста сцены (см. SceneTextureEntry): занятое имя снимается
@@ -191,8 +191,9 @@ private:
 	bool _PlaceTask(UploadTaskTexture& task);
 	AtlasRegistry atlases_data;
 	// shared_ptr — владелец хэндла; материалы ссылаются на текстуру по id ЯЧЕЙКИ (не держат указатель).
-	// Поэтому DeleteTextureHandle = опустошение ячейки: хэндл освобождается, а материалы на следующей
-	// сборке батча получат из неё nullptr → подставят dummy (и перепривяжутся, если её наполнят заново).
+	// Поэтому DeleteTextureHandle(Keep) = опустошение ячейки: материалы на следующей сборке батча
+	// получат из неё nullptr → подставят dummy, а наполнение той же ячейки их перепривяжет.
+	// DeleteTextureHandle(Release) отпускает и имя: ссылки остаются без него навсегда.
 	TextureRegistry handles_data;
 	std::unordered_map<std::string, SDL_GPUSampler*> samplers_data;
 	std::unordered_map<TextureAtlas*, std::unique_ptr<AtlasPacker>> atlas_packers;  // персистентное состояние упаковки

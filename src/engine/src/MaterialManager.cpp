@@ -36,7 +36,7 @@ size_t MaterialManager::ClearSceneMaterials()
 	size_t removed = 0;
 	for (int32_t i = 0; i < materials.Count(); ++i) {
 		const Material* m = materials.At(i).object.get();
-		if (m && !HasTag(m->tags, ResourceTag::CodeOwned)) removed += materials.Erase(MaterialId{ i }) ? 1 : 0;
+		if (m && !HasTag(m->tags, ResourceTag::CodeOwned)) removed += materials.Clear(MaterialId{ i }) ? 1 : 0;
 	}
 	return removed;
 }
