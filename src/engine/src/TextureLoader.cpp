@@ -48,7 +48,6 @@ DecodedCubeMap TextureLoader::LoadCubeMapFromFile(const char* path, uint32_t fac
 
 	const uint32_t bpp = SDL_BYTESPERPIXEL(target_format);
 	const uint32_t src_stride = img.width * bpp;
-	// Ячейка креста (колонка, строка) для слоя SDL cube: 0:+X 1:-X 2:+Y 3:-Y 4:+Z 5:-Z.
 	const int cross_cell[6][2] = { {2,1}, {0,1}, {1,0}, {1,2}, {1,1}, {3,1} };
 	const size_t face_bytes = (size_t)faceSize * faceSize * bpp;
 	out.pixels.resize(face_bytes * 6);

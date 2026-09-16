@@ -323,7 +323,7 @@ namespace TexturePresets {
 
         case TexturePreset::Normal_Atlas2048_1Layer:
             info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
-            info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;   // линейные данные (нормали)
+            info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
             info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
             info.width = 2048;
             info.height = 2048;
@@ -332,7 +332,7 @@ namespace TexturePresets {
             break;
         case TexturePreset::ORM_Atlas1024_1Layer:
             info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
-            info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;   // R=AO G=Rough B=Metal (линейные)
+            info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
             info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
             info.width = 1024;
             info.height = 1024;
@@ -375,15 +375,12 @@ namespace TexturePresets {
         info.props = 0;
         return info;
     }
-    // Albedo: sRGB-данные в UNORM-формате, как везде в движке.
     inline SDL_GPUTextureCreateInfo AlbedoAtlas(uint32_t resolution, uint32_t layers = 1, uint32_t mip_levels = 1) {
         return _MaterialAtlas(resolution, layers, mip_levels, SDL_GPU_TEXTUREUSAGE_SAMPLER);
     }
-    // Normal — линейные данные (tangent-space нормали).
     inline SDL_GPUTextureCreateInfo NormalAtlas(uint32_t resolution, uint32_t layers = 1, uint32_t mip_levels = 1) {
         return _MaterialAtlas(resolution, layers, mip_levels, SDL_GPU_TEXTUREUSAGE_SAMPLER);
     }
-    // ORM — упаковка R=AO, G=Roughness, B=Metallic (линейные).
     inline SDL_GPUTextureCreateInfo ORMAtlas(uint32_t resolution, uint32_t layers = 1, uint32_t mip_levels = 1) {
         return _MaterialAtlas(resolution, layers, mip_levels, SDL_GPU_TEXTUREUSAGE_SAMPLER);
     }
@@ -413,15 +410,12 @@ namespace TexturePresets {
         info.width = faceSize;
         info.height = faceSize;
         info.layer_count_or_depth = 6;
-        // Мип-цепочка ОБЯЗАТЕЛЬНА: sampleEnv переводит roughness в мип-LOD, при одном уровне
-        // отражение перестаёт размываться вовсе.
         info.num_levels = FullMipLevels(faceSize);
         info.sample_count = SDL_GPU_SAMPLECOUNT_1;
         info.props = 0;
         return info;
     }
 
-    // Куб c занимает слои c·6…c·6+5, поэтому индекс куба для шейдера = layer/6.
     inline SDL_GPUTextureCreateInfo EnvCubeArray(uint32_t faceSize, uint32_t num_cubes) {
         SDL_GPUTextureCreateInfo info = EnvCube(faceSize);
         info.type = SDL_GPU_TEXTURETYPE_CUBE_ARRAY;
@@ -429,8 +423,6 @@ namespace TexturePresets {
         return info;
     }
 
-    // Линейный цвет ДО тонмаппинга: эмиссия и блики уходят за 1.0, поэтому на экран он попадает
-    // отдельным present-проходом (формат свопчейна 8-битный).
     inline SDL_GPUTextureCreateInfo SceneHDR(uint32_t width, uint32_t height) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -445,7 +437,6 @@ namespace TexturePresets {
         return info;
     }
 
-    // R11G11B10: три канала в четыре байта, вдвое дешевле RGBA16F, альфа эмиссии не нужна.
     inline SDL_GPUTextureCreateInfo EmissionHDR(uint32_t width, uint32_t height) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -460,7 +451,6 @@ namespace TexturePresets {
         return info;
     }
 
-    // Доля цвета, которую гасит экранный AO. R11G11B10 как у эмиссии.
     inline SDL_GPUTextureCreateInfo AmbientHDR(uint32_t width, uint32_t height) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -475,8 +465,6 @@ namespace TexturePresets {
         return info;
     }
 
-    // R32_FLOAT, хотя по точности хватило бы R8: одноканальные 8/16-битные форматы не входят в
-    // обязательный к поддержке набор storage-образов Vulkan, а R32_FLOAT входит.
     inline SDL_GPUTextureCreateInfo AmbientOcclusion(uint32_t width, uint32_t height) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -491,10 +479,6 @@ namespace TexturePresets {
         return info;
     }
 
-    // Уровень пирамиды — ОТДЕЛЬНАЯ текстура: мипы одной не годятся, потому что шаг блума биндит
-    // dst-мип как RW-storage, а sampled-вью источника покрывает все мипы, включая этот
-    // (VUID-VkDescriptorImageInfo-imageLayout-00344). Формат согласован с
-    // [[vk::image_format("rgba16f")]] в bloom-шейдерах.
     inline SDL_GPUTextureCreateInfo BloomLevel(uint32_t width, uint32_t height) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;
