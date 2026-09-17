@@ -1,8 +1,8 @@
 #include "PhysicsBufferSet.h"
-#include "GpuTaskContext.h"
+#include "GpuContext.h"
 
 namespace PhysicsBufferSet {
-	void Create(GpuTaskContext* gpu) {
+	void Create(GpuContext* gpu) {
 		(void)gpu;
 	}
 }

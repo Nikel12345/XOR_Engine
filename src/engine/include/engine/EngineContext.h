@@ -28,7 +28,7 @@ class ShaderManager;
 class ModelManager;
 class CameraManager;
 class PipeManager;
-class GpuTaskContext;
+class GpuContext;
 struct ShaderProgram;
 struct ComputeShaderProgram;
 class InputManager;
@@ -46,8 +46,8 @@ public:
 	EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* rm, BatchBuilder* bb, TextureLoader* tl);
 	~EngineContext();
 
-	GpuTaskContext& Gpu() { return *gpu_ctx; }
-	GpuTaskContext* GetGpuContext() { return gpu_ctx; }
+	GpuContext& Gpu() { return *gpu_ctx; }
+	GpuContext* GetGpuContext() { return gpu_ctx; }
 
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name, ResourceTag tags = ResourceTag::None);
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name, ResourceTag tags = ResourceTag::None);
@@ -195,5 +195,5 @@ private:
 	Engine* engine = nullptr;
 	GraphicsConfig* graphics_config = nullptr;
 
-	GpuTaskContext* gpu_ctx = nullptr;
+	GpuContext* gpu_ctx = nullptr;
 };

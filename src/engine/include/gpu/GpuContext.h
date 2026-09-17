@@ -16,9 +16,9 @@ class GeometryPool;
 // Ничего не резолвится: и ресурсы, и проходы sp/csp хранит ИМЕНАМИ, в указатели их переводит
 // сборка батча, существование здесь не проверяется. Чужой менеджер уходит ПАРАМЕТРОМ в листовой
 // вызов — так ShaderManager расставляет usage-флаги в обёртках BufferManager, не храня его.
-class GpuTaskContext {
+class GpuContext {
 public:
-	GpuTaskContext(BufferManager* bm, ShaderManager* sm, PassManager* pm, TextureManager* tm);
+	GpuContext(BufferManager* bm, ShaderManager* sm, PassManager* pm, TextureManager* tm);
 
 	void CreateFragmentShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines = {}, ResourceTag tags = ResourceTag::None);
 	// Вершинник называет ПУЛ и потребляемые СЕМАНТИКИ; порядок слотов задаёт таблица стримов пула.

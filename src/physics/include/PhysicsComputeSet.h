@@ -1,9 +1,9 @@
 #pragma once
 
-class GpuTaskContext;
+class GpuContext;
 
 // Регистрация compute-программ физики (integrate / broad-phase / narrow-phase).
-// Берёт узкий GPU-фасад GpuTaskContext — без EngineContext и рендера.
+// Берёт узкий GPU-фасад GpuContext — без EngineContext и рендера.
 namespace PhysicsComputeSet {
-	void Create(GpuTaskContext* gpu);
+	void Create(GpuContext* gpu);
 }

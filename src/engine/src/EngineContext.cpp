@@ -5,7 +5,7 @@
 #include "TextureLoader.h"
 #include "PassManager.h"
 #include "EngineProfiler.h"
-#include "GpuTaskContext.h"
+#include "GpuContext.h"
 #include "TextureManager.h"
 #include "MaterialManager.h"
 #include "ModelManager.h"
@@ -17,7 +17,7 @@ using namespace ShaderBase;
 
 EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager* rm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pm, BatchBuilder* bb, TextureLoader* tl)
 {
-	gpu_ctx = new GpuTaskContext(bm, sm, rm, tm);
+	gpu_ctx = new GpuContext(bm, sm, rm, tm);
 	this->buffer_manager = bm;
 	this->texture_manager = tm;
 	this->pass_manager = rm;

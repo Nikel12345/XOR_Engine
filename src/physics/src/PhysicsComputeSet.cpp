@@ -1,8 +1,8 @@
 #include "PhysicsComputeSet.h"
-#include "GpuTaskContext.h"
+#include "GpuContext.h"
 
 namespace PhysicsComputeSet {
-	void Create(GpuTaskContext* gpu) {
+	void Create(GpuContext* gpu) {
 		(void)gpu;
 	}
 }
