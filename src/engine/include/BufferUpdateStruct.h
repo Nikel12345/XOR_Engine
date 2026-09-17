@@ -18,6 +18,8 @@ struct UploadTask {
 	bool resize_dst_buf_only = false;
 };
 
+// cp — для инструкции, которая заливает КОПИРОВАНИЕМ GPU→GPU (SDL_CopyGPUBufferToBuffer);
+// та, что пишет через transfer-буфер, работает с task и cp не трогает.
 using UpdateInstructionUpdaterFunc = std::function<void(SDL_GPUCopyPass* cp, BufferManager*, UploadTask&)>;
 using UpdateInstructionSizeFunc = std::function <uint32_t()>;
 using UpdateInstructionOffsetFunc = std::function <uint32_t()>;
