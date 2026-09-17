@@ -74,7 +74,8 @@ namespace DefaultRenderPassNamespace
             TextureManager* tm = ctx->GetTextureManager();
             auto env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
             // faceSize пресета — единственный источник истины о разрешении env-куба: крест сцены
-            // нарежется под него (CreateCubeMapTexture).
+            // нарежется под него (CreateCubeMapTexture). Мип-цепочка обязательна: сэмпл окружения
+            // переводит roughness в мип-LOD, при одном уровне отражение перестаёт размываться.
             default_env_atlas = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(512), env_sampler, ResourceTag::Default);
         }
         return default_env_atlas;
@@ -201,11 +202,15 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
     // Третий MRT main-прохода + пара карт AO (половина кадра). Сэмплер LINEAR: композит читает AO
     // с половинного разрешения на полном — билинейный апскейл идёт даром, отдельного шага не нужно.
     g_pass_system.scene_ambient  = tm->CreateTextureAtlas(SCENE_AMBIENT, TexturePresets::AmbientHDR(width, height), env_sampler, ResourceTag::Default | ResourceTag::System);
+    // AO лежит в R32_FLOAT, хотя по точности хватило бы R8: одноканальные 8- и 16-битные форматы
+    // не входят в обязательный набор storage-образов Vulkan, а R32_FLOAT входит.
     g_pass_system.ssao      = tm->CreateTextureAtlas(SSAO_TEXTURE, TexturePresets::AmbientOcclusion(ssao_w, ssao_h), env_sampler, ResourceTag::Default | ResourceTag::System);
     g_pass_system.ssao_temp = tm->CreateTextureAtlas(SSAO_TEMP,    TexturePresets::AmbientOcclusion(ssao_w, ssao_h), env_sampler, ResourceTag::Default | ResourceTag::System);
 
     // Bloom-пирамида: BLOOM_LEVELS отдельных текстур "bloom_L<i>". Уровень 0 = bloom_scale от
-    // эффектного домена, дальше /2 на уровень.
+    // эффектного домена, дальше /2 на уровень. Отдельных, а не мипов одной: шаг блума биндит мип
+    // назначения как RW-storage, а sampled-вью источника покрывает все мипы, включая этот, —
+    // VUID-VkDescriptorImageInfo-imageLayout-00344.
     // Флаги (в т.ч. SIMULTANEOUS только назначениям апсемпла) выведут декларации bloom-программ.
     for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
         uint32_t lw = 0, lh = 0;

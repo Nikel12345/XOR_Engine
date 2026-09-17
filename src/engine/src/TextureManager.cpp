@@ -60,6 +60,9 @@ struct AtlasPacker {
 
 TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_manager): dev(device), trm(transfer_manager){
     using namespace DefaultSamplersNames;
+    // У материального сэмплера анизотропия выключена намеренно: она выбирает LOD по резкой оси
+    // футпринта и держит высокочастотную нормаль острой, сводя на нет мип-префильтр, из-за чего
+    // шейдинг нормали мерцает при движении камеры.
     CreateSampler(DEFAULT_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::DEFAULT_SAMPLER));
     CreateSampler(DEFAULT_SHADOW_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::SHADOW_SAMPLER));
 	CreateSampler(VSM_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::VSM_SAMPLER));
