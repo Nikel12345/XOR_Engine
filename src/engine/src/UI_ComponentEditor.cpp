@@ -6,10 +6,9 @@
 #include "EngineContext.h"
 #include "InputManager.h"
 #include "InputCommands.h"
-// EngineContext держит менеджеры forward-декларациями — полные типы тянет этот TU.
 #include "ModelManager.h"
 #include "MaterialManager.h"
-#include "MaterialData.h"   // CollectVariativeRoles: какие слоты вариативны и в каком порядке
+#include "MaterialData.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
@@ -18,28 +17,23 @@ using namespace ui;
 
 namespace {
 
-// Подпись виджета группы: что объявила схема, иначе key первого поля.
 const char* GroupLabel(const FieldSpec& f) { return f.group_label ? f.group_label : f.key; }
 
-// Поле не редактируется. Либо сказано явно (.ReadOnly — сеттер есть, он нужен ЗАГРУЗКЕ, но
-// UI писать не должен), либо сеттера нет вовсе — значит поле вычисляемое, писать некуда.
 bool ReadOnly(const FieldSpec& f) { return f.ui_readonly || (!f.set_num && !f.set_str); }
 
-} // namespace
+}
 
 bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec,
                              Archetype& arch, size_t row)
 {
-    // Свой ID-скоуп: лейблы полей не конфликтуют ни с заголовком секции (CollapsingHeader
-    // с именем компонента), ни между компонентами.
+    // Свой ID-скоуп: иначе одноимённые поля разных компонентов схлопнутся в один виджет.
     ImGui::PushID(spec.name.c_str());
     bool edited = false;   // прямая запись в колонку → после цикла дёргаем after_edit
     bool sent   = false;   // ушло командой: колонку НЕ трогали, after_edit сделает хендлер
     const auto& fs = spec.fields;
 
-    // Поле с командой у ЖИВОЙ энтити: правка уходит в sim ВМЕСТО записи в колонку. Обе ветки
-    // сразу — иначе UI-поток всё равно писал бы живой ECS, ради чего команда и заводилась,
-    // а хендлер записал бы второй раз. У черновика (kNoEntity) команде некому адресоваться.
+    // Команда ВМЕСТО записи в колонку, а не вместе с ней: иначе UI-поток всё равно писал бы
+    // живой ECS, ради чего команда и заводилась, а хендлер записал бы второй раз.
     const bool routed = target.live();
     auto put_num = [&](const FieldSpec& f, double v) {
         if (routed && f.cmd != CommandId::None) {
@@ -59,8 +53,6 @@ bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec
     };
 
     for (size_t i = 0; i < fs.size(); ) {
-        // ---- группа: N подряд идущих полей одним виджетом (объявлена схемой, см. FieldGroup) ----
-        // Диапазон/шаг берём у первого поля группы — оно её и открывает.
         const size_t gsize = FieldGroupSize(fs[i].group);
         if (gsize > 1 && i + gsize <= fs.size()) {
             const FieldSpec& f = fs[i];
@@ -74,8 +66,6 @@ bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec
                 changed = ImGui::ColorEdit3(GroupLabel(f), v);
                 break;
             case FieldGroup::Mat4: {
-                // Строго в порядке объявления: 4 строки по 4 колонки. Подпись строки — её же
-                // ключи, чтобы не выдумывать имён (у Positions это x y z w / a b c d / ...).
                 for (int r = 0; r < 4; ++r) {
                     char label[64];
                     snprintf(label, sizeof(label), "%s %s %s %s",
@@ -85,7 +75,7 @@ bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec
                 }
                 break;
             }
-            default:   // Vec3
+            default:
                 changed = ImGui::DragFloat3(GroupLabel(f), v, f.speed, f.lo, f.hi, "%.3f",
                                             f.lo < f.hi ? ImGuiSliderFlags_AlwaysClamp : 0);
                 break;
@@ -97,9 +87,6 @@ bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec
             continue;
         }
 
-        // ---- одиночное поле по kind ----
-        // Нередактируемое (вычисляемое либо .ReadOnly) рисуется МЕТКОЙ, а не гашеным виджетом:
-        // задизейбленный драг читается как «сломанная крутилка», а не как «это расчёт».
         const FieldSpec& f = fs[i];
         const bool ro = ReadOnly(f);
         switch (f.kind) {
@@ -112,7 +99,7 @@ bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec
             }
             break;
         }
-        case FieldKind::Angle: {   // радианы в данных, слайдер в градусах (lo/hi схемы — градусы)
+        case FieldKind::Angle: {
             float v = (float)f.get_num(arch, row);
             if (ro) { ImGui::LabelText(f.key, "%.1f deg", v * 57.2957795f); break; }
             const bool ranged = f.lo < f.hi;
@@ -137,7 +124,7 @@ bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec
             if (ImGui::Checkbox(f.key, &v)) put_num(f, v ? 1.0 : 0.0);
             break;
         }
-        case FieldKind::AssetModel: {   // имя ассета — комбо из менеджера, а не ввод строки
+        case FieldKind::AssetModel: {
             const std::string& sel = f.get_str(arch, row);
             if (ro || !target.ctx) { ImGui::LabelText(f.key, "%s", sel.c_str()); break; }
             if (ImGui::BeginCombo(f.key, sel.empty() ? "(none)" : sel.c_str())) {
@@ -154,7 +141,7 @@ bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec
             }
             break;
         }
-        default: {   // Str
+        default: {
             if (ro) { ImGui::LabelText(f.key, "%s", f.get_str(arch, row).c_str()); break; }
             char buf[256];
             snprintf(buf, sizeof buf, "%s", f.get_str(arch, row).c_str());
@@ -176,9 +163,6 @@ bool ui::DrawParamsFields(const ParamsSpec& spec, std::vector<uint8_t>& blob)
     bool edited = false;
 
     for (const ParamsFieldSpec& f : spec.fields) {
-        // Поле не влезает в блоб — блоб старше/младше схемы. Молча не рисуем: писать по этому
-        // смещению значило бы портить чужую память (реестр такие поля отбраковывает на
-        // регистрации, сюда доходит только рассинхрон размера самого блоба).
         void* p = ParamsFieldPtr(blob, f);
         if (!p) continue;
 
@@ -202,7 +186,7 @@ bool ui::DrawParamsFields(const ParamsSpec& spec, std::vector<uint8_t>& blob)
         case ParamsFieldKind::Vec4:
             edited |= ImGui::DragFloat4(label, static_cast<float*>(p), f.speed, f.lo, f.hi, "%.3f", flags);
             break;
-        case ParamsFieldKind::Angle: {   // радианы в блобе, слайдер в градусах (lo/hi схемы — градусы)
+        case ParamsFieldKind::Angle: {
             edited |= ImGui::SliderAngle(label, static_cast<float*>(p),
                                          ranged ? f.lo : -360.0f, ranged ? f.hi : 360.0f);
             break;
@@ -216,13 +200,13 @@ bool ui::DrawParamsFields(const ParamsSpec& spec, std::vector<uint8_t>& blob)
             }
             break;
         }
-        case ParamsFieldKind::Bool: {   // в cbuffer bool — 4 байта, на CPU держим uint32_t
+        case ParamsFieldKind::Bool: {
             auto* u = static_cast<uint32_t*>(p);
             bool v = (*u != 0);
             if (ImGui::Checkbox(label, &v)) { *u = v ? 1u : 0u; edited = true; }
             break;
         }
-        default:   // F32: слайдер при заданном диапазоне, иначе драг
+        default:
             if (ranged) edited |= ImGui::SliderFloat(label, static_cast<float*>(p), f.lo, f.hi);
             else        edited |= ImGui::DragFloat(label, static_cast<float*>(p), f.speed);
             break;
@@ -234,20 +218,8 @@ bool ui::DrawParamsFields(const ParamsSpec& spec, std::vector<uint8_t>& blob)
     return edited;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────────────
-//  Секции, которые схемой не выражаются, и сборка вида целиком.
-// ─────────────────────────────────────────────────────────────────────────────────────────
 namespace {
 
-// Material: зубчатый список имён. Схемой (FieldSpec — ФИКСИРОВАННЫЙ набор полей) он не
-// выражается — ровно поэтому в реестре у него custom_save/custom_load вместо fields. Здесь
-// зеркало того же escape hatch со стороны UI, и адресуется оно так же — по факту custom_save,
-// а не по имени компонента.
-//
-// Слоты диктует модель (как required_slots шейдера диктует слот-роли текстур у материала):
-// слот = сабмеш, его material_index адресует этот список, поэтому длина всегда равна числу
-// сабмешей — добавить/убрать нечего. Модель не выбрана или не найдена → список пуст.
-// У живой энтити длину НЕ правим: её приводит хендлер SetEntityModel (там же и QueueUpdate).
 void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
 {
     MaterialComponent& mats = (*arch.get_array<MaterialComponent>())[row];
@@ -265,7 +237,7 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
         ImGui::PushID(static_cast<int>(k));
         MaterialManager* mmgr = t.ctx->GetMaterialManager();
         const MaterialId sel_id = mats.materials[k].material;
-        const std::string sel = mmgr->MaterialNameOf(sel_id);   // копия: правка живой энтити идёт командой
+        const std::string sel = mmgr->MaterialNameOf(sel_id);
         char label[32];
         snprintf(label, sizeof(label), "submesh %zu", k);
 
@@ -280,17 +252,11 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
                     t.ctx->GetInputManager()->PushCommand(CommandId::SetEntityMaterial,
                         new FieldEditCmd{ t.entity, "Material", "names", (double)k, mc.name });
                 else
-                    mats.materials[k] = MaterialRef{ MaterialId{ mi }, {} };   // черновик: смена материала сбрасывает состояния (как в SetEntityMaterial)
+                    mats.materials[k] = MaterialRef{ MaterialId{ mi }, {} };
             }
             ImGui::EndCombo();
         }
 
-        // ── Какой вариант показывает ЭТА сущность ──
-        // Слоты сюда диктует МАТЕРИАЛ (у кого больше одной текстуры), как выше их диктовала
-        // модель. Показываем только те роли, у которых реально есть ячейка состояния:
-        // CollectVariativeRoles обрывается на MAX_VARIATIVE_SLOTS, и роль за этой границей
-        // переключить нечем — предлагать её тут значило бы врать. Что такая роль есть, видно
-        // в инспекторе материала (там у неё «(!)»).
         const Material* mat = mmgr->GetMaterial(sel_id);
         if (mat) {
             const VariativeRoles vr = CollectVariativeRoles(*mat);
@@ -301,8 +267,6 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
                 auto& st = mats.materials[k].states;
                 auto sit = std::find_if(st.begin(), st.end(),
                     [role](const auto& pr) { return pr.first == role; });
-                // Нет записи = дефолт. И протухший номер (вариант убрали) показываем как дефолт —
-                // ровно так же его трактует кламп в шейдере.
                 uint32_t cur = (sit != st.end() && sit->second < count) ? sit->second : 0u;
 
                 ImGui::PushID(static_cast<int>(role));
@@ -325,20 +289,20 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
                     t.ctx->GetInputManager()->PushCommand(CommandId::SetEntityTextureVariant,
                         new EntityTextureVariantCmd{ t.entity, safe_u32(k),
                                                      static_cast<uint32_t>(role), next });
-                else if (next == 0) { if (sit != st.end()) st.erase(sit); }        // черновик: та же
-                else if (sit != st.end()) sit->second = next;                      // логика, что в
-                else st.emplace_back(role, next);                                  // хендлере команды
+                else if (next == 0) { if (sit != st.end()) st.erase(sit); }
+                else if (sit != st.end()) sit->second = next;
+                else st.emplace_back(role, next);
             }
         }
         ImGui::PopID();
     }
 }
 
-} // namespace
+}
 
 void ui::DrawEntityComponents(const EditTarget& target, Archetype& arch, size_t row)
 {
-    std::string tags;   // теги без данных — одной строкой внизу, не секциями
+    std::string tags;
     for (const ComponentSpec& s : ComponentSpecRegistry::Get().All()) {
         if (!arch.components.count(s.sig_type)) continue;
         if (s.fields.empty() && !s.custom_save) {
@@ -347,8 +311,6 @@ void ui::DrawEntityComponents(const EditTarget& target, Archetype& arch, size_t 
         }
         if (!ImGui::CollapsingHeader(s.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) continue;
 
-        // custom_save = «схемой не выражается» (сейчас только Material) → рисует своя функция,
-        // как и сохраняет. Всё остальное — generic по fields, без исключений по именам.
         if (s.custom_save) DrawMaterialSection(target, arch, row);
         else               DrawComponentFields(target, s, arch, row);
     }

@@ -7,7 +7,6 @@
 #include "EngineContext.h"
 #include "InputManager.h"
 #include "InputCommands.h"
-// EngineContext.h держит менеджеры forward-декларациями — полные типы тянет этот TU.
 #include "ObjectManager.h"
 #include "CameraManager.h"
 #include "BufferManager.h"
@@ -29,24 +28,18 @@
 #include <atomic>
 #include <filesystem>
 
-using namespace ShaderBase;   // VertexSemantic в редакторе pull вершинника
+using namespace ShaderBase;
 #include <SDL3/SDL_dialog.h>
 
 using namespace ui;
 
-// Правая панель целиком: диспетчер DrawInspector + все Inspect*-блоки/редакторы (внизу), плюс
-// гизмо (DrawGizmo). Хелперы файл-локальны (анонимный namespace) — их зовёт только этот TU.
-
 namespace {
-    // Текущий режим стрелок. Переключается радиокнопками в Inspector, читается в DrawGizmo.
     ImGuizmo::OPERATION g_gizmo_op   = ImGuizmo::TRANSLATE;
     ImGuizmo::MODE      g_gizmo_mode = ImGuizmo::WORLD;
 
-    // Positions хранит матрицу row-major (трансляция в w/d/h = индексы 3,7,11), а glm/
-    // ImGuizmo ждут column-major — поэтому собираем glm::mat4 транспонируя поэлементно.
     glm::mat4 ReadPositionsMatrix(const Positions& P, size_t i)
     {
-        glm::mat4 m;                                 // m[col][row]
+        glm::mat4 m;
         m[0][0] = P.x[i]; m[1][0] = P.y[i]; m[2][0] = P.z[i]; m[3][0] = P.w[i];
         m[0][1] = P.a[i]; m[1][1] = P.b[i]; m[2][1] = P.c[i]; m[3][1] = P.d[i];
         m[0][2] = P.e[i]; m[1][2] = P.f[i]; m[2][2] = P.g[i]; m[3][2] = P.h[i];
@@ -54,11 +47,6 @@ namespace {
         return m;
     }
 
-    // TextureSlotRole (enum слота) → строка для ImGui. Явный switch, а не рефлексия: набор ролей
-    // фиксирован и мал, а Custom0=1000 сломал бы range-scan magic_enum/source_location-трюков.
-    // RoleName переехал в UI_Internal.h — его просит и редактор компонента (см. там же).
-
-    // ChannelConvention (enum) → строка для дропдауна конвенции каналов текстуры.
     const char* ConvName(ChannelConvention c)
     {
         switch (c) {
@@ -69,7 +57,6 @@ namespace {
         }
     }
 
-    // AnchorShift (enum пивота модели) → строка для дропдауна.
     const char* AnchorName(AnchorShift a)
     {
         switch (a) {
@@ -87,9 +74,6 @@ namespace {
         }
     }
 
-    // Маркер «ссылка по имени не резолвится» в конце строки: жёлтый (!) + тултип с причиной.
-    // Икон-шрифта у ImGui нет — обычный цветной текст. Рендер при таких промахах не падает
-    // (dummy/fallback на пересборке), маркер лишь делает промах видимым в инспекторе.
     void MissingRefMark(const char* tooltip)
     {
         ImGui::SameLine();
@@ -97,18 +81,13 @@ namespace {
         ImGui::SetItemTooltip("%s", tooltip);
     }
 
-    // ShaderInspector дёргает редакторы списков буферов/слот-ролей, определённые ниже (рядом с формами SD).
     void BufferListEditor(const char* label, std::vector<BufferDataName>& list, const std::vector<BufferDataName>& avail);
     void RoleListEditor(std::vector<TextureSlotRole>& list);
 
-    // Единый инспектор сущности: свет — такая же сущность, отдельного «типа выбора» нет. Шапка
-    // (удаление + перенос + рамки коллайдеров) — про ЭНТИТИ, а не про компонент; сами компоненты
-    // рисует общий с формой создания вид (ui::DrawEntityComponents).
     void InspectEntity(EngineContext* ctx, ObjectManager* om, SceneData* scene, Entity e)
     {
         ImGui::Text("Entity %u", static_cast<unsigned>(e));
 
-        // Удаление — всегда (в т.ч. у directional-света без трансформа).
         if (DangerButton("Delete", ImVec2(120.0f, 0.0f))) {
             ctx->GetInputManager()->PushCommand(CommandId::DeleteEntity,
                 reinterpret_cast<const void*>(static_cast<uintptr_t>(e)));
@@ -122,7 +101,6 @@ namespace {
         Archetype& arch = *arch_it->second;
         const size_t row = idx_it->second;
 
-        // Debug-рамки коллайдеров (дети): галочка visible → HideEntity.
         auto kids_it = scene->children.find(e);
         if (kids_it != scene->children.end() && !kids_it->second.empty()) {
             ImGui::SeparatorText("Debug colliders");
@@ -130,7 +108,7 @@ namespace {
                 if (!om->Has<DrawComponent>(scene, c)) continue;
                 bool visible = om->GetComponent<DrawComponent>(scene, c).visible;
                 char clabel[40]; snprintf(clabel, sizeof(clabel), "visible (collider %u)", static_cast<unsigned>(c));
-                if (ImGui::Checkbox(clabel, &visible))   // то же поле схемы, только у ребёнка
+                if (ImGui::Checkbox(clabel, &visible))
                     ctx->GetInputManager()->PushCommand(CommandId::HideEntity,
                         new FieldEditCmd{ c, "Draw", "visible", visible ? 1.0 : 0.0, {} });
             }
@@ -146,11 +124,8 @@ namespace {
         ShaderManager* sm = ctx->GetShaderManager();
         InputManager*  im = ctx->GetInputManager();
 
-        // ---- Имя + переименование: галочка кликабельна ТОЛЬКО когда имя изменено, непусто и свободно.
-        //      Переименование = ре-кей в словаре (delete+create). Ссылки по старому имени (энтити) после
-        //      этого не резолвятся — переименовывай до назначения материала. ----
         static char nameBuf[128] = "";
-        static std::string nameFor = "\x01";                 // сентинел → синк буфера на смену выбора
+        static std::string nameFor = "\x01";
         if (matName != nameFor) { nameFor = matName; std::snprintf(nameBuf, sizeof nameBuf, "%s", matName.c_str()); }
         ImGui::InputText("Name", nameBuf, sizeof nameBuf);
         ImGui::SameLine();
@@ -162,23 +137,20 @@ namespace {
             ImGui::BeginDisabled(!nameChanged);
             const bool apply = ImGui::Button("##rename", ImVec2(sz, sz));
             ImGui::EndDisabled();
-            ImDrawList* dl = ImGui::GetWindowDrawList();      // галочку рисуем сами (в шрифте ImGui её нет)
+            ImDrawList* dl = ImGui::GetWindowDrawList();
             const ImU32 col = ImGui::GetColorU32(nameChanged ? ImGuiCol_Text : ImGuiCol_TextDisabled);
             dl->AddLine({ p0.x + sz*0.24f, p0.y + sz*0.52f }, { p0.x + sz*0.42f, p0.y + sz*0.70f }, col, 2.0f);
             dl->AddLine({ p0.x + sz*0.42f, p0.y + sz*0.70f }, { p0.x + sz*0.78f, p0.y + sz*0.30f }, col, 2.0f);
             if (apply) {
                 im->PushCommand(CommandId::RenameMaterial, new RenameMaterialCmd{ matName, nameBuf });
-                g_sel.name = nameBuf;                          // выбор следует за переименованием
+                g_sel.name = nameBuf;
             }
         }
 
-        // Материал = набор sp (проходов), и у КАЖДОЙ свои данные: слоты диктует её required_slots,
-        // params — её собственный блоб (SpBinding). Текстуры при этом ОБЩИЕ и ключуются ролью:
-        // правка под одним sp видна под другим. Params — нет: они адресованы конкретной программе.
         ImGui::SeparatorText("Shaders");
         const auto& specs = ParamsSpecRegistry::Materials().All();
 
-        std::vector<std::string> texNames;                   // значения комбобокса текстур — по алфавиту
+        std::vector<std::string> texNames;
         const TextureRegistry& treg = ctx->GetTextureManager()->Textures();
         for (int32_t ti = 0; ti < treg.Count(); ++ti) {
             const TextureCell& c = treg.At(ti);
@@ -191,31 +163,20 @@ namespace {
             const std::string spName = sm->ShaderProgramNameOf(binding.sp);
             ImGui::PushID(static_cast<int>(si));
 
-            if (ImGui::SmallButton("x"))                       // убрать этот sp
+            if (ImGui::SmallButton("x"))
                 im->PushCommand(CommandId::RemoveMaterialShader, new MaterialShaderCmd{ matName, spName });
             ImGui::SameLine();
             ImGui::TextUnformatted(spName.c_str());
 
-            // Резолв sp через карту (GetShaderProgram логирует промах — спамил бы каждый кадр).
             ShaderProgram* sp = sm->GetShaderProgram(binding.sp);
             if (!sp) MissingRefMark("shader program not found — renders with fallback");
 
-            // Слоты этого sp; значение — из общей карты по роли (правка отражается во всех sp с этой ролью).
-            // На роль — СПИСОК вариантов: [0] дефолт (рисуется без переключения), дальше те, между
-            // которыми переключается сущность. Комбобокс на КАЖДЫЙ номер, потому что вариант — это
-            // позиция в списке: она и есть то, что хранит состояние сущности.
             if (sp) {
-                // Ячеек в секции состояний ровно MAX_VARIATIVE_SLOTS, и достаются они первым
-                // вариативным ролям в порядке обхода материала (то же CollectVariativeRoles, что
-                // читают заливка и сборка батчей). Роли, которой не хватило, варианты собираются,
-                // но НЕ переключаются — она молча показывает дефолт. Гасить её в UI нельзя (роль
-                // может стать вариативной раньше соседней), поэтому просто помечаем.
                 const VariativeRoles cells = CollectVariativeRoles(*mat);
                 auto has_cell = [&cells](TextureSlotRole r) {
                     for (uint32_t c = 0; c < cells.count; ++c) if (cells.role[c] == r) return true;
                     return false;
                 };
-                // Потолок таблицы UVL — на пару (материал, sp): столько блоков влезает в пуш.
                 uint32_t total_blocks = 0;
                 for (TextureSlotRole r : sp->required_slots) {
                     auto rit = mat->textures.find(r);
@@ -229,27 +190,19 @@ namespace {
                     const uint32_t n = (it != mat->textures.end()) ? safe_u32(it->second.size()) : 0u;
                     ImGui::PushID(static_cast<int>(role));
 
-                    // Какой номер сейчас показан — состояние ФОРМЫ, а не материала, поэтому живёт
-                    // в ImGui-storage (ключ = стек ID, то есть своё на роль и на sp), а не в
-                    // ресурсе. Каждый кадр КЛАМПИТСЯ: список могли укоротить кнопкой x, командой
-                    // из другого места или загрузкой сцены — форма обязана это пережить.
+                    // Показанный номер — состояние формы, и кламп нужен каждый кадр: список
+                    // могли укоротить кнопкой, командой со стороны или загрузкой сцены.
                     ImGuiStorage* store = ImGui::GetStateStorage();
                     const ImGuiID  vkey = ImGui::GetID("variant_view");
                     uint32_t v = safe_i_u32(store->GetInt(vkey, 0));
-                    // Кламп к ПОСЛЕДНЕМУ валидному, а не к нулю: список укоротили (кнопкой x,
-                    // командой из другого места, загрузкой сцены) — показ должен отступить на
-                    // столько, на сколько список ужался, а не прыгать в начало. Удалили один —
-                    // отступили на один. Ноль тут только когда вариантов не осталось вовсе.
                     if (n == 0)      v = 0;
                     else if (v >= n) v = n - 1;
 
-                    ImGui::TextUnformatted(RoleName(role));   // RoleName: enum слота → строка
+                    ImGui::TextUnformatted(RoleName(role));
                     if (n > 1 && !has_cell(role))
                         MissingRefMark("too many variative slots for MAX_VARIATIVE_SLOTS - "
                                        "this one is not switchable, it always shows variant 0");
 
-                    // Стрелки листают НОМЕР варианта: одновременно виден один комбобокс, а номер
-                    // и есть то, что хранит состояние сущности, — поэтому он подписан явно.
                     ImGui::SameLine();
                     ImGui::BeginDisabled(v == 0);
                     if (ImGui::ArrowButton("prev", ImGuiDir_Left)) --v;
@@ -261,39 +214,29 @@ namespace {
                     if (ImGui::ArrowButton("next", ImGuiDir_Right)) ++v;
                     ImGui::EndDisabled();
 
-                    // + : новый вариант = копия дефолта (сразу резолвится, dummy не даёт).
-                    // Показываем сразу его — он появится следующим номером.
                     ImGui::SameLine();
                     ImGui::BeginDisabled(uvl_full);
                     if (ImGui::SmallButton("+")) {
                         im->PushCommand(CommandId::AddMaterialTextureVariant,
                             new MaterialVariantCmd{ matName, static_cast<uint32_t>(role), 0 });
-                        v = n;   // список вырастет к следующему кадру; кламп выше подстрахует
+                        v = n;
                     }
                     ImGui::EndDisabled();
-                    // AllowWhenDisabled: у выключенного элемента SetItemTooltip молчит, а нужна
-                    // подсказка именно тогда, когда кнопка погашена.
                     if (uvl_full && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                         ImGui::SetTooltip("UVL table is full (MAX_UVL_BLOCKS = %u blocks per material + shader)",
                             MAX_UVL_BLOCKS);
 
-                    // x : убрать ПОКАЗАННЫЙ вариант. Нулевой не убрать — это дефолт слота, то,
-                    // что рисуется без переключения; «убрать текстуру у слота» — другая операция.
                     ImGui::SameLine();
                     ImGui::BeginDisabled(v == 0);
                     if (ImGui::SmallButton("x")) {
                         im->PushCommand(CommandId::RemoveMaterialTextureVariant,
                             new MaterialVariantCmd{ matName, static_cast<uint32_t>(role), v });
                         --v;   // отклик в ЭТОМ же кадре: команда исполнится на sim позже, а кламп
-                               // выше добьёт случай, когда список ужался не нашей кнопкой
                     }
                     ImGui::EndDisabled();
 
                     store->SetInt(vkey, safe_u32t_i(v));
 
-                    // Комбобокс — ровно один, на показанный номер. Роль без текстур показываем
-                    // пустой строкой номера 0: назначить ей текстуру можно тут же.
-                    // БЕЗ Indent: комбобокс встаёт по левому краю, вровень со строкой роли над ним.
                     const TextureId current_id = (v < n) ? it->second[v] : TextureId{};
                     const std::string current = ctx->GetTextureManager()->TextureNameOf(current_id);
                     if (ImGui::BeginCombo("##variant", current.c_str())) {
@@ -306,20 +249,13 @@ namespace {
                         }
                         ImGui::EndCombo();
                     }
-                    // Ссылка есть, а текстуры в ячейке нет (удалена) → маркер.
                     if (current_id && !ctx->GetTextureManager()->GetTextureHandle(current_id))
                         MissingRefMark("texture not found - dummy is used");
                     ImGui::PopID();
                 }
             }
 
-            // -- params ЭТОЙ sp -- Смена ТИПА = дефолтный блоб типа из реестра. Правка ПОЛЕЙ идёт
-            // in-place и дерево не трогает (ключ узла — адрес блоба, а не байты), но смена типа
-            // адрес заводит или убирает, то есть меняет сам ключ -> батчи пересобрать.
-            // Список типов — весь реестр: и движковые, и зарегистрированные кодом игры.
             const ParamsSpec* cur = ParamsSpecRegistry::Materials().ByName(binding.params_type);
-            // Тип назван, но не зарегистрирован (сцена от сборки, где он был) — не молчим: блоб
-            // рисовать нечем, а SaveScene его не сохранит.
             const bool unknown_type = !binding.params_type.empty() && !cur;
             if (ImGui::BeginCombo("Params", cur ? cur->name.c_str()
                                                 : (unknown_type ? binding.params_type.c_str() : "(none)"))) {
@@ -342,20 +278,19 @@ namespace {
 
             if (!binding.params || binding.params->empty()) ImGui::TextDisabled("(no params)");
             else if (!cur)             ImGui::TextDisabled("(%zu bytes, unknown layout)", binding.params->size());
-            else if (cur->custom_edit) cur->custom_edit(binding.params->data());   // escape hatch типа
+            else if (cur->custom_edit) cur->custom_edit(binding.params->data());
             else                       DrawParamsFields(*cur, *binding.params);
 
             ImGui::PopID();
             ImGui::Separator();
         }
 
-        // Добавить sp (перечень graphics sp, ещё не добавленных материалу).
         if (ImGui::BeginCombo("+ Shader", "(add)")) {
             ShaderProgramRegistry& spreg = sm->ShaderPrograms();
             for (int32_t i = 0; i < spreg.Count(); ++i) {
                 const ShaderProgramCell& spc = spreg.At(i);
                 if (!spc.object) continue;
-                if (!g_show_internal && HasTag(spc.object->tags, ResourceTag::System)) continue;   // служебная: руками не выбирают
+                if (!g_show_internal && HasTag(spc.object->tags, ResourceTag::System)) continue;
                 bool present = false;
                 for (auto& b : mat->shader_programs) if (b.sp == ShaderProgramId{ i }) { present = true; break; }
                 if (present) continue;
@@ -377,41 +312,31 @@ namespace {
             cam->SetView(pos, tgt, glm::vec3(0.0f, 1.0f, 0.0f));
     }
 
-    // --- Приём пути из нативного файл-диалога. Колбэк SDL может прийти из ДРУГОГО потока, поэтому
-    //     кладём через мьютекс+atomic, а UI забирает у себя на кадре. g_pick_target помечает, КАКОЕ
-    //     поле заполнять (у формы модели два пути) — активная форма забирает только «своё».
-    //
-    //     Пути ресурсов ХРАНЯТСЯ ОТНОСИТЕЛЬНО КОРНЯ ПРОЕКТА (current_path(): в dev его ставит cmake,
-    //     в install — папка exe), иначе scene.json не переносится через git/установку. Поэтому сырой
-    //     путь из диалога (диалог отдаёт абсолютный) прогоняется через финализацию ProcessPendingPick:
-    //       • файл ВНУТРИ проекта → относительный путь;
-    //       • файл СНАРУЖИ (другой диск / вне дерева) → лог + второй диалог (выбор папки внутри
-    //         проекта) → копия файла туда → относительный путь до копии.
-    //     Абсолютный путь наружу проекта НЕ сохраняется никогда (git его не заберёт). ---
+    // Колбэк файл-диалога может прийти из ДРУГОГО потока, поэтому путь кладётся через
+    // мьютекс+atomic, а UI забирает его у себя на кадре.
+    // Путь ресурса хранится ОТНОСИТЕЛЬНО корня проекта, иначе сцена не переносится: файл снаружи
+    // проекта копируется внутрь (второй диалог), и сохраняется путь до копии.
     enum class PickTarget { None, TexPath, ModelVert, ModelIndex, ShaderVert, ShaderFrag, ShaderComp };
     PickTarget        g_pick_target = PickTarget::None;
-    std::mutex        g_pick_mtx;                 // охраняет все строковые буферы ниже
-    std::string       g_picked_path;             // ФИНАЛЬНЫЙ относительный путь для форм (ставит финализация)
+    std::mutex        g_pick_mtx;
+    std::string       g_picked_path;
     std::atomic<bool> g_picked_ready{ false };
 
-    std::string       g_raw_path;                // сырой (абсолютный) путь из первого диалога
+    std::string       g_raw_path;
     std::atomic<bool> g_raw_ready{ false };
-    std::string       g_copy_src;                // исходник, ждущий копирования (файл вне проекта)
-    std::string       g_folder_path;             // папка назначения из второго диалога (пусто = отмена)
+    std::string       g_copy_src;
+    std::string       g_folder_path;
     std::atomic<bool> g_folder_ready{ false };
 
-    // Первый диалог (выбор файла): кладём СЫРОЙ путь — финализация на кадре (см. ProcessPendingPick).
     void SDLCALL OnFilePicked(void*, const char* const* filelist, int)
     {
-        if (filelist && filelist[0]) {                 // пусто = отмена, nullptr = ошибка
+        if (filelist && filelist[0]) {
             std::lock_guard<std::mutex> lk(g_pick_mtx);
             g_raw_path = filelist[0];
             g_raw_ready.store(true, std::memory_order_release);
         }
     }
 
-    // Второй диалог (выбор папки назначения для копии файла извне проекта). Отмену тоже отмечаем
-    // готовой — финализация на кадре снимет ожидание и отменит операцию.
     void SDLCALL OnFolderPicked(void*, const char* const* filelist, int)
     {
         std::lock_guard<std::mutex> lk(g_pick_mtx);
@@ -419,17 +344,13 @@ namespace {
         g_folder_ready.store(true, std::memory_order_release);
     }
 
-    // Открыть нативный диалог выбора ФАЙЛА, пометив целевое поле (SDL требует main-поток; результат —
-    // потокобезопасно). Финализирует ProcessPendingPick.
+    // SDL требует main-поток.
     void OpenFileDialog(PickTarget target, const SDL_DialogFileFilter* filters, int nfilters)
     {
         g_pick_target = target;
         SDL_ShowOpenFileDialog(OnFilePicked, nullptr, nullptr, filters, nfilters, nullptr, false);
     }
 
-    // SDL отдаёт пути в UTF-8, а MSVC std::filesystem трактует узкую строку как ACP → кириллица
-    // (G:\контент\...) бьётся и файл «не находится». Строим path из UTF-8 явно (C++20/23 aware),
-    // и обратно path→UTF-8 для хранения/JSON.
     std::filesystem::path PathFromU8(const std::string& s)
     {
         return std::filesystem::path(reinterpret_cast<const char8_t*>(s.c_str()));
@@ -440,38 +361,32 @@ namespace {
         return std::string(u.begin(), u.end());
     }
 
-    // «Внутри проекта» = relative(path, root) существует и не убегает вверх ('..'). Кроссдисковый путь
-    // relative() отдаёт пустым — тоже «снаружи». Пустая строка возврата = снаружи (UTF-8, '/').
     std::string RelativeInsideProject(const std::filesystem::path& p, const std::filesystem::path& root)
     {
         std::error_code ec;
         std::filesystem::path rel = std::filesystem::relative(p, root, ec);
         if (ec) return {};
-        std::string s = U8FromPath(rel);                       // '/' — единообразно и портируемо в JSON
-        if (s.empty() || s.rfind("..", 0) == 0) return {};     // вне дерева проекта
+        std::string s = U8FromPath(rel);
+        if (s.empty() || s.rfind("..", 0) == 0) return {};
         return s;
     }
 
-    // Раз в кадр (верх DrawInspector): превращаем сырой путь из диалога в финальный ОТНОСИТЕЛЬНЫЙ,
-    // при необходимости через копирование извне проекта. Только по завершении ставим g_picked_ready —
-    // формы (TakePickedPath / инлайн-приёмы) забирают уже готовый относительный путь.
     void ProcessPendingPick()
     {
         namespace fs = std::filesystem;
         std::error_code ec;
-        const fs::path root = fs::current_path(ec);            // корень проекта (cmake в dev / exe в install)
+        const fs::path root = fs::current_path(ec);
 
-        // Этап 1: свежий файл из первого диалога.
         if (g_raw_ready.exchange(false, std::memory_order_acquire)) {
             std::string raw;
             { std::lock_guard<std::mutex> lk(g_pick_mtx); raw = g_raw_path; }
 
             std::string rel = RelativeInsideProject(PathFromU8(raw), root);
-            if (!rel.empty()) {                                // внутри проекта — сразу относительный
+            if (!rel.empty()) {
                 std::lock_guard<std::mutex> lk(g_pick_mtx);
                 g_picked_path = rel;
                 g_picked_ready.store(true, std::memory_order_release);
-            } else {                                           // снаружи — лог + запрос папки для копии
+            } else {
                 SDL_Log("[Path] '%s' is outside the project (%s) - pick a folder INSIDE the project to copy it into",
                         raw.c_str(), U8FromPath(root).c_str());
                 { std::lock_guard<std::mutex> lk(g_pick_mtx); g_copy_src = raw; }
@@ -479,12 +394,11 @@ namespace {
             }
         }
 
-        // Этап 2: выбрана папка назначения — копируем и берём относительный путь до копии.
         if (g_folder_ready.exchange(false, std::memory_order_acquire)) {
             std::string src, folder;
             { std::lock_guard<std::mutex> lk(g_pick_mtx); src = g_copy_src; folder = g_folder_path; g_copy_src.clear(); }
 
-            if (folder.empty()) {                              // отмена выбора папки
+            if (folder.empty()) {
                 SDL_Log("[Path] copy cancelled - path left unset");
                 g_pick_target = PickTarget::None;
                 return;
@@ -499,7 +413,7 @@ namespace {
                 return;
             }
             std::string rel = RelativeInsideProject(dstP, root);
-            if (rel.empty()) {                                 // выбрал папку вне проекта — путь не сохраняем
+            if (rel.empty()) {
                 SDL_Log("[Path] chosen folder is outside the project - path not stored (file copied to %s)",
                         U8FromPath(dstP).c_str());
                 g_pick_target = PickTarget::None;
@@ -512,31 +426,24 @@ namespace {
         }
     }
 
-    // Куб отличает ТИП АТЛАСА — тот же признак, по которому его пишет SaveScene и грузит LoadScene.
-    // Своего «я куб» у хэндла нет и не нужно: куб — обычная текстура на 6 слоях cube-атласа.
     bool IsCubeAtlas(const TextureAtlas* a) {
         return a && (a->texture_type == SDL_GPU_TEXTURETYPE_CUBE
                   || a->texture_type == SDL_GPU_TEXTURETYPE_CUBE_ARRAY);
     }
 
-    // Форма создания/редактирования текстуры (одна и та же — см. upsert delete+create). Ничего не
-    // происходит по-символьно: правки копятся в буферах, действие только по кнопке.
     void TextureEditor(EngineContext* ctx)
     {
         static char        nameBuf[128] = "";
         static char        pathBuf[512] = "";
         static std::string atlasSel;
         static ChannelConvention convSel = ChannelConvention::AsIs;
-        static bool        cubeSel = false;   // исходник — крест 4×3, а не плоская картинка
-        static std::string syncedFor = "\x01";   // сентинел ≠ любому имени → синк на первый заход
+        static bool        cubeSel = false;
+        static std::string syncedFor = "\x01";
 
-        // Имя подтягиваем из выбора (клик по плитке = редактировать её; "New" = пустое имя).
-        // atlas/path НЕ сбрасываем — удобно заливать серию текстур в тот же атлас.
         if (g_sel.name != syncedFor) {
             syncedFor = g_sel.name;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
             if (!g_sel.name.empty()) {
-                // Ресурс самоописываем: тянем атлас/путь прямо из хэндла (см. TextureHandle).
                 if (TextureHandle* h = ctx->GetTextureManager()->GetTextureHandle(g_sel.name)) {
                     atlasSel = ctx->GetTextureManager()->AtlasNameOf(h->atlas_id);
                     std::snprintf(pathBuf, sizeof pathBuf, "%s", h->source_path.c_str());
@@ -544,10 +451,9 @@ namespace {
                     cubeSel = IsCubeAtlas(h->atlas);
                 }
             }
-            else pathBuf[0] = '\0';   // "New" — путь чистим (атлас оставляем для серии)
+            else pathBuf[0] = '\0';
         }
 
-        // Забрать путь, выбранный в диалоге (только если он для нашего поля).
         if (g_pick_target == PickTarget::TexPath && g_picked_ready.exchange(false, std::memory_order_acquire)) {
             std::lock_guard<std::mutex> lk(g_pick_mtx);
             std::snprintf(pathBuf, sizeof pathBuf, "%s", g_picked_path.c_str());
@@ -557,17 +463,12 @@ namespace {
         ImGui::TextDisabled("Texture (create / edit)");
         ImGui::InputText("Name", nameBuf, sizeof nameBuf);
 
-        // Вид исходника. Cube = горизонтальный крест 4×3 одним файлом: режется на 6 граней и ложится
-        // слоями cube-атласа (EngineContext::CreateCubeMapTexture). Плоские и cube-атласы не
-        // взаимозаменяемы, поэтому переключение вида сбрасывает выбор атласа, а не оставляет
-        // заведомо негодный.
         int kind = cubeSel ? 1 : 0;
         ImGui::RadioButton("Flat", &kind, 0);
         ImGui::SameLine();
         ImGui::RadioButton("Cube (cross 4x3)", &kind, 1);
         if ((kind == 1) != cubeSel) { cubeSel = (kind == 1); atlasSel.clear(); }
 
-        // Атлас — дропдаун существующих (общий фильтр служебных с браузером), отфильтрованный по виду.
         if (ImGui::BeginCombo("Atlas", atlasSel.empty() ? "(select)" : atlasSel.c_str())) {
             const AtlasRegistry& areg = ctx->GetTextureManager()->Atlases();
             for (int32_t ai = 0; ai < areg.Count(); ++ai) {
@@ -591,8 +492,6 @@ namespace {
             OpenFileDialog(PickTarget::TexPath, filters, 2);
         }
 
-        // Конвенция каналов исходника (enum → switch, см. ConvName). К кубу не применяется —
-        // нормализуют каналы только материальные карты, поэтому для него поля нет вовсе.
         static const ChannelConvention kConvs[] = {
             ChannelConvention::AsIs, ChannelConvention::SmoothnessInGreen, ChannelConvention::DepthInAlpha
         };
@@ -608,16 +507,14 @@ namespace {
         const bool ready = nameBuf[0] && !atlasSel.empty() && pathBuf[0];
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
-            // old_name = выбранная текстура: если имя изменили — переименование (старую снять в команде).
             ctx->GetInputManager()->PushCommand(CommandId::UpsertTexture,
                 new UpsertTextureCmd{ nameBuf, atlasSel, pathBuf,
-                                      cubeSel ? 0u : static_cast<uint32_t>(convSel),   // у куба конвенции нет
+                                      cubeSel ? 0u : static_cast<uint32_t>(convSel),
                                       g_sel.name, cubeSel });
-            g_sel = Selection{}; g_sel.kind = SelKind::Texture; g_sel.name = nameBuf;   // выбор следует за именем
+            g_sel = Selection{}; g_sel.kind = SelKind::Texture; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
 
-        // Удаление существующей текстуры (материалы по её имени → dummy на пересборке).
         if (!g_sel.name.empty()) {
             ImGui::SameLine();
             const bool del = DangerButton("Delete");
@@ -628,10 +525,6 @@ namespace {
         }
     }
 
-    // Подпись ступени диапазона (SubMeshSpan): пользователю нужен ПОРОГ В ПИКСЕЛЯХ, а хранится
-    // номер ступени. Отдаётся как format-строка слайдера: printf без %d печатает её как есть,
-    // поэтому ползунок ходит по 0..15, а подписан осмысленным числом. Буфер статический —
-    // указатель живёт ровно до конца вызова SliderInt, дальше ImGui подпись уже скопировал.
     const char* SpanStepLabel(int step)
     {
         static char buf[24];
@@ -640,12 +533,8 @@ namespace {
         return buf;
     }
 
-    // Диапазоны экранных размеров сабмешей выбранной модели. Правка МОМЕНТАЛЬНАЯ, как у params
-    // материала и state прохода: пишем поле на месте, без пересоздания модели. Пересоздавать
-    // тут нечего — геометрия не меняется, меняется только число, которое каллинг сравнивает с
-    // экранным радиусом; а recreate вдобавок перечитал бы .bin и обнулил бы остальные спаны.
-    // Батч держит КОПИЮ диапазона (ModelBatchData::submesh), поэтому правка обязана пересобрать
-    // дерево — тот же инвариант, что у texture_uvl.
+    // Пишем поле на месте: пересоздание модели перечитало бы .bin и обнулило остальные спаны.
+    // Батч держит КОПИЮ диапазона, поэтому правка обязана пересобрать дерево.
     void ModelSpansEditor(EngineContext* ctx)
     {
         if (g_sel.name.empty()) return;
@@ -682,9 +571,6 @@ namespace {
         }
     }
 
-    // Форма создания/редактирования модели (аналог TextureEditor). Upsert = перезагрузка in-place
-    // (ModelManager::LoadModelFromFile). Процедурные модели имеют пустые пути → форма пуста, а кнопка
-    // (нужны оба пути) не активна — их создание только в коде.
     void ModelEditor(EngineContext* ctx)
     {
         static char        nameBuf[128] = "";
@@ -693,7 +579,7 @@ namespace {
         static AnchorShift anchorSel = AnchorShift::Keep;
         static std::string syncedFor = "\x01";
 
-        if (g_sel.name != syncedFor) {                        // синк из выбранной модели (self-describing)
+        if (g_sel.name != syncedFor) {
             syncedFor = g_sel.name;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
             if (!g_sel.name.empty()) {
@@ -706,7 +592,6 @@ namespace {
             else { modelBuf[0] = '\0'; indexBuf[0] = '\0'; }
         }
 
-        // Забрать путь из диалога в нужное из двух полей.
         if ((g_pick_target == PickTarget::ModelVert || g_pick_target == PickTarget::ModelIndex)
             && g_picked_ready.exchange(false, std::memory_order_acquire)) {
             std::lock_guard<std::mutex> lk(g_pick_mtx);
@@ -728,7 +613,6 @@ namespace {
         ImGui::SameLine();
         if (ImGui::Button("Browse...##i")) OpenFileDialog(PickTarget::ModelIndex, filters, 2);
 
-        // Пивот (anchor) — enum → дропдаун (см. AnchorName).
         static const AnchorShift kAnchors[] = {
             AnchorShift::Keep, AnchorShift::Center, AnchorShift::LBB, AnchorShift::RBB,
             AnchorShift::LTB, AnchorShift::RTB, AnchorShift::LBF, AnchorShift::RBF,
@@ -748,24 +632,16 @@ namespace {
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
             ctx->GetInputManager()->PushCommand(CommandId::UpsertModel,
                 new UpsertModelCmd{ nameBuf, modelBuf, indexBuf, static_cast<uint32_t>(anchorSel), g_sel.name });
-            g_sel = Selection{}; g_sel.kind = SelKind::Model; g_sel.name = nameBuf;   // выбор следует за именем
+            g_sel = Selection{}; g_sel.kind = SelKind::Model; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
 
-        // Ниже кнопки намеренно: всё выше копится в буферах и коммитится «Recreate», а спаны
-        // пишутся сразу. Соседство разной механики в одной панели — повод разделить их визуально,
-        // а не смешать в общую форму.
         ModelSpansEditor(ctx);
     }
 
-    // Инспектор/создатель graphics-sp. Одна форма и для правки, и для создания (как текстуры/модели):
-    // пустое имя выбора (плитка «+») → sp == nullptr, кнопка «Create»; иначе правка ПЕРЕСОЗДАНИЕМ
-    // (delete+create). vs/fs/буферы/слоты/проход/spd копятся в буферах, коммит — одной кнопкой.
-    // Push/dispatch в UI НЕ идут (это код) — у sp, созданной из UI, push-констант нет.
-    // Состояние прохода: тот же generic-рендерер схемы, что и у params материала. Схему ищем ПО
-    // ИМЕНИ из самого шага (state_type) — в реестре ПРОХОДОВ, не материалов (см. ParamsSpec.h).
-    // Правка мутирует байты на месте: тело прохода отдаёт вниз указатель на этот же блоб, а
-    // UI-поток и есть рендер-поток (UI рисуется внутри RenderFunc) — команда не нужна.
+    // У sp, созданной из UI, push-констант нет: push и dispatch — это код.
+    // Состояние прохода ищется по имени в реестре ПРОХОДОВ, а не материалов. Правка мутирует
+    // байты на месте: UI-поток и есть рендер-поток, поэтому команда тут не нужна.
     void DrawPassState(std::vector<uint8_t>& state, const std::string& state_type)
     {
         if (state_type.empty()) {
@@ -781,8 +657,6 @@ namespace {
         DrawParamsFields(*spec, state);
     }
 
-    // Шаг кадра по имени-ключу реестра. Пространство имён у пассов и препассов общее
-    // (CreateComputePass отказывает на занятое имя), поэтому порядок проверок однозначен.
     void InspectPass(EngineContext* ctx, const std::string& name)
     {
         PassManager* pmgr = ctx->GetPassManager();
@@ -808,25 +682,21 @@ namespace {
 
     void ShaderInspector(EngineContext* ctx, const std::string& spName)
     {
-        // Пустое имя (плитка «+») = создание: НЕ зовём GetShaderProgram (он логирует промах каждый кадр).
         ShaderProgram* sp = spName.empty() ? nullptr : ctx->GetShaderManager()->GetShaderProgram(spName);
         const bool creating = (sp == nullptr);
         InputManager* im = ctx->GetInputManager();
         if (creating) ImGui::TextUnformatted("Shader: (new)");
         else          ImGui::Text("Shader: %s", spName.c_str());
 
-        // ================= Шапка: имя + выбор vs/fs по имени (пересоздание по кнопке) =================
-        // Правки копятся в буферах, действие — только по кнопке (delete старой sp + create новой).
-        // vs/fs — ИМЕНА из реестров ShaderManager (сами шейдер-данные кодовые, тут только композиция).
         ShaderManager* smgr = ctx->GetShaderManager();
         static char        nameBuf[128] = "";
         static std::string vsSel, fsSel, passSel;
-        static std::vector<BufferDataName> vsBufSel, fsBufSel;   // storage-буферы стадий (ключи реестра)
-        static std::vector<TextureSlotRole> slotsSel;           // required_slots (взаимоисключающие роли)
+        static std::vector<BufferDataName> vsBufSel, fsBufSel;
+        static std::vector<TextureSlotRole> slotsSel;
         static ShaderProgramDescription spdBuf;
-        static std::string syncedFor = "\x01";   // сентинел → синк буферов на смену выбора
+        static std::string syncedFor = "\x01";
 
-        if (spName != syncedFor) {                // синк из выбранной sp (или сброс на дефолты при создании)
+        if (spName != syncedFor) {
             syncedFor = spName;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", spName.c_str());
             if (sp) {
@@ -834,11 +704,11 @@ namespace {
                 fsSel = smgr->FragmentShaders().NameOf(sp->fs_id);
                 passSel = sp->render_pass_name;
                 spdBuf = sp->spd;
-                vsBufSel = sp->vertex_shader_buffer_names;     // ссылки по имени — берём как есть
+                vsBufSel = sp->vertex_shader_buffer_names;
                 fsBufSel = sp->fragment_shader_buffer_names;
                 slotsSel = sp->required_slots;
             }
-            else {   // «+» — чистая форма новой sp
+            else {
                 vsSel.clear(); fsSel.clear(); passSel.clear();
                 spdBuf = ShaderProgramDescription{};
                 vsBufSel.clear(); fsBufSel.clear(); slotsSel.clear();
@@ -848,7 +718,6 @@ namespace {
         ImGui::TextDisabled(creating ? "Shader program (create)" : "Shader program (compose / rename = recreate)");
         ImGui::InputText("Name", nameBuf, sizeof nameBuf);
 
-        // Вершинный слот — только вершинники; фрагментный — только фрагментные (фильтр по типу реестра).
         if (ImGui::BeginCombo("Vertex", vsSel.c_str())) {
             const VertexShaderRegistry& vreg = smgr->VertexShaders();
             for (int32_t i = 0; i < vreg.Count(); ++i) {
@@ -872,9 +741,6 @@ namespace {
             ImGui::EndCombo();
         }
 
-        // ================= Storage-буферы стадий (в буфер, применяется по кнопке) =================
-        // Порядок строк = слоты бинда (BindGPU*StorageBuffers). Раздельно вершинные и фрагментные.
-        // Перечень — каноничные ключи реестра (BufferDataName): их же кладём в ссылки sp.
         std::vector<BufferDataName> bufNames;
         for (auto& [k, b] : ctx->GetBufferManager()->GetBuffersData())
             if (b && (g_show_internal || !HasTag(b->tags, ResourceTag::System))) bufNames.push_back(k);
@@ -883,10 +749,8 @@ namespace {
         BufferListEditor("Vertex buffers",   vsBufSel, bufNames);
         BufferListEditor("Fragment buffers", fsBufSel, bufNames);
 
-        // ================= Слот-роли текстур (в буфер, применяется по кнопке) =================
         RoleListEditor(slotsSel);
 
-        // ================= Проход (в буфер, применяется по кнопке) =================
         ImGui::SeparatorText("Pass");
         if (ImGui::BeginCombo("Pass", passSel.empty() ? "(none)" : passSel.c_str())) {
             for (RenderPassStep* rp : ctx->GetPassManager()->GetOrderedRenderPasses()) {
@@ -897,7 +761,6 @@ namespace {
             ImGui::EndCombo();
         }
 
-        // ================= Pipeline state (spd) — в буфер =================
         ImGui::SeparatorText("Pipeline state (spd)");
         {
             ShaderProgramDescription& d = spdBuf;
@@ -920,8 +783,6 @@ namespace {
             }
         }
 
-        // ===== Одна кнопка на ВСЮ композицию sp (имя/vs/fs/буферы/слоты/проход/spd) =====
-        // Создание: имя обязано быть свободным (иначе кнопка гаснет — не молчаливая перезапись).
         ImGui::Separator();
         const bool nameFree = !smgr->ShaderProgramIdOf(nameBuf);
         const bool ready = nameBuf[0] && !vsSel.empty() && !fsSel.empty() && !passSel.empty()
@@ -930,13 +791,11 @@ namespace {
         if (ImGui::Button(creating ? "Create" : "Apply / Recreate", ImVec2(160, 0))) {
             im->PushCommand(CommandId::RecreateShader,
                 new RecreateShaderCmd{ spName, nameBuf, vsSel, fsSel, passSel, spdBuf, vsBufSel, fsBufSel, slotsSel });
-            g_sel = Selection{}; g_sel.kind = SelKind::Shader; g_sel.name = nameBuf;   // выбор на созданную/переименованную
+            g_sel = Selection{}; g_sel.kind = SelKind::Shader; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
         if (creating && nameBuf[0] && !nameFree) { ImGui::SameLine(); ImGui::TextDisabled("(name taken)"); }
 
-        // ================= Удаление (внизу, только у существующей) =================
-        // Пайплайн в отложенное удаление, шейдеры релизятся по refcount, материалы → fallback.
         if (!creating) {
             ImGui::Separator();
             if (DangerButton("Delete shader")) {
@@ -946,11 +805,6 @@ namespace {
             }
         }
     }
-    // Редактор списка storage-буферов стадии (порядок строк = слоты бинда). Каждый слот — свой
-    // выпадающий список: буфер можно заменить на ЛЮБОЙ другой (в отличие от взаимоисключающих
-    // семантик pull в VsdEditor — там уже добавленную нельзя выбрать повторно). Выбор не исключающий:
-    // один буфер может стоять в нескольких слотах. "x" справа убирает слот, "+ buffer" — добавляет
-    // новый в конец. Правит list на месте; коммит — общей кнопкой sp.
     void BufferListEditor(const char* label, std::vector<BufferDataName>& list,
                           const std::vector<BufferDataName>& avail)
     {
@@ -959,7 +813,7 @@ namespace {
         int rm_at = -1;
         for (int i = 0; i < static_cast<int>(list.size()); ++i) {
             ImGui::PushID(i);
-            ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);   // оставить место под "x"
+            ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);
             if (ImGui::BeginCombo("##buf", list[i])) {
                 for (BufferDataName b : avail) {
                     bool is_cur = (b == list[i]);
@@ -975,16 +829,13 @@ namespace {
         if (rm_at >= 0) list.erase(list.begin() + rm_at);
 
         if (ImGui::BeginCombo("+ buffer", "(add)")) {
-            for (BufferDataName b : avail)                       // не исключающий: дубликаты допустимы
+            for (BufferDataName b : avail)
                 if (ImGui::Selectable(b)) list.push_back(b);
             ImGui::EndCombo();
         }
         ImGui::PopID();
     }
 
-    // Редактор слот-ролей sp (required_slots). В отличие от буферов роли ВЗАИМОИСКЛЮЧАЮЩИЕ: одна
-    // роль = один слот, поэтому дропдаун каждого слота и "+ slot" показывают только ещё не занятые
-    // роли (+ текущую самого слота). Порядок не влияет — стрелок нет. "x" убирает слот.
     void RoleListEditor(std::vector<TextureSlotRole>& list)
     {
         static const TextureSlotRole kRoles[] = {
@@ -1001,10 +852,10 @@ namespace {
         int rm_at = -1;
         for (int i = 0; i < static_cast<int>(list.size()); ++i) {
             ImGui::PushID(i);
-            ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);   // место под "x"
+            ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);
             if (ImGui::BeginCombo("##role", RoleName(list[i]))) {
                 for (TextureSlotRole r : kRoles) {
-                    if (used_elsewhere(r, i)) continue;                 // занятую другим слотом не предлагаем
+                    if (used_elsewhere(r, i)) continue;
                     bool is_cur = (r == list[i]);
                     if (ImGui::Selectable(RoleName(r), is_cur)) list[i] = r;
                     if (is_cur) ImGui::SetItemDefaultFocus();
@@ -1017,7 +868,7 @@ namespace {
         }
         if (rm_at >= 0) list.erase(list.begin() + rm_at);
 
-        if (ImGui::BeginCombo("+ slot", "(add)")) {                     // только ещё не добавленные роли
+        if (ImGui::BeginCombo("+ slot", "(add)")) {
             for (TextureSlotRole r : kRoles) {
                 if (std::find(list.begin(), list.end(), r) != list.end()) continue;
                 if (ImGui::Selectable(RoleName(r))) list.push_back(r);
@@ -1027,7 +878,6 @@ namespace {
         ImGui::PopID();
     }
 
-    // VertexSemantic -> строка (набор фиксирован; реестра раскладок пока нет).
     const char* SemName(VertexSemantic s)
     {
         switch (s) {
@@ -1039,7 +889,6 @@ namespace {
         }
     }
 
-    // Общий приём пути из файл-диалога для форм SD (по своему PickTarget-полю).
     bool TakePickedPath(PickTarget want, char* dst, size_t n)
     {
         if (g_pick_target == want && g_picked_ready.exchange(false, std::memory_order_acquire)) {
@@ -1053,9 +902,6 @@ namespace {
 
     static const SDL_DialogFileFilter kHlslFilters[] = { { "HLSL", "hlsl" }, { "All files", "*" } };
 
-    // Дефайны компиляции правятся ОДНОЙ строкой "NAME=VALUE NAME2" через пробел: набор редкий и
-    // короткий, а построчный редактор потребовал бы char-буфер на строку (ImGui пишет в char[]).
-    // Пробелов внутри препроцессорной константы не бывает, поэтому разбор по пробелу безопасен.
     std::string DefinesToStr(const std::vector<ShaderDefine>& defs)
     {
         std::string s;
@@ -1077,13 +923,12 @@ namespace {
             if (p == b) continue;
             const std::string tok(b, p - b);
             const size_t eq = tok.find('=');
-            if (eq == std::string::npos) out.push_back({ tok, {} });   // без значения = 1
+            if (eq == std::string::npos) out.push_back({ tok, {} });
             else                         out.push_back({ tok.substr(0, eq), tok.substr(eq + 1) });
         }
         return out;
     }
 
-    // Поле дефайнов для всех трёх форм SD.
     void DefinesField(char* buf, size_t n)
     {
         ImGui::InputText("Defines", buf, n);
@@ -1091,7 +936,6 @@ namespace {
             ImGui::SetTooltip("NAME=VALUE, space separated. Without =VALUE the define equals 1.");
     }
 
-    // Форма фрагментного шейдера (create/edit = Upsert по имени, как текстура/модель).
     void FsdEditor(EngineContext* ctx)
     {
         static char nameBuf[128] = "", pathBuf[512] = "", defsBuf[512] = "";
@@ -1123,7 +967,7 @@ namespace {
         if (!g_sel.name.empty()) {
             ImGui::SameLine();
             const bool used = ctx->GetShaderManager()->IsFragmentShaderUsed(ctx->GetShaderManager()->FragmentShaders().Find(g_sel.name));
-            ImGui::BeginDisabled(used);   // используемый SD удалять запрещено (см. ShaderManager)
+            ImGui::BeginDisabled(used);
             if (DangerButton("Delete")) {
                 ctx->GetInputManager()->PushCommand(CommandId::DeleteFragmentShader, new ShaderDataNameCmd{ g_sel.name });
                 g_sel = Selection{};
@@ -1133,7 +977,6 @@ namespace {
         }
     }
 
-    // Форма compute-шейдера (аналогично FSD; source_path у CSD не храним).
     void CsdEditor(EngineContext* ctx)
     {
         static char nameBuf[128] = "", pathBuf[512] = "", defsBuf[512] = "";
@@ -1141,7 +984,7 @@ namespace {
         if (g_sel.name != syncedFor) {
             syncedFor = g_sel.name;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
-            ComputeShaderData* d = ctx->GetShaderManager()->GetComputeShader(g_sel.name);   // путь теперь хранится (см. CSD)
+            ComputeShaderData* d = ctx->GetShaderManager()->GetComputeShader(g_sel.name);
             std::snprintf(pathBuf, sizeof pathBuf, "%s", d ? d->source_path.c_str() : "");
             std::snprintf(defsBuf, sizeof defsBuf, "%s", d ? DefinesToStr(d->defines).c_str() : "");
         }
@@ -1165,7 +1008,7 @@ namespace {
         if (!g_sel.name.empty()) {
             ImGui::SameLine();
             const bool used = ctx->GetShaderManager()->IsComputeShaderUsed(ctx->GetShaderManager()->ComputeShaders().Find(g_sel.name));
-            ImGui::BeginDisabled(used);   // используемый SD удалять запрещено (см. ShaderManager)
+            ImGui::BeginDisabled(used);
             if (DangerButton("Delete")) {
                 ctx->GetInputManager()->PushCommand(CommandId::DeleteComputeShader, new ShaderDataNameCmd{ g_sel.name });
                 g_sel = Selection{};
@@ -1175,8 +1018,6 @@ namespace {
         }
     }
 
-    // Форма вершинного шейдера: имя + путь + ПУЛ + раскладка (pull). Набор доступных семантик
-    // предлагает сам пул — фиксированной четвёрки POSITION/UV/NORMAL/TANGENT больше нет.
     void VsdEditor(EngineContext* ctx)
     {
         static char nameBuf[128] = "", pathBuf[512] = "", defsBuf[512] = "";
@@ -1191,11 +1032,9 @@ namespace {
             std::snprintf(defsBuf, sizeof defsBuf, "%s", d ? DefinesToStr(d->defines).c_str() : "");
             poolSel = d ? d->pool_name : std::string();
             pull.clear();
-            // Все слоты (со стримами пула биндингов несколько — Pos/UV/NormTan): pull формы =
-            // объединение семантик по слотам, как в манифесте.
             if (d) for (const auto& b : d->bindings)
                 for (VertexSemantic s : b.pull) pull.push_back(s);
-            if (pull.empty()) pull.push_back(POSITION);                       // дефолт для новой
+            if (pull.empty()) pull.push_back(POSITION);
         }
         TakePickedPath(PickTarget::ShaderVert, pathBuf, sizeof pathBuf);
 
@@ -1206,8 +1045,6 @@ namespace {
         if (ImGui::Button("Browse...##vsd")) OpenFileDialog(PickTarget::ShaderVert, kHlslFilters, 2);
         DefinesField(defsBuf, sizeof defsBuf);
 
-        // Пул выбирается ЯВНО: он задаёт и набор доступных семантик, и порядок слотов. У новой
-        // формы — дефолтный, чтобы обычный случай был на клик короче.
         ModelManager* mm = ctx->GetModelManager();
         if (poolSel.empty() && mm->DefaultPool()) poolSel = mm->DefaultPool()->Name();
         GeometryPool* pool = nullptr;
@@ -1219,9 +1056,6 @@ namespace {
             ImGui::EndCombo();
         }
 
-        // Раскладка pull: строка на семантику с кнопкой удаления. Стрелок перестановки тут НЕТ и
-        // быть не должно: порядок pull никуда не доезжает — слоты задаёт таблица стримов пула
-        // (StreamsForSemantics обходит её, а не pull), и сохранение пишет каноничный порядок.
         ImGui::SeparatorText("Vertex layout (pull)");
         int rm_at = -1;
         for (int i = 0; i < static_cast<int>(pull.size()); ++i) {
@@ -1233,7 +1067,6 @@ namespace {
         }
         if (rm_at >= 0) pull.erase(pull.begin() + rm_at);
 
-        // Добавить недостающую семантику — только из того, что эта раскладка вообще даёт.
         if (pool && ImGui::BeginCombo("+ field", "(add)")) {
             for (VertexSemantic sem : pool->AvailableSemantics()) {
                 if (std::find(pull.begin(), pull.end(), sem) != pull.end()) continue;
@@ -1242,9 +1075,6 @@ namespace {
             ImGui::EndCombo();
         }
 
-        // Правятся семантики, а биндятся СТРИМЫ, и это не один к одному (NORMAL и TANGENT — один
-        // стрим, снять только один из них ничего не изменит). Показываем результат резолва, чтобы
-        // схлопывание было видно, а не удивляло.
         if (pool) {
             std::string slots;
             for (const GeometryPool::Stream* st : pool->StreamsForSemantics(pull)) {
@@ -1265,7 +1095,7 @@ namespace {
         if (!g_sel.name.empty()) {
             ImGui::SameLine();
             const bool used = ctx->GetShaderManager()->IsVertexShaderUsed(ctx->GetShaderManager()->VertexShaders().Find(g_sel.name));
-            ImGui::BeginDisabled(used);   // используемый SD удалять запрещено (см. ShaderManager)
+            ImGui::BeginDisabled(used);
             if (DangerButton("Delete")) {
                 ctx->GetInputManager()->PushCommand(CommandId::DeleteVertexShader, new ShaderDataNameCmd{ g_sel.name });
                 g_sel = Selection{};
@@ -1281,26 +1111,22 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
     ImGui::SetNextWindowBgAlpha(kPanelBgAlpha);
     ImGui::Begin("Inspector");
 
-    ProcessPendingPick();   // сырой путь из диалога → финальный относительный (до приёма формами)
+    ProcessPendingPick();
 
     ObjectManager* om = ctx->GetObjectManager();
     SceneData* scene = om->GetActiveScene();
 
-    // Режим гизмо — только если у выбранной сущности есть Positions (иначе двигать нечего).
     if (g_sel.kind == SelKind::Entity && scene && om->Has<Positions>(scene, g_sel.entity)) {
         ImGui::TextUnformatted("Gizmo:");
 
-        // Ряд из радиокнопок + Deselect. Кладём через SameLine, но переносим на новую
-        // строку, когда следующий элемент не влезает в ширину панели (штатный паттерн
-        // «manual wrapping» из imgui_demo: решаем по правому краю уже нарисованного).
         const ImGuiStyle& st = ImGui::GetStyle();
-        const float square = ImGui::GetFrameHeight();                                  // диаметр кружка
+        const float square = ImGui::GetFrameHeight();
         const float right_x = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
         auto radio_w  = [&](const char* s) { return square + st.ItemInnerSpacing.x + ImGui::CalcTextSize(s).x; };
         auto button_w = [&](const char* s) { return ImGui::CalcTextSize(s).x + st.FramePadding.x * 2.0f; };
-        auto keep_or_wrap = [&](float next_w) {                                         // перед следующим виджетом
+        auto keep_or_wrap = [&](float next_w) {
             if (ImGui::GetItemRectMax().x + st.ItemSpacing.x + next_w < right_x)
-                ImGui::SameLine();                                                      // влезает — продолжаем строку
+                ImGui::SameLine();
         };
 
         keep_or_wrap(radio_w("Move"));
@@ -1311,8 +1137,6 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         if (ImGui::RadioButton("Scale",   g_gizmo_op == ImGuizmo::SCALE))     g_gizmo_op = ImGuizmo::SCALE;
         keep_or_wrap(radio_w("Uniform"));
         if (ImGui::RadioButton("Uniform", g_gizmo_op == ImGuizmo::SCALEU))    g_gizmo_op = ImGuizmo::SCALEU;
-        // Ориентация осей ручек: World — по мировым осям, Local — по текущему повороту
-        // объекта. Pivot в обоих случаях на объекте (см. DrawGizmo). На SCALE mode не влияет.
         keep_or_wrap(radio_w("World"));
         if (ImGui::RadioButton("World",   g_gizmo_mode == ImGuizmo::WORLD))   g_gizmo_mode = ImGuizmo::WORLD;
         keep_or_wrap(radio_w("Local"));
@@ -1325,7 +1149,7 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
     switch (g_sel.kind)
     {
     case SelKind::Entity:
-        if (scene) InspectEntity(ctx, om, scene, g_sel.entity);   // трансформ/удаление/коллайдеры + свет по компонентам
+        if (scene) InspectEntity(ctx, om, scene, g_sel.entity);
         break;
 
     case SelKind::Camera:
@@ -1363,7 +1187,6 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
 
     case SelKind::UINode:
     {
-        // Узел дерева UI_Yoga: XY двигает гизмо, Z (слой) — кнопками (стрелка Z в упор не берётся).
         UI_Yoga* yg = ctx->GetUIYoga();
         if (!yg) { ImGui::TextDisabled("no UI tree"); break; }
         const UI_Yoga::Node n = g_sel.ui_node;
@@ -1377,9 +1200,9 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         };
         ImGui::Text("Z %.3f", dz);
         ImGui::SameLine();
-        if (ImGui::SmallButton("-"))         nudge_z(+0.01f);   // дальше (больше z, под другими)
+        if (ImGui::SmallButton("-"))         nudge_z(+0.01f);
         ImGui::SameLine();
-        if (ImGui::SmallButton("+"))         nudge_z(-0.01f);   // ближе (меньше z, поверх)
+        if (ImGui::SmallButton("+"))         nudge_z(-0.01f);
         ImGui::SameLine();
         if (ImGui::SmallButton("Deselect"))  g_sel = Selection{};
         break;
@@ -1395,16 +1218,14 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
 
 void UI_ImGui::DrawGizmo(EngineContext* ctx)
 {
-    // UI-узел: свой гизмо. UI живёт в NDC (матрица = clip напрямую, без камеры) → скармливаем
-    // ЕДИНИЧНЫЕ view/proj, иначе ImGuizmo прогнал бы NDC-позицию через мировую камеру и ручки
-    // улетели бы в другое пространство. Только XY (TRANSLATE_X|Y): Z в упор не берётся, он в
-    // инспекторе кнопками. Двигаем OFFSET узла (командой в sim), а не матрицу энтити.
+    // UI живёт в NDC, поэтому view/proj ЕДИНИЧНЫЕ: иначе ImGuizmo прогнал бы позицию через
+    // мировую камеру. Двигаем offset узла командой в sim, а не матрицу энтити.
     if (g_sel.kind == SelKind::UINode) {
         UI_Yoga* yg = ctx->GetUIYoga();
         if (!yg) return;
         const UI_Yoga::Node n = g_sel.ui_node;
         float cx, cy, z;
-        if (!yg->GetNodeNdc(n, cx, cy, z)) return;   // узел ещё не эмитился
+        if (!yg->GetNodeNdc(n, cx, cy, z)) return;
 
         ImGuiIO& io = ImGui::GetIO();
         glm::mat4 view(1.0f), proj(1.0f);
@@ -1420,7 +1241,7 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
         if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(proj),
                                  op, ImGuizmo::WORLD, glm::value_ptr(model), delta))
         {
-            const float dtx = delta[12], dty = delta[13];   // приращение переноса за кадр (в NDC)
+            const float dtx = delta[12], dty = delta[13];
             if (dtx != 0.0f || dty != 0.0f) {
                 // NDC → px (Y флип: NDC вверх, layout-px вниз). Двигаем offset узла командой.
                 ctx->GetInputManager()->PushCommand(CommandId::NudgeUINode,
@@ -1431,7 +1252,6 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
         return;
     }
 
-    // Гизмо — для выбранной сущности (свет = тоже сущность). Для материала/текстуры/… нет.
     if (g_sel.kind != SelKind::Entity) return;
     Entity selected = g_sel.entity;
 
@@ -1439,7 +1259,6 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
     SceneData* scene = om->GetActiveScene();
     if (!scene) return;
 
-    // Нет трансформа (directional-свет без Positions либо удалённая сущность) → просто без гизмо.
     if (!om->Has<Positions>(scene, selected)) return;
 
     Camera* cam = ctx->GetCameraManager()->GetActiveCamera();
@@ -1452,25 +1271,19 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
     const size_t i = el.i();
 
     glm::mat4 model = ReadPositionsMatrix(P, i);
-    const glm::mat4 model_before = model;   // до манипуляции — база для инверсии поворота
+    const glm::mat4 model_before = model;
 
     ImGuiIO& io = ImGui::GetIO();
     ImGuizmo::SetOrthographic(false);
     ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
     ImGuizmo::SetRect(0.0f, 0.0f, io.DisplaySize.x, io.DisplaySize.y);
 
-    // Перенос/скейл берём из родной матрицы ImGuizmo как есть (они верны, pivot на объекте).
-    // Поворот у ImGuizmo идёт в ПРОТИВОПОЛОЖНУЮ сторону (несовпадение хендедности рендера с тем,
-    // что ждёт ImGuizmo: translate ок, знак угла инвертирован). Инвертируем НАПРАВЛЕНИЕ, сохраняя
-    // пивот и масштаб: мировой поворот кадра вокруг пивота = model_after·model_before⁻¹ (жёсткий
-    // поворот — масштаб сокращается); берём его инверсию вокруг того же пивота →
-    // model_before·inverse(model_after)·model_before. Никакого delta и двойного учёта пивота.
     if (ImGuizmo::Manipulate(glm::value_ptr(view),
                              glm::value_ptr(proj),
                              g_gizmo_op, g_gizmo_mode,
                              glm::value_ptr(model)))
     {
-        if (g_gizmo_op == ImGuizmo::ROTATE)                 // model здесь = model_after от ImGuizmo
+        if (g_gizmo_op == ImGuizmo::ROTATE)
             model = model_before * glm::inverse(model) * model_before;
 
         SetTransformCmd* cmd = new SetTransformCmd{};

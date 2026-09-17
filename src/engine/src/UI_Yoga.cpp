@@ -8,8 +8,6 @@
 #include "FontManager.h"
 #include <yoga/Yoga.h>
 
-// Узел нашего дерева: Yoga-узел + пейлоад для создания энтити + свои дети (индексы, параллельны
-// детям Yoga — вставляем в том же порядке). Плоский вектор в Impl, Node = индекс в нём.
 struct NodeRec {
     YGNodeRef             yg       = nullptr;
     bool                  draws    = false;      // создавать ли энтити (контейнер без материала — нет)
@@ -39,7 +37,6 @@ struct UI_Yoga::Impl {
     float                last_w = -1.0f, last_h = -1.0f;
 };
 
-// ── Трансляция плоского UIStyle → Yoga-сеттеры. Yoga живёт ТОЛЬКО в этом .cpp. ──
 static void ApplyStyle(YGNodeRef n, const UIStyle& s)
 {
     YGNodeStyleSetFlexDirection(n, s.dir == UIDir::Row ? YGFlexDirectionRow : YGFlexDirectionColumn);
@@ -61,7 +58,7 @@ static void ApplyStyle(YGNodeRef n, const UIStyle& s)
         case UISize::Points:  YGNodeStyleSetWidth(n, s.w);              break;
         case UISize::Percent: YGNodeStyleSetWidthPercent(n, s.w);       break;
         case UISize::Grow:    YGNodeStyleSetFlexGrow(n, s.w > 0 ? s.w : 1.0f); break;
-        case UISize::Auto:    default:                                  break;   // WidthAuto = дефолт
+        case UISize::Auto:    default:                                  break;
     }
     switch (s.hmode) {
         case UISize::Points:  YGNodeStyleSetHeight(n, s.h);            break;
@@ -115,7 +112,7 @@ void UI_Yoga::NudgeNode(Node n, float ddx, float ddy, float ddz)
     if (n >= impl_->nodes.size()) return;
     NodeRec& r = impl_->nodes[n];
     r.off_x += ddx;  r.off_y += ddy;  r.z_off += ddz;
-    dirty = true;   // пересчёт на следующем Emit
+    dirty = true;
 }
 
 bool UI_Yoga::GetNodeNdc(Node n, float& ndc_x, float& ndc_y, float& z) const
@@ -133,7 +130,6 @@ void UI_Yoga::GetOffset(Node n, float& dx, float& dy, float& dz) const
     dx = r.off_x;  dy = r.off_y;  dz = r.z_off;
 }
 
-// Общий конструктор узла: создать Yoga-узел, применить стиль, положить в плоский вектор.
 static UI_Yoga::Node MakeNode(UI_Yoga::Impl* impl, const UIStyle& s)
 {
     YGNodeRef yg = YGNodeNewWithConfig(impl->cfg);
@@ -145,7 +141,7 @@ static UI_Yoga::Node MakeNode(UI_Yoga::Impl* impl, const UIStyle& s)
 
 UI_Yoga::Node UI_Yoga::Root(const UIStyle& s)
 {
-    Clear();                        // новый корень = свежее дерево
+    Clear();
     const Node id = MakeNode(impl_, s);
     impl_->root = id;
     dirty = true;  structural_ = true;
@@ -158,7 +154,7 @@ UI_Yoga::Node UI_Yoga::Box(Node parent, const UIStyle& s, const std::string& mat
     NodeRec& r = impl_->nodes[id];
     r.material = material;
     r.quad     = quad;
-    r.draws    = !material.empty();    // без материала — чистый контейнер (не рисуется)
+    r.draws    = !material.empty();
     NodeRec& p = impl_->nodes[parent];
     YGNodeInsertChild(p.yg, r.yg, YGNodeGetChildCount(p.yg));
     p.children.push_back(id);
@@ -175,11 +171,9 @@ UI_Yoga::Node UI_Yoga::Text(Node parent, const UIStyle& s, const std::string& ut
     r.quad     = quad;
     r.draws    = true;
     r.font     = 0;
-    r.text     = utf8;   // для подписи узла в редакторе
+    r.text     = utf8;
     if (font && fm) {
         r.glyphs = fm->ShapeString(font, utf8);
-        // Intrinsic-размер строки в ПИКСЕЛЯХ шрифта: Σ advance × line_height. Тайтовый бокс →
-        // форма узла = форма шрифта; Yoga посадит его целиком, шейдер просто заливает.
         float adv = 0.0f;
         for (uint32_t gi : r.glyphs)
             if (gi < font->glyphs.size()) adv += static_cast<float>(font->glyphs[gi].advance);
@@ -236,21 +230,16 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
     constexpr float kZStep = 0.001f;   // шаг z на уровень (24 уровня = 0.024 — с запасом)
 
     NodeRec& r = impl->nodes[id];
-    // Смещение из редактора добавляется ПОСЛЕ раскладки → узел (и его поддерево, т.к. (x,y) уходит
-    // детям) едет, а соседи по flex не рефлоуятся.
-    const float x = ox + YGNodeLayoutGetLeft(r.yg) + r.off_x;   // абсолютный px (top-left, y вниз)
+    const float x = ox + YGNodeLayoutGetLeft(r.yg) + r.off_x;
     const float y = oy + YGNodeLayoutGetTop(r.yg)  + r.off_y;
     const float w = YGNodeLayoutGetWidth(r.yg);
     const float h = YGNodeLayoutGetHeight(r.yg);
 
-    // px (y вниз) → NDC-прямоугольник. Считаем для ВСЕХ узлов (даже контейнеров) — чтобы гизмо мог
-    // встать на любой выбранный узел; рисуем энтити только у r.draws.
     const float sx = (w / W) * 2.0f;          // масштаб X в NDC
     const float sy = (h / H) * 2.0f;          // масштаб Y
     const float L  = (x / W) * 2.0f - 1.0f;   // левый край в NDC
     const float T  = 1.0f - (y / H) * 2.0f;   // верхний край (флип: y вниз → NDC вверх)
     const float z  = 0.5f - static_cast<float>(depth) * kZStep + r.z_off;   // глубже = ближе, +bias слоя
-    // Слепок центра для гизмо (все узлы).
     r.ndc_cx = L + sx * 0.5f;
     r.ndc_cy = T - sy * 0.5f;
     r.ndc_z  = z;
@@ -290,7 +279,7 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
     }
 
     for (UI_Yoga::Node c : r.children)
-        EmitNode(impl, ctx, om, scene_ptr, scene_name, c, x, y, W, H, depth + 1, create);   // дети — от абсолюта
+        EmitNode(impl, ctx, om, scene_ptr, scene_name, c, x, y, W, H, depth + 1, create);
 }
 
 void UI_Yoga::Emit(EngineContext* ctx, float screen_w, float screen_h)
@@ -312,7 +301,6 @@ void UI_Yoga::Emit(EngineContext* ctx, float screen_w, float screen_h)
     impl_->last_w = screen_w;  impl_->last_h = screen_h;
 
     if (impl_->root == kInvalid || screen_w <= 0.0f || screen_h <= 0.0f) {
-        // Дерева нет: снять энтити прошлой раскладки, если были.
         for (Entity e : impl_->created) ctx->DeleteEntity(scene_name, e);
         impl_->created.clear();
         structural_ = false;  dirty = false;  return;
