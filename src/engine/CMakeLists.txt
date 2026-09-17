@@ -102,12 +102,12 @@ set(ENGINEECS_SRC
     src/ComponentSerializer.cpp
 )
 set(ENGINEECS_HDR
-    include/ObjectManager.h
-    include/ObjectManager.inl
-    include/BaseComponents.h
-    include/ComponentStorage.h
-    include/SceneData.h
-    include/ComponentSerializer.h
+    include/ecs/ObjectManager.h
+    include/ecs/ObjectManager.inl
+    include/ecs/BaseComponents.h
+    include/ecs/ComponentStorage.h
+    include/ecs/SceneData.h
+    include/ecs/ComponentSerializer.h
 )
 list(TRANSFORM ENGINEECS_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
 list(TRANSFORM ENGINEECS_HDR PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
@@ -116,7 +116,7 @@ source_group("Source"  FILES ${ENGINEECS_SRC})
 source_group("Headers" FILES ${ENGINEECS_HDR})
 
 target_include_directories(EngineEcs PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/ecs
 )
 target_link_libraries(EngineEcs PUBLIC
     EngineCore                                              # словарь и утилиты + общий PCH
@@ -155,25 +155,25 @@ set(ENGINEGPU_SRC
     src/SparseRankChannel.cpp
 )
 set(ENGINEGPU_HDR
-    include/GpuQueues.h
-    include/QueueManager.h
-    include/TransferManager.h
-    include/BufferManager.h
-    include/BufferData.h
-    include/BufferUpdateStruct.h
-    include/ShaderManager.h
-    include/ShaderData.h
-    include/ShaderTypes.h
-    include/TextureManager.h
-    include/TextureData.h
-    include/PreviewPacker.h
-    include/PassManager.h
-    include/PipeManager.h
-    include/GeometryPool.h
-    include/RenderCommandData.h
-    include/RenderSnapshot.h
-    include/GpuTaskContext.h
-    include/SparseRankChannel.h
+    include/gpu/GpuQueues.h
+    include/gpu/QueueManager.h
+    include/gpu/TransferManager.h
+    include/gpu/BufferManager.h
+    include/gpu/BufferData.h
+    include/gpu/BufferUpdateStruct.h
+    include/gpu/ShaderManager.h
+    include/gpu/ShaderData.h
+    include/gpu/ShaderTypes.h
+    include/gpu/TextureManager.h
+    include/gpu/TextureData.h
+    include/gpu/PreviewPacker.h
+    include/gpu/PassManager.h
+    include/gpu/PipeManager.h
+    include/gpu/GeometryPool.h
+    include/gpu/RenderCommandData.h
+    include/gpu/RenderSnapshot.h
+    include/gpu/GpuTaskContext.h
+    include/gpu/SparseRankChannel.h
 )
 list(TRANSFORM ENGINEGPU_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
 list(TRANSFORM ENGINEGPU_HDR PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
@@ -182,11 +182,13 @@ target_sources(EngineGpu PRIVATE ${ENGINEGPU_SRC} ${ENGINEGPU_HDR})
 source_group("Source"  FILES ${ENGINEGPU_SRC})
 source_group("Headers" FILES ${ENGINEGPU_HDR})
 
-# Публичные заголовки движка лежат в include/ — отдаём их потребителям.
+# Заголовки разложены по ярусам (include/{core,ecs,gpu,engine}), и каждая цель отдаёт наружу
+# ТОЛЬКО свой: нижние приходят по линковке. Поэтому включение вверх не резолвится — границу
+# слоёв держит компилятор, а не договорённость.
 # SDL3 и glm экспонируются PUBLIC, т.к. публичные заголовки GPU-кора их включают
 # (раньше SDL3-инклуд протекал к игре случайно через ImGui — теперь явно отсюда).
 target_include_directories(EngineGpu PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/gpu
     "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/include"   # ShaderManager.h раскрывает SDL_ShaderCross_*
 )
 target_include_directories(EngineGpu PRIVATE
@@ -227,28 +229,28 @@ set(ENGINE_MANAGERS_SRC
     src/FontManager.cpp
 )
 set(ENGINE_MANAGERS_HDR
-    include/CameraManager.h
-    include/MaterialManager.h
-    include/ModelManager.h
-    include/ThreadController.h
-    include/SlotController.h
-    include/InputManager.h
-    include/InputCommands.h
-    include/TextureLoader.h
-    include/FontManager.h
+    include/engine/CameraManager.h
+    include/engine/MaterialManager.h
+    include/engine/ModelManager.h
+    include/engine/ThreadController.h
+    include/engine/SlotController.h
+    include/engine/InputManager.h
+    include/engine/InputCommands.h
+    include/engine/TextureLoader.h
+    include/engine/FontManager.h
 )
 set(ENGINE_STRUCTS_SRC
     src/CameraStruct.cpp
     src/ParamsSpec.cpp
 )
 set(ENGINE_STRUCTS_HDR
-    include/CameraStruct.h
-    include/MaterialData.h
-    include/MaterialParams.h
-    include/ParamsSpec.h
-    include/ModelData.h
-    include/PositionStructure.h
-    include/LightStruct.h
+    include/engine/CameraStruct.h
+    include/engine/MaterialData.h
+    include/engine/MaterialParams.h
+    include/engine/ParamsSpec.h
+    include/engine/ModelData.h
+    include/engine/PositionStructure.h
+    include/engine/LightStruct.h
 )
 set(ENGINE_DATAMODULES_SRC
     src/BoundSphereDataModule.cpp
@@ -261,27 +263,27 @@ set(ENGINE_DATAMODULES_SRC
     src/UI_DataModule.cpp
 )
 set(ENGINE_DATAMODULES_HDR
-    include/BoundSphereDataModule.h
-    include/TextureStateDataModule.h
-    include/IndirectDataModule.h
-    include/LightDataModule.h
-    include/PIB_DataModule.h
-    include/TransformDataModule.h
-    include/InstanceDataModule.h
-    include/UI_DataModule.h
+    include/engine/BoundSphereDataModule.h
+    include/engine/TextureStateDataModule.h
+    include/engine/IndirectDataModule.h
+    include/engine/LightDataModule.h
+    include/engine/PIB_DataModule.h
+    include/engine/TransformDataModule.h
+    include/engine/InstanceDataModule.h
+    include/engine/UI_DataModule.h
 )
 set(ENGINE_PRESETS_HDR
-    include/TextureSamplerPresets.h
-    include/TexturesPresets.h
+    include/engine/TextureSamplerPresets.h
+    include/engine/TexturesPresets.h
 )
 set(ENGINE_UTILS_SRC
     src/BatchBuilder.cpp
     src/FPSCounter.cpp
 )
 set(ENGINE_UTILS_HDR
-    include/BatchBuilder.h
-    include/FPSCounter.h
-    include/GraphicsConfig.h
+    include/engine/BatchBuilder.h
+    include/engine/FPSCounter.h
+    include/engine/GraphicsConfig.h
 )
 set(ENGINE_CORE_SRC
     src/Engine.cpp
@@ -305,19 +307,19 @@ set(ENGINE_CORE_SRC
     src/UI_Yoga.cpp
 )
 set(ENGINE_CORE_HDR
-    include/Engine.h
-    include/DefaultRenderPassSet.h
-    include/DefaultShaderSet.h
-    include/DefaultResourceSet.h
-    include/DefaultUpdateSet.h
-    include/DefaultCommandSet.h
-    include/UI_ImGui.h
-    include/UI_Internal.h
-    include/UI_Widgets.h
-    include/UI_ComponentEditor.h
-    include/PCH_Engine.h
-    include/EngineContext.h
-    include/UI_Yoga.h
+    include/engine/Engine.h
+    include/engine/DefaultRenderPassSet.h
+    include/engine/DefaultShaderSet.h
+    include/engine/DefaultResourceSet.h
+    include/engine/DefaultUpdateSet.h
+    include/engine/DefaultCommandSet.h
+    include/engine/UI_ImGui.h
+    include/engine/UI_Internal.h
+    include/engine/UI_Widgets.h
+    include/engine/UI_ComponentEditor.h
+    include/engine/PCH_Engine.h
+    include/engine/EngineContext.h
+    include/engine/UI_Yoga.h
 )
 
 # Абсолютим всё одинаково — иначе source_group не совпадёт с target_sources.
@@ -355,7 +357,7 @@ source_group("Headers/Utils"       FILES ${ENGINE_UTILS_HDR})
 source_group("Headers/Core"        FILES ${ENGINE_CORE_HDR})
 
 target_include_directories(Engine PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/engine
 )
 target_include_directories(Engine PRIVATE
     "${CMAKE_SOURCE_DIR}/external/SDL3_image/include"   # только TextureLoader.cpp
@@ -366,7 +368,7 @@ target_include_directories(Engine PRIVATE
 # Свой PCH верхнего слоя: PCH.h + imgui.h (~8 TU таргета зовут ImGui). EngineGpu/EngineEcs
 # остаются на чистом PCH.h — imgui в GPU/ECS-слои не протекает.
 target_precompile_headers(Engine PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/PCH_Engine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/engine/PCH_Engine.h
 )
 
 target_link_libraries(Engine PUBLIC

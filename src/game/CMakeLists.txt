@@ -24,7 +24,7 @@ target_compile_options(Game PRIVATE /Qvec-report:2)
 # принудительным инклюдом даже без единой строчки #include — редактор для неё опционален.
 target_precompile_headers(Game PRIVATE
     "${CMAKE_SOURCE_DIR}/src/engine/include/core/PCH.h"
-    "${CMAKE_SOURCE_DIR}/src/engine/include/Engine.h"
+    "${CMAKE_SOURCE_DIR}/src/engine/include/engine/Engine.h"
 )
 
 set_target_properties(Game PROPERTIES
