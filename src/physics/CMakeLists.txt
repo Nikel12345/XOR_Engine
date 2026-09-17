@@ -32,5 +32,9 @@ target_include_directories(Physics PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# EngineGpu даёт GPU-фасад (+ SDL3/glm транзитивно), EngineEcs — ObjectManager/компоненты.
-target_link_libraries(Physics PUBLIC EngineGpu EngineEcs)
+# EngineEcs PUBLIC: ObjectManager и компоненты стоят в ЗАГОЛОВКАХ физики (ColliderQuery.h), то
+# есть входят в её контракт. EngineGpu PRIVATE: GpuContext появляется только в .cpp, в заголовках
+# от него форвард-декларация — физика берёт GPU для своих задач, но потребитель физики GPU-кор
+# вместе с ней не получает.
+target_link_libraries(Physics PUBLIC  EngineEcs)
+target_link_libraries(Physics PRIVATE EngineGpu)

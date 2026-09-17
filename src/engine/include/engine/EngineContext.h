@@ -43,7 +43,7 @@ inline constexpr const char* kScenesRoot = "saved_scene";
 
 class EngineContext {
 public:
-	EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* rm, BatchBuilder* bb, TextureLoader* tl);
+	EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pass, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pipe, BatchBuilder* bb, TextureLoader* tl);
 	~EngineContext();
 
 	GpuContext& Gpu() { return *gpu_ctx; }

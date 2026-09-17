@@ -15,18 +15,18 @@
 
 using namespace ShaderBase;
 
-EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager* rm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pm, BatchBuilder* bb, TextureLoader* tl)
+EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pass, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pipe, BatchBuilder* bb, TextureLoader* tl)
 {
-	gpu_ctx = new GpuContext(bm, sm, rm, tm);
+	gpu_ctx = new GpuContext(bm, sm, pass, tm);
 	this->buffer_manager = bm;
 	this->texture_manager = tm;
-	this->pass_manager = rm;
+	this->pass_manager = pass;
 	this->material_manager = mm;
 	this->object_manager = om;
 	this->shader_manager = sm;
 	this->model_manager = md;
 	this->camera_manager = cm;
-	this->pipe_manager = pm;
+	this->pipe_manager = pipe;
 
 	this->batch_builder = bb;
 	this->texture_loader = tl;
