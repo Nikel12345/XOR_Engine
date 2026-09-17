@@ -3,7 +3,8 @@
 # Площадки для запуска подсистем движка по отдельности.
 # Каждый сценарий — свой .cpp; main решает, что именно запустить.
 set(SANDBOX_SRC
-    src/TransposeVecProbe.cpp         # ЗОНД: нужны ли интринсики в TransformDataModule (транспонирование SoA->AoS и умножение)
+    src/FrustumVecProbe.cpp           # ЗОНД: фрустум-отсев 1М объектов на CPU через ECS - форма, которая векторизуется
+    # src/TransposeVecProbe.cpp       # ЗОНД: нужны ли интринсики в TransformDataModule (транспонирование SoA->AoS и умножение)
     # src/GravityVecProbe.cpp           # ЗОНД: векторизуется ли гравитационный шаг через ForEach (без интринсиков)
     # src/QueueThreadingProbe.cpp       # зонд: очереди под конвейером потоков движка (ThreadController+SlotController) — потокобезопасность  (см. историю)
     # src/ShaderVramProbe.cpp         # зонд: цена резидентного шейдера — модуль/пайплайн, VRAM vs RAM (см. шапку файла)
