@@ -1,6 +1,4 @@
 ﻿#pragma once
-// Схема полей блоба: по ней и рисуется инспектор, и пишется манифест, поэтому поле объявляется
-// один раз. Ни ImGui, ни yyjson отсюда не видны — заголовок подключается из игрового кода.
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -13,7 +11,6 @@
 #include <SDL3/SDL_log.h>
 #include "MaterialData.h"
 
-// Блоб уезжает в cbuffer push-константой: тип крупнее потолка обрезался бы на пуше без ошибки.
 inline constexpr size_t kMaxParamsBlob = 128;
 
 // Лейн — 4 байта, как в cbuffer (bool в HLSL тоже 4). Angle держит радианы и в блобе, и в файле,
@@ -62,10 +59,9 @@ struct ParamsFieldSpec {
 #define PARAMS_FIELD(T, member) #member, (uint32_t)offsetof(T, member)
 
 struct ParamsSpec {
-    std::string     name;                                  // ключ в materials.json и подпись в дропдауне
+    std::string     name; 
     std::type_index type = std::type_index(typeid(void));
     size_t          size = 0;
-    // Байты T{}: недостающий в файле ключ остаётся дефолтным, и дефолт живёт только в структуре.
     std::vector<uint8_t>      defaults;
     std::vector<ParamsFieldSpec> fields;
     // Задан — инспектор зовёт его вместо generic-рендерера.
@@ -79,8 +75,6 @@ struct ParamsSpec {
 
 class ParamsSpecRegistry {
 public:
-    // Два независимых экземпляра: дропдаун «Type» инспектора перечисляет ВЕСЬ свой реестр, и общий
-    // предлагал бы сделать материал параметрами блума.
     static ParamsSpecRegistry& Materials();
     static ParamsSpecRegistry& Passes();
 
@@ -142,9 +136,6 @@ void SetMaterialParams(Material* m, ShaderProgramId sp_id, const std::string& sp
 void ApplyMaterialParamsSpec(SpBinding* b, const ParamsSpec& s);
 void ClearMaterialParams(SpBinding* b);
 
-// Состояние прохода — второй домен блоба. В схему идут только поля, которые тело прохода НЕ
-// переписывает каждым кадром: объявленное поле тем самым и редактируется, и сохраняется.
-// Форма без имени схемы — для состояния, где редактировать нечего.
 template<class P, class T>
 void SetPassState(P* step, const T& v)
 {
@@ -174,5 +165,4 @@ void SetPassState(P* step, const std::string& spec_name, const T& v)
     step->state_type = spec_name;
 }
 
-// Идемпотентна. Звать один раз на старте движка, рядом с RegisterBuiltinComponentSpecs().
 void RegisterBuiltinMaterialParamsSpecs();

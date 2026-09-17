@@ -1,6 +1,4 @@
 ﻿#pragma once
-// Схема полей компонента: по ней идут и сохранение с загрузкой, и инспектор с формой создания.
-// Регистрация открытая — движок объявляет свои компоненты, физика и игра свои.
 #include <string>
 #include <vector>
 #include <map>
@@ -30,7 +28,7 @@ constexpr size_t FieldGroupSize(FieldGroup g)
 }
 
 struct FieldSpec {
-    const char* key = nullptr;     // json-ключ колонки И лейбл поля в инспекторе
+    const char* key = nullptr;
     FieldKind   kind = FieldKind::F32;
 
     double (*get_num)(Archetype&, size_t) = nullptr;
@@ -43,10 +41,6 @@ struct FieldSpec {
     bool  clamp_on_load = false;
     bool  ui_readonly = false;     // прямая запись порвала бы инварианты (Parent.parent)
 
-    // Правка у ЖИВОЙ сущности уходит этой командой в sim вместо записи в колонку — для полей,
-    // чья запись меняет состояние движка мимо ECS. Значение вернётся в UI через кадр-другой,
-    // поэтому вешать можно только на ДИСКРЕТНЫЕ виджеты: драг перечитывает колонку каждый кадр
-    // и без кэша отправленного не сдвинется. Черновик формы создания правится напрямую.
     CommandId cmd = CommandId::None;
 
     FieldGroup  group = FieldGroup::None;
@@ -75,9 +69,6 @@ template<typename SoA, typename Proxy>
 void AddDefaultSoA(Archetype& arch) { arch.ensure_component<SoA>(); arch.get_array<SoA>()->add(Proxy{}); }
 
 
-// Словарь имён ассетов в шапке scene.json: колонка хранит индекс в списке, а не имя. Индекс —
-// ОПТИМИЗАЦИЯ, а не схема: в ячейке законны оба вида, строка значит «имя как есть», число —
-// «индекс», поэтому сцену можно написать руками и без словаря.
 class ScenePool {
 public:
     struct List {
@@ -86,8 +77,6 @@ public:
         uint32_t Intern(const std::string& name);
     };
 
-    // Контейнер узловой намеренно: ссылку берут один раз на колонку, и она обязана пережить
-    // появление соседнего списка.
     List& operator[](const std::string& list_name) { return lists_[list_name]; }
     List* Find(const std::string& list_name);
 
@@ -96,11 +85,10 @@ public:
     void Write(yyjson_mut_doc* doc, yyjson_mut_val* root) const;
     void Read(yyjson_val* root);
 
-    // Считаем, а не логируем на месте: битый файл на миллионе сущностей дал бы миллион строк.
     uint32_t Misses() const { return misses_; }
 
 private:
-    std::map<std::string, List> lists_;   // упорядоченный: порядок списков в файле детерминирован
+    std::map<std::string, List> lists_;
     uint32_t misses_ = 0;
 };
 
@@ -137,11 +125,11 @@ constexpr const char* FieldPoolName(FieldKind k)
 
 
 struct ComponentSpec {
-    std::string     name;       // имя в файле, напр. "Model"
-    std::type_index sig_type;   // для SoA — тип хранилища, он и идёт в сигнатуру архетипа
+    std::string     name;
+    std::type_index sig_type;
 
     void (*add_default)(Archetype&) = nullptr;
-    std::vector<FieldSpec> fields;                     // пусто → тег без данных
+    std::vector<FieldSpec> fields;
     void (*after_edit)(Archetype&, size_t) = nullptr;
 
     // Заданы — генераторы по fields не работают вовсе.
@@ -149,7 +137,6 @@ struct ComponentSpec {
     std::function<void(Archetype&, yyjson_val*, size_t, ScenePool*)>                       custom_load;
 
     void Save(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp, ScenePool* pool) const;
-    // ИНВАРИАНТ вызова: сущности уже добавлены в arch.entities — строки дописываются в хвост колонок.
     void Load(Archetype& arch, yyjson_val* comp, size_t count, ScenePool* pool) const;
 };
 
@@ -168,5 +155,4 @@ private:
     std::unordered_map<std::type_index, size_t>   by_type_;
 };
 
-// Идемпотентна. Звать один раз на старте движка.
 void RegisterBuiltinComponentSpecs();
