@@ -2,7 +2,7 @@
 #include <vector>
 #include <cstdint>
 #include "Colliders.h"
-#include "ColliderQuery.h"   // ColliderQuery::ModelLookup в сигнатуре
+#include "ColliderQuery.h"   // ColliderQuery::ModelColliders в сигнатуре
 
 class ObjectManager;
 struct SceneData;
@@ -23,8 +23,7 @@ namespace DebugColliderSystem {
 		float     local[16];
 	};
 
-	// model_of — резолвер имени модели энтити (см. ColliderQuery::ModelLookup): нужен fallback-
-	// проходу, который строит авто-боксы по сабмешам.
+	// colliders_of — авто-формы модели (см. ColliderQuery::ModelColliders): нужны fallback-проходу.
 	std::vector<DebugShape> CollectDebugShapes(ObjectManager& om, SceneData* scene,
-		const ColliderQuery::ModelLookup& model_of);
+		const ColliderQuery::ModelColliders& colliders_of);
 }

@@ -7,13 +7,12 @@
 #include "Colliders.h"
 #include "ObjectManager.h"
 #include "BaseComponents.h"
-#include "ModelData.h"
 
 //  Единый обход «активных коллайдеров» сцены — общий для детекции контактов
 //  (ContactSystem) и отладочной отрисовки (DebugColliderSystem). Два прохода:
 //    1) энтити с ЯВНЫМИ формами (непустой ColliderComponent.shapes);
 //    2) fallback — энтити с моделью без явных форм получают АВТО-составной
-//       box-коллайдер: по OBB на каждый сабмеш из его локального AABB.
+//       box-коллайдер; строит его резолвер снаружи (см. ModelColliders).
 //  Визуализаторы (DebugColliderTag) и энтити без Positions пропускаются.
 //
 //  fn вызывается как:
@@ -24,14 +23,14 @@
 namespace ColliderQuery {
 	using Entity = uint32_t;
 
-	// Резолвер «ссылка на модель → геометрия». Словарь моделей живёт в ModelManager — он в либе
-	// Engine, которую Physics НЕ линкует (и не должна). Поэтому поиск приходит снаружи, вызовом:
-	// физика остаётся листовой, а зависимость от каталога ассетов становится явной в сигнатуре.
+	// Резолвер «ссылка на модель → её авто-формы». Словарь моделей живёт в ModelManager — он в либе
+	// Engine, которую Physics НЕ линкует (и не должна), поэтому снаружи приходит и сам поиск, и
+	// перекладка геометрии в формы: физике остаётся не знать ни про модель, ни про её сабмеши.
 	// Пустой резолвер = авто-коллайдеров по сабмешам не будет.
-	using ModelLookup = std::function<const ModelData*(ModelId)>;
+	using ModelColliders = std::function<std::vector<Collider>(ModelId)>;
 
 	template <typename Fn>
-	void ForEachActiveCollider(ObjectManager& om, SceneData* scene, const ModelLookup& model_of, Fn&& fn) {
+	void ForEachActiveCollider(ObjectManager& om, SceneData* scene, const ModelColliders& colliders_of, Fn&& fn) {
 		// 1) Явные коллайдеры (непустой список форм).
 		om.ForEach<Positions, ColliderComponent>(scene,
 			[&](Entity e, SoAElement<Positions> p, ColliderComponent& col) {
@@ -47,13 +46,9 @@ namespace ColliderQuery {
 				if (om.Has<ColliderComponent>(scene, e) &&
 					!om.GetComponent<ColliderComponent>(scene, e).shapes.empty())
 					return;   // уже учтён явными формами
-				const ModelData* model = (model_of && mc.model) ? model_of(mc.model) : nullptr;
-				if (!model || model->submeshes.empty()) return;
-
-				std::vector<Collider> autoShapes;
-				autoShapes.reserve(model->submeshes.size());
-				for (const auto& sm : model->submeshes)
-					autoShapes.push_back(Collider::Box(sm.aabb_half, sm.aabb_center));
+				if (!colliders_of || !mc.model) return;
+				const std::vector<Collider> autoShapes = colliders_of(mc.model);
+				if (autoShapes.empty()) return;
 
 				fn(e, autoShapes, p.container(), p.i());
 			});

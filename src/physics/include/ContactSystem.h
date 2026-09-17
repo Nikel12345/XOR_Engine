@@ -19,8 +19,7 @@ namespace ContactSystem {
 		float penetration;   // глубина для sphere-sphere; для пар с боксом = 0 (только факт)
 	};
 
-	// model_of — резолвер имени модели энтити (см. ColliderQuery::ModelLookup): нужен fallback-
-	// проходу, который строит авто-боксы по сабмешам.
+	// colliders_of — авто-формы модели (см. ColliderQuery::ModelColliders): нужны fallback-проходу.
 	std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene,
-		const ColliderQuery::ModelLookup& model_of);
+		const ColliderQuery::ModelColliders& colliders_of);
 }

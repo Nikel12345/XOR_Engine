@@ -360,12 +360,21 @@ void Game::CreateDebugColliders()
     if (!scene) return;
     if (!debug_collider_material || !debug_box_model || !debug_sphere_model) return;
 
-    // Резолвер имени модели для fallback-прохода физики: словарь моделей живёт в Engine, которую
-    // Physics не линкует, поэтому поиск отдаём вызовом (см. ColliderQuery::ModelLookup).
+    // Авто-формы модели для fallback-прохода физики: по OBB на каждый сабмеш из его локального
+    // AABB. Считаем здесь, потому что словарь моделей живёт в Engine, которую Physics не линкует
+    // (см. ColliderQuery::ModelColliders).
     ModelManager* mm = ctx->GetModelManager();
     std::vector<DebugColliderSystem::DebugShape> shapes = DebugColliderSystem::CollectDebugShapes(
         *objectManager, scene,
-        [mm](ModelId id) -> const ModelData* { return mm->FindModel(id); });
+        [mm](ModelId id) -> std::vector<Collider> {
+            std::vector<Collider> boxes;
+            const ModelData* model = mm->FindModel(id);
+            if (!model) return boxes;
+            boxes.reserve(model->submeshes.size());
+            for (const SubMeshData& sm : model->submeshes)
+                boxes.push_back(Collider::Box(sm.aabb_half, sm.aabb_center));
+            return boxes;
+        });
     if (shapes.empty()) return;
 
     for (const DebugColliderSystem::DebugShape& s : shapes) {
