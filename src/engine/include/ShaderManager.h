@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "ShaderData.h"
+#include "SDL3_shadercross/SDL_shadercross.h"
 #include "ResourceRegistry.h"
 #include <unordered_map>
 #include <cstdint>

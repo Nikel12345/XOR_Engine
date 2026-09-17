@@ -8,6 +8,7 @@
 #include "ModelManager.h"
 #include "TransferManager.h"
 #include "SlotController.h"
+#include "ThreadController.h"
 #include "PassManager.h"
 #include "ObjectManager.h"
 #include "BatchBuilder.h"

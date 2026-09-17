@@ -23,7 +23,7 @@ target_compile_options(Game PRIVATE /Qvec-report:2)
 # Именно PCH.h, а не PCH_Engine.h: последний доклеивает imgui.h, и игра получала бы его
 # принудительным инклюдом даже без единой строчки #include — редактор для неё опционален.
 target_precompile_headers(Game PRIVATE
-    "${CMAKE_SOURCE_DIR}/src/engine/include/PCH.h"
+    "${CMAKE_SOURCE_DIR}/src/engine/include/core/PCH.h"
     "${CMAKE_SOURCE_DIR}/src/engine/include/Engine.h"
 )
 

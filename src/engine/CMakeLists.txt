@@ -44,6 +44,52 @@ target_include_directories(yoga PUBLIC "${CMAKE_SOURCE_DIR}/external/yoga")
 target_compile_features(yoga PUBLIC cxx_std_20)
 
 # ============================================================
+#  EngineCore — словарь и утилиты, не знающие ни про ECS, ни про GPU.
+#  Сюда попадает только то, что переживёт замену ЛЮБОЙ из целей выше.
+# ============================================================
+add_library(EngineCore STATIC)
+target_compile_features(EngineCore PUBLIC cxx_std_23)
+
+# ENGINE_PROFILE: кадровый профайлер (Prof::/PROF_SCOPE). ON (дев) — замеры активны;
+# OFF (шиппинг) — FrameProfiler::Add/Frame пустеют inline, PROF_SCOPE исчезает, вся
+# стоимость (мьютекс/хэш/строки/печать) уходит. PUBLIC: Prof:: зовут все три яруса и игра.
+option(ENGINE_PROFILE "Кадровый профайлер (Prof::/PROF_SCOPE)" ON)
+target_compile_definitions(EngineCore PUBLIC ENGINE_PROFILE=$<BOOL:${ENGINE_PROFILE}>)
+
+set(ENGINECORE_SRC
+    src/Utils.cpp
+    src/EngineProfiler.cpp
+)
+set(ENGINECORE_HDR
+    include/core/Aliases.h
+    include/core/ResourceId.h
+    include/core/ResourceRegistry.h
+    include/core/ResourceTags.h
+    include/core/CommandId.h
+    include/core/Utils.h
+    include/core/config.h
+    include/core/EngineProfiler.h
+    include/core/PCH.h
+)
+list(TRANSFORM ENGINECORE_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
+list(TRANSFORM ENGINECORE_HDR PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
+target_sources(EngineCore PRIVATE ${ENGINECORE_SRC} ${ENGINECORE_HDR})
+source_group("Source"  FILES ${ENGINECORE_SRC})
+source_group("Headers" FILES ${ENGINECORE_HDR})
+
+# glm PUBLIC: его раскрывает общий PCH.h, который лежит здесь же.
+target_include_directories(EngineCore PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/core
+    "${CMAKE_SOURCE_DIR}/external/glm"
+)
+target_link_libraries(EngineCore PUBLIC
+    SDL3::SDL3          # Utils.h/config.h/PCH.h включают SDL; цель даёт и include-пути
+)
+target_precompile_headers(EngineCore PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/core/PCH.h
+)
+
+# ============================================================
 #  EngineEcs — ECS-ядро: ObjectManager + компоненты + сцены.
 #  Лист: не зависит ни от рендера, ни от GPU. Линкуется и Engine, и Physics.
 # ============================================================
@@ -61,10 +107,6 @@ set(ENGINEECS_HDR
     include/BaseComponents.h
     include/ComponentStorage.h
     include/SceneData.h
-    include/Aliases.h
-    include/ResourceTags.h
-    include/ResourceId.h
-    include/CommandId.h
     include/ComponentSerializer.h
 )
 list(TRANSFORM ENGINEECS_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
@@ -76,16 +118,13 @@ source_group("Headers" FILES ${ENGINEECS_HDR})
 target_include_directories(EngineEcs PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_include_directories(EngineEcs PRIVATE
-    "${CMAKE_SOURCE_DIR}/external/glm"                      # нужно для PCH.h
-    "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/include" # тоже только ради общего PCH (косметика)
-)
 target_link_libraries(EngineEcs PUBLIC
+    EngineCore                                              # словарь и утилиты + общий PCH
     SDL3::SDL3                                              # BaseComponents.h включает SDL; цель даёт и include-пути
     yyjson                                                  # scene.json: колоночная сериализация ECS (ComponentSerializer.h раскрывает yyjson-типы)
 )
 target_precompile_headers(EngineEcs PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/PCH.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/core/PCH.h
 )
 
 # ============================================================
@@ -95,13 +134,6 @@ target_precompile_headers(EngineEcs PRIVATE
 # ============================================================
 add_library(EngineGpu STATIC)
 target_compile_features(EngineGpu PUBLIC cxx_std_23)
-
-# ENGINE_PROFILE: кадровый профайлер (Prof::/PROF_SCOPE). ON (дев) — замеры активны;
-# OFF (шиппинг) — FrameProfiler::Add/Frame пустеют inline, PROF_SCOPE исчезает, вся
-# стоимость (мьютекс/хэш/строки/печать) уходит. PUBLIC: определение доходит и до
-# Engine (линкует EngineGpu PUBLIC), где Prof:: в Engine.cpp/ThreadController.cpp.
-option(ENGINE_PROFILE "Кадровый профайлер (Prof::/PROF_SCOPE)" ON)
-target_compile_definitions(EngineGpu PUBLIC ENGINE_PROFILE=$<BOOL:${ENGINE_PROFILE}>)
 
 set(ENGINEGPU_SRC
     src/QueueManager.cpp
@@ -121,7 +153,6 @@ set(ENGINEGPU_SRC
     src/RenderCommandData.cpp
     src/GpuTaskContext.cpp
     src/SparseRankChannel.cpp
-    src/EngineProfiler.cpp
 )
 set(ENGINEGPU_HDR
     include/GpuQueues.h
@@ -141,10 +172,8 @@ set(ENGINEGPU_HDR
     include/GeometryPool.h
     include/RenderCommandData.h
     include/RenderSnapshot.h
-    include/ResourceRegistry.h
     include/GpuTaskContext.h
     include/SparseRankChannel.h
-    include/EngineProfiler.h
 )
 list(TRANSFORM ENGINEGPU_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
 list(TRANSFORM ENGINEGPU_HDR PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
@@ -158,7 +187,6 @@ source_group("Headers" FILES ${ENGINEGPU_HDR})
 # (раньше SDL3-инклуд протекал к игре случайно через ImGui — теперь явно отсюда).
 target_include_directories(EngineGpu PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "${CMAKE_SOURCE_DIR}/external/glm"
     "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/include"   # ShaderManager.h раскрывает SDL_ShaderCross_*
 )
 target_include_directories(EngineGpu PRIVATE
@@ -166,6 +194,7 @@ target_include_directories(EngineGpu PRIVATE
 )
 
 target_link_libraries(EngineGpu PUBLIC
+    EngineCore          # словарь и утилиты + общий PCH
     SDL3::SDL3          # SDL3-инклуды публичных заголовков GPU-кора приходят вместе с целью
 )
 target_link_libraries(EngineGpu PRIVATE
@@ -173,7 +202,7 @@ target_link_libraries(EngineGpu PRIVATE
 )
 
 target_precompile_headers(EngineGpu PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/PCH.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/core/PCH.h
 )
 
 # ============================================================
@@ -248,13 +277,10 @@ set(ENGINE_PRESETS_HDR
 set(ENGINE_UTILS_SRC
     src/BatchBuilder.cpp
     src/FPSCounter.cpp
-    src/Utils.cpp
 )
 set(ENGINE_UTILS_HDR
     include/BatchBuilder.h
     include/FPSCounter.h
-    include/Utils.h
-    include/config.h
     include/GraphicsConfig.h
 )
 set(ENGINE_CORE_SRC
@@ -289,7 +315,6 @@ set(ENGINE_CORE_HDR
     include/UI_Internal.h
     include/UI_Widgets.h
     include/UI_ComponentEditor.h
-    include/PCH.h
     include/PCH_Engine.h
     include/EngineContext.h
     include/UI_Yoga.h

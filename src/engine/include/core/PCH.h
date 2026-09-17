@@ -34,4 +34,3 @@
 #include "Utils.h"
 // imgui намеренно НЕ в PCH: им пользуются только Engine.cpp и UI_ImGui.cpp (через UI_ImGui.h).
 // Так GPU-слой (EngineGpu) не тянет imgui-заголовки.
-#include "SDL3_shadercross/SDL_shadercross.h"

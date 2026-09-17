@@ -13,6 +13,12 @@ XOR Engine — набор статических библиотек. Прило�
 ## Цели сборки
 
 ```
+                        EngineCore
+               имена, id, реестр ячеек, теги,
+             проверяемые касты, профайлер, PCH
+                             ^
+             +---------------+---------------+
+             |                               |
         EngineEcs                       EngineGpu
         ECS-ядро                        GPU-кор
         не знает ни рендера,            не знает про ECS, модели,
@@ -33,8 +39,9 @@ XOR Engine — набор статических библиотек. Прило�
 
 | цель | что внутри | почему отдельно |
 |---|---|---|
-| **EngineEcs** | `ObjectManager` (+`.inl`), `BaseComponents`, `ComponentSerializer`, `SceneData`, `Aliases.h`, `ResourceId.h` | ECS обязан оставаться листом: его линкует и `Engine`, и `Physics`. Тянет только SDL3 и `yyjson` (колоночная сериализация сцены) |
-| **EngineGpu** | `QueueManager`, `TransferManager`, `BufferManager` (+`_Binds`/`_Update`/`_Utils`), `ShaderManager` (+`_ShadersCreate`/`_SPVLoad`), `TextureManager`, `PreviewPacker`, `PassManager`, `PipeManager`, `GeometryPool`, `RenderCommandData`, `RenderSnapshot.h`, `GpuTaskContext`, `SparseRankChannel`, `EngineProfiler` | Всё, чем кадр исполняется: буферы, шейдеры, пайплайны, текстуры, проходы, пулы геометрии — без единого знания о сцене и рендер-логике |
+| **EngineCore** | `Aliases.h`, `ResourceId.h`, `ResourceRegistry.h`, `ResourceTags.h`, `CommandId.h`, `Utils.h`, `config.h`, `EngineProfiler`, общий `PCH.h` | Словарь и утилиты, не знающие ни про ECS, ни про GPU. Правило приёма: сюда попадает только то, что переживёт замену ЛЮБОЙ из целей выше — иначе второй оркестратор, которому рендер не нужен, линковал бы `EngineGpu` ради `safe_u32` |
+| **EngineEcs** | `ObjectManager` (+`.inl`), `BaseComponents`, `ComponentStorage`, `ComponentSerializer`, `SceneData` | ECS обязан оставаться листом: его линкует и `Engine`, и `Physics`. Тянет только SDL3 и `yyjson` (колоночная сериализация сцены) |
+| **EngineGpu** | `QueueManager`, `TransferManager`, `BufferManager` (+`_Binds`/`_Update`/`_Utils`), `ShaderManager` (+`_ShadersCreate`/`_SPVLoad`), `TextureManager`, `PreviewPacker`, `PassManager`, `PipeManager`, `GeometryPool`, `RenderCommandData`, `RenderSnapshot.h`, `GpuTaskContext`, `SparseRankChannel` | Всё, чем кадр исполняется: буферы, шейдеры, пайплайны, текстуры, проходы, пулы геометрии — без единого знания о сцене и рендер-логике |
 | **Engine** | менеджеры, data-модули, `BatchBuilder`, `EngineContext`, дефолт-сеты, UI, цикл кадра | Линкует `EngineGpu` и `EngineEcs` как PUBLIC и склеивает их |
 | **Physics** | `PhysicsBufferSet`, `PhysicsComputeSet`, `CollisionShapes`, `ContactSystem`, `DebugColliderSystem` | Линкует **только** `EngineGpu` + `EngineEcs`, без `Engine`, рендера и ImGui. Своего PCH не имеет намеренно — это работающая проверка, что слоение не протекло |
 

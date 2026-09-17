@@ -35,7 +35,7 @@ target_compile_options(Sandbox PRIVATE /Qvec-report:2)
 
 # PCH: только std/SDL/glm — Sandbox дергает подсистемы точечно, Engine.h ему не нужен.
 target_precompile_headers(Sandbox PRIVATE
-    "${CMAKE_SOURCE_DIR}/src/engine/include/PCH.h"
+    "${CMAKE_SOURCE_DIR}/src/engine/include/core/PCH.h"
 )
 
 # Рабочая директория при отладке — откуда грузятся ресурсы/шейдеры.
