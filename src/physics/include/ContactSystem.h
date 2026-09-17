@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 #include <cstdint>
-#include "ColliderQuery.h"   // ColliderQuery::ModelLookup в сигнатуре
+#include "ColliderQuery.h"   // ColliderQuery::ModelColliders в сигнатуре
 
 class ObjectManager;
 struct SceneData;
