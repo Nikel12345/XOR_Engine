@@ -221,6 +221,8 @@ Engine::Engine(const EngineConfig& cfg)
 	queue_manager = new QueueManager(dev);
 	buffer_manager = new BufferManager(dev, transfer_manager);
 	texture_manager = new TextureManager(dev, transfer_manager);
+	DefaultResourceSet::CreateDefaultBuffers(buffer_manager);
+	DefaultResourceSet::CreateDefaultTextureResources(texture_manager);
 	shader_manager = new ShaderManager(dev);
 	pipe_manager = new PipeManager(dev, win);
 	model_manager = new ModelManager();

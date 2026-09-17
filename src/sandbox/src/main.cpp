@@ -35,6 +35,7 @@
 #include "config.h"
 #include "TransferManager.h"
 #include "BufferManager.h"
+#include "DefaultResourceSet.h"
 #include "BufferUpdateStruct.h"
 #include "ObjectManager.h"
 #include "TransformDataModule.h"
@@ -87,6 +88,7 @@ int main(int argc, char** argv)
 
     TransferManager* tm  = new TransferManager(dev);
     BufferManager*   bm  = new BufferManager(dev, tm);
+    DefaultResourceSet::CreateDefaultBuffers(bm);
     ObjectManager*   om  = new ObjectManager();
     TransformDataModule* tdm = new TransformDataModule();
 

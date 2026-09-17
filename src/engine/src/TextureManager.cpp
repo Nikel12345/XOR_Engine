@@ -1,6 +1,5 @@
 ﻿#include "PCH.h"
 #include "TextureManager.h"
-#include "TextureSamplerPresets.h"
 #include "finders_interface.h"
 
 struct AtlasPacker {
@@ -58,30 +57,6 @@ struct AtlasPacker {
 };
 
 TextureManager::TextureManager(SDL_GPUDevice* device, TransferManager* transfer_manager): dev(device), trm(transfer_manager){
-    using namespace DefaultSamplersNames;
-    // У материального сэмплера анизотропия выключена намеренно: она выбирает LOD по резкой оси
-    // футпринта и держит высокочастотную нормаль острой, сводя на нет мип-префильтр, из-за чего
-    // шейдинг нормали мерцает при движении камеры.
-    CreateSampler(DEFAULT_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::DEFAULT_SAMPLER));
-    CreateSampler(DEFAULT_SHADOW_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::SHADOW_SAMPLER));
-	CreateSampler(VSM_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::VSM_SAMPLER));
-	CreateSampler(ENV_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::ENV_SAMPLER));
-    CreateSampler(SIMPLE_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::SIMPLE_SAMPLER));
-
-    {
-        SDL_GPUTextureCreateInfo tci{};
-        tci.type                 = SDL_GPU_TEXTURETYPE_2D_ARRAY;
-        tci.format               = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
-        tci.usage                = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-        tci.width                = 2048;
-        tci.height               = 2048;
-        tci.layer_count_or_depth = 1;
-        tci.num_levels           = 1;
-        tci.sample_count         = SDL_GPU_SAMPLECOUNT_1;
-        TextureAtlas* text_atlas = CreateTextureAtlas(DefaultAtlasNames::TEXT_ATLAS, tci, GetSampler("SimpleSampler"), ResourceTag::Default | ResourceTag::System);
-        text_atlas->padding = 0;
-    }
-
     preview.Create(dev);
 }
 

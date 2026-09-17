@@ -2,10 +2,69 @@
 #include "DefaultResourceSet.h"
 #include "EngineContext.h"
 #include "TextureManager.h"
+#include "TextureSamplerPresets.h"
+#include "BufferManager.h"
+#include "CameraStruct.h"
+#include "LightStruct.h"
 #include "TextureData.h"
 #include "BatchBuilder.h"
 #include "TexturesPresets.h"
 #include "PositionStructure.h"
+
+void DefaultResourceSet::CreateDefaultBuffers(BufferManager* bm)
+{
+    using namespace DefaultBuffersNames;
+	bm->CreateBufferData(DEFAULT_TRANSFORM_BUFFER, BASE_TB_SIZE / 10, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	bm->CreateBufferData(DEFAULT_LIGHT_BUFFER, sizeof(LightLayout) * 2, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	bm->CreateBufferData(DEFAULT_CAMERA_BUFFER, sizeof(CameraData), BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	bm->CreateBufferData(DEFAULT_POSITION_INDEX_BUFFER, BASE_TB_SIZE / 16/ 10, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	bm->CreateBufferData(DEFAULT_INSTANCE_BUFFER, BASE_TB_SIZE / 80, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	bm->CreateBufferData(DEFAULT_LIGHT_CAMERA_BUFFER, sizeof(CameraData) * 6, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+
+	bm->CreateBufferData(DEFAULT_TEX_STATE_RANK_BUFFER, sizeof(uint32_t) * 2 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	bm->CreateBufferData(DEFAULT_TEX_STATE_INDEX_BUFFER, sizeof(uint32_t) * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+	bm->CreateBufferData(DEFAULT_TEX_STATE_BUFFER, sizeof(uint32_t) * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+
+    bm->CreateBufferData(DEFAULT_INDIRECT_BUFFER, sizeof(SDL_GPUIndexedIndirectDrawCommand) * 10, BufferDataType::Dynamic)
+        ->usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
+
+    bm->CreateBufferData(DEFAULT_BOUND_SPHERE_BUFFER, BASE_TB_SIZE / 40, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(DEFAULT_OUT_PIB_BUFFER, BASE_TB_SIZE / 16 / 10, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(DEFAULT_ENTITY_TO_CMD_BUFFER, BASE_TB_SIZE / 16 / 10, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+
+    bm->CreateBufferData(UI_TEXT_RANK_BUFFER,     sizeof(uint32_t) * 2 * 64,  BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(UI_TEXT_INDEX_BUFFER,    sizeof(uint32_t) * 2 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(UI_TEXT_BUFFER,          sizeof(uint32_t) * 4096,    BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+
+    bm->CreateBufferData(UI_FONT_UVL_BUFFER, sizeof(uint32_t) * 4 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
+}
+
+void DefaultResourceSet::CreateDefaultTextureResources(TextureManager* tm)
+{
+    using namespace DefaultSamplersNames;
+    // У материального сэмплера анизотропия выключена намеренно: она выбирает LOD по резкой оси
+    // футпринта и держит высокочастотную нормаль острой, сводя на нет мип-префильтр, из-за чего
+    // шейдинг нормали мерцает при движении камеры.
+    tm->CreateSampler(DEFAULT_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::DEFAULT_SAMPLER));
+    tm->CreateSampler(DEFAULT_SHADOW_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::SHADOW_SAMPLER));
+	tm->CreateSampler(VSM_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::VSM_SAMPLER));
+	tm->CreateSampler(ENV_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::ENV_SAMPLER));
+    tm->CreateSampler(SIMPLE_SAMPLER, SamplerPresets::GetSamplerCreateInfo(SamplerPreset::SIMPLE_SAMPLER));
+
+    {
+        SDL_GPUTextureCreateInfo tci{};
+        tci.type                 = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+        tci.format               = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
+        tci.usage                = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        tci.width                = 2048;
+        tci.height               = 2048;
+        tci.layer_count_or_depth = 1;
+        tci.num_levels           = 1;
+        tci.sample_count         = SDL_GPU_SAMPLECOUNT_1;
+        TextureAtlas* text_atlas = tm->CreateTextureAtlas(DefaultAtlasNames::TEXT_ATLAS, tci, tm->GetSampler("SimpleSampler"), ResourceTag::Default | ResourceTag::System);
+        text_atlas->padding = 0;
+    }
+}
 
 void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 {
