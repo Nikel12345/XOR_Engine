@@ -142,7 +142,7 @@ template<> struct CommandPayload<CommandId::RemoveMaterialTextureVariant> { usin
 
 // Правка поля НА МЕСТЕ: архетип тот же, дерево батчей не трогается ни SetDirtyBatches, ни QueueUpdate.
 struct EntityTextureVariantCmd {
-    Entity   entity;
+    uint32_t entity;      // Entity как uint32_t — заголовок не завязан на BaseComponents.h
     uint32_t mat_index;   // какой материал сущности (= submesh.material_index)
     uint32_t role;
     uint32_t variant;     // 0 = дефолт; запись нуля УБИРАЕТ пару из states (список разреженный)
