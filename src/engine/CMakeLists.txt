@@ -59,9 +59,12 @@ set(ENGINEECS_HDR
     include/ObjectManager.h
     include/ObjectManager.inl
     include/BaseComponents.h
+    include/ComponentStorage.h
     include/SceneData.h
     include/Aliases.h
     include/ResourceTags.h
+    include/ResourceId.h
+    include/CommandId.h
     include/ComponentSerializer.h
 )
 list(TRANSFORM ENGINEECS_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
@@ -113,6 +116,8 @@ set(ENGINEGPU_SRC
     src/TextureManager.cpp
     src/PreviewPacker.cpp
     src/PassManager.cpp
+    src/PipeManager.cpp
+    src/GeometryPool.cpp
     src/RenderCommandData.cpp
     src/GpuTaskContext.cpp
     src/SparseRankChannel.cpp
@@ -132,7 +137,11 @@ set(ENGINEGPU_HDR
     include/TextureData.h
     include/PreviewPacker.h
     include/PassManager.h
+    include/PipeManager.h
+    include/GeometryPool.h
     include/RenderCommandData.h
+    include/RenderSnapshot.h
+    include/ResourceRegistry.h
     include/GpuTaskContext.h
     include/SparseRankChannel.h
     include/EngineProfiler.h
@@ -149,7 +158,6 @@ source_group("Headers" FILES ${ENGINEGPU_HDR})
 # (раньше SDL3-инклуд протекал к игре случайно через ImGui — теперь явно отсюда).
 target_include_directories(EngineGpu PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
     "${CMAKE_SOURCE_DIR}/external/glm"
     "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/include"   # ShaderManager.h раскрывает SDL_ShaderCross_*
 )
@@ -184,8 +192,6 @@ set(ENGINE_MANAGERS_SRC
     src/CameraManager.cpp
     src/MaterialManager.cpp
     src/ModelManager.cpp
-    src/GeometryPool.cpp
-    src/PipeManager.cpp
     src/ThreadController.cpp
     src/SlotController.cpp
     src/InputManager.cpp
@@ -195,8 +201,6 @@ set(ENGINE_MANAGERS_HDR
     include/CameraManager.h
     include/MaterialManager.h
     include/ModelManager.h
-    include/GeometryPool.h
-    include/PipeManager.h
     include/ThreadController.h
     include/SlotController.h
     include/InputManager.h
@@ -251,6 +255,7 @@ set(ENGINE_UTILS_HDR
     include/FPSCounter.h
     include/Utils.h
     include/config.h
+    include/GraphicsConfig.h
 )
 set(ENGINE_CORE_SRC
     src/Engine.cpp
@@ -326,7 +331,6 @@ source_group("Headers/Core"        FILES ${ENGINE_CORE_HDR})
 
 target_include_directories(Engine PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_include_directories(Engine PRIVATE
     "${CMAKE_SOURCE_DIR}/external/SDL3_image/include"   # только TextureLoader.cpp

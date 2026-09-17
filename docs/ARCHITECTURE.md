@@ -34,7 +34,7 @@ XOR Engine — набор статических библиотек. Прило�
 | цель | что внутри | почему отдельно |
 |---|---|---|
 | **EngineEcs** | `ObjectManager` (+`.inl`), `BaseComponents`, `ComponentSerializer`, `SceneData`, `Aliases.h`, `ResourceId.h` | ECS обязан оставаться листом: его линкует и `Engine`, и `Physics`. Тянет только SDL3 и `yyjson` (колоночная сериализация сцены) |
-| **EngineGpu** | `QueueManager`, `TransferManager`, `BufferManager` (+`_Binds`/`_Update`/`_Utils`), `ShaderManager` (+`_ShadersCreate`/`_SPVLoad`), `TextureManager`, `PreviewPacker`, `PassManager`, `RenderCommandData`, `GpuTaskContext`, `SparseRankChannel`, `EngineProfiler` | Буферы, шейдеры, текстуры, проходы — без единого знания о сцене и рендер-логике |
+| **EngineGpu** | `QueueManager`, `TransferManager`, `BufferManager` (+`_Binds`/`_Update`/`_Utils`), `ShaderManager` (+`_ShadersCreate`/`_SPVLoad`), `TextureManager`, `PreviewPacker`, `PassManager`, `PipeManager`, `GeometryPool`, `RenderCommandData`, `RenderSnapshot.h`, `GpuTaskContext`, `SparseRankChannel`, `EngineProfiler` | Всё, чем кадр исполняется: буферы, шейдеры, пайплайны, текстуры, проходы, пулы геометрии — без единого знания о сцене и рендер-логике |
 | **Engine** | менеджеры, data-модули, `BatchBuilder`, `EngineContext`, дефолт-сеты, UI, цикл кадра | Линкует `EngineGpu` и `EngineEcs` как PUBLIC и склеивает их |
 | **Physics** | `PhysicsBufferSet`, `PhysicsComputeSet`, `CollisionShapes`, `ContactSystem`, `DebugColliderSystem` | Линкует **только** `EngineGpu` + `EngineEcs`, без `Engine`, рендера и ImGui. Своего PCH не имеет намеренно — это работающая проверка, что слоение не протекло |
 
@@ -71,9 +71,9 @@ XOR Engine — набор статических библиотек. Прило�
 
 Файлы читаются через роли, а не по алфавиту.
 
-- **Менеджеры** (`CameraManager`, `MaterialManager`, `ModelManager`, `PipeManager`, `InputManager`,
-  `FontManager`, `TextureLoader`, `GeometryPool`, `RangeAllocator`, `ThreadController`,
-  `SlotController`) — каждый владеет реестром своего вида ресурса и **только им**.
+- **Менеджеры** (`CameraManager`, `MaterialManager`, `ModelManager`, `InputManager`,
+  `FontManager`, `TextureLoader`, `ThreadController`, `SlotController`) — каждый владеет реестром
+  своего вида ресурса и **только им**.
 - **`EngineContext`** — единственное место кроссменеджерских операций и публичный фасад:
   `CreateMaterial`, `CreateTextureFromFile`, `CreateModel`, `CreateFont`, `CreateGeometryPool`.
   Узкая GPU-половина того же фасада — `GpuTaskContext`; ею пользуются шейдер-сеты и физика.
