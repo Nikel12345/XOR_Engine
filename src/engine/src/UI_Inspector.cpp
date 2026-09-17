@@ -109,8 +109,8 @@ namespace {
                 bool visible = om->GetComponent<DrawComponent>(scene, c).visible;
                 char clabel[40]; snprintf(clabel, sizeof(clabel), "visible (collider %u)", static_cast<unsigned>(c));
                 if (ImGui::Checkbox(clabel, &visible))
-                    ctx->GetInputManager()->PushCommand(CommandId::HideEntity,
-                        new FieldEditCmd{ c, "Draw", "visible", visible ? 1.0 : 0.0, {} });
+                    cmd::Push<CommandId::HideEntity>(ctx->GetInputManager(),
+                        c, "Draw", "visible", visible ? 1.0 : 0.0);
             }
         }
 
@@ -142,7 +142,7 @@ namespace {
             dl->AddLine({ p0.x + sz*0.24f, p0.y + sz*0.52f }, { p0.x + sz*0.42f, p0.y + sz*0.70f }, col, 2.0f);
             dl->AddLine({ p0.x + sz*0.42f, p0.y + sz*0.70f }, { p0.x + sz*0.78f, p0.y + sz*0.30f }, col, 2.0f);
             if (apply) {
-                im->PushCommand(CommandId::RenameMaterial, new RenameMaterialCmd{ matName, nameBuf });
+                cmd::Push<CommandId::RenameMaterial>(im, matName, nameBuf);
                 g_sel.name = nameBuf;
             }
         }
@@ -164,7 +164,7 @@ namespace {
             ImGui::PushID(static_cast<int>(si));
 
             if (ImGui::SmallButton("x"))
-                im->PushCommand(CommandId::RemoveMaterialShader, new MaterialShaderCmd{ matName, spName });
+                cmd::Push<CommandId::RemoveMaterialShader>(im, matName, spName);
             ImGui::SameLine();
             ImGui::TextUnformatted(spName.c_str());
 
@@ -217,8 +217,7 @@ namespace {
                     ImGui::SameLine();
                     ImGui::BeginDisabled(uvl_full);
                     if (ImGui::SmallButton("+")) {
-                        im->PushCommand(CommandId::AddMaterialTextureVariant,
-                            new MaterialVariantCmd{ matName, static_cast<uint32_t>(role), 0 });
+                        cmd::Push<CommandId::AddMaterialTextureVariant>(im, matName, static_cast<uint32_t>(role), 0u);
                         v = n;
                     }
                     ImGui::EndDisabled();
@@ -229,8 +228,7 @@ namespace {
                     ImGui::SameLine();
                     ImGui::BeginDisabled(v == 0);
                     if (ImGui::SmallButton("x")) {
-                        im->PushCommand(CommandId::RemoveMaterialTextureVariant,
-                            new MaterialVariantCmd{ matName, static_cast<uint32_t>(role), v });
+                        cmd::Push<CommandId::RemoveMaterialTextureVariant>(im, matName, static_cast<uint32_t>(role), v);
                         --v;   // отклик в ЭТОМ же кадре: команда исполнится на sim позже, а кламп
                     }
                     ImGui::EndDisabled();
@@ -243,8 +241,7 @@ namespace {
                         for (const std::string& tn : texNames) {
                             bool is_cur = (tn == current);
                             if (ImGui::Selectable(tn.c_str(), is_cur) && !is_cur)
-                                im->PushCommand(CommandId::SetMaterialTexture,
-                                    new SetMaterialTextureCmd{ matName, static_cast<uint32_t>(role), v, tn });
+                                cmd::Push<CommandId::SetMaterialTexture>(im, matName, static_cast<uint32_t>(role), v, tn);
                             if (is_cur) ImGui::SetItemDefaultFocus();
                         }
                         ImGui::EndCombo();
@@ -295,7 +292,7 @@ namespace {
                 for (auto& b : mat->shader_programs) if (b.sp == ShaderProgramId{ i }) { present = true; break; }
                 if (present) continue;
                 if (ImGui::Selectable(spc.name.c_str()))
-                    im->PushCommand(CommandId::AddMaterialShader, new MaterialShaderCmd{ matName, spc.name });
+                    cmd::Push<CommandId::AddMaterialShader>(im, matName, spc.name);
             }
             ImGui::EndCombo();
         }
@@ -507,10 +504,9 @@ namespace {
         const bool ready = nameBuf[0] && !atlasSel.empty() && pathBuf[0];
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
-            ctx->GetInputManager()->PushCommand(CommandId::UpsertTexture,
-                new UpsertTextureCmd{ nameBuf, atlasSel, pathBuf,
-                                      cubeSel ? 0u : static_cast<uint32_t>(convSel),
-                                      g_sel.name, cubeSel });
+            cmd::Push<CommandId::UpsertTexture>(ctx->GetInputManager(), nameBuf, atlasSel, pathBuf,
+                                                cubeSel ? 0u : static_cast<uint32_t>(convSel),
+                                                g_sel.name, cubeSel);
             g_sel = Selection{}; g_sel.kind = SelKind::Texture; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
@@ -519,7 +515,7 @@ namespace {
             ImGui::SameLine();
             const bool del = DangerButton("Delete");
             if (del) {
-                ctx->GetInputManager()->PushCommand(CommandId::DeleteTexture, new DeleteTextureCmd{ g_sel.name });
+                cmd::Push<CommandId::DeleteTexture>(ctx->GetInputManager(), g_sel.name);
                 g_sel = Selection{};
             }
         }
@@ -630,8 +626,8 @@ namespace {
         const bool ready = nameBuf[0] && modelBuf[0] && indexBuf[0];
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
-            ctx->GetInputManager()->PushCommand(CommandId::UpsertModel,
-                new UpsertModelCmd{ nameBuf, modelBuf, indexBuf, static_cast<uint32_t>(anchorSel), g_sel.name });
+            cmd::Push<CommandId::UpsertModel>(ctx->GetInputManager(), nameBuf, modelBuf, indexBuf,
+                                              static_cast<uint32_t>(anchorSel), g_sel.name);
             g_sel = Selection{}; g_sel.kind = SelKind::Model; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
@@ -789,8 +785,8 @@ namespace {
             && (!creating || nameFree);
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button(creating ? "Create" : "Apply / Recreate", ImVec2(160, 0))) {
-            im->PushCommand(CommandId::RecreateShader,
-                new RecreateShaderCmd{ spName, nameBuf, vsSel, fsSel, passSel, spdBuf, vsBufSel, fsBufSel, slotsSel });
+            cmd::Push<CommandId::RecreateShader>(im, spName, nameBuf, vsSel, fsSel, passSel,
+                                                spdBuf, vsBufSel, fsBufSel, slotsSel);
             g_sel = Selection{}; g_sel.kind = SelKind::Shader; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
@@ -799,7 +795,7 @@ namespace {
         if (!creating) {
             ImGui::Separator();
             if (DangerButton("Delete shader")) {
-                im->PushCommand(CommandId::DeleteShader, new RebuildShaderPipelineCmd{ spName });
+                cmd::Push<CommandId::DeleteShader>(im, spName);
                 g_sel = Selection{};
                 return;
             }
@@ -959,8 +955,8 @@ namespace {
         const bool ready = nameBuf[0] && pathBuf[0];
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
-            ctx->GetInputManager()->PushCommand(CommandId::UpsertFragmentShader,
-                new UpsertFragmentShaderCmd{ nameBuf, pathBuf, g_sel.name, DefinesFromStr(defsBuf) });
+            cmd::Push<CommandId::UpsertFragmentShader>(ctx->GetInputManager(),
+                nameBuf, pathBuf, g_sel.name, DefinesFromStr(defsBuf));
             g_sel = Selection{}; g_sel.kind = SelKind::Fsd; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
@@ -969,7 +965,7 @@ namespace {
             const bool used = ctx->GetShaderManager()->IsFragmentShaderUsed(ctx->GetShaderManager()->FragmentShaders().Find(g_sel.name));
             ImGui::BeginDisabled(used);
             if (DangerButton("Delete")) {
-                ctx->GetInputManager()->PushCommand(CommandId::DeleteFragmentShader, new ShaderDataNameCmd{ g_sel.name });
+                cmd::Push<CommandId::DeleteFragmentShader>(ctx->GetInputManager(), g_sel.name);
                 g_sel = Selection{};
             }
             ImGui::EndDisabled();
@@ -1000,8 +996,8 @@ namespace {
         const bool ready = nameBuf[0] && pathBuf[0];
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
-            ctx->GetInputManager()->PushCommand(CommandId::UpsertComputeShader,
-                new UpsertComputeShaderCmd{ nameBuf, pathBuf, g_sel.name, DefinesFromStr(defsBuf) });
+            cmd::Push<CommandId::UpsertComputeShader>(ctx->GetInputManager(),
+                nameBuf, pathBuf, g_sel.name, DefinesFromStr(defsBuf));
             g_sel = Selection{}; g_sel.kind = SelKind::Csd; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
@@ -1010,7 +1006,7 @@ namespace {
             const bool used = ctx->GetShaderManager()->IsComputeShaderUsed(ctx->GetShaderManager()->ComputeShaders().Find(g_sel.name));
             ImGui::BeginDisabled(used);
             if (DangerButton("Delete")) {
-                ctx->GetInputManager()->PushCommand(CommandId::DeleteComputeShader, new ShaderDataNameCmd{ g_sel.name });
+                cmd::Push<CommandId::DeleteComputeShader>(ctx->GetInputManager(), g_sel.name);
                 g_sel = Selection{};
             }
             ImGui::EndDisabled();
@@ -1087,8 +1083,8 @@ namespace {
         const bool ready = nameBuf[0] && pathBuf[0] && !pull.empty() && pool;
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
-            ctx->GetInputManager()->PushCommand(CommandId::UpsertVertexShader,
-                new UpsertVertexShaderCmd{ nameBuf, pathBuf, g_sel.name, poolSel, pull, DefinesFromStr(defsBuf) });
+            cmd::Push<CommandId::UpsertVertexShader>(ctx->GetInputManager(),
+                nameBuf, pathBuf, g_sel.name, poolSel, pull, DefinesFromStr(defsBuf));
             g_sel = Selection{}; g_sel.kind = SelKind::Vsd; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();
@@ -1097,7 +1093,7 @@ namespace {
             const bool used = ctx->GetShaderManager()->IsVertexShaderUsed(ctx->GetShaderManager()->VertexShaders().Find(g_sel.name));
             ImGui::BeginDisabled(used);
             if (DangerButton("Delete")) {
-                ctx->GetInputManager()->PushCommand(CommandId::DeleteVertexShader, new ShaderDataNameCmd{ g_sel.name });
+                cmd::Push<CommandId::DeleteVertexShader>(ctx->GetInputManager(), g_sel.name);
                 g_sel = Selection{};
             }
             ImGui::EndDisabled();
@@ -1195,8 +1191,7 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         ImGui::Text("Offset: X=%.0f  Y=%.0f px", dx, dy);
         ImGui::Separator();
         auto nudge_z = [&](float ddz) {
-            ctx->GetInputManager()->PushCommand(CommandId::NudgeUINode,
-                new UINodeNudgeCmd{ n, 0.0f, 0.0f, ddz });
+            cmd::Push<CommandId::NudgeUINode>(ctx->GetInputManager(), n, 0.0f, 0.0f, ddz);
         };
         ImGui::Text("Z %.3f", dz);
         ImGui::SameLine();
@@ -1244,9 +1239,9 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
             const float dtx = delta[12], dty = delta[13];
             if (dtx != 0.0f || dty != 0.0f) {
                 // NDC → px (Y флип: NDC вверх, layout-px вниз). Двигаем offset узла командой.
-                ctx->GetInputManager()->PushCommand(CommandId::NudgeUINode,
-                    new UINodeNudgeCmd{ n,  dtx * io.DisplaySize.x * 0.5f,
-                                           -dty * io.DisplaySize.y * 0.5f, 0.0f });
+                cmd::Push<CommandId::NudgeUINode>(ctx->GetInputManager(), n,
+                                                  dtx * io.DisplaySize.x * 0.5f,
+                                                 -dty * io.DisplaySize.y * 0.5f, 0.0f);
             }
         }
         return;
@@ -1286,9 +1281,8 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
         if (g_gizmo_op == ImGuizmo::ROTATE)
             model = model_before * glm::inverse(model) * model_before;
 
-        SetTransformCmd* cmd = new SetTransformCmd{};
-        cmd->entity = selected;
-        std::memcpy(cmd->matrix, glm::value_ptr(model), sizeof(cmd->matrix));
-        ctx->GetInputManager()->PushCommand(CommandId::SetTransform, cmd);
+        SetTransformCmd payload{ selected };
+        std::memcpy(payload.matrix, glm::value_ptr(model), sizeof(payload.matrix));
+        cmd::Push<CommandId::SetTransform>(ctx->GetInputManager(), payload);
     }
 }

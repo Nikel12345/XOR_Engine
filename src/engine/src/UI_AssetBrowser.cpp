@@ -117,7 +117,7 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
                     std::string nm = "material";
                     for (int i = 1; mm->MaterialIdOf(nm); ++i) nm = "material_" + std::to_string(i);
                     g_sel = Selection{}; g_sel.kind = SelKind::Material; g_sel.name = nm;
-                    ctx->GetInputManager()->PushCommand(CommandId::CreateMaterial, new CreateMaterialCmd{ nm });
+                    cmd::Push<CommandId::CreateMaterial>(ctx->GetInputManager(), nm);
                 },
                 [&](auto&& emit) { const MaterialRegistry& reg = ctx->GetMaterialManager()->Materials();
                                    for (int32_t i = 0; i < reg.Count(); ++i) {

@@ -34,6 +34,8 @@ bool ui::DrawComponentFields(const EditTarget& target, const ComponentSpec& spec
 
     // Команда ВМЕСТО записи в колонку, а не вместе с ней: иначе UI-поток всё равно писал бы
     // живой ECS, ради чего команда и заводилась, а хендлер записал бы второй раз.
+    // id тут РАНТАЙМНЫЙ (из схемы), поэтому пара с нагрузкой мимо cmd::Push: любое поле с .Cmd()
+    // обязано принимать FieldEditCmd.
     const bool routed = target.live();
     auto put_num = [&](const FieldSpec& f, double v) {
         if (routed && f.cmd != CommandId::None) {
@@ -249,8 +251,8 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
                 if (!g_show_internal && HasTag(mc.object->tags, ResourceTag::System)) continue;
                 if (!ImGui::Selectable(mc.name.c_str(), mc.name == sel)) continue;
                 if (t.live())
-                    t.ctx->GetInputManager()->PushCommand(CommandId::SetEntityMaterial,
-                        new FieldEditCmd{ t.entity, "Material", "names", (double)k, mc.name });
+                    cmd::Push<CommandId::SetEntityMaterial>(t.ctx->GetInputManager(),
+                        t.entity, "Material", "names", (double)k, mc.name);
                 else
                     mats.materials[k] = MaterialRef{ MaterialId{ mi }, {} };
             }
@@ -286,9 +288,8 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
 
                 if (next == cur) continue;
                 if (t.live())
-                    t.ctx->GetInputManager()->PushCommand(CommandId::SetEntityTextureVariant,
-                        new EntityTextureVariantCmd{ t.entity, safe_u32(k),
-                                                     static_cast<uint32_t>(role), next });
+                    cmd::Push<CommandId::SetEntityTextureVariant>(t.ctx->GetInputManager(),
+                        t.entity, safe_u32(k), static_cast<uint32_t>(role), next);
                 else if (next == 0) { if (sit != st.end()) st.erase(sit); }
                 else if (sit != st.end()) sit->second = next;
                 else st.emplace_back(role, next);

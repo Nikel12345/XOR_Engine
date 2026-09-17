@@ -120,8 +120,7 @@ namespace {
         ImGui::BeginDisabled(g_ce_entity == kNoEntity || target.empty());
         if (ImGui::Button("Create")) {
             std::string json = om->SaveScene(stg);
-            ctx->GetInputManager()->PushCommand(CommandId::CreateEntity,
-                new CreateEntityCmd{ target, std::move(json) });
+            cmd::Push<CommandId::CreateEntity>(ctx->GetInputManager(), target, std::move(json));
             om->DeleteEntity(stg, g_ce_entity);
             g_ce_entity = kNoEntity;
             g_ce_open = false;
@@ -189,10 +188,10 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
         for (const std::string& name : g_scene_dirs) {
             ImGui::PushID(name.c_str());
             if (ImGui::SmallButton("Load"))
-                im->PushCommand(CommandId::LoadScene, new SceneIOCmd{ name, kScenesRoot });
+                cmd::Push<CommandId::LoadScene>(im, name, kScenesRoot);
             ImGui::SameLine();
             if (ImGui::SmallButton("Save"))
-                im->PushCommand(CommandId::SaveScene, new SceneIOCmd{ name, kScenesRoot });
+                cmd::Push<CommandId::SaveScene>(im, name, kScenesRoot);
             ImGui::SameLine();
             ImGui::Selectable(name.c_str(), name == active);
             ImGui::PopID();
@@ -201,7 +200,7 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
         if (std::find(g_scene_dirs.begin(), g_scene_dirs.end(), active) == g_scene_dirs.end()) {
             ImGui::PushID(active.c_str());
             if (ImGui::SmallButton("Save")) {
-                im->PushCommand(CommandId::SaveScene, new SceneIOCmd{ active, kScenesRoot });
+                cmd::Push<CommandId::SaveScene>(im, active, kScenesRoot);
                 g_scene_dirs_time = -1.0;
             }
             ImGui::SameLine();
