@@ -2,7 +2,6 @@
 #include "InputManager.h"
 
 namespace {
-    // Бит маски для SDL-кнопки мыши (SDL_BUTTON_LEFT == 1 и т.д.).
     inline uint32_t MouseBit(uint8_t button) {
         return button ? (1u << (button - 1)) : 0u;
     }
@@ -19,7 +18,6 @@ void InputManager::HandleEvent(const SDL_Event& event)
         SDL_Scancode sc = event.key.scancode;
         if (static_cast<size_t>(sc) < held_.size())
             held_[static_cast<size_t>(sc)].store(true, std::memory_order_relaxed);
-        // repeat не плодим в дискретной очереди — это удержание, не новое ребро.
         if (!event.key.repeat) {
             std::lock_guard<std::mutex> lock(key_mutex_);
             key_events_.push_back({ sc, true });
