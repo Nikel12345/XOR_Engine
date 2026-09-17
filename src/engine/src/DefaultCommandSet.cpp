@@ -16,7 +16,6 @@
 
 using namespace ShaderBase;
 
-// Сами текстуры заводит Engine::InitDefaultResources.
 static const char* DefaultTextureForRole(TextureSlotRole r)
 {
 	switch (r) {
@@ -24,7 +23,7 @@ static const char* DefaultTextureForRole(TextureSlotRole r)
 	case TextureSlotRole::Normal:   return "default_normal";
 	case TextureSlotRole::ORM:      return "default_orm";
 	case TextureSlotRole::Emissive: return "default_emissive";
-	default:                        return "NoTextureDummy";   // Custom* и прочее
+	default:                        return "NoTextureDummy";
 	}
 }
 
@@ -37,17 +36,12 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 			ctx->DeleteEntity(ctx->GetObjectManager()->GetActiveSceneName(), e);
 		});
 
-	// Запись флага И дельта в батчи — обе внутри HideEntity: прямой записью с UI-потока дерево
-	// батчей не перестроить.
 	cmd::Register<CommandId::HideEntity>(im,
 		[](EngineContext* ctx, const FieldEditCmd& c)
 		{
 			ctx->HideEntity(ctx->GetObjectManager()->GetActiveSceneName(), c.entity, c.num != 0.0);
 		});
 
-	// Смена ресурса — не запись поля: у модели меняется ещё и длина списка материалов, у материала
-	// сбрасываются states, и сущность перевешивается в дереве батчей. Логика на EngineContext — её
-	// же зовёт игровой код прямо с sim-потока; команда здесь только транспорт с UI.
 	cmd::Register<CommandId::SetEntityModel>(im,
 		[](EngineContext* ctx, const FieldEditCmd& c)
 		{
@@ -60,7 +54,6 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 			ctx->ChangeMaterial(c.entity, c.str, safe_f_u32(static_cast<float>(c.num)));
 		});
 
-	// ImGuizmo отдаёт column-major, Positions хранит row-major — отсюда поэлементная перекладка.
 	cmd::Register<CommandId::SetTransform>(im,
 		[](EngineContext* ctx, const SetTransformCmd& c)
 		{
@@ -72,7 +65,7 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 				SoAElement<Positions> el = om->GetComponent<Positions>(scene, c.entity);
 				Positions& P = el.container();
 				const size_t i = el.i();
-				const float* m = c.matrix;   // column-major: m[col*4 + row]
+				const float* m = c.matrix;   // ImGuizmo даёт column-major: m[col*4 + row]
 				P.x[i] = m[0]; P.y[i] = m[4]; P.z[i] = m[8];  P.w[i] = m[12];
 				P.a[i] = m[1]; P.b[i] = m[5]; P.c[i] = m[9];  P.d[i] = m[13];
 				P.e[i] = m[2]; P.f[i] = m[6]; P.g[i] = m[10]; P.h[i] = m[14];
@@ -80,7 +73,7 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 			}
 		});
 
-	// Источник — дерево, энтити пересоздаст ближайший Emit по dirty (его взводит NudgeNode).
+	// Энтити здесь не трогаем: их пересоздаст ближайший Emit по dirty, который взводит NudgeNode.
 	cmd::Register<CommandId::NudgeUINode>(im,
 		[](EngineContext* ctx, const UINodeNudgeCmd& c)
 		{
@@ -88,17 +81,15 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 				yg->NudgeNode(c.node, c.ddx, c.ddy, c.ddz);
 		});
 
-	// Добавление ИНКРЕМЕНТАЛЬНОЕ: путь через ObjectManager::LoadScene идёт мимо
-	// EngineContext::CreateEntity, поэтому дельту ставим руками. Полная пересборка дала бы тот же
-	// результат ценой обхода ВСЕЙ сцены — на 1М энтити это фриз ради одной сущности.
+	// Дельту ставим руками: SetDirtyBatches дал бы тот же результат обходом ВСЕЙ сцены — на 1М
+	// энтити это фриз ради одной новой сущности.
 	cmd::Register<CommandId::CreateEntity>(im,
 		[](EngineContext* ctx, const CreateEntityCmd& c)
 		{
 			ObjectManager* om = ctx->GetObjectManager();
 			SceneData* scene = om->GetScene(c.scene);
 			if (scene) {
-				// Дельту берёт только активная сцена — она одна кормит батч-дерево (id чужой
-				// сцены попал бы в чужой объект).
+				// Батч-дерево кормит только активная сцена: id чужой совпал бы с чужим объектом.
 				const bool feeds_batches = (scene == om->GetActiveScene());
 				const std::vector<Entity> created = om->LoadScene(c.scene, c.json);
 				for (Entity e : created)
@@ -124,15 +115,14 @@ void DefaultCommandSet::SetSceneCommands(InputManager& im)
 
 void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 {
-	// В батче запечён уже разрешённый UVL текстуры — правка id требует ПЕРЕСБОРКИ.
+	// UVL текстуры запечён в батче — правки id мало, нужна ПЕРЕСБОРКА.
 	cmd::Register<CommandId::SetMaterialTexture>(im,
 		[](EngineContext* ctx, const SetMaterialTextureCmd& c)
 		{
 			if (Material* m = ctx->GetMaterialManager()->GetMaterial(c.material)) {
 				const TextureId tid = ctx->GetTextureManager()->InternTexture(c.texture);
 				std::vector<TextureId>& variants = m->textures[static_cast<TextureSlotRole>(c.role)];
-				// Вне диапазона (список успели укоротить между кадром UI и исполнением) — тихо мимо:
-				// это гонка, а не ошибка.
+				// Вне диапазона — тихо мимо: список успели укоротить между кадром UI и исполнением.
 				if (variants.empty()) variants.push_back(tid);
 				else if (c.variant < variants.size()) variants[c.variant] = tid;
 				ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c.material);
@@ -148,12 +138,11 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			if (sp) for (TextureSlotRole role : sp->required_slots)
 				texs.emplace_back(role, std::vector<TextureId>{ ctx->GetTextureManager()->InternTexture(DefaultTextureForRole(role)) });
 			Material* m = ctx->GetMaterialManager()->CreateMaterial(c.name, std::move(texs), std::vector<ShaderProgramId>{ ctx->GetShaderManager()->InternShaderProgram("Lit") });
-			if (m) ctx->SetMaterialParams(m, "Lit", OpaqueMaterialParams{});   // блоб адресован Lit: её MaterialBlock
+			if (m) ctx->SetMaterialParams(m, "Lit", OpaqueMaterialParams{});
 			ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c.name);
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
 		});
 
-	// Дефолтами добираем ТОЛЬКО новые роли: общую с другой sp текстуру роли не перетираем.
 	cmd::Register<CommandId::AddMaterialShader>(im,
 		[](EngineContext* ctx, const MaterialShaderCmd& c)
 		{
@@ -162,7 +151,7 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 				bool present = false;
 				for (auto& b : m->shader_programs) if (b.sp == sp_id) { present = true; break; }
 				if (!present) {
-					// params остаются пустыми: раскладку cbuffer движок не выводит, тип выбирают в инспекторе.
+					// params пустые: раскладку cbuffer движок не выводит — тип выбирают в инспекторе.
 					m->shader_programs.push_back(SpBinding{ sp_id, nullptr, {} });
 					if (ShaderProgram* sp = ctx->GetShaderManager()->GetShaderProgram(c.shader))
 						for (TextureSlotRole role : sp->required_slots)
@@ -188,8 +177,7 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			}
 		});
 
-	// Новый вариант — КОПИЯ дефолта, чтобы резолвился сразу, а не давал dummy. Потолок
-	// MAX_UVL_BLOCKS не здесь: он на пару (материал, sp), считает и логирует его BatchBuilder.
+	// Потолок MAX_UVL_BLOCKS не здесь: он на пару (материал, sp), и считает его BatchBuilder.
 	cmd::Register<CommandId::AddMaterialTextureVariant>(im,
 		[](EngineContext* ctx, const MaterialVariantCmd& c)
 		{
@@ -197,7 +185,6 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 				std::vector<TextureId>& variants = m->textures[static_cast<TextureSlotRole>(c.role)];
 				variants.push_back(variants.empty() ? TextureId{} : variants[0]);
 				ctx->GetMaterialManager()->CollectSamplerUsage(m, ctx->GetTextureManager(), c.material);
-				// Структурная правка: сменились длина таблицы UVL и нумерация ячеек секции.
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 		});
@@ -216,8 +203,8 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 			}
 		});
 
-	// НЕ структурная правка — в этом вся идея фичи: два куба с одним материалом показывают разное,
-	// оставаясь в одном инстанс-батче.
+	// Единственная правка материала БЕЗ пересборки, и это намеренно: номер варианта лежит в
+	// сущности, батч от него не зависит — два куба с одним материалом остаются в одном инстансе.
 	cmd::Register<CommandId::SetEntityTextureVariant>(im,
 		[](EngineContext* ctx, const EntityTextureVariantCmd& c)
 		{
@@ -225,7 +212,6 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 				static_cast<TextureSlotRole>(c.role), c.variant);
 		});
 
-	// Материалы резолвятся по имени — ре-кей требует пересборки.
 	cmd::Register<CommandId::RenameMaterial>(im,
 		[](EngineContext* ctx, const RenameMaterialCmd& c)
 		{
@@ -237,8 +223,6 @@ void DefaultCommandSet::SetMaterialCommands(InputManager& im)
 
 void DefaultCommandSet::SetTextureCommands(InputManager& im)
 {
-	// Пустой old_name — создание, иначе правка выбранной ячейки. Ребилд батчей: материалы держат
-	// id ячейки и подхватят новый хэндл сами.
 	cmd::Register<CommandId::UpsertTexture>(im,
 		[](EngineContext* ctx, const UpsertTextureCmd& c)
 		{
@@ -256,7 +240,6 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 				tm->DeleteTextureHandle(tex_id, NameSlot::Keep);   // replace в той же ячейке (no-op, если пуста)
 				// ReleasePreview НЕ зовём: ячейка та же, слот превью должен пережить пересоздание
 				// (иначе плитка мигнёт затычкой до нового блита).
-				// Куб — ОДИН хэндл на 6 слоёв, поэтому снятие, превью и ренейм выше для него те же строки.
 				if (c.cube) ctx->CreateCubeMapTexture(c.name, c.atlas, c.path.c_str(), keep);
 				else         ctx->CreateTextureFromFile(c.name, c.atlas, c.path.c_str(), static_cast<ChannelConvention>(c.conv), keep);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
@@ -276,8 +259,7 @@ void DefaultCommandSet::SetTextureCommands(InputManager& im)
 
 void DefaultCommandSet::SetModelCommands(InputManager& im)
 {
-	// Перезагрузка in-place: ModelData остаётся в той же ячейке, ModelId у сущностей жив — чинить
-	// ссылки не нужно. Пересборка — из-за диапазонов геометрии: их батч запекает у себя.
+	// ModelId у сущностей не протухает: перезагрузка идёт в ту же ячейку реестра, чинить нечего.
 	cmd::Register<CommandId::UpsertModel>(im,
 		[](EngineContext* ctx, const UpsertModelCmd& c)
 		{
@@ -298,7 +280,6 @@ void DefaultCommandSet::SetModelCommands(InputManager& im)
 
 void DefaultCommandSet::SetShaderCommands(InputManager& im)
 {
-	// Материалы с удалённой sp уходят на fallback — это делает BatchBuilder на пересборке.
 	cmd::Register<CommandId::DeleteShader>(im,
 		[](EngineContext* ctx, const ShaderProgramNameCmd& c)
 		{
@@ -309,8 +290,6 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			}
 		});
 
-	// Одна форма на правку и создание: старая sp найдена (oldName) → delete+create, пустой oldName
-	// (плитка «+») → создание с нуля.
 	cmd::Register<CommandId::RecreateShader>(im,
 		[](EngineContext* ctx, const RecreateShaderCmd& c)
 		{
@@ -318,7 +297,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			const ShaderProgramId old_id = sm->ShaderProgramIdOf(c.oldName);
 			ShaderProgram* old = sm->GetShaderProgram(old_id);   // nullptr = создание с нуля
 
-			// При ренейме ссылки материалов по СТАРОМУ имени НЕ чиним — конвенция движка: на пересборке
+			// Ссылки материалов по СТАРОМУ имени при ренейме НЕ чиним — конвенция движка: на пересборке
 			// они дадут fallback.
 			std::string finalName;
 			if (old)
@@ -333,7 +312,7 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 			if (!ctx->GetPassManager()->GetRenderPassStep(passName) && old) passName = old->render_pass_name;
 			const std::vector<BufferDataName>   vbufs = c.vsBuffers;
 			const std::vector<BufferDataName>   fbufs = c.fsBuffers;
-			const std::vector<TextureSlotRole>  slots = c.slots;   // дубли отсеет CreateShaderProgram
+			const std::vector<TextureSlotRole>  slots = c.slots;
 			const std::string vsName = !c.vsName.empty() ? c.vsName : (old ? sm->VertexShaders().NameOf(old->vs_id) : std::string());
 			const std::string fsName = !c.fsName.empty() ? c.fsName : (old ? sm->FragmentShaders().NameOf(old->fs_id) : std::string());
 
@@ -342,9 +321,8 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 				if (finalName != c.oldName) sm->RenameShaderProgram(old_id, finalName);
 				sm->DeleteShaderProgram(old_id, NameSlot::Keep);
 			}
-			// push-инструкции не переносим руками: CreateShaderProgram сам возьмёт код-байндинги из
-			// реестра ПО ИМЕНИ. Переименование = смена владельца функции — перенос со старого
-			// имени всё равно жил бы лишь до ближайшей LoadScene, где связывает имя.
+			// Код-байндинги руками не переносим: CreateShaderProgram возьмёт их из реестра ПО ИМЕНИ, а
+			// перенос со старого имени всё равно жил бы лишь до ближайшей LoadScene.
 			sm->CreateShaderProgram(finalName, c.spd, passName, vsName, vbufs, fsName, fbufs, slots, ctx->GetBufferManager(), keep);
 			sm->SetDirtyGraphicsPipelines(true);
 			ctx->GetBatchBuilder()->SetDirtyBatches(true);
@@ -423,8 +401,8 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 	cmd::Register<CommandId::DeleteVertexShader>(im,
 		[](EngineContext* ctx, const ShaderDataNameCmd& c)
 		{
-			// Используемый SD менеджер удалить откажется (пайплайн собран из его данных, fallback
-			// с чужой раскладкой невозможен); неиспользуемый ничего не рисует — dirty-флаги не нужны.
+			// Dirty-флагов тут нет намеренно: используемый SD менеджер удалить откажется, а
+			// неиспользуемый ничего не рисует.
 			ShaderManager* sm = ctx->GetShaderManager();
 			sm->DeleteVertexShader(sm->VertexShaders().Find(c.name), NameSlot::Release);
 		});
@@ -433,13 +411,13 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 		[](EngineContext* ctx, const ShaderDataNameCmd& c)
 		{
 			ShaderManager* sm = ctx->GetShaderManager();
-			sm->DeleteFragmentShader(sm->FragmentShaders().Find(c.name), NameSlot::Release);   // отказ/чистое удаление — см. DeleteVertexShader
+			sm->DeleteFragmentShader(sm->FragmentShaders().Find(c.name), NameSlot::Release);
 		});
 
 	cmd::Register<CommandId::DeleteComputeShader>(im,
 		[](EngineContext* ctx, const ShaderDataNameCmd& c)
 		{
 			ShaderManager* sm = ctx->GetShaderManager();
-			sm->DeleteComputeShader(sm->ComputeShaders().Find(c.name), NameSlot::Release);   // отказ/чистое удаление — см. DeleteVertexShader
+			sm->DeleteComputeShader(sm->ComputeShaders().Find(c.name), NameSlot::Release);
 		});
 }
