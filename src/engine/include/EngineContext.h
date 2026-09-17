@@ -1,7 +1,5 @@
 #pragma once
 #include "ComponentStorage.h"
-// Только по имени: CreateEntity сравнивает типы через contains_type_v, полные
-// определения нужны вызывающему, а не этому заголовку.
 struct DrawComponent;
 struct ModelComponent;
 #include <SDL3/SDL_gpu.h>
@@ -20,10 +18,8 @@ struct ModelComponent;
 #include "ModelData.h"
 #include "GeometryPool.h"   // StreamDesc в сигнатуре CreateGeometryPool — нужен полный тип
 
-// Менеджеры — ТОЛЬКО forward: контекст держит их указателями, а сигнатуры фасада отдают
-// указатели/принимают имена. Полные заголовки инклюдит тот cpp, который реально зовёт
-// методы менеджера (ctx->GetXxxManager()->...). Так правка одного менеджера не пересобирает
-// всех потребителей фасада (раньше EngineContext.h был хабом на все менеджеры разом).
+// Менеджеры — ТОЛЬКО forward: полный заголовок инклюдит тот cpp, который реально зовёт менеджер.
+// Иначе правка одного менеджера пересобирает всех потребителей фасада.
 class BufferManager;
 class TextureManager;
 class PassManager;
@@ -33,101 +29,66 @@ class ModelManager;
 class CameraManager;
 class PipeManager;
 class GpuTaskContext;
-struct ShaderProgram;          // тяжёлая половина (ShaderData.h) — только у реальных потребителей
+struct ShaderProgram;
 struct ComputeShaderProgram;
 class InputManager;
 class TextureLoader;
 class FontManager;
-struct FontData;               // возвращаем указателем (как TextureHandle*/Material*)
-class UI_Yoga;                 // держим указателем (создаёт Engine, садит сеттером)
+struct FontData;
+class UI_Yoga;
 class Engine;
-struct GraphicsConfig;         // держим указателем (создаёт Engine, садит сеттером)
+struct GraphicsConfig;
 
-// Корень сцен в рабочей папке игры — ПАПКА С ПАПКАМИ. Каждая подпапка — одна сцена, и её ИМЯ
-// есть имя сцены: Save/LoadScene складывают путь как scenes_root + "/" + scene_name, а список
-// сцен в редакторе — просто перечисление этого каталога. Литерал один на всех: разъедься UI и
-// загрузчик по разным корням — кнопка грузила бы не то, что показывает.
+// Литерал один на всех: разъедься UI и загрузчик по разным корням — кнопка грузила бы не то,
+// что показывает.
 inline constexpr const char* kScenesRoot = "saved_scene";
 
 class EngineContext {
 public:
 	EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* rm, BatchBuilder* bb, TextureLoader* tl);
-	~EngineContext();   // delete gpu_ctx (тип неполный в заголовке)
+	~EngineContext();
 
-	// Узкий GPU-фасад: им пользуются ShaderSet'ы и модуль физики. Хранится указателем,
-	// чтобы заголовок не тянул GpuTaskContext.h (deref неполного типа под ссылку легален).
 	GpuTaskContext& Gpu() { return *gpu_ctx; }
 	GpuTaskContext* GetGpuContext() { return gpu_ctx; }
 
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name, ResourceTag tags = ResourceTag::None);
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name, ResourceTag tags = ResourceTag::None);
-	// conv — конвенция исходного файла; импорт нормализует её к канону движка (G = roughness).
-	// По умолчанию AsIs (поведение без изменений). SmoothnessInGreen инвертирует G на загрузке.
 	TextureHandle* CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv = ChannelConvention::AsIs, ResourceTag tags = ResourceTag::None);
-	// Грузит cube-текстуру (4×3 крест) в УЖЕ существующий cube-атлас (создаётся отдельно
-	// через CreateTextureAtlas с tci.type=CUBE — характер атласа задаёт только tci). ctx здесь
-	// дирижёр: проверяет совместимость (что атлас и правда куб + квадратный) и делегирует
-	// нарезку/заливку 6 граней TextureLoader'у. Размер грани диктует tci атласа.
 	TextureHandle* CreateCubeMapTexture(const TextureName& name, const AtlasName& atlas_name, const char* path, ResourceTag tags = ResourceTag::None);
 	TextureAtlas* GetTextureAtlas(const AtlasName& name) const;
 
-	// Слот — СПИСОК имён: { { TextureSlotRole::Albedo, { "wood", "wood_cracked" } }, ... }.
-	// [0] рисуется по умолчанию, остальные — варианты, переключаемые состоянием на сущности.
 	Material* CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::initializer_list<ShaderName> shaders, ResourceTag tags = ResourceTag::None);
 
-	// Тип-безопасная упаковка per-sp факторов (T = раскладка cbuffer MaterialBlock ЭТОЙ sp).
-	// Адресат данных — программа: у материала на каждую sp своя ячейка (см. SpBinding).
-	// Реализация одна на всех — свободный ::SetMaterialParams из ParamsSpec.h (он же
-	// проставляет имя типа из реестра); фасад лишь пробрасывает, не завися от MaterialManager.h.
+	// T обязан совпадать с раскладкой cbuffer MaterialBlock ИМЕННО ЭТОЙ sp.
 	template<class T>
 	void SetMaterialParams(Material* m, const ShaderName& sp_name, const T& p) { ::SetMaterialParams(m, InternShaderProgram(sp_name), sp_name, p); }
 	ShaderProgramId InternShaderProgram(const std::string& name);
 
-	// Какой вариант слот-роли показывает сущность (MaterialRef::states). Правка поля НА МЕСТЕ:
-	// архетип не меняется, дерево батчей не трогается вовсе — в этом вся идея переключаемых
-	// текстур. variant == 0 УБИРАЕТ запись (states разреженные, и сущность уходит из буфера
-	// состояний целиком), поэтому «сбросить в дефолт» и «нет записи» — одно и то же.
-	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА. С UI-потока — командой SetEntityTextureVariant, её обработчик
-	// зовёт этот же метод (одна логика на оба входа).
+	// variant == 0 УБИРАЕТ запись: states разреженные, и «сбросить в дефолт» здесь то же самое,
+	// что «записи нет».
+	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА (с UI — одноимённой командой).
 	void SetEntityTextureVariant(Entity e, uint32_t mat_index, TextureSlotRole role, uint32_t variant);
 
-	// Смена МОДЕЛИ живой сущности. Сеттером, а не записью в компонент, потому что это не одно
-	// поле, а три согласованных изменения: имя, длина MaterialComponent::materials (material_index
-	// сабмеша адресует именно её — лишние записи не адресуются ничем, недостающие не рисуются) и
-	// перевешивание в дереве батчей (другая модель = другой model-батч).
-	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА. С UI-потока — командой SetEntityModel, её хендлер зовёт этот же
-	// метод (одна логика на оба входа).
+	// Записью в компонент не заменяется: вместе с моделью меняются длина
+	// MaterialComponent::materials и место сущности в дереве батчей.
+	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА (с UI — одноимённой командой).
 	void ChangeModel(Entity e, const ModelName& model_name);
 
-	// Смена МАТЕРИАЛА одного сабмеша живой сущности (submesh — индекс в materials, он же
-	// material_index сабмеша модели). Материал определяет sp и атлас, то есть ключи шейдерного и
-	// текстурного батчей, — сущность переезжает в дереве, отсюда QueueUpdate внутри.
-	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА. С UI-потока — командой SetEntityMaterial.
+	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА (с UI — одноимённой командой).
 	void ChangeMaterial(Entity e, const MaterialName& material_name, uint32_t submesh = 0);
 
-	// Кроссменеджерская операция: растеризовать шрифт. Живёт на контексте (менеджеры не владеют
-	// друг другом — см. CLAUDE.md), передаёт TextureManager/BufferManager параметрами в FontManager.
 	FontData* CreateFont(const std::string& name, const char* path, float px, bool sdf = false);
 
-	// Кроссменеджерская операция: развернуть раскладку вершин в рабочий пул. Живёт на контексте,
-	// потому что трогает и ModelManager (реестр пулов, стейджинг), и BufferManager (буферы стримов
-	// + инструкции заливки) — второй уходит ПАРАМЕТРОМ, см. CLAUDE.md. Зовётся на инициализации,
-	// ДО создания вершинных шейдеров: те объявляют usage, по которому буферы и бейкаются.
+	// Звать ДО создания вершинных шейдеров: они объявляют usage, по которому бейкаются буферы пула.
 	GeometryPool* CreateGeometryPool(const std::string& name, uint32_t vertex_size,
 		const std::vector<GeometryPool::StreamDesc>& streams);
 
-	// pool_name пусто = дефолтный пул (первый созданный) — старые сцены и код не мигрируются.
 	ModelData* CreateModel(const ModelName& name, const char* model_path, const char* index_path,
 		AnchorShift anchor = AnchorShift::Keep, const std::string& pool_name = {});
-	// Форма со СТЁРТЫМ типом: вершины — байты в раскладке пула. Прямо её зовут редко, обычно берут
-	// типизированную обёртку ниже.
 	ModelData* CreateModel(const ModelName& name, ModelGeneratorFn generator, AnchorShift anchor = AnchorShift::Keep,
 		ResourceTag tags = ResourceTag::None, const std::string& pool_name = {});
 
-	// Типизированная форма: V — структура вершины, которую заполняет генератор. Задаётся ЯВНО, как
-	// T у ShaderManager::CreatePushInstruction<T>, и стирание типа делает обёртка — генератор просто
-	// заполняет свой вектор и про байты не знает. Раскладку по-прежнему определяет ПУЛ; V обязан ей
-	// соответствовать (грубое несовпадение ловит проверка кратности в ModelManager).
+	// V обязан соответствовать раскладке пула: грубое несовпадение ловит проверка кратности.
 	template<typename V, typename Fn>
 	ModelData* CreateModel(const ModelName& name, Fn&& generator, AnchorShift anchor = AnchorShift::Keep,
 		ResourceTag tags = ResourceTag::None, const std::string& pool_name = {})
@@ -145,8 +106,7 @@ public:
 
 	template<typename... Components>
 	Entity CreateEntity(const std::string& scene_name, Components&&... comps) {
-		// Рисуемость теперь определяет DrawComponent (см. BatchBuilder). Positions НЕ требуется:
-		// transformless-дровабл (скайбокс) батчится с PIB=-1, позицию строит его VS.
+		// Positions НЕ требуется: transformless-дровабл батчится с PIB=-1, позицию строит его VS.
 		constexpr bool needs_pib = contains_type_v<DrawComponent, Components...>
 			&& contains_type_v<ModelComponent, Components...>;
 
@@ -156,44 +116,29 @@ public:
 			SceneData* active_scene = object_manager->GetActiveScene();
 			SceneData* target_scene = object_manager->GetScene(scene_name);
 			if (target_scene != nullptr && active_scene == target_scene) {
-				batch_builder->QueueCreate(entity);   // incremental add on next prepare
+				batch_builder->QueueCreate(entity);
 			}
 		}
 
 		return entity;
 	}
 	void DeleteEntity(const SceneName& scene_name, Entity e);
-	// Toggles render visibility of a single entity WITHOUT touching ECS: writes
-	// DrawComponent::visible (source of truth for full rebuilds) and queues an
-	// incremental batch add/remove (QueueCreate/QueueDelete). The transform row stays,
-	// neighbours' indices don't shift — it's the "remove from batches" half of
-	// DeleteEntity without the entity teardown. Used for debug colliders (child entities).
+	// Строка трансформа остаётся на месте, индексы соседей не сдвигаются.
 	void HideEntity(const SceneName& scene_name, Entity e, bool visible);
-	// Activating a scene swaps the whole entity set; force a full batch rebuild.
 	void SetActiveScene(const SceneName& name);
 
-	// Сохранение/загрузка СЦЕНЫ-ПАПКИ: scene.json (ECS) + файлы ресурсов рядом (по менеджерам,
-	// подключаются поэтапно). scenes_root — КОРЕНЬ (см. kScenesRoot), сама папка сцены —
-	// scenes_root/scene_name. Тонкий прокси в Engine::Save/LoadScene — оркестрация по
-	// менеджерам (tm/mm/sm + om) живёт там; ctx лишь публичная точка входа.
 	void SaveScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
 	void LoadScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
 	void ExecuteGenerators();
-	// Сносит ВСЁ содержимое сцены (сущности/иерархию; генераторы переживают) и помечает
-	// батчи на полную пересборку. LoadScene вызывает его первым (replace-on-load).
+	// Генераторы сцены снос переживают.
 	void ClearScene(const SceneName& scene_name);
 
-	// Генераторы — функции, восстанавливающие ПРОИЗВОДНЫЕ сущности сцены из её авторских
-	// данных (помечают их GeneratedComponent → не сериализуются). Хранятся в самой сцене
-	// (SceneData::generators) и вешаются на УЖЕ созданную сцену: CreateScene → здесь
-	// RegisterGenerator → потом Load наполняет и сам запускает их.
+	// Вешается на УЖЕ созданную сцену: CreateScene → RegisterGenerator → Load наполняет и
+	// запускает генераторы сам.
 	void RegisterGenerator(const SceneName& scene_name, std::function<void()> generator);
 
-	// Create*Shader регистрируют шейдер-данные по имени в ShaderManager; CreateShaderProgram
-	// ссылается на них по имени (vs_name/fs_name/cs_name).
 	void CreateFragmentShader(const std::string& name, const char* hlsl_path, ResourceTag tags = ResourceTag::None, const ShaderDefines& defines = {});
-	// Вершинник называет ПУЛ (по имени, как модели) и потребляемые СЕМАНТИКИ; набор и порядок
-	// слотов выводит сам пул. Пустое имя пула = дефолтный.
+	// Набор и порядок слотов выводит сам пул, перечисление семантик на них не влияет.
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,
 		std::initializer_list<ShaderBase::VertexSemantic> pull, ResourceTag tags = ResourceTag::None, const ShaderDefines& defines = {});
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
@@ -206,7 +151,7 @@ public:
 		const std::string& cs_name,
 		std::initializer_list<BufferDataName> rw_storage_buffers,
 		std::initializer_list<BufferDataName> ro_storage_buffers,
-		std::initializer_list<ComputeRWTextureBindingParametr> rw_storage_textures,   // топ-левел тип (ShaderTypes.h)
+		std::initializer_list<ComputeRWTextureBindingParametr> rw_storage_textures,
 		std::initializer_list<AtlasName> ro_storage_textures,
 		std::initializer_list<AtlasName> texture_samplers,
 		const ComputePassName& associated_compute_pass, ResourceTag tags = ResourceTag::None);
@@ -227,22 +172,15 @@ public:
 	void SetInputManager(InputManager* im) { input_manager = im; }
 	InputManager* GetInputManager() const { return input_manager; }
 
-	// FontManager создаётся Engine и садится сюда сеттером (как InputManager) — контекст его
-	// не создаёт, только держит для кроссменеджерского CreateFont.
 	void SetFontManager(FontManager* fm) { font_manager = fm; }
 	FontManager* GetFontManager() const { return font_manager; }
 
-	// UI_Yoga создаётся Engine и садится сюда сеттером (как FontManager). Игра берёт его отсюда,
-	// чтобы декларативно строить UI-дерево; сам Yoga наружу не течёт (см. UI_Yoga.h).
 	void SetUIYoga(UI_Yoga* y) { ui_yoga = y; }
 	UI_Yoga* GetUIYoga() const { return ui_yoga; }
 
-	// Бэк-поинтер на Engine — только для делегирования Save/LoadScene (оркестрация по менеджерам).
 	void SetEngine(Engine* e) { engine = e; }
 
-	// Настройки графики — отдельным указателем, а НЕ через Engine*: контекст раздаёт состояние, и
-	// бэк-поинтер на движок не должен становиться общим чёрным ходом ко всему подряд.
-	// Живой указатель (см. GraphicsConfig): потребители читают поля в момент использования.
+	// Живой указатель: потребители читают поля в момент использования.
 	void SetGraphicsConfig(GraphicsConfig* c) { graphics_config = c; }
 	GraphicsConfig* GetGraphicsConfig() const { return graphics_config; }
 
@@ -261,10 +199,10 @@ private:
 
 	InputManager* input_manager = nullptr;
 	TextureLoader* texture_loader = nullptr;
-	FontManager* font_manager = nullptr;   // см. SetFontManager (создаёт Engine)
-	UI_Yoga* ui_yoga = nullptr;   // см. SetUIYoga (создаёт Engine)
-	Engine* engine = nullptr;   // см. SetEngine
-	GraphicsConfig* graphics_config = nullptr;   // см. SetGraphicsConfig (владеет Engine)
+	FontManager* font_manager = nullptr;
+	UI_Yoga* ui_yoga = nullptr;
+	Engine* engine = nullptr;
+	GraphicsConfig* graphics_config = nullptr;
 
 	GpuTaskContext* gpu_ctx = nullptr;   // указателем: заголовок не тянет GpuTaskContext.h
 };

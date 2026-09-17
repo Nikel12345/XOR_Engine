@@ -5,7 +5,6 @@
 #include "TextureLoader.h"
 #include "PassManager.h"
 #include "EngineProfiler.h"
-// Заголовок фасада держит менеджеры forward-декларациями — полные типы тянет этот TU.
 #include "GpuTaskContext.h"
 #include "TextureManager.h"
 #include "MaterialManager.h"
@@ -14,11 +13,11 @@
 #include "PipeManager.h"
 #include "FontManager.h"
 
-using namespace ShaderBase;   // VertexBufferBinding в сигнатурах Create*Shader
+using namespace ShaderBase;
 
 EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager* rm, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pm, BatchBuilder* bb, TextureLoader* tl)
 {
-	gpu_ctx = new GpuTaskContext(bm, sm, rm, tm);   // GPU-фасад над Buffer/Shader/Pass/Texture
+	gpu_ctx = new GpuTaskContext(bm, sm, rm, tm);
 	this->buffer_manager = bm;
 	this->texture_manager = tm;
 	this->pass_manager = rm;
@@ -61,7 +60,6 @@ TextureAtlas* EngineContext::CreateTextureAtlas(const AtlasName& name, const Atl
 	return texture_manager->CreateTextureAtlas(name, existing_atlas, sampler, tags);
 }
 
-// В какой CPU-пиксельформат декодить, чтобы байты совпали с форматом GPU-атласа.
 static SDL_PixelFormat PixelFormatForGpuFormat(SDL_GPUTextureFormat fmt)
 {
 	switch (fmt) {
@@ -79,7 +77,7 @@ static SDL_PixelFormat PixelFormatForGpuFormat(SDL_GPUTextureFormat fmt)
 
 TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, const AtlasName& atlas_name, const char* path, ChannelConvention conv, ResourceTag tags) {
 	TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
-	if (!atlas) return nullptr;   // GetTextureAtlas уже залогировал отсутствие
+	if (!atlas) return nullptr;
 
 	DecodedImage img = texture_loader->LoadFromFile(path, PixelFormatForGpuFormat(atlas->format));
 	if (!img.ok()) {
@@ -87,12 +85,8 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 		return nullptr;
 	}
 
-	// Рамка атласа стоит P=atlas->padding пикселей с КАЖДОЙ стороны (эта же P — единственная величина
-	// и в _PlaceTask). Чтобы паддинговый след степени двойки (контент−2P + 2P) остался ровно этой
-	// степенью двойки и тайлился впритык — ужимаем такую сторону на 2P (по P с каждой стороны, ОДИН
-	// SDL_ScaleSurface на обе оси). Условие ужатия = условию рамки в _PlaceTask (ось-степень-двойки,
-	// НЕ в размер атласа) → рассинхрона нет. P=0 (немипованный атлас) → блок пропускается, текстуры
-	// как есть. Мелочь ≤ 2P не ужимаем (её след контент+2P и так степень двойки — см. 4px при P=2).
+	// Сторону-степень-двойки ужимаем на 2P, чтобы след «контент + рамка» остался степенью двойки и
+	// тайлился впритык. Условие обязано совпадать с условием рамки в _PlaceTask.
 	const uint32_t P = atlas->padding;
 	if (P > 0) {
 		auto is_pot = [](uint32_t v) { return v && (v & (v - 1)) == 0; };
@@ -119,9 +113,6 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 		}
 	}
 
-	// Нормализация исходной конвенции к канону движка (G = linear roughness; A = height).
-	// Инверсия канала формат-независима (G = индекс 1, A = индекс 3 и в RGBA, и в BGRA).
-	// Делается один раз здесь на CPU, поэтому шейдер/материалы остаются без веток и флагов.
 	if (conv == ChannelConvention::SmoothnessInGreen) {
 		for (size_t i = 1; i < img.pixels.size(); i += 4)
 			img.pixels[i] = std::byte{ static_cast<unsigned char>(255 - std::to_integer<int>(img.pixels[i])) };
@@ -132,18 +123,14 @@ TextureHandle* EngineContext::CreateTextureFromFile(const TextureName& name, con
 	}
 
 	TextureHandle* h = texture_manager->CreateTexture(name, atlas, img.width, img.height, std::move(img.pixels), 1, tags);
-	if (h) { h->atlas_id = texture_manager->AtlasIdOf(atlas_name); h->source_path = path; h->conv = conv; }   // самоописание для редактора/сериализации
+	if (h) { h->atlas_id = texture_manager->AtlasIdOf(atlas_name); h->source_path = path; h->conv = conv; }
 	return h;
 }
 
 TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, const AtlasName& atlas_name, const char* path, ResourceTag tags) {
 	TextureAtlas* atlas = texture_manager->GetTextureAtlas(atlas_name);
-	if (!atlas) return nullptr;   // GetTextureAtlas уже залогировал отсутствие
+	if (!atlas) return nullptr;
 
-	// Компатибилити-проверка — задача дирижёра: куб грузим только в cube-атлас, и он обязан
-	// быть квадратным (требование GPU-кубмапа, иначе faceSize=width≠height даст битые грани).
-	// CUBE_ARRAY годится наравне с CUBE: куб там занимает шестёрку слоёв со своей базой, а какую
-	// именно — решает упаковщик (база кратна 6 = слоту массива), здесь это знать не нужно.
 	if (atlas->texture_type != SDL_GPU_TEXTURETYPE_CUBE
 	 && atlas->texture_type != SDL_GPU_TEXTURETYPE_CUBE_ARRAY) {
 		SDL_Log("EngineContext::CreateCubeMapTexture: atlas '%s' is not a cube map (texture_type=%d)", atlas_name.c_str(), (int)atlas->texture_type);
@@ -158,9 +145,6 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 		return nullptr;
 	}
 
-	// Loader отдаёт ГОЛЫЕ пиксели 6 граней стопкой (размер грани диктует tci атласа) — ровно ту
-	// раскладку, которую ждёт многослойная заливка. Про кубы знает только этот метод: TM получает
-	// «текстура на 6 подряд идущих слоёв», и грань f оказывается на слое base+f по построению.
 	DecodedCubeMap cube = texture_loader->LoadCubeMapFromFile(path, atlas->width, PixelFormatForGpuFormat(atlas->format));
 	if (!cube.ok()) {
 		SDL_Log("EngineContext::CreateCubeMapTexture: failed to decode cube faces from '%s'", path);
@@ -168,14 +152,12 @@ TextureHandle* EngineContext::CreateCubeMapTexture(const TextureName& name, cons
 	}
 
 	TextureHandle* h = texture_manager->CreateTexture(name, atlas, cube.faceSize, cube.faceSize, std::move(cube.pixels), 6, tags);
-	if (h) { h->atlas_id = texture_manager->AtlasIdOf(atlas_name); h->source_path = path; }   // самоописание для редактора/сериализации
+	if (h) { h->atlas_id = texture_manager->AtlasIdOf(atlas_name); h->source_path = path; }
 	return h;
 }
 
 Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<std::pair<TextureSlotRole, std::vector<TextureName>>> textures, std::initializer_list<ShaderName> shaders, ResourceTag tags)
 {
-	// Здесь sp резолвим лишь для авторской валидации: у каждого required_slot шейдера должна быть
-	// текстура в материале. Проверка best-effort (варнинг, не отказ): её могут создать позже.
 	std::vector<std::pair<TextureSlotRole, std::vector<TextureId>>> texture_ids;
 	texture_ids.reserve(textures.size());
 	for (const auto& [role, names] : textures) {
@@ -190,10 +172,8 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 	shader_ids.reserve(shader_names.size());
 	for (const ShaderName& sn : shader_names) shader_ids.push_back(shader_manager->InternShaderProgram(sn));
 
-	// ВСЕ варианты одного слота обязаны лежать в ОДНОМ атласе: на слот биндится один
-	// Texture2DArray, а UVL адресует слой внутри него — вариант из чужого атласа переключить
-	// нечем (он молча сэмплился бы из соседнего). Варнинг, а не отказ: имя могут создать позже,
-	// и тогда проверять тут нечего — она best-effort, как и проверка required_slots ниже.
+	// Все варианты слота обязаны лежать в ОДНОМ атласе: на слот биндится один Texture2DArray,
+	// и вариант из чужого молча сэмплился бы из соседнего.
 	for (const auto& [role, ids] : texture_ids) {
 		const TextureAtlas* first = nullptr;
 		for (TextureId tid : ids) {
@@ -223,7 +203,6 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 	}
 	const std::string material_name = name;   // name уходит по move — копию держим для диагностики
 	Material* m = material_manager->CreateMaterial(std::move(name), std::move(texture_ids), std::move(shader_ids), tags);
-	// Слот материала = фрагментный сэмплер → атласы его текстур получают SAMPLER (сбор usage-флагов).
 	material_manager->CollectSamplerUsage(m, texture_manager, material_name);
 	return m;
 }
@@ -237,8 +216,6 @@ void EngineContext::SetEntityTextureVariant(Entity e, uint32_t mat_index, Textur
 
 	auto& st = mats[mat_index].states;
 	auto it = std::find_if(st.begin(), st.end(), [role](const auto& p) { return p.first == role; });
-	// Ноль — это «как у всех», а не «выбран вариант 0»: запись удаляем, чтобы states остались
-	// разреженными и гейт HasAnyTextureState снова стал ложным.
 	if (variant == 0) { if (it != st.end()) st.erase(it); }
 	else if (it != st.end()) it->second = variant;
 	else st.emplace_back(role, variant);
@@ -251,16 +228,13 @@ void EngineContext::ChangeModel(Entity e, const ModelName& model_name)
 
 	object_manager->GetComponent<ModelComponent>(scene, e).model = model_manager->InternModel(model_name);
 
-	// Длина списка материалов = число сабмешей НОВОЙ модели. Резолв ТИХИЙ: неразрешённое имя
-	// здесь законно (ассет мог ещё не догрузиться) — о нём скажет BatchBuilder на сборке.
 	if (object_manager->Has<MaterialComponent>(scene, e)) {
 		const ModelData* model = model_manager->FindModel(model_name);
 		object_manager->GetComponent<MaterialComponent>(scene, e).materials.resize(
 			model ? model->submeshes.size() : 0);
 	}
 
-	// Сфера сущности считается по МОДЕЛИ, а буфер bound-сфер гейтится этой ревизией, а не
-	// деревом батчей (см. ObjectManager::EntityRevision).
+	// Буфер bound-сфер гейтится ревизией сущностей, а не деревом батчей.
 	object_manager->BumpEntityRevision();
 	batch_builder->QueueUpdate(e);
 }
@@ -273,8 +247,8 @@ void EngineContext::ChangeMaterial(Entity e, const MaterialName& material_name, 
 	if (submesh >= mats.size()) return;
 
 	mats[submesh].material = material_manager->InternMaterial(material_name);
-	// Состояния адресованы РОЛЯМИ прежнего материала — у нового набор ролей свой, и сохранённый
-	// номер варианта означал бы уже другую текстуру. Смена материала = его дефолтный вид.
+	// Состояния адресованы ролями ПРЕЖНЕГО материала: у нового номер варианта означал бы
+	// другую текстуру.
 	mats[submesh].states.clear();
 
 	batch_builder->QueueUpdate(e);
@@ -283,15 +257,12 @@ void EngineContext::ChangeMaterial(Entity e, const MaterialName& material_name, 
 FontData* EngineContext::CreateFont(const std::string& name, const char* path, float px, bool sdf)
 {
 	if (!font_manager) { SDL_Log("EngineContext::CreateFont: font_manager not set"); return nullptr; }
-	// Кроссменеджерская связка: TextureManager уходит ПАРАМЕТРОМ, FM его не хранит (см. CLAUDE.md).
-	// BufferManager тут не нужен — GlyphUVL заливается позже, при проводке (StoreGlyphUVL).
 	return font_manager->CreateFont(texture_manager, name, path, px, sdf);
 }
 
 GeometryPool* EngineContext::CreateGeometryPool(const std::string& name, uint32_t vertex_size,
 	const std::vector<GeometryPool::StreamDesc>& streams)
 {
-	// Кроссменеджерская связка: BufferManager уходит ПАРАМЕТРОМ, MM его не хранит (см. CLAUDE.md).
 	return model_manager->CreateGeometryPool(buffer_manager, name, vertex_size, streams);
 }
 
@@ -310,10 +281,8 @@ void EngineContext::DeleteEntity(const SceneName& scene_name, Entity e)
 	SceneData* target_scene = object_manager->GetScene(scene_name);
 	if (!target_scene) return;
 
-	// Каскад на детей по обратному индексу parent->children. Удаляем через ЭТОТ же
-	// метод (не напрямую ObjectManager), чтобы каждый ребёнок снял и свой рендер-инстанс
-	// (QueueDelete) — иначе его трансформ-строка осталась бы в батче и «переехала» бы на
-	// чужой объект. Список копируем — рекурсия мутирует children. O(1) на потомка.
+	// Детей сносим через ЭТОТ же метод, иначе их рендер-инстансы останутся в батче и их
+	// трансформ-строки переедут на чужие объекты. Список копируем — рекурсия мутирует children.
 	if (auto it = target_scene->children.find(e); it != target_scene->children.end()) {
 		std::vector<Entity> kids = std::move(it->second);
 		target_scene->children.erase(it);
@@ -323,10 +292,8 @@ void EngineContext::DeleteEntity(const SceneName& scene_name, Entity e)
 	const bool needs_pib = object_manager->Has<ModelComponent>(target_scene, e)
 		&& object_manager->Has<Positions>(target_scene, e);
 
-	// Only the active scene feeds the batch tree, so only its deletions need an
-	// incremental batch update.
 	if (needs_pib && target_scene == object_manager->GetActiveScene()) {
-		batch_builder->QueueDelete(e);   // incremental remove on next prepare
+		batch_builder->QueueDelete(e);
 	}
 
 	object_manager->DeleteEntity(target_scene, e);
@@ -337,37 +304,29 @@ void EngineContext::HideEntity(const SceneName& scene_name, Entity e, bool visib
 	SceneData* target_scene = object_manager->GetScene(scene_name);
 	if (!target_scene) return;
 
-	// visible живёт в DrawComponent как источник истины для полной пересборки
-	// (реактивация сцены → BuildRenderBatches перечитает флаг). Сам тоггл — это
-	// «половина DeleteEntity»: только инкрементальное снятие/добавление рендер-инстанса,
-	// без сноса энтити из ECS. Поэтому трансформ-строка остаётся, а render_instance_base
-	// соседей не сдвигается (в отличие от удаления, где swap_remove перетряхивает индексы).
+	// visible живёт в DrawComponent, потому что полная пересборка перечитывает флаг оттуда.
 	if (!object_manager->Has<DrawComponent>(target_scene, e)) return;
 	DrawComponent& draw = object_manager->GetComponent<DrawComponent>(target_scene, e);
-	if (draw.visible == visible) return;   // no-op: не дёргаем очередь и ревизию батчей
+	if (draw.visible == visible) return;
 
 	draw.visible = visible;
 
-	// Батч-дерево кормит только активная сцена; инкремент имеет смысл лишь для рисуемого
-	// энтити с моделью и трансформом (та же тройка-условие, что в DeleteEntity).
 	const bool batched = object_manager->Has<ModelComponent>(target_scene, e)
 		&& object_manager->Has<Positions>(target_scene, e);
 	if (!batched || target_scene != object_manager->GetActiveScene()) return;
 
-	if (visible) batch_builder->QueueCreate(e);   // показать: добавить рендер-инстанс
-	else         batch_builder->QueueDelete(e);   // скрыть: снять рендер-инстанс
+	if (visible) batch_builder->QueueCreate(e);
+	else         batch_builder->QueueDelete(e);
 }
 
 void EngineContext::SetActiveScene(const SceneName& name)
 {
-	object_manager->SetActiveScene(name);   // исключительная: прочие сцены гаснут
+	object_manager->SetActiveScene(name);
 	batch_builder->SetDirtyBatches(true);
 }
 
 void EngineContext::RegisterGenerator(const SceneName& scene_name, std::function<void()> generator)
 {
-	// Сцена должна уже существовать (паттерн «ресурс создан до использования»: CreateScene
-	// раньше). Генератор живёт в самой сцене и переживает clear/перезагрузку.
 	SceneData* scene = object_manager->GetScene(scene_name);
 	if (!scene) { SDL_Log("RegisterGenerator: scene '%s' not found (CreateScene first)", scene_name.c_str()); return; }
 	scene->generators.push_back(std::move(generator));
@@ -376,23 +335,16 @@ void EngineContext::RegisterGenerator(const SceneName& scene_name, std::function
 void EngineContext::ClearScene(const SceneName& scene_name)
 {
 	SceneData* scene = object_manager->GetScene(scene_name);
-	if (!scene) return;   // нечего чистить (ещё не создана)
+	if (!scene) return;
 
-	// Полное удаление контента: архетипы + индексы + иерархия (next_entity_id→0).
-	// Генераторы НЕ трогаем — они навешены однократно и должны пережить перезагрузку
-	// (см. SceneData::clear). Батчи не правим точечно: ставим флаг полной пересборки —
-	// BuildRenderBatches сам сбросит дерево, entity_slots и очереди дельт и отстроит от
-	// (теперь пустой) сцены, так что висячих ссылок на удалённые сущности не останется.
-	// Замок не нужен: рендер-проходы/каллинг читают пер-слотовые СЛЕПКИ, а не ECS.
-	// Единственный живой читатель ECS на рендер-потоке — UI (осознанный компромисс,
-	// см. Engine::RenderFunc).
+	// Точечных правок батчей тут нет намеренно: флаг полной пересборки заодно сбрасывает
+	// entity_slots и очереди дельт, иначе в них остались бы ссылки на снесённые сущности.
 	scene->clear();
 	batch_builder->SetDirtyBatches(true);
 }
 
 void EngineContext::SaveScene(const SceneName& scene_name, const std::string& scenes_root)
 {
-	// Тонкий прокси: оркестрация по менеджерам (om + tm/mm/sm по этапам) — в Engine.
 	if (engine) engine->SaveScene(scene_name, scenes_root);
 	else SDL_Log("SaveScene: engine back-pointer not set");
 }
@@ -406,7 +358,7 @@ void EngineContext::LoadScene(const SceneName& scene_name, const std::string& sc
 void EngineContext::ExecuteGenerators()
 {
 	auto scene = object_manager->GetActiveScene();
-	if (!scene) return;   // генераторы живут В сцене: нет сцены — нечего восстанавливать
+	if (!scene) return;
 	for (auto& g : scene->generators)
 		if (g) g();
 
@@ -434,17 +386,13 @@ void EngineContext::CreateComputePipelines()
 	shader_manager->SetDirtyComputePipelines(false);
 }
 
-// GPU-методы — тонкие форвардеры в gpu_ctx (реализация в GpuTaskContext.cpp).
-// tags ставим тут через реестр (не тащим флаг в gpu_ctx/sm-сигнатуры): Create* создаёт SD в
-// реестре, затем помечаем его. Get*Shader на промахе не логирует (см. ShaderManager) — компиляция
-// могла не пройти, тогда просто некому ставить флаг.
+// tags ставятся здесь, после создания: промах Get*Shader законен — компиляция могла не пройти.
 void EngineContext::CreateFragmentShader(const std::string& name, const char* path, ResourceTag tags, const ShaderDefines& defines) {
 	gpu_ctx->CreateFragmentShader(name, path, defines, tags);
 }
 
 void EngineContext::CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,
 	std::initializer_list<ShaderBase::VertexSemantic> pull, ResourceTag tags, const ShaderDefines& defines) {
-	// Резолв пула — здесь: его реестр в ModelManager, а gpu_ctx о нём не знает (там только GPU-менеджеры).
 	gpu_ctx->CreateVertexShader(name, hlsl_path, model_manager->GetPool(pool_name),
 		std::vector<ShaderBase::VertexSemantic>(pull), defines, tags);
 }
