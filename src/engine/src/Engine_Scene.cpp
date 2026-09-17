@@ -707,15 +707,6 @@ static void LoadMaterials(const std::string& dir, MaterialManager* mtm, TextureM
 	SDL_Log("LoadScene: %zu/%zu materials from manifest", n, entries.size());
 }
 
-static void ClearSceneResources(TextureManager* tm, ModelManager* mm, ShaderManager* sm, MaterialManager* mtm)
-{
-	const size_t mat = mtm->ClearSceneMaterials();
-	const size_t shd = sm->ClearSceneShaders();
-	const size_t mdl = mm->ClearSceneModels();
-	const size_t tex = tm->ClearSceneTextures();
-	SDL_Log("LoadScene: wiped %zu materials, %zu shader records, %zu models, %zu textures", mat, shd, mdl, tex);
-}
-
 void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_root)
 {
 	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
@@ -739,7 +730,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 		}
 	}
 
-	{ PhaseTimer t(wipe_ms); ClearSceneResources(texture_manager, model_manager, shader_manager, material_manager); }
+	{ PhaseTimer t(wipe_ms); engine_context->ClearScene(scene_name); }
 
 	{ PhaseTimer t(tex_ms); LoadTextures (dir, texture_manager, engine_context); }
 	{ PhaseTimer t(mdl_ms); LoadModels   (dir, model_manager); }
@@ -751,8 +742,6 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 		{
 			PhaseTimer t(clear_ms);
 			SceneData* target = object_manager->GetScene(scene_name);
-			if (target) target->clear();
-
 			if (SceneData* prev_active = object_manager->GetActiveScene(); prev_active && prev_active != target)
 				prev_active->clear();
 		}

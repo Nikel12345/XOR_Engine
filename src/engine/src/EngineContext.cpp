@@ -247,8 +247,6 @@ void EngineContext::ChangeMaterial(Entity e, const MaterialName& material_name, 
 	if (submesh >= mats.size()) return;
 
 	mats[submesh].material = material_manager->InternMaterial(material_name);
-	// Состояния адресованы ролями ПРЕЖНЕГО материала: у нового номер варианта означал бы
-	// другую текстуру.
 	mats[submesh].states.clear();
 
 	batch_builder->QueueUpdate(e);
@@ -334,12 +332,13 @@ void EngineContext::RegisterGenerator(const SceneName& scene_name, std::function
 
 void EngineContext::ClearScene(const SceneName& scene_name)
 {
-	SceneData* scene = object_manager->GetScene(scene_name);
-	if (!scene) return;
+	const size_t mat = material_manager->ClearSceneMaterials();
+	const size_t shd = shader_manager->ClearSceneShaders();
+	const size_t mdl = model_manager->ClearSceneModels();
+	const size_t tex = texture_manager->ClearSceneTextures();
+	SDL_Log("ClearScene: wiped %zu materials, %zu shader records, %zu models, %zu textures", mat, shd, mdl, tex);
 
-	// Точечных правок батчей тут нет намеренно: флаг полной пересборки заодно сбрасывает
-	// entity_slots и очереди дельт, иначе в них остались бы ссылки на снесённые сущности.
-	scene->clear();
+	if (SceneData* scene = object_manager->GetScene(scene_name)) scene->clear();
 	batch_builder->SetDirtyBatches(true);
 }
 

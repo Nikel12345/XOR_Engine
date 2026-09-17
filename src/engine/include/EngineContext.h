@@ -39,8 +39,6 @@ class UI_Yoga;
 class Engine;
 struct GraphicsConfig;
 
-// Литерал один на всех: разъедься UI и загрузчик по разным корням — кнопка грузила бы не то,
-// что показывает.
 inline constexpr const char* kScenesRoot = "saved_scene";
 
 class EngineContext {
@@ -66,20 +64,16 @@ public:
 
 	// variant == 0 УБИРАЕТ запись: states разреженные, и «сбросить в дефолт» здесь то же самое,
 	// что «записи нет».
-	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА (с UI — одноимённой командой).
 	void SetEntityTextureVariant(Entity e, uint32_t mat_index, TextureSlotRole role, uint32_t variant);
 
 	// Записью в компонент не заменяется: вместе с моделью меняются длина
 	// MaterialComponent::materials и место сущности в дереве батчей.
-	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА (с UI — одноимённой командой).
 	void ChangeModel(Entity e, const ModelName& model_name);
 
-	// ЗВАТЬ ТОЛЬКО С SIM-ПОТОКА (с UI — одноимённой командой).
 	void ChangeMaterial(Entity e, const MaterialName& material_name, uint32_t submesh = 0);
 
 	FontData* CreateFont(const std::string& name, const char* path, float px, bool sdf = false);
 
-	// Звать ДО создания вершинных шейдеров: они объявляют usage, по которому бейкаются буферы пула.
 	GeometryPool* CreateGeometryPool(const std::string& name, uint32_t vertex_size,
 		const std::vector<GeometryPool::StreamDesc>& streams);
 
@@ -106,7 +100,6 @@ public:
 
 	template<typename... Components>
 	Entity CreateEntity(const std::string& scene_name, Components&&... comps) {
-		// Positions НЕ требуется: transformless-дровабл батчится с PIB=-1, позицию строит его VS.
 		constexpr bool needs_pib = contains_type_v<DrawComponent, Components...>
 			&& contains_type_v<ModelComponent, Components...>;
 
@@ -130,7 +123,8 @@ public:
 	void SaveScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
 	void LoadScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
 	void ExecuteGenerators();
-	// Генераторы сцены снос переживают.
+	// Сущности сносятся у названной сцены, а ресурсы — ВСЕ сценовые разом: их принадлежность
+	// сцене задаёт тег, а не имя. Генераторы снос переживают.
 	void ClearScene(const SceneName& scene_name);
 
 	// Вешается на УЖЕ созданную сцену: CreateScene → RegisterGenerator → Load наполняет и
@@ -138,7 +132,6 @@ public:
 	void RegisterGenerator(const SceneName& scene_name, std::function<void()> generator);
 
 	void CreateFragmentShader(const std::string& name, const char* hlsl_path, ResourceTag tags = ResourceTag::None, const ShaderDefines& defines = {});
-	// Набор и порядок слотов выводит сам пул, перечисление семантик на них не влияет.
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,
 		std::initializer_list<ShaderBase::VertexSemantic> pull, ResourceTag tags = ResourceTag::None, const ShaderDefines& defines = {});
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
@@ -180,7 +173,6 @@ public:
 
 	void SetEngine(Engine* e) { engine = e; }
 
-	// Живой указатель: потребители читают поля в момент использования.
 	void SetGraphicsConfig(GraphicsConfig* c) { graphics_config = c; }
 	GraphicsConfig* GetGraphicsConfig() const { return graphics_config; }
 
@@ -204,5 +196,5 @@ private:
 	Engine* engine = nullptr;
 	GraphicsConfig* graphics_config = nullptr;
 
-	GpuTaskContext* gpu_ctx = nullptr;   // указателем: заголовок не тянет GpuTaskContext.h
+	GpuTaskContext* gpu_ctx = nullptr;
 };
