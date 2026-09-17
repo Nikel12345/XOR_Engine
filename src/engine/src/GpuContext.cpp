@@ -3,13 +3,58 @@
 #include "BufferManager.h"
 #include "ShaderManager.h"
 #include "PassManager.h"
+#include "PipeManager.h"
 #include "TextureManager.h"
 
 using namespace ShaderBase;
 
-GpuContext::GpuContext(BufferManager* bm, ShaderManager* sm, PassManager* pm, TextureManager* tm)
-	: buffer_manager(bm), shader_manager(sm), pass_manager(pm), texture_manager(tm)
+GpuContext::GpuContext(BufferManager* bm, ShaderManager* sm, PassManager* pass, PipeManager* pipe, TextureManager* tm)
+	: buffer_manager(bm), shader_manager(sm), pass_manager(pass), pipe_manager(pipe), texture_manager(tm)
 {
+}
+
+TextureAtlas* GpuContext::GetTextureAtlas(const AtlasName& name) const
+{
+	return texture_manager->GetTextureAtlas(name);
+}
+
+TextureAtlas* GpuContext::CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name, ResourceTag tags)
+{
+	auto sampler = texture_manager->GetSampler(sampler_name);
+	return texture_manager->CreateTextureAtlas(name, tci, sampler, tags);
+}
+
+TextureAtlas* GpuContext::CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name, ResourceTag tags)
+{
+	auto sampler = texture_manager->GetSampler(sampler_name);
+	TextureAtlas* existing_atlas = texture_manager->GetTextureAtlas(existing_atlas_name);
+	return texture_manager->CreateTextureAtlas(name, existing_atlas, sampler, tags);
+}
+
+ShaderProgramId GpuContext::InternShaderProgram(const std::string& name)
+{
+	return shader_manager->InternShaderProgram(name);
+}
+
+void GpuContext::CreateGraphicsPipelines()
+{
+	if (!shader_manager->IsDirtyGraphicsPipelines()) {
+		return;
+	}
+
+	auto& shader_programs = shader_manager->ShaderPrograms();
+	pipe_manager->CreateGraphicsPiplenes(shader_programs, shader_manager, pass_manager);
+	shader_manager->SetDirtyGraphicsPipelines(false);
+}
+
+void GpuContext::CreateComputePipelines()
+{
+	if (!shader_manager->IsDirtyComputePipelines()) {
+		return;
+	}
+	auto& compute_shader_programs = shader_manager->ComputePrograms();
+	pipe_manager->CreateComputePipelines(compute_shader_programs, shader_manager);
+	shader_manager->SetDirtyComputePipelines(false);
 }
 
 void GpuContext::CreateFragmentShader(const std::string& name, const char* path, const ShaderDefines& defines, ResourceTag tags) {

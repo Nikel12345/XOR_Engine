@@ -8,17 +8,28 @@
 
 class ShaderManager;
 class PassManager;
+class PipeManager;
 class TextureManager;
 class BufferManager;
 class GeometryPool;
+struct TextureAtlas;
 
-
-// Ничего не резолвится: и ресурсы, и проходы sp/csp хранит ИМЕНАМИ, в указатели их переводит
-// сборка батча, существование здесь не проверяется. Чужой менеджер уходит ПАРАМЕТРОМ в листовой
-// вызов — так ShaderManager расставляет usage-флаги в обёртках BufferManager, не храня его.
 class GpuContext {
 public:
-	GpuContext(BufferManager* bm, ShaderManager* sm, PassManager* pm, TextureManager* tm);
+	GpuContext(BufferManager* bm, ShaderManager* sm, PassManager* pass, PipeManager* pipe, TextureManager* tm);
+
+	// Атлас — обёртка над одной GPU-текстурой; сэмплер называется по имени, потому что реестр
+	// сэмплеров тоже здесь. Наполнение атласа пикселями из файла — уже не GPU (декод в
+	// EngineContext::CreateTextureFromFile, там живёт загрузчик).
+	TextureAtlas* CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name, ResourceTag tags = ResourceTag::None);
+	TextureAtlas* CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name, ResourceTag tags = ResourceTag::None);
+	TextureAtlas* GetTextureAtlas(const AtlasName& name) const;
+
+	// Пересоздают только то, что помечено грязным; вызывать каждый кадр дёшево.
+	void CreateGraphicsPipelines();
+	void CreateComputePipelines();
+
+	ShaderProgramId InternShaderProgram(const std::string& name);
 
 	void CreateFragmentShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines = {}, ResourceTag tags = ResourceTag::None);
 	// Вершинник называет ПУЛ и потребляемые СЕМАНТИКИ; порядок слотов задаёт таблица стримов пула.
@@ -53,5 +64,6 @@ private:
 	BufferManager* buffer_manager = nullptr;
 	ShaderManager* shader_manager = nullptr;
 	PassManager* pass_manager = nullptr;
+	PipeManager* pipe_manager = nullptr;
 	TextureManager* texture_manager = nullptr;
 };

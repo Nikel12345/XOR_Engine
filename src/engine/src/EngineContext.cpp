@@ -17,7 +17,7 @@ using namespace ShaderBase;
 
 EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pass, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pipe, BatchBuilder* bb, TextureLoader* tl)
 {
-	gpu_ctx = new GpuContext(bm, sm, pass, tm);
+	gpu_ctx = new GpuContext(bm, sm, pass, pipe, tm);
 	this->buffer_manager = bm;
 	this->texture_manager = tm;
 	this->pass_manager = pass;
@@ -26,7 +26,6 @@ EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager*
 	this->shader_manager = sm;
 	this->model_manager = md;
 	this->camera_manager = cm;
-	this->pipe_manager = pipe;
 
 	this->batch_builder = bb;
 	this->texture_loader = tl;
@@ -39,25 +38,22 @@ EngineContext::~EngineContext()
 
 ShaderProgramId EngineContext::InternShaderProgram(const std::string& name)
 {
-	return shader_manager->InternShaderProgram(name);
+	return gpu_ctx->InternShaderProgram(name);
 }
 
 TextureAtlas* EngineContext::GetTextureAtlas(const AtlasName& name) const
 {
-	return texture_manager->GetTextureAtlas(name);
+	return gpu_ctx->GetTextureAtlas(name);
 }
 
 TextureAtlas* EngineContext::CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name, ResourceTag tags)
 {
-	auto sampler = texture_manager->GetSampler(sampler_name);
-	return texture_manager->CreateTextureAtlas(name, tci, sampler, tags);
+	return gpu_ctx->CreateTextureAtlas(name, tci, sampler_name, tags);
 }
 
 TextureAtlas* EngineContext::CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name, ResourceTag tags)
 {
-	auto sampler = texture_manager->GetSampler(sampler_name);
-	TextureAtlas* existing_atlas = texture_manager->GetTextureAtlas(existing_atlas_name);
-	return texture_manager->CreateTextureAtlas(name, existing_atlas, sampler, tags);
+	return gpu_ctx->CreateTextureAtlas(name, existing_atlas_name, sampler_name, tags);
 }
 
 static SDL_PixelFormat PixelFormatForGpuFormat(SDL_GPUTextureFormat fmt)
@@ -364,26 +360,8 @@ void EngineContext::ExecuteGenerators()
 	batch_builder->SetDirtyBatches(true);
 }
 
-void EngineContext::CreateGraphicsPipelines()
-{
-	if (!shader_manager->IsDirtyGraphicsPipelines()) {
-		return;
-	}
-	
-	auto& shader_programs = shader_manager->ShaderPrograms();
-	pipe_manager->CreateGraphicsPiplenes(shader_programs, shader_manager, pass_manager);
-	shader_manager->SetDirtyGraphicsPipelines(false);
-}
-
-void EngineContext::CreateComputePipelines()
-{
-	if (!shader_manager->IsDirtyComputePipelines()) {
-		return;
-	}
-	auto& compute_shader_programs = shader_manager->ComputePrograms();
-	pipe_manager->CreateComputePipelines(compute_shader_programs, shader_manager);
-	shader_manager->SetDirtyComputePipelines(false);
-}
+void EngineContext::CreateGraphicsPipelines() { gpu_ctx->CreateGraphicsPipelines(); }
+void EngineContext::CreateComputePipelines()  { gpu_ctx->CreateComputePipelines(); }
 
 // tags ставятся здесь, после создания: промах Get*Shader законен — компиляция могла не пройти.
 void EngineContext::CreateFragmentShader(const std::string& name, const char* path, ResourceTag tags, const ShaderDefines& defines) {

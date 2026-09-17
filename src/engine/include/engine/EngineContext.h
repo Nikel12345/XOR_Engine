@@ -156,7 +156,6 @@ public:
 	ObjectManager* GetObjectManager() const { return object_manager; }
 	CameraManager* GetCameraManager() const { return camera_manager; }
 	MaterialManager* GetMaterialManager() const { return material_manager; }
-	PipeManager* GetPipeManager() const { return pipe_manager; }
 
 	BatchBuilder* GetBatchBuilder() const { return batch_builder; }
 	TextureLoader* GetTextureLoader() const { return texture_loader; }
@@ -184,7 +183,6 @@ private:
 	ShaderManager* shader_manager = nullptr;
 	ModelManager* model_manager = nullptr;
 	CameraManager* camera_manager = nullptr;
-	PipeManager* pipe_manager = nullptr;
 
 	BatchBuilder* batch_builder = nullptr;
 
