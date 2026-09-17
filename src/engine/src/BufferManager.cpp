@@ -2,7 +2,6 @@
 #include "BufferManager.h"
 #include "CameraStruct.h"
 #include "LightStruct.h"
-#include "PositionStructure.h"
 
 BufferManager::BufferManager(SDL_GPUDevice* device, TransferManager* transfer_manager) : dev(device), trm(transfer_manager) {
     using namespace DefaultBuffersNames;

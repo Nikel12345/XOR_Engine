@@ -5,11 +5,10 @@
 #include <memory>
 #include <SDL3/SDL_gpu.h>
 #include "Aliases.h"
-#include "MaterialData.h"
+#include "ShaderTypes.h"
 #include "TextureData.h"
 #include "ModelData.h"
 
-struct SubMeshData;
 struct BufferData;
 struct TextureData;
 struct TextureAtlas;

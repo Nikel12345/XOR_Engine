@@ -1,7 +1,7 @@
 ﻿#include "PCH.h"
 #include "ShaderManager.h"
 #include "BufferManager.h"
-#include "PositionStructure.h"
+#include "GeometryPool.h"
 #include <string_view>
 
 using namespace ShaderBase;
