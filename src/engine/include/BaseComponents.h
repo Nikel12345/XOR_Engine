@@ -1,7 +1,8 @@
 #pragma once
-// Компоненты движка — только данные; машинерия хранилища в ComponentStorage.h (там же описан
-// путь SoA-прокси, по которому собраны Positions/Velocities/...). Игровые компоненты объявляются
-// в файлах игры и регистрируются там же (ComponentSpecRegistry::Register) — движок не правится.
+// Компоненты движка — только данные. Половина из них ходит парой «SoA-хранилище + прокси»
+// (Positions и PositionProxy16, Velocities и VelocityProxy, ...): колонками лежит хранилище, а
+// прокси — это одна строка полями, и только им компонент отдают в CreateEntity. Весь путь такой
+// пары расписан в ComponentStorage.h.
 #include "ComponentStorage.h"
 #include "ResourceId.h"
 #include <cmath>
@@ -47,10 +48,6 @@ struct VelocityProxy {
     }
 };
 
-// Мировая матрица 4x4, разложенная на 16 колонок. Буквы идут ПО СТРОКАМ (x,y,z,w — первая
-// строка матрицы), а GPU читает column-major, поэтому трансляция лежит в w,d,h — не в i,j,k,
-// а x,y,z — это m00,m01,m02, а не позиция. Перекладку колонок в матрицу делает
-// TransformDataModule::LoadPositionMatrix, она же — определение этого соответствия.
 struct Positions : SoAProxyAddable<Positions> {
     using soa_tag = void;
 
@@ -102,23 +99,18 @@ struct ParentProxy {
     }
 };
 
+// Иерархия: родитель сущности лежит здесь, а её матрица ОТНОСИТЕЛЬНО него — в LocalMatrices,
+// разложенных column-major как есть (m12..m14 — трансляция). Каждый кадр
+// TransformDataModule::UpdateLocalTransforms пишет Positions = матрица_родителя x эта.
+// У Positions раскладка ДРУГАЯ: буквы идут по строкам, поэтому трансляция там в w, d, h.
 struct ParentComponent {
     Entity parent;
 };
 
-// Не показывать в списке объектов редактора. Вешают и верхние либы (Physics/игра) — движок
-// фильтрует по своему тегу, про их типы не зная.
 struct EditorHiddenComponent {};
 
-// Сущность выведена кодом из авторских данных, поэтому SaveScene её ПРОПУСКАЕТ: на загрузке
-// её заново делает генератор (EngineContext::RegisterGenerator/RunGenerators). С фильтром UI
-// (EditorHiddenComponent) не связан — смысл ровно один, «не в файл, пересоздаётся».
 struct GeneratedComponent {};
 
-// Матрица относительно родителя, 16 колонок — но, в отличие от Positions, разложенных
-// column-major как есть (m0..m3 = столбец 0, m12..m14 = трансляция). Каждый кадр
-// TransformDataModule::UpdateLocalTransforms пишет Positions = матрица_родителя x эта:
-// полная иерархия с поворотом и масштабом, в отличие от LocalOffsets.
 struct LocalMatrices : SoAProxyAddable<LocalMatrices> {
     using soa_tag = void;
     std::vector<float> m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15;
@@ -156,42 +148,22 @@ struct LocalOffsetProxy {
     }
 };
 
-// Ссылка на ассет — только имя: резолв в ModelData* делает потребитель, получив ModelManager
-// параметром. ECS про менеджеры ресурсов не знает, и фиксапа после загрузки сцены нет — в файле
-// и в рантайме лежит одно и то же.
 struct ModelComponent {
     ModelId model;
 };
 
-// Тот же enum, что в ShaderTypes.h, но объявленный без определения намеренно: scoped enum и так
-// полный тип (подлежащий int), а ShaderTypes.h привёл бы за собой glm и SDL_gpu, которых у
-// EngineEcs нет в PUBLIC (эту цель линкует физика). ECS хранит номер роли непрозрачно —
-// сравнивает и сохраняет, а разворачивает его в слот потребитель.
 enum class TextureSlotRole;
 
-// Ссылка сущности на материал + ЕЁ СОБСТВЕННОЕ состояние вариантов: материал у объектов общий,
-// а выбор варианта per-object (два куба с одним материалом показывают разное и остаются в одном
-// инстанс-батче). states РАЗРЕЖЕННЫЕ и по РОЛИ, а не по номеру слота: номер зависит от набора
-// вариативных ролей материала и едет при его правке, роль — нет. Пусто = всюду дефолт.
 struct MaterialRef {
     MaterialId                                        material;
-    std::vector<std::pair<TextureSlotRole, uint32_t>> states;   // роль -> номер варианта
+    std::vector<std::pair<TextureSlotRole, uint32_t>> states;
 };
 
-// Порядок расположения материалов должен соответствовать порядку сабмешей в модели, поскольку индекс материала в сабмеше используется для доступа к материалу
-// Order of materials must correspond to the order of submeshes in the model, as the material index in the submesh is used to access the material
 struct MaterialComponent {
     std::vector<MaterialRef> materials;
 };
 
-// «Эта сущность переключает варианты текстур» — фильтр, данных нет (они в MaterialRef::states).
-// Тегом вопрос становится фактом об АРХЕТИПЕ, а место сущности в префиксном буфере состояний
-// зависит только от наличия тега и числа её материалов — обе величины структурные. Поэтому
-// буфер гейтится обычной ревизией батчей, а не счётчиком правок states (TextureStateDataModule).
-// Ставится при СОЗДАНИИ и не снимается на возврате к дефолту: миграции архетипов в ECS нет, а
-// переключение варианта не должно быть структурной правкой. «Тег есть, всё дефолтное» — законно.
 struct TextureStateComponent {};
-
 
 enum class LightTypes {
     SPOT,
@@ -285,20 +257,14 @@ struct SphereLightComponent {
 
 struct DirectLightComponent {
     struct DirectLightData {
-        // Направление лучей (нормализуется при заливке). Позиции у directional нет.
         float dir_x = 0, dir_y = -1, dir_z = 0;
         float r = 1, g = 1, b = 1;
         float power = 1;
 
-        // Статичные ВЛОЖЕННЫЕ ortho-боксы каскадов — камера теней НЕ едет за игроком: center —
-        // общий центр всех каскадов, half_extent — поперёк dir у каскада 0 (самого мелкого и
-        // резкого), half_depth — вдоль dir, каждый следующий каскад в cascade_ratio раз больше.
         float center_x = 0, center_y = 0, center_z = 0;
         float half_extent = 20.0f;
         float half_depth = 20.0f;
 
-        // Каскад = отдельная ortho-камера. Потолок есть потому, что все каскады всех светов
-        // делят одну 8-слойную теневую карту.
         static constexpr int MAX_CASCADES = 4;
         int   cascade_count = 3;
         float cascade_ratio = 3.0f;
@@ -309,15 +275,12 @@ struct DirectLightComponent {
             return e;
         }
 
-        // Глубина растёт тем же ratio, что и латераль: иначе дальний каскад шире, но по глубине
-        // остаётся размером с нулевой, и пол уходит из-под теней.
         float CascadeDepth(int c) const {
             float e = half_depth;
             for (int k = 0; k < c; ++k) e *= cascade_ratio;
             return e;
         }
 
-        // far каскада: им нормируется глубина в ЕГО слое теневой карты, у каждого свой.
         float CascadeFar(int c) const { return 2.0f * CascadeDepth(c); }
 
         DirectLightData(
@@ -343,27 +306,16 @@ struct ShadowCasterComponent{};
 
 struct ShadowComponent {};
 
-// «Сущность участвует в отрисовке»: пара Draw+Positions — то, по чему её отбирают сборщик
-// батчей и дата-модули (модель и материалы тянутся уже через GetComponent).
-//
-// visible менять ТОЛЬКО через EngineContext::HideEntity — тот пишет флаг И ставит дельту в
-// батч-дерево; прямая запись поля батчи не перестроит. Скрытие не трогает ECS, поэтому
-// трансформ-строка остаётся на месте и индексы соседей не едут (в отличие от DeleteEntity).
 struct DrawComponent {
 	bool     visible = true;
-	float    alpha   = 1.0f;   // per-instance прозрачность (× текстура × материал)
-	uint32_t flags   = 0;      // задел под per-instance биты (tint/dissolve/gpu-visible/...)
+	float    alpha   = 1.0f;
+	uint32_t flags   = 0;
 };
 
-// «Элемент игрового интерфейса»: по нему UI-проход и UI_DataModule отбирают энтити ОТДЕЛЬНО от
-// мировой геометрии. В ComponentSerializer не регистрируется — заготовка, из файла не приходит.
 struct UIComponent {};
 
-// Текст UI-элемента — ПОСЛЕДОВАТЕЛЬНОСТЬ кодов глифов. Пути «строка = готовая текстура» нет
-// вообще: коды разворачивает в UVL глифов шейдер, а строку в коды переводит слой выше
-// (шрифт+раскладка). font пока не участвует в отборе — шрифт определяется батчем.
 struct UITextComponent {
-	std::vector<uint32_t> glyphs;   // коды глифов (в TextBuffer лягут подряд, count на элемент)
+	std::vector<uint32_t> glyphs;
 	uint32_t              font = 0;
 };
 
