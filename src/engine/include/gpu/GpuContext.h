@@ -18,22 +18,21 @@ class GpuContext {
 public:
 	GpuContext(BufferManager* bm, ShaderManager* sm, PassManager* pass, PipeManager* pipe, TextureManager* tm);
 
-	// Атлас — обёртка над одной GPU-текстурой; сэмплер называется по имени, потому что реестр
-	// сэмплеров тоже здесь. Наполнение атласа пикселями из файла — уже не GPU (декод в
-	// EngineContext::CreateTextureFromFile, там живёт загрузчик).
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name, ResourceTag tags = ResourceTag::None);
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, const AtlasName& existing_atlas_name, const std::string& sampler_name, ResourceTag tags = ResourceTag::None);
 	TextureAtlas* GetTextureAtlas(const AtlasName& name) const;
 
-	// Пересоздают только то, что помечено грязным; вызывать каждый кадр дёшево.
 	void CreateGraphicsPipelines();
 	void CreateComputePipelines();
 
 	ShaderProgramId InternShaderProgram(const std::string& name);
 
+	// Отдаются наружу потому, что их некому больше держать: выше живёт EngineContext, и своей
+	// копии этих указателей у него нет. Операции над буферами и проходами — здесь же, не через них.
+	BufferManager* GetBufferManager() const { return buffer_manager; }
+	PassManager*   GetPassManager()   const { return pass_manager; }
+
 	void CreateFragmentShader(const std::string& name, const char* hlsl_path, const ShaderDefines& defines = {}, ResourceTag tags = ResourceTag::None);
-	// Вершинник называет ПУЛ и потребляемые СЕМАНТИКИ; порядок слотов задаёт таблица стримов пула.
-	// Пул приходит уже отрезолвленным: его реестр живёт в ModelManager, которого тут нет.
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const GeometryPool* pool,
 		const std::vector<ShaderBase::VertexSemantic>& pull, const ShaderDefines& defines = {}, ResourceTag tags = ResourceTag::None);
 	ShaderProgram* CreateShaderProgram(const std::string& name, const ShaderProgramDescription& spd, const RenderPassName& associated_pass_name,
@@ -51,7 +50,6 @@ public:
 		std::initializer_list<AtlasName> texture_samplers,
 		const ComputePassName& associated_compute_pass, ResourceTag tags = ResourceTag::None);
 
-	// Без usage-флагов: BufferData::usage наполняют декларации до бейка (см. BufferData.h).
 	BufferData* CreateBufferData(BufferDataName name, Uint32 size, BufferDataType type, ResizeBehaviour resize_behaviour);
 	BufferData* GetBufferData(BufferDataName name);
 

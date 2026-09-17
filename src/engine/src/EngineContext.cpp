@@ -18,9 +18,7 @@ using namespace ShaderBase;
 EngineContext::EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pass, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pipe, BatchBuilder* bb, TextureLoader* tl)
 {
 	gpu_ctx = new GpuContext(bm, sm, pass, pipe, tm);
-	this->buffer_manager = bm;
 	this->texture_manager = tm;
-	this->pass_manager = pass;
 	this->material_manager = mm;
 	this->object_manager = om;
 	this->shader_manager = sm;
@@ -257,7 +255,7 @@ FontData* EngineContext::CreateFont(const std::string& name, const char* path, f
 GeometryPool* EngineContext::CreateGeometryPool(const std::string& name, uint32_t vertex_size,
 	const std::vector<GeometryPool::StreamDesc>& streams)
 {
-	return model_manager->CreateGeometryPool(buffer_manager, name, vertex_size, streams);
+	return model_manager->CreateGeometryPool(gpu_ctx->GetBufferManager(), name, vertex_size, streams);
 }
 
 ModelData* EngineContext::CreateModel(const ModelName& name, const char* model_path, const char* index_path, AnchorShift anchor, const std::string& pool_name)

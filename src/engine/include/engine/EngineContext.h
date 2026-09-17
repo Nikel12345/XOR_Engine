@@ -17,6 +17,7 @@ struct ModelComponent;
 #include "TextureData.h"
 #include "ModelData.h"
 #include "GeometryPool.h"   // StreamDesc в сигнатуре CreateGeometryPool — нужен полный тип
+#include "GpuContext.h"     // геттеры ниже форвардят в него
 
 // Менеджеры — ТОЛЬКО forward: полный заголовок инклюдит тот cpp, который реально зовёт менеджер.
 // Иначе правка одного менеджера пересобирает всех потребителей фасада.
@@ -28,7 +29,6 @@ class ShaderManager;
 class ModelManager;
 class CameraManager;
 class PipeManager;
-class GpuContext;
 struct ShaderProgram;
 struct ComputeShaderProgram;
 class InputManager;
@@ -148,11 +148,11 @@ public:
 		std::initializer_list<AtlasName> texture_samplers,
 		const ComputePassName& associated_compute_pass, ResourceTag tags = ResourceTag::None);
 
-	BufferManager* GetBufferManager() const { return buffer_manager; }
+	BufferManager* GetBufferManager() const { return gpu_ctx->GetBufferManager(); }
 	TextureManager* GetTextureManager() const { return texture_manager; }
 	ShaderManager* GetShaderManager() const { return shader_manager; }
 	ModelManager* GetModelManager() const { return model_manager; }
-	PassManager* GetPassManager() const { return pass_manager; }
+	PassManager* GetPassManager() const { return gpu_ctx->GetPassManager(); }
 	ObjectManager* GetObjectManager() const { return object_manager; }
 	CameraManager* GetCameraManager() const { return camera_manager; }
 	MaterialManager* GetMaterialManager() const { return material_manager; }
@@ -175,9 +175,7 @@ public:
 	GraphicsConfig* GetGraphicsConfig() const { return graphics_config; }
 
 private:
-	BufferManager* buffer_manager = nullptr;
 	TextureManager* texture_manager = nullptr;
-	PassManager* pass_manager = nullptr;
 	MaterialManager* material_manager = nullptr;
 	ObjectManager* object_manager = nullptr;
 	ShaderManager* shader_manager = nullptr;
