@@ -1,8 +1,6 @@
 ﻿#include "PCH.h"
 #include "ObjectManager.h"
 #include "BaseComponents.h"
-#include "TextureData.h"
-#include "ModelData.h"
 #include "ComponentSerializer.h"
 #include "EngineProfiler.h"
 #include <algorithm>
