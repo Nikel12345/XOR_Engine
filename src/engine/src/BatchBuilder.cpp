@@ -387,8 +387,9 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             if (model_it == model_map.end())
             {
                 ModelBatchData new_model{};
-                new_model.submesh = { submesh.indexCount, submesh.indexOffset,
-                                      submesh.vertexOffset, submesh.screen_size_span };
+                new_model.submesh = { submesh.indexCount, submesh.indexOffset, submesh.vertexOffset,
+                                      { submesh.screen_size_span.lod_min,
+                                        submesh.screen_size_span.lod_max } };
                 new_model.instanceCount = 0;
                 new_model.pib_sub_buffer.reserve(16);
                 model_map[model_key] = std::move(new_model);

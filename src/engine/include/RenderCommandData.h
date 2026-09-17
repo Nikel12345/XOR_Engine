@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <bit>
+#include <cassert>
 #include <vector>
 #include <unordered_map>
 #include <memory>
@@ -7,7 +8,6 @@
 #include "Aliases.h"
 #include "ShaderTypes.h"
 #include "TextureData.h"
-#include "ModelData.h"
 
 struct BufferData;
 struct TextureData;
@@ -19,11 +19,27 @@ class PassManager;
 // заполнена. Оба случая читаются одинаково.
 inline constexpr uint32_t kPibNoRow = 0xFFFFFFFFu;
 
+// Пара ступеней экранного размера сабмеша в том виде, в каком её читает GPU: по 4 бита в слове
+// entity->cmd. Копия SubMeshData::screen_size_span, но не тот же тип — у модели раскладка своя и
+// переживёт переход на настоящие LOD'ы.
+struct ScreenSizeSpan {
+    uint8_t lod_min = 0;
+    uint8_t lod_max = 0;
+};
+
+inline constexpr uint32_t kCmdIndexMask = 0x00FFFFFFu;
+inline uint32_t MakeEntityToCmdWord(uint32_t cmd_index, ScreenSizeSpan span) {
+    assert(cmd_index <= kCmdIndexMask);
+    return (cmd_index & kCmdIndexMask)
+         | (static_cast<uint32_t>(span.lod_min & 0xFu) << 24)
+         | (static_cast<uint32_t>(span.lod_max & 0xFu) << 28);
+}
+
 struct SubMeshDraw {
     uint32_t index_count = 0;
     uint32_t index_offset = 0;
     uint32_t vertex_offset = 0;
-    SubMeshSpan screen_size_span{};
+    ScreenSizeSpan screen_size_span{};
 };
 
 struct PibRecord {

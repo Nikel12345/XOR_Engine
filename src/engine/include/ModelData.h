@@ -43,14 +43,6 @@ struct SubMeshData {
     SubMeshSpan screen_size_span;
 };
 
-inline constexpr uint32_t kCmdIndexMask = 0x00FFFFFFu;
-inline uint32_t MakeEntityToCmdWord(uint32_t cmd_index, SubMeshSpan span) {
-    assert(cmd_index <= kCmdIndexMask);
-    return (cmd_index & kCmdIndexMask)
-         | (static_cast<uint32_t>(span.lod_min & 0xFu) << 24)
-         | (static_cast<uint32_t>(span.lod_max & 0xFu) << 28);
-}
-
 // L/R = X min/max, B/T = Y min/max (Bottom/Top), B/F = Z min/max (Back/Front).
 enum class AnchorShift { Keep, Center, LBB, RBB, LTB, RTB, LBF, RBF, LTF, RTF };
 
