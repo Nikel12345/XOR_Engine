@@ -146,7 +146,7 @@ static void RegisterResourceComponentSpecs(MaterialManager* mtm, ModelManager* m
 
 void Engine::OnWindowResized(Sint32 window_w, Sint32 window_h)
 {
-	size_state_.window_size.store(EngineSizeState::Pack(safe_i_u32(window_w), safe_i_u32(window_h)),
+	size_state.window_size.store(EngineSizeState::Pack(safe_i_u32(window_w), safe_i_u32(window_h)),
 	                              std::memory_order_release);
 }
 
@@ -215,8 +215,8 @@ Engine::Engine(const EngineConfig& cfg)
 {
 	if (!InitPlatform(cfg)) return;
 	graphics_config = new GraphicsConfig{ cfg.graphics };
-	size_state_.window_size.store(EngineSizeState::Pack(cfg.width, cfg.height), std::memory_order_relaxed);
-	applied_inputs_ = TargetSizeInputs{ *graphics_config, cfg.width, cfg.height };
+	size_state.window_size.store(EngineSizeState::Pack(cfg.width, cfg.height), std::memory_order_relaxed);
+	applied_inputs = TargetSizeInputs{ *graphics_config, cfg.width, cfg.height };
 	transfer_manager = new TransferManager(dev);
 	queue_manager = new QueueManager(dev);
 	buffer_manager = new BufferManager(dev, transfer_manager);

@@ -291,8 +291,8 @@ bool Engine::RenderFunc(uint8_t slot)
 
 	// Размер назначения берём из свопчейна: в него и бьёт present-блит.
 	const TargetSizeInputs want{ *graphics_config, w, h };
-	if (want != applied_inputs_) {
-		applied_inputs_ = want;
+	if (want != applied_inputs) {
+		applied_inputs = want;
 		texture_manager->ExecuteResizeInstructions(w, h);
 	}
 	texture_manager->TrashTextures(slot_controller->RenderFencesDone());

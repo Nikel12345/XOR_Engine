@@ -123,8 +123,7 @@ public:
 	void SaveScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
 	void LoadScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
 	void ExecuteGenerators();
-	// Сущности сносятся у названной сцены, а ресурсы — ВСЕ сценовые разом: их принадлежность
-	// сцене задаёт тег, а не имя. Генераторы снос переживают.
+	// Сущности сносятся у названной сцены.
 	void ClearScene(const SceneName& scene_name);
 
 	// Вешается на УЖЕ созданную сцену: CreateScene → RegisterGenerator → Load наполняет и

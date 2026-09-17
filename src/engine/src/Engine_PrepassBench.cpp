@@ -132,8 +132,8 @@ static int          g_stat_calls = 0;
 static const int    PRINT_EVERY = 600;
 
 //  Тела A/B-вариантов префасса — перенесены из Engine.cpp КАК ЕСТЬ (закомментированы).
-//  Чтобы стенд заработал: восстановить под текущий API и раскомментировать здесь.
-//  Engine.h их уже объявляет (PrepareFuncPrepassDepended_Original/_Optimized).
+//  Чтобы стенд заработал: восстановить под текущий API, раскомментировать здесь и объявить
+//  оба метода в Engine.h.
 //PrepassTimingReport Engine::PrepareFuncPrepassDepended_Original(uint8_t slot)
 //{
 //	using Clock = std::chrono::steady_clock;
