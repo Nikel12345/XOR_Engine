@@ -14,11 +14,8 @@ target_include_directories(MyGame PRIVATE
 
 target_link_libraries(MyGame PRIVATE Engine Physics)
 
-# PCH: как у Game — std/SDL/glm БЕЗ imgui + Engine.h (см. src/game/CMakeLists.txt).
-target_precompile_headers(MyGame PRIVATE
-    "${CMAKE_SOURCE_DIR}/src/engine/include/core/PCH.h"
-    "${CMAKE_SOURCE_DIR}/src/engine/include/engine/Engine.h"
-)
+# PCH: как у Game (см. src/game/CMakeLists.txt).
+target_precompile_headers(MyGame PRIVATE [["PCH.h"]] [["Engine.h"]])
 
 # Рабочая директория при отладке — откуда грузятся ресурсы/шейдеры.
 # Свои ассеты mygame лежат рядом (models/, textures/); движковые шейдеры

@@ -18,14 +18,11 @@ target_link_libraries(Game PRIVATE Engine Physics)
 # (только диагностика), а без него scripts/vec_check.py не может проверить метки VEC_HOT.
 target_compile_options(Game PRIVATE /Qvec-report:2)
 
-# PCH: std/SDL/glm (чистый PCH.h) + Engine.h (фасад движка). Правка заголовков движка
-# пересобирает PCH один раз, а TU игры дальше грузят его бинарно, а не парсят текст заново.
-# Именно PCH.h, а не PCH_Engine.h: последний доклеивает imgui.h, и игра получала бы его
-# принудительным инклюдом даже без единой строчки #include — редактор для неё опционален.
-target_precompile_headers(Game PRIVATE
-    "${CMAKE_SOURCE_DIR}/src/engine/include/core/PCH.h"
-    "${CMAKE_SOURCE_DIR}/src/engine/include/engine/Engine.h"
-)
+# PCH: std/SDL/glm + фасад движка. PCH_Engine.h тут не годится — он доклеивает imgui.h,
+# а ImGui линкуется к Engine как PRIVATE, так что игре его include-пути не достаются.
+# Заголовки названы, а не адресованы путём: резолвит их include-путь цели, поэтому переезд
+# файла между ярусами ломается здесь так же, как обычное включение.
+target_precompile_headers(Game PRIVATE [["PCH.h"]] [["Engine.h"]])
 
 set_target_properties(Game PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src/game"

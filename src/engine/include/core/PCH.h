@@ -32,5 +32,6 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "Utils.h"
-// imgui намеренно НЕ в PCH: им пользуются только Engine.cpp и UI_ImGui.cpp (через UI_ImGui.h).
-// Так GPU-слой (EngineGpu) не тянет imgui-заголовки.
+// imgui сюда НЕЛЬЗЯ: этот PCH форс-инклюдится в EngineCore/Ecs/Gpu, а ImGui линкуется к Engine
+// как PRIVATE — ниже его include-путей нет, и общий PCH с imgui там просто не соберётся.
+// Верхнему слою imgui даёт PCH_Engine.h.

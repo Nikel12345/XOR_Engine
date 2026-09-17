@@ -85,9 +85,7 @@ target_include_directories(EngineCore PUBLIC
 target_link_libraries(EngineCore PUBLIC
     SDL3::SDL3          # Utils.h/config.h/PCH.h включают SDL; цель даёт и include-пути
 )
-target_precompile_headers(EngineCore PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/core/PCH.h
-)
+target_precompile_headers(EngineCore PRIVATE [["PCH.h"]])
 
 # ============================================================
 #  EngineEcs — ECS-ядро: ObjectManager + компоненты + сцены.
@@ -123,9 +121,7 @@ target_link_libraries(EngineEcs PUBLIC
     SDL3::SDL3                                              # BaseComponents.h включает SDL; цель даёт и include-пути
     yyjson                                                  # scene.json: колоночная сериализация ECS (ComponentSerializer.h раскрывает yyjson-типы)
 )
-target_precompile_headers(EngineEcs PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/core/PCH.h
-)
+target_precompile_headers(EngineEcs PRIVATE [["PCH.h"]])
 
 # ============================================================
 #  EngineGpu — GPU-кор: буферы, шейдеры, текстуры, пассы.
@@ -203,9 +199,7 @@ target_link_libraries(EngineGpu PRIVATE
     "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/lib/SDL3_shadercross.lib"  # компиляция шейдеров — только внутри
 )
 
-target_precompile_headers(EngineGpu PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/core/PCH.h
-)
+target_precompile_headers(EngineGpu PRIVATE [["PCH.h"]])
 
 # ============================================================
 #  Engine — рендер/оркестрация: пассы, data-модули, ECS, UI, цикл.
@@ -301,7 +295,6 @@ set(ENGINE_CORE_SRC
     src/UI_AssetBrowser.cpp
     src/UI_Inspector.cpp
     src/UI_ComponentEditor.cpp
-    src/PCH.cpp
     src/EngineContext.cpp
     src/TextureLoader.cpp
     src/UI_Yoga.cpp
@@ -365,11 +358,10 @@ target_include_directories(Engine PRIVATE
     "${CMAKE_SOURCE_DIR}/external/yoga"                 # только UI_Yoga.cpp (#include <yoga/...>)
 )
 
-# Свой PCH верхнего слоя: PCH.h + imgui.h (~8 TU таргета зовут ImGui). EngineGpu/EngineEcs
-# остаются на чистом PCH.h — imgui в GPU/ECS-слои не протекает.
-target_precompile_headers(Engine PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/engine/PCH_Engine.h
-)
+# Свой PCH: PCH.h + imgui.h (8 из 38 TU зовут ImGui). Отдельный он не ради скорости, а по
+# необходимости — общий PCH с imgui не собрался бы в EngineCore/Ecs/Gpu: ImGui линкуется сюда
+# PRIVATE, и ниже его include-путей просто нет.
+target_precompile_headers(Engine PRIVATE [["PCH_Engine.h"]])
 
 target_link_libraries(Engine PUBLIC
     EngineGpu

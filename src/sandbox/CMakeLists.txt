@@ -34,9 +34,7 @@ target_link_libraries(Sandbox PRIVATE Engine)
 target_compile_options(Sandbox PRIVATE /Qvec-report:2)
 
 # PCH: только std/SDL/glm — Sandbox дергает подсистемы точечно, Engine.h ему не нужен.
-target_precompile_headers(Sandbox PRIVATE
-    "${CMAKE_SOURCE_DIR}/src/engine/include/core/PCH.h"
-)
+target_precompile_headers(Sandbox PRIVATE [["PCH.h"]])
 
 # Рабочая директория при отладке — откуда грузятся ресурсы/шейдеры.
 # Поставь туда, где лежат ассеты сценариев. Если переиспользуешь ассеты игры —
