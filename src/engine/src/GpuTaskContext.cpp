@@ -18,7 +18,6 @@ void GpuTaskContext::CreateFragmentShader(const std::string& name, const char* p
 
 void GpuTaskContext::CreateVertexShader(const std::string& name, const char* hlsl_path, const GeometryPool* pool,
 	const std::vector<ShaderBase::VertexSemantic>& pull, const ShaderDefines& defines, ResourceTag tags) {
-	// buffer_manager — сбор usage-флагов (VERTEX выбранным стримам, INDEX индексному буферу пула).
 	shader_manager->CreateVertexShader(name, hlsl_path, pool, pull, buffer_manager, defines, tags);
 }
 
@@ -27,13 +26,8 @@ ShaderProgram* GpuTaskContext::CreateShaderProgram(const std::string& name, cons
 	const std::string& fs_name, std::initializer_list<BufferDataName> fragment_shader_buffers,
 	std::initializer_list<TextureSlotRole> texture_slots, ResourceTag tags) {
 
-	// Буферы sp — ССЫЛКИ ПО ИМЕНИ (BufferDataName, как vs/fs): храним сами ключи реестра, резолв
-	// в BufferData* отложен на сборку батча (BatchBuilder). Существование здесь не проверяем.
 	std::vector<BufferDataName> vertex_buffer_names(vertex_shader_buffers.begin(), vertex_shader_buffers.end());
 	std::vector<BufferDataName> fragment_buffer_names(fragment_shader_buffers.begin(), fragment_shader_buffers.end());
-	// Проход — тоже ссылка по имени (резолв у PipeManager/BatchBuilder), поэтому здесь не ищется.
-	// buffer_manager — только чтобы sp записал GRAPHICS_STORAGE_READ в обёртки своих буферов
-	// (ShaderManager чужих менеджеров не хранит, получает на вызове).
 	return shader_manager->CreateShaderProgram(name, spd, associated_pass_name, vs_name, std::move(vertex_buffer_names), fs_name, std::move(fragment_buffer_names), texture_slots, buffer_manager, tags);
 }
 
@@ -49,14 +43,11 @@ ComputeShaderProgram* GpuTaskContext::CreateComputeShaderProgram(const std::stri
 	std::initializer_list<AtlasName> texture_samplers,
 	const ComputePassName& associated_compute_pass, ResourceTag tags)
 {
-	// Ничего не резолвится: csp хранит ИМЕНА (сериализуемо) — и ресурсов, и прохода. Резолв
-	// делает сборка батча, у неё для этого есть все менеджеры.
 	return shader_manager->CreateComputeShaderProgram(name, cs_name,
 		rw_storage_buffers, ro_storage_buffers, rw_storage_textures, ro_storage_textures, texture_samplers,
 		associated_compute_pass, buffer_manager, texture_manager, tags);
 }
 
-// --- Буферы: форвард в BufferManager ---
 BufferData* GpuTaskContext::CreateBufferData(BufferDataName name, Uint32 size, BufferDataType type, ResizeBehaviour resize_behaviour) {
 	return buffer_manager->CreateBufferData(name, size, type, resize_behaviour);
 }

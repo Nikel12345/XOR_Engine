@@ -13,6 +13,9 @@ class BufferManager;
 class GeometryPool;
 
 
+// Ничего не резолвится: и ресурсы, и проходы sp/csp хранит ИМЕНАМИ, в указатели их переводит
+// сборка батча, существование здесь не проверяется. Чужой менеджер уходит ПАРАМЕТРОМ в листовой
+// вызов — так ShaderManager расставляет usage-флаги в обёртках BufferManager, не храня его.
 class GpuTaskContext {
 public:
 	GpuTaskContext(BufferManager* bm, ShaderManager* sm, PassManager* pm, TextureManager* tm);
@@ -37,7 +40,6 @@ public:
 		std::initializer_list<AtlasName> texture_samplers,
 		const ComputePassName& associated_compute_pass, ResourceTag tags = ResourceTag::None);
 
-	// --- Буферы: создание и инструкции жизненного цикла (форвард в BufferManager) ---
 	// Без usage-флагов: BufferData::usage наполняют декларации до бейка (см. BufferData.h).
 	BufferData* CreateBufferData(BufferDataName name, Uint32 size, BufferDataType type, ResizeBehaviour resize_behaviour);
 	BufferData* GetBufferData(BufferDataName name);
