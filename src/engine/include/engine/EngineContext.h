@@ -16,11 +16,9 @@ struct ModelComponent;
 #include "ParamsSpec.h"
 #include "TextureData.h"
 #include "ModelData.h"
-#include "GeometryPool.h"   // StreamDesc в сигнатуре CreateGeometryPool — нужен полный тип
-#include "GpuContext.h"     // геттеры ниже форвардят в него
+#include "GeometryPool.h"
+#include "GpuContext.h"
 
-// Менеджеры — ТОЛЬКО forward: полный заголовок инклюдит тот cpp, который реально зовёт менеджер.
-// Иначе правка одного менеджера пересобирает всех потребителей фасада.
 class BufferManager;
 class TextureManager;
 class PassManager;
@@ -46,7 +44,8 @@ public:
 	EngineContext(BufferManager* bm, TextureManager* tm, PassManager* pass, MaterialManager* mm, ObjectManager* om, ShaderManager* sm, ModelManager* md, CameraManager* cm, PipeManager* pipe, BatchBuilder* bb, TextureLoader* tl);
 	~EngineContext();
 
-	GpuContext& Gpu() { return *gpu_ctx; }
+	// Единственный вход в GPU-ярус снаружи: через него модуль (физика) получает контекст,
+	// не линкуя Engine.
 	GpuContext* GetGpuContext() { return gpu_ctx; }
 
 	TextureAtlas* CreateTextureAtlas(const AtlasName& name, SDL_GPUTextureCreateInfo tci, const std::string& sampler_name, ResourceTag tags = ResourceTag::None);
@@ -158,7 +157,6 @@ public:
 	MaterialManager* GetMaterialManager() const { return material_manager; }
 
 	BatchBuilder* GetBatchBuilder() const { return batch_builder; }
-	TextureLoader* GetTextureLoader() const { return texture_loader; }
 
 	void SetInputManager(InputManager* im) { input_manager = im; }
 	InputManager* GetInputManager() const { return input_manager; }
