@@ -9,10 +9,8 @@
 #include <string>
 #include "config.h"
 #include "Aliases.h"
-#include "GraphicsConfig.h"   // по значению внутри TargetSizeInputs — forward-декларацией не обойтись
+#include "GraphicsConfig.h"
 
-// ТОЛЬКО forward-декларации: полный заголовок инклюдит тот cpp, который реально зовёт менеджер.
-// Иначе правка любого из них пересобирает всех потребителей Engine.h.
 class QueueManager;
 class TransferManager;
 class BufferManager;
@@ -44,9 +42,6 @@ struct TransferBufferData;
 struct PrepassTimingReport;
 struct ImDrawData;
 
-// Размер ОКНА: пишет MAIN-поток из события ОС, читают sim и render. Внутреннее разрешение здесь
-// НЕ хранится — оно производное от конфига и этого размера, и второй источник истины разошёлся бы.
-// Упаковка (w<<32)|h — чтобы пара менялась одним атомарным словом и не рвалась пополам.
 struct EngineSizeState {
     std::atomic<uint64_t> window_size{ 0 };
 
@@ -68,8 +63,6 @@ struct TargetSizeInputs {
     bool operator==(const TargetSizeInputs&) const = default;
 };
 
-// Всё, что игра вправе решать про окно и свопчейн. Формат шейдеров, число кадров в полёте и обход
-// бага claim'а сюда не входят — это контракты движка (см. InitPlatform).
 struct EngineConfig {
     const char* title = "SDL_Engine";
     uint32_t width = 800;
@@ -79,15 +72,12 @@ struct EngineConfig {
     SDL_GPUPresentMode present_mode = SDL_GPU_PRESENTMODE_MAILBOX;
     SDL_GPUSwapchainComposition composition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
     bool gpu_debug = true;
-    // Только СТАРТОВЫЕ: движок кладёт копию на кучу, дальше её правят через GetGraphicsConfig().
     GraphicsConfig graphics{};
 };
 
 class Engine
 {
 public:
-    // Отказ платформы — не исключение: движок остаётся невалидным (менеджеры не создавались),
-    // и Run() сразу вернёт 1.
     explicit Engine(const EngineConfig& cfg);
     bool IsValid() const { return init_ok; }
     QueueManager* GetQueueManager() const { return queue_manager; }
@@ -133,7 +123,7 @@ public:
 
     void EndImGuiFrame();
 
-    // Колбэк зовёт SIM-поток. Задавать ДО Run(): он уже раздаёт колбэки по потокам.
+    // Колбэк зовёт SIM-поток. Задавать ДО Run().
     void SetGameIterate(std::function<void()> cb);
 
     // ОБЯЗАН зваться с main-потока: очередь сообщений окна привязана к потоку-создателю. Блокирует
@@ -152,8 +142,6 @@ public:
     float GetWindowWidth()  const { return size_state.WindowW(); }
     float GetWindowHeight() const { return size_state.WindowH(); }
 
-    // Живой указатель: правка полей на месте и есть способ менять настройки, гейт RenderFunc
-    // подхватит её сам.
     GraphicsConfig* GetGraphicsConfig() const { return graphics_config; }
 
     // Звать с MAIN-потока. Публикует размер окна, и только его: таргеты пересоздаст гейт RenderFunc.
@@ -169,8 +157,6 @@ private:
     void InitDefaultBufferUpdaters();
     void InitPasses();
 
-    // Пересоздание таргетов исполняет RenderFunc, а не тот, кто поменял размер: удаление текстур
-    // вправе делать только render-поток.
     EngineSizeState size_state;
 
     void ComputeRenderSize(uint32_t& w, uint32_t& h) const {
@@ -179,12 +165,9 @@ private:
     }
 
     GraphicsConfig* graphics_config = nullptr;
-    // Снимок входов, под которые таргеты уже пересозданы. Трогает ТОЛЬКО render-поток.
     TargetSizeInputs applied_inputs{};
 
     // Рендер-поток стоит на всю загрузку сцены: компромисс «редактор читает живой ECS без замков»
-    // рассчитан на рваное ЗНАЧЕНИЕ, а загрузка разрушает сами структуры, по которым ходят панели, —
-    // архетипы, дерево UI и реестры менеджеров. Держится весь кадр рендера и всю загрузку.
     std::mutex scene_swap_mutex;
 
     SDL_Window* win = nullptr;
@@ -223,12 +206,9 @@ private:
     std::atomic<bool> running{ false };
     ImDrawData* imgui_draw_data = nullptr;
 
-    // Две очереди, поэтому и две пачки: буферы заливает копировальная, текстуры — графическая
-    // (мипы и блиты превью копировальной не исполнить). Фенсы обоих ждутся одним wait_all.
     TransferBufferData* pending_upload_tbs[BUFFERING_LEVEL] = {};
     TransferBufferData* pending_texture_tbs[BUFFERING_LEVEL] = {};
 
-    // Трогает только FenceThread.
     std::chrono::steady_clock::time_point last_frame_done_time{};
     bool last_frame_done_valid = false;
 };

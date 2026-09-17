@@ -52,7 +52,7 @@ public:
               const std::string& material, const std::string& quad, FontData* font, FontManager* fm);
 
     void Clear();                        // снести дерево (энтити снимутся на следующем Emit)
-    void MarkDirty() { dirty_ = true; }  // ресайз окна / смена контента → пересчёт на следующем Emit
+    void MarkDirty() { dirty = true; }  // ресайз окна / смена контента → пересчёт на следующем Emit
     bool HasTree() const;
 
     // Сцена снесена извне (LoadScene: SceneData::clear) — вместе с нашими энтити. UI уходит
@@ -88,7 +88,7 @@ public:
 
 private:
     Impl* impl_ = nullptr;   // прячет Yoga-типы (pimpl)
-    bool  dirty_ = true;      // нужен Emit (раскладка/смещение изменились)
+    bool  dirty = true;      // нужен Emit (раскладка/смещение изменились)
     bool  structural_ = true; // дерево изменилось (добавили/убрали узлы) → нужен полный recreate энтити.
                               // Иначе Emit мутирует Positions существующих на месте (без recreate —
                               // recreate каждый кадр драга роняет редактор, см. CLAUDE.md).

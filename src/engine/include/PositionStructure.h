@@ -9,9 +9,6 @@
 #include "GeometryPool.h"
 #include "Utils.h"
 
-
-// ФОРМАТ ЗАГРУЗКИ моделей (CPU-стейджинг, .bin-файлы, генераторы CreateModel): интерлив.
-// На GPU в таком виде НЕ ЖИВЁТ — заливка расщепляет его на стримы пула (см. PosUVNormLayout).
 struct PosUVNormal {
     float x, y, z;       // позиция
     float u, v;          // UV
@@ -20,16 +17,10 @@ struct PosUVNormal {
 };
 struct PosOnly { float x, y, z; };
 
-// Имя пула движковой раскладки: язык манифестов (models.json/shaders.json), ключ реестра пулов.
 inline constexpr const char* POS_UV_NORM_POOL = "PosUVNorm";
 
-// Разбивка PosUVNormal на стримы — аргумент CreateGeometryPool (тот сам заведёт буферы, сгенерит
-// им имена и зарегистрирует инструкции заливки).
-//
+
 // Normal и Tangent объединены в ОДИН стрим намеренно: они потребляются строго вместе
-// (нормал-маппингу нужны оба, теням — ни один). UV отдельно ради будущего потребителя Pos+UV без
-// нормалей — alpha-tested тени. Функция, а не глобальная константа: возвращает vector, а тот не
-// должен зависеть от порядка статической инициализации.
 inline std::vector<GeometryPool::StreamDesc> PosUVNormLayout()
 {
     using namespace ShaderBase;

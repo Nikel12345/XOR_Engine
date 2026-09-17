@@ -12,8 +12,6 @@ class PipeManager
 {
 public:
 	PipeManager(SDL_GPUDevice* device, SDL_Window* win);
-	// pass_manager — резолвер прохода sp по имени (sp хранит имя, не указатель), тем же
-	// параметром, что и ShaderManager: PipeManager чужих менеджеров не держит.
 	void CreateGraphicsPiplenes(ShaderProgramRegistry& shader_programs, ShaderManager* sm, PassManager* pass_manager);
 	void CreateComputePipelines(ComputeProgramRegistry& compute_shader_programs, ShaderManager* sm);
 

@@ -23,11 +23,11 @@ private:
     int             sampleCount;
     int             remaining;
 
-    time_point      startTime;       // начало текущего кадра (start → end)
-    time_point      firstCallTime;   // время самого первого вызова end()
+    time_point      startTime; 
+    time_point      firstCallTime;
 
     bool            initialized;
 
-    float           lastExecTime;    // длительность последнего кадра (start → end)
+    float           lastExecTime;
 };
 

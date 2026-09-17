@@ -2,7 +2,6 @@
 #include "ParamsSpec.h"
 #include "MaterialParams.h"
 
-//  Реестр (зеркало ComponentSpecRegistry)
 ParamsSpecRegistry& ParamsSpecRegistry::Materials()
 {
     static ParamsSpecRegistry instance;
@@ -21,11 +20,10 @@ void ParamsSpecRegistry::Register(ParamsSpec s)
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "ParamsSpec: empty name - not registered");
         return;
     }
-    if (by_name_.count(s.name)) return;   // идемпотентно: уже зарегали
+    if (by_name_.count(s.name)) return;
 
-    // Тип, собранный MakeParamsSpec, сюда с таким размером не дойдёт — его ловит static_assert.
-    // Эта ветка для блоба, собранного в рантайме (спека руками, чужой размер): НЕ регистрируем
-    // вовсе, иначе тип попал бы в дропдаун инспектора и в манифест, а на пуше молча обрезался.
+    // Спека, собранная руками мимо MakeParamsSpec: не регистрируем вовсе, иначе тип попал бы в
+    // дропдаун и в манифест, а на пуше молча обрезался.
     if (s.size > kMaxParamsBlob) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
             "ParamsSpec '%s': blob is %zu bytes, limit is %zu (kMaxParamsBlob) - type NOT registered",
@@ -33,8 +31,7 @@ void ParamsSpecRegistry::Register(ParamsSpec s)
         return;
     }
 
-    // Схема обязана лежать внутри блоба: поле за границей sizeof(T) — ложь о раскладке,
-    // с ней UI писал бы мимо структуры. Отбрасываем поимённо, тип регистрируем без него.
+    // Поле за границей sizeof(T) — ложь о раскладке, UI писал бы мимо структуры.
     for (size_t i = 0; i < s.fields.size(); ) {
         const ParamsFieldSpec& f = s.fields[i];
         if (f.key && f.offset + f.Bytes() <= s.size) { ++i; continue; }
@@ -46,8 +43,8 @@ void ParamsSpecRegistry::Register(ParamsSpec s)
 
     const size_t idx = specs_.size();
     by_name_[s.name] = idx;
-    // Первая схема типа выигрывает. У материалов «тип → схема» однозначно, а у проходов схему
-    // выбирают по имени (SetPassState) — тихая перезапись ByType ломала бы первых ради вторых.
+    // Первая схема типа выигрывает: у проходов схему выбирают по имени, и перезапись ByType
+    // ломала бы материалы ради них.
     by_type_.emplace(s.type, idx);
     specs_.push_back(std::move(s));
 }
@@ -86,17 +83,15 @@ void SetMaterialParamsBlob(Material* m, ShaderProgramId sp_id, const std::string
             "(add the sp to the material first)", sp_name.c_str());
         return;
     }
-    // Сырой путь мимо MakeParamsSpec: размер приходит числом, поэтому проверяем и в релизе.
-    // Ячейку оставляем как была — прежние параметры лучше, чем обрезанные на пуше.
+    // Размер приходит числом, поэтому проверяем и в релизе. Ячейку оставляем как была.
     if (size > kMaxParamsBlob) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
             "SetMaterialParams: '%s' blob is %zu bytes, limit is %zu (kMaxParamsBlob) - params NOT set",
             sp_name.c_str(), size, kMaxParamsBlob);
         return;
     }
-    // НОВЫЙ блоб, а не запись в существующий: слепки кадров в полёте читают старый, а resize
-    // переселил бы его буфер у них под руками — shared_ptr держит вектор, но не его внутреннюю
-    // память. Правка ОТДЕЛЬНЫХ полей (слайдер инспектора) идёт мимо этого, прямо в блоб.
+    // НОВЫЙ блоб: слепки кадров в полёте читают старый, а resize переселил бы его буфер у них под
+    // руками — shared_ptr держит вектор, но не его память.
     b->params      = std::make_shared<std::vector<uint8_t>>(size);
     std::memcpy(b->params->data(), data, size);
     b->params_type = type_name;
@@ -105,30 +100,25 @@ void SetMaterialParamsBlob(Material* m, ShaderProgramId sp_id, const std::string
 void ApplyMaterialParamsSpec(SpBinding* b, const ParamsSpec& s)
 {
     if (!b) return;
-    // Тоже новый блоб (см. SetMaterialParamsBlob). Смена адреса здесь даже желательна: адрес входит
-    // в ключ узла дерева, а смена типа обязана этот ключ подвинуть.
-    b->params      = std::make_shared<std::vector<uint8_t>>(s.defaults);   // дефолты = member-инициализаторы типа
+    // Смена адреса тут желательна: он входит в ключ узла дерева, а смена типа обязана его подвинуть.
+    b->params      = std::make_shared<std::vector<uint8_t>>(s.defaults);
     b->params_type = s.name;
 }
 
 void ClearMaterialParams(SpBinding* b)
 {
     if (!b) return;
-    // Отпускаем ссылку, а не гасим байты: слепки кадров в полёте держат блоб сами и дорисуются
-    // последними корректными значениями. Гашение писало бы в буфер, который в этот момент читает
-    // рендер-поток, — без нужды, ради состояния, которое и так выражено пустым указателем.
+    // Отпускаем ссылку, а не гасим байты: их в этот момент читает рендер-поток.
     b->params.reset();
     b->params_type.clear();
 }
 
-//  Встроенные типы: вся правда о типе — одна запись (как у компонентов).
 //  Порядок fields = порядок ключей в materials.json и полей в инспекторе.
 void RegisterBuiltinMaterialParamsSpecs()
 {
     using K = ParamsFieldKind;
     auto& reg = ParamsSpecRegistry::Materials();
 
-    // ---- Opaque: тинт + эмиссия + Blinn-Phong + POM (см. комментарии в MaterialParams.h) ----
     reg.Register(MakeParamsSpec<OpaqueMaterialParams>("Opaque", {
         ParamsFieldSpec::Num(PARAMS_FIELD(OpaqueMaterialParams, baseColor),        K::Color4).Label("Base Color"),
         ParamsFieldSpec::Num(PARAMS_FIELD(OpaqueMaterialParams, emissive),         K::Color3).Label("Emissive"),
@@ -141,12 +131,10 @@ void RegisterBuiltinMaterialParamsSpecs()
         ParamsFieldSpec::Num(PARAMS_FIELD(OpaqueMaterialParams, pomBias),          K::F32, 0, 3).Label("POM Bias"),
     }));
 
-    // ---- Transparent: одна альфа (остальное — padding до 16 байт) ----
     reg.Register(MakeParamsSpec<TransparentMaterialParams>("Transparent", {
         ParamsFieldSpec::Num(PARAMS_FIELD(TransparentMaterialParams, alpha), K::F32, 0, 1).Label("Alpha"),
     }));
 
-    // ---- UI: тинт фона + цвет текста (см. MaterialParams.h) ----
     reg.Register(MakeParamsSpec<UIMaterialParams>("UI", {
         ParamsFieldSpec::Num(PARAMS_FIELD(UIMaterialParams, bg_color),    K::Color4).Label("BG Color"),
         ParamsFieldSpec::Num(PARAMS_FIELD(UIMaterialParams, text_color),  K::Color4).Label("Text Color"),

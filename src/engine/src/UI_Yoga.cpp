@@ -115,7 +115,7 @@ void UI_Yoga::NudgeNode(Node n, float ddx, float ddy, float ddz)
     if (n >= impl_->nodes.size()) return;
     NodeRec& r = impl_->nodes[n];
     r.off_x += ddx;  r.off_y += ddy;  r.z_off += ddz;
-    dirty_ = true;   // пересчёт на следующем Emit
+    dirty = true;   // пересчёт на следующем Emit
 }
 
 bool UI_Yoga::GetNodeNdc(Node n, float& ndc_x, float& ndc_y, float& z) const
@@ -148,7 +148,7 @@ UI_Yoga::Node UI_Yoga::Root(const UIStyle& s)
     Clear();                        // новый корень = свежее дерево
     const Node id = MakeNode(impl_, s);
     impl_->root = id;
-    dirty_ = true;  structural_ = true;
+    dirty = true;  structural_ = true;
     return id;
 }
 
@@ -162,7 +162,7 @@ UI_Yoga::Node UI_Yoga::Box(Node parent, const UIStyle& s, const std::string& mat
     NodeRec& p = impl_->nodes[parent];
     YGNodeInsertChild(p.yg, r.yg, YGNodeGetChildCount(p.yg));
     p.children.push_back(id);
-    dirty_ = true;  structural_ = true;
+    dirty = true;  structural_ = true;
     return id;
 }
 
@@ -189,7 +189,7 @@ UI_Yoga::Node UI_Yoga::Text(Node parent, const UIStyle& s, const std::string& ut
     NodeRec& p = impl_->nodes[parent];
     YGNodeInsertChild(p.yg, r.yg, YGNodeGetChildCount(p.yg));
     p.children.push_back(id);
-    dirty_ = true;  structural_ = true;
+    dirty = true;  structural_ = true;
     return id;
 }
 
@@ -202,7 +202,7 @@ void UI_Yoga::Clear()
         YGNodeFreeRecursive(impl_->nodes[impl_->root].yg);
     impl_->nodes.clear();
     impl_->root = kInvalid;
-    dirty_ = true;  structural_ = true;
+    dirty = true;  structural_ = true;
 }
 
 void UI_Yoga::Reset()
@@ -308,14 +308,14 @@ void UI_Yoga::Emit(EngineContext* ctx, float screen_w, float screen_h)
     // Смена размера экрана инвалидирует раскладку так же, как dirty_ (см. Impl::last_w/h): без этого
     // ресайз не перекладывал UI — узлы держали NDC от стартового разрешения, отсюда «другой размер UI».
     const bool size_changed = (screen_w != impl_->last_w) || (screen_h != impl_->last_h);
-    if (!dirty_ && !size_changed) return;
+    if (!dirty && !size_changed) return;
     impl_->last_w = screen_w;  impl_->last_h = screen_h;
 
     if (impl_->root == kInvalid || screen_w <= 0.0f || screen_h <= 0.0f) {
         // Дерева нет: снять энтити прошлой раскладки, если были.
         for (Entity e : impl_->created) ctx->DeleteEntity(scene_name, e);
         impl_->created.clear();
-        structural_ = false;  dirty_ = false;  return;
+        structural_ = false;  dirty = false;  return;
     }
 
     YGNodeCalculateLayout(impl_->nodes[impl_->root].yg, screen_w, screen_h, YGDirectionLTR);
@@ -334,5 +334,5 @@ void UI_Yoga::Emit(EngineContext* ctx, float screen_w, float screen_h)
         // = краш (см. CLAUDE.md). Бонус: ресайз больше не тасует порядок батчей.
         EmitNode(impl_, ctx, om, scene, scene_name, impl_->root, 0.0f, 0.0f, screen_w, screen_h, 0, /*create*/false);
     }
-    dirty_ = false;
+    dirty = false;
 }

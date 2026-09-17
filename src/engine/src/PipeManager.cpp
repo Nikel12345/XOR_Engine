@@ -1,7 +1,7 @@
 ﻿#include "PCH.h"
 #include "PipeManager.h"
 #include "RenderCommandData.h"
-#include "PassManager.h"   // PassManager: резолв прохода sp по имени
+#include "PassManager.h"
 #include "ShaderManager.h"
 
 
@@ -38,8 +38,6 @@ std::shared_ptr<SDL_GPUGraphicsPipeline> PipeManager::GetOrCreatePipeline(Shader
 {
     if (sp->pipeline) return sp->pipeline;
 
-    // Проход — по имени из sp: форматы целей прохода задают раскладку пайплайна, без него сборка
-    // невозможна (в отличие от промаха буфера, который лишь сдвинет слот).
     RenderPassStep* pass = pass_manager ? pass_manager->GetRenderPassStep(sp->render_pass_name) : nullptr;
     if (!pass) {
         SDL_Log("Pipeline '%s': render pass '%s' not found", sp->debug_name.c_str(), sp->render_pass_name.c_str());
@@ -113,10 +111,7 @@ std::shared_ptr<SDL_GPUGraphicsPipeline> PipeManager::GetOrCreatePipeline(Shader
         pci.target_info.color_target_descriptions = nullptr;
     }
 
-    // Наличие depth-таргета ВЫВОДИТСЯ из формата, а не считается данностью. Проход без глубины
-    // законен (полноэкранный эффект в один цвет, отладочная отрисовка), а раньше жёсткий true
-    // отправлял в SDL depth_stencil_format = INVALID — то есть ассерт «Invalid texture format
-    // enum!» внутри SDL_CreateGPUGraphicsPipeline. У проходов С глубиной поведение прежнее.
+    // Наличие depth-таргета ВЫВОДИТСЯ из формата, а не считается данностью.
     const SDL_GPUTextureFormat ds_fmt = pass->renderPassTexsData.depth_format;
     pci.target_info.has_depth_stencil_target = (ds_fmt != SDL_GPU_TEXTUREFORMAT_INVALID);
     pci.target_info.depth_stencil_format = ds_fmt;

@@ -13,7 +13,7 @@ ComponentSpecRegistry& ComponentSpecRegistry::Get()
 
 void ComponentSpecRegistry::Register(ComponentSpec s)
 {
-    if (by_name_.count(s.name)) return;   // идемпотентно
+    if (by_name_.count(s.name)) return;
     const size_t idx = specs_.size();
     by_name_[s.name]     = idx;
     by_type_[s.sig_type] = idx;
@@ -56,7 +56,6 @@ FieldSpec FieldSpec::Str(const char* key,
 
 namespace {
 
-// Не-число даёт false, и тогда поле строки остаётся дефолтным.
 bool TryGetNum(yyjson_val* v, double& out)
 {
     if (yyjson_is_real(v)) { out = yyjson_get_real(v); return true; }
@@ -83,14 +82,14 @@ ScenePool::List* ScenePool::Find(const std::string& list_name)
 
 const char* ScenePool::Cell(const List* list, yyjson_val* v)
 {
-    // Строка — всегда ИМЯ, число — всегда индекс, разводит их сам тип json: модель, названная
-    // "42", приезжает именем даже когда в словаре есть запись под индексом 42.
+    // Разводит их тип json: модель, названная "42", приезжает именем даже когда в словаре есть
+    // запись под индексом 42.
     if (const char* s = yyjson_get_str(v)) return s;
     if (yyjson_is_uint(v)) {
         const uint64_t i = yyjson_get_uint(v);
         if (list && i < list->names.size()) return list->names[(size_t)i].c_str();
     }
-    ++misses_;   // индекс мимо словаря ЛИБО ячейка не строка и не индекс
+    ++misses_;
     return nullptr;
 }
 
@@ -99,15 +98,14 @@ void ScenePool::Write(yyjson_mut_doc* doc, yyjson_mut_val* root) const
     for (const auto& [list_name, list] : lists_) {
         if (list.names.empty()) continue;
         yyjson_mut_val* arr = yyjson_mut_arr(doc);
-        yyjson_mut_obj_add(root, yyjson_mut_strcpy(doc, list_name.c_str()), arr);   // ключ динамический
+        yyjson_mut_obj_add(root, yyjson_mut_strcpy(doc, list_name.c_str()), arr);
         for (const std::string& n : list.names) yyjson_mut_arr_add_strcpy(doc, arr, n.c_str());
     }
 }
 
 void ScenePool::Read(yyjson_val* root)
 {
-    // В корне файла словарь от архетипов отличает тип: списки — массивы, архетипы — объекты.
-    // Разбор архетипов массивы пропускает своим гвардом, здесь берём ровно обратное.
+    // В корне словарь от архетипов отличает тип: списки — массивы, архетипы — объекты.
     size_t k, m; yyjson_val *key, *val;
     yyjson_obj_foreach(root, k, m, key, val) {
         if (!yyjson_is_arr(val)) continue;
@@ -116,8 +114,8 @@ void ScenePool::Read(yyjson_val* root)
         List& list = lists_[list_name];
         size_t i, n; yyjson_val* s;
         yyjson_arr_foreach(val, i, n, s) {
-            // Не строка (правка руками: id записали числом) — кладём ПУСТЫШКУ, а не пропускаем:
-            // пропуск сдвинул бы все последующие индексы, и колонка уехала бы на соседний ассет.
+            // Пустышка, а не пропуск: пропуск сдвинул бы все последующие индексы, и колонка
+            // уехала бы на соседний ассет.
             const char* str = yyjson_get_str(s);
             if (!str) { ++misses_; str = ""; }
             list.names.emplace_back(str);
@@ -129,11 +127,11 @@ void ComponentSpec::Save(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyj
 {
     if (custom_save) { custom_save(arch, count, doc, comp, pool); return; }
     for (const FieldSpec& f : fields) {
-        if (!f.set_num && !f.set_str) continue;   // вычисляемое: колонки нет
+        if (!f.set_num && !f.set_str) continue;   // вычисляемое поле
         yyjson_mut_val* col = yyjson_mut_obj_add_arr(doc, comp, f.key);
         switch (f.kind) {
         case FieldKind::F32:
-        case FieldKind::Angle:   // в файле те же радианы, градусы живут только в слайдере
+        case FieldKind::Angle:   // в файле радианы, градусы живут только в слайдере
             for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_real(doc, col, f.get_num(arch, i));
             break;
         case FieldKind::U32:
@@ -142,7 +140,7 @@ void ComponentSpec::Save(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyj
         case FieldKind::Bool:
             for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_bool(doc, col, f.get_num(arch, i) != 0.0);
             break;
-        default: {  // Str / Asset*
+        default: {
             const char* list_name = FieldPoolName(f.kind);
             ScenePool::List* list = (pool && list_name) ? &(*pool)[list_name] : nullptr;
             if (list)
@@ -158,20 +156,19 @@ void ComponentSpec::Save(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyj
 void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count, ScenePool* pool) const
 {
     if (custom_load) { custom_load(arch, comp, count, pool); return; }
-    for (size_t i = 0; i < count; ++i) add_default(arch);     // дефолты = member-инициализаторы T{}
-    if (!comp) return;                                        // компонент без данных (тег) / форма создания
-    const size_t base = arch.entities.size() - count;         // строки дописаны в хвост (инвариант в .h)
+    for (size_t i = 0; i < count; ++i) add_default(arch);
+    if (!comp) return;                                        // тег без данных или форма создания
+    const size_t base = arch.entities.size() - count;         // строки дописаны в хвост (см. .h)
     for (const FieldSpec& f : fields) {
-        if (!f.set_num && !f.set_str) continue;               // вычисляемое: писать некуда
+        if (!f.set_num && !f.set_str) continue;
         yyjson_val* col = yyjson_obj_get(comp, f.key);
-        if (!col) continue;                                   // нет колонки → дефолт
+        if (!col) continue;                                   // нет колонки → остаётся дефолт
         size_t idx, max; yyjson_val* v;
         if (f.set_str) {
             const char* list_name = FieldPoolName(f.kind);
             ScenePool::List* list = (pool && list_name) ? pool->Find(list_name) : nullptr;
             yyjson_arr_foreach(col, idx, max, v) {
-                if (idx >= count) break;                      // count-гвард: длиннее → усечь
-                // Ячейка = имя ЛИБО индекс в словаре шапки (см. ScenePool).
+                if (idx >= count) break;                      // колонка длиннее count → усечь
                 if (const char* s = pool ? pool->Cell(list, v) : yyjson_get_str(v))
                     f.set_str(arch, base + idx, s);
             }
@@ -188,13 +185,11 @@ void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count, SceneP
     }
 }
 
-// Material — escape hatch: список имён НА СУЩНОСТЬ это не колонка одного поля, а зубчатый
-// массив массивов. Схемой такое не выражается, отсюда рукописная пара save/load.
+// Список имён НА СУЩНОСТЬ — зубчатый массив, а не колонка одного поля: схемой не выражается.
 namespace {
 
-// Строк ровно cascade_count, то есть их число лежит в ДАННЫХ, а схема описывает тип компонента.
-// Поэтому одно вычисляемое строковое поле, а не MAX_CASCADES числовых, часть которых описывала
-// бы несуществующие каскады.
+// Число строк лежит в ДАННЫХ, поэтому одно вычисляемое строковое поле, а не MAX_CASCADES
+// числовых, часть которых описывала бы несуществующие каскады.
 std::string FormatCascades(const DirectLightComponent::DirectLightData& d)
 {
     std::string out;
@@ -234,8 +229,7 @@ void RegisterBuiltinComponentSpecs()
     reg.Register({ .name = "Draw", .sig_type = typeid(DrawComponent),
         .add_default = AddDefaultAoS<DrawComponent>,
         .fields = {
-            // visible у ЖИВОЙ сущности меняет только EngineContext::HideEntity — прямая запись
-            // флага не поставит дельту в батчи; .Cmd и уводит правку туда.
+            // Прямая запись флага не поставит дельту в батчи, поэтому правка уходит командой.
             FieldSpec::Num("visible", Bool, AOS_NUM(DrawComponent, visible)).Cmd(CommandId::HideEntity),
             FieldSpec::Num("alpha",   F32,  AOS_NUM(DrawComponent, alpha), 0, 1, 0.01f),
             FieldSpec::Num("flags",   U32,  AOS_NUM(DrawComponent, flags)),
@@ -244,7 +238,6 @@ void RegisterBuiltinComponentSpecs()
     reg.Register({ .name = "Shadow", .sig_type = typeid(ShadowComponent),
         .add_default = AddDefaultAoS<ShadowComponent> });
 
-    // Сами номера вариантов лежат в колонке "states" компонента Material — тег их не дублирует.
     reg.Register({ .name = "TextureState", .sig_type = typeid(TextureStateComponent),
         .add_default = AddDefaultAoS<TextureStateComponent> });
 
@@ -261,7 +254,7 @@ void RegisterBuiltinComponentSpecs()
             FieldSpec::Num("m14", F32, SOA_NUM(LocalMatrices, m14)), FieldSpec::Num("m15", F32, SOA_NUM(LocalMatrices, m15)),
         } });
 
-    // В файле лежит СЫРОЙ файл-локальный id, настоящим его делает проход 2 ObjectManager::LoadScene.
+    // В файле лежит файл-локальный id, настоящим его делает проход 2 ObjectManager::LoadScene.
     reg.Register({ .name = "Parent", .sig_type = typeid(ParentComponent),
         .add_default = AddDefaultAoS<ParentComponent>,
         .fields = { FieldSpec::Num("parent", U32, AOS_NUM(ParentComponent, parent)).ReadOnly() } });
@@ -270,8 +263,8 @@ void RegisterBuiltinComponentSpecs()
     reg.Register({ .name = "ShadowCaster", .sig_type = typeid(ShadowCasterComponent),
         .add_default = AddDefaultAoS<ShadowCasterComponent> });
 
-    // У светов объявлены только входные поля: приватные кэши пересчитает сам компонент —
-    // needsUpdate=true приезжает из T{} на загрузке и из after_edit на правке в UI.
+    // Объявлены только входные поля: кэши пересчитает сам компонент по needsUpdate, который
+    // приезжает из T{} на загрузке и из after_edit на правке в UI.
     reg.Register({ .name = "SpotLight", .sig_type = typeid(SpotLightComponent),
         .add_default = AddDefaultAoS<SpotLightComponent>,
         .fields = {
@@ -319,7 +312,6 @@ void RegisterBuiltinComponentSpecs()
             FieldSpec::Num("center_z", F32, AOS_NUM(DirectLightComponent, light_data.center_z)),
             FieldSpec::Num("half_extent", F32, AOS_NUM(DirectLightComponent, light_data.half_extent), 0.01f, FLT_MAX, 0.1f),
             FieldSpec::Num("half_depth",  F32, AOS_NUM(DirectLightComponent, light_data.half_depth),  0.01f, FLT_MAX, 0.1f),
-            // Кламп числа каскадов объявлен ЕДИНОЖДЫ и работает и на загрузке, и в инспекторе.
             FieldSpec::Num("cascade_count", U32, AOS_NUM(DirectLightComponent, light_data.cascade_count),
                            1, (float)DirectLightComponent::DirectLightData::MAX_CASCADES, 1).Clamp(),
             FieldSpec::Num("cascade_ratio", F32, AOS_NUM(DirectLightComponent, light_data.cascade_ratio), 1, FLT_MAX),

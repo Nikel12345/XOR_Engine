@@ -13,4 +13,4 @@ struct LightLayout {
 	float max_range = 0;								// 60 байт
 	int padding = 0;								// 64 байт
 };
-
+

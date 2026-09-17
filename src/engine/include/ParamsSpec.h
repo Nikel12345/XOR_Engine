@@ -1,32 +1,6 @@
 ﻿#pragma once
-// Реестр ТИПОВ параметров-блоба cbuffer'а — прямое зеркало ComponentSerializer.h, но для сырых
-// байт. Тип ДЕКЛАРИРУЕТ схему полей (fields), а редактор в инспекторе и запись/чтение манифеста —
-// генерируемые интерпретаторы этой схемы: поле объявляется ОДИН РАЗ, диапазоны и дефолты не
-// расходятся между файлом и UI.
-//
-// Доменов у блоба два, и у каждого свой экземпляр реестра (см. Materials()/Passes()):
-//   Material::params          — фактор материала; тип ВЫБИРАЕТ пользователь в дропдауне;
-//   (Render|Compute)PassStep::state — состояние прохода (порог/сила bloom, номер камеры);
-//                               тип задан самим проходом.
-// Механика у них общая целиком, отличается только владелец блоба и то, кто назначает тип.
-//
-// Регистрация ОТКРЫТАЯ и полностью симметрична компонентам: движок регистрирует свои типы в
-// RegisterBuiltinMaterialParamsSpecs(), верхние слои (игра) — из своего кода одной записью,
-// НЕ ПРАВЯ НИ ОДНОГО ФАЙЛА ДВИЖКА (раньше это было невозможно: тип-тег жил закрытым enum'ом
-// MaterialParamsKind внутри движка, и его строковый round-trip — рукописным switch в Engine_Scene):
-//
-//   struct alignas(16) WaterParams { float tint[4]{0.2f,0.5f,0.9f,1}; float waveAmp = 0.1f, waveSpeed = 1, foam = 0, _pad = 0; };
-//   ParamsSpecRegistry::Materials().Register(MakeParamsSpec<WaterParams>("Water", {
-//       ParamsFieldSpec::Num(PARAMS_FIELD(WaterParams, tint),      ParamsFieldKind::Color4).Label("Tint"),
-//       ParamsFieldSpec::Num(PARAMS_FIELD(WaterParams, waveAmp),   ParamsFieldKind::F32, 0, 1),
-//       ParamsFieldSpec::Num(PARAMS_FIELD(WaterParams, waveSpeed), ParamsFieldKind::F32, 0, 4),
-//   }));
-//
-// После этого тип сам появляется в дропдауне «Type» инспектора, его поля рисует generic-рендерер
-// (ui::DrawParamsFields), а материалы с ним сохраняются/грузятся по ИМЕНАМ полей.
-//
-// Зависимостей нет намеренно: ни ImGui (рисует UI-слой), ни yyjson (пишет Engine_Scene) — чтобы
-// заголовок был подключаем из любого пользовательского кода.
+// Схема полей блоба: по ней и рисуется инспектор, и пишется манифест, поэтому поле объявляется
+// один раз. Ни ImGui, ни yyjson отсюда не видны — заголовок подключается из игрового кода.
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -39,14 +13,11 @@
 #include <SDL3/SDL_log.h>
 #include "MaterialData.h"
 
-// Потолок блоба. Он уезжает в cbuffer push-константой, и до этого потолка размер не проверял
-// никто: слишком большой тип просто обрезался бы на пуше — без ошибки и без строки в логе.
-// 128 — с запасом: самый крупный встроенный тип занимает 48 байт, состояния проходов ≤ 32.
+// Блоб уезжает в cbuffer push-константой: тип крупнее потолка обрезался бы на пуше без ошибки.
 inline constexpr size_t kMaxParamsBlob = 128;
 
-// Вид поля: сколько 4-байтовых лейнов занимает в блобе и каким виджетом рисуется.
-// Все лейны по 4 байта — как в cbuffer (bool в HLSL тоже 4 байта, на CPU держим uint32_t).
-// Angle — радианы в блобе и в файле (как F32), слайдер UI в градусах; lo/hi у него — ГРАДУСЫ.
+// Лейн — 4 байта, как в cbuffer (bool в HLSL тоже 4). Angle держит радианы и в блобе, и в файле,
+// градусы живут только в слайдере, поэтому lo/hi у него задают в ГРАДУСАХ.
 enum class ParamsFieldKind : uint8_t { F32, Angle, U32, Bool, Vec2, Vec3, Vec4, Color3, Color4 };
 
 inline uint32_t ParamsFieldLanes(ParamsFieldKind k)
@@ -59,22 +30,18 @@ inline uint32_t ParamsFieldLanes(ParamsFieldKind k)
     }
 }
 inline uint32_t ParamsFieldBytes(ParamsFieldKind k) { return 4u * ParamsFieldLanes(k); }
-inline bool     ParamsFieldIsFloat(ParamsFieldKind k) { return k != ParamsFieldKind::U32 && k != ParamsFieldKind::Bool; }
 
 struct ParamsFieldSpec {
-    const char*  key    = nullptr;   // json-ключ поля в materials.json И (при пустом label) подпись в UI
-    const char*  label  = nullptr;   // подпись в инспекторе; nullptr → key
+    const char*  key    = nullptr;   // json-ключ поля и, при пустом label, подпись в UI
+    const char*  label  = nullptr;
     ParamsFieldKind kind   = ParamsFieldKind::F32;
-    uint32_t     offset = 0;         // байтовое смещение в блобе (offsetof — см. макрос PARAMS_FIELD)
+    uint32_t     offset = 0;
 
-    // Диапазон: драг/слайдер в UI и, при clamp_on_load, жёсткий кламп на загрузке. lo==hi → не задан.
-    float lo = 0, hi = 0;
-    float speed = 0.01f;             // шаг драга в UI
+    float lo = 0, hi = 0;            // lo == hi → диапазон не задан
+    float speed = 0.01f;
     bool  clamp_on_load = false;
-    bool  ui_readonly   = false;     // видно, но не редактируется (производное/служебное поле)
+    bool  ui_readonly   = false;
 
-    // Единственная фабрика (как FieldSpec::Num у компонентов): ключ+смещение обычно дают макросом
-    //   ParamsFieldSpec::Num(PARAMS_FIELD(MyParams, metallic), ParamsFieldKind::F32, 0, 1)
     static ParamsFieldSpec Num(const char* key, uint32_t offset, ParamsFieldKind kind,
                             float lo = 0, float hi = 0, float speed = 0.01f)
     {
@@ -84,7 +51,6 @@ struct ParamsFieldSpec {
         return f;
     }
 
-    // Модификаторы-цепочки (как .Clamp()/.ReadOnly() у FieldSpec)
     ParamsFieldSpec&& Label(const char* l) && { label = l;            return std::move(*this); }
     ParamsFieldSpec&& Clamp()              && { clamp_on_load = true; return std::move(*this); }
     ParamsFieldSpec&& ReadOnly()           && { ui_readonly   = true; return std::move(*this); }
@@ -93,19 +59,16 @@ struct ParamsFieldSpec {
     uint32_t    Bytes()   const { return ParamsFieldBytes(kind); }
 };
 
-// Ключ + смещение поля одной записью: PARAMS_FIELD(OpaqueMaterialParams, metallic) → "metallic", 32
 #define PARAMS_FIELD(T, member) #member, (uint32_t)offsetof(T, member)
 
 struct ParamsSpec {
-    std::string     name;                                  // "Opaque" — ключ в materials.json И подпись в дропдауне
-    std::type_index type = std::type_index(typeid(void));  // typeid(T) — типизированный доступ (MaterialParamsAs<T>)
-    size_t          size = 0;                              // sizeof(T) — размер блоба
-    // Байты T{}: истина о дефолтах — member-инициализаторы самой структуры, а не дубль в схеме.
-    // С них стартует загрузка (недостающий в файле ключ просто остаётся дефолтным).
+    std::string     name;                                  // ключ в materials.json и подпись в дропдауне
+    std::type_index type = std::type_index(typeid(void));
+    size_t          size = 0;
+    // Байты T{}: недостающий в файле ключ остаётся дефолтным, и дефолт живёт только в структуре.
     std::vector<uint8_t>      defaults;
     std::vector<ParamsFieldSpec> fields;
-    // Escape hatch для невыразимого схемой (аналог custom_save у компонентов): если задан —
-    // инспектор зовёт его вместо generic-рендерера. Блоб тип-стёрт до void* (ImGui сюда не течёт).
+    // Задан — инспектор зовёт его вместо generic-рендерера.
     std::function<void(void* blob)> custom_edit;
 
     const ParamsFieldSpec* Field(const char* key) const {
@@ -114,23 +77,18 @@ struct ParamsSpec {
     }
 };
 
-// Реестр типов params. Ключуется ИМЕНЕМ (оно же идёт в файл) + typeid — ровно как ComponentSpecRegistry.
 class ParamsSpecRegistry {
 public:
-    // ДВА независимых экземпляра одного реестра — по домену, где блоб живёт. Общий был бы ложью
-    // о выборе: дропдаун «Type» инспектора материала перечисляет ВЕСЬ свой реестр, и тип
-    // bloom-параметров оказался бы там предложением сделать материал блумом.
-    static ParamsSpecRegistry& Materials();   // Material::params — тип выбирает пользователь
-    static ParamsSpecRegistry& Passes();      // (Render|Compute)PassStep::state — тип задан проходом
+    // Два независимых экземпляра: дропдаун «Type» инспектора перечисляет ВЕСЬ свой реестр, и общий
+    // предлагал бы сделать материал параметрами блума.
+    static ParamsSpecRegistry& Materials();
+    static ParamsSpecRegistry& Passes();
 
-    // Идемпотентно по имени (повторная регистрация игнорируется — как у компонентов).
-    // Поля, вылезающие за sizeof(T), отбрасываются с ошибкой в лог: схема врёт про раскладку.
+    // Идемпотентно по имени.
     void Register(ParamsSpec s);
 
-    const ParamsSpec* ByName(const std::string& name) const;   // загрузка/сохранение/UI
-    const ParamsSpec* ByType(std::type_index t) const;         // типизированный доступ
-    // Все типы в порядке регистрации — дропдаун «Type» в инспекторе материала.
-    // Реестру проходов не нужен: тип состояния задан самим проходом и не выбирается.
+    const ParamsSpec* ByName(const std::string& name) const;
+    const ParamsSpec* ByType(std::type_index t) const;
     const std::vector<ParamsSpec>& All() const { return specs_; }
 
 private:
@@ -139,7 +97,6 @@ private:
     std::unordered_map<std::type_index, size_t> by_type_;
 };
 
-// Спека из типа: kind/size/defaults выводятся из T, руками пишется только имя и схема полей.
 template<class T>
 ParamsSpec MakeParamsSpec(std::string name, std::vector<ParamsFieldSpec> fields)
 {
@@ -157,11 +114,11 @@ ParamsSpec MakeParamsSpec(std::string name, std::vector<ParamsFieldSpec> fields)
     return s;
 }
 
-// Имя зарегистрированного типа по typeid; "" + ошибка в лог, если тип не регистрировали
-// (тогда блоб уедет в рендер, но UI не сможет его разобрать, а SaveScene — сохранить).
+// Незарегистрированный тип даёт "" и ошибку в лог: блоб уедет в рендер, но UI его не разберёт,
+// а SaveScene не сохранит.
 const std::string& MaterialParamsTypeName(std::type_index t);
 
-// Указатель на поле в блобе; nullptr, если поле не влезает (рассинхрон схемы и блоба).
+// nullptr, если поле не влезает в блоб — схема разошлась с раскладкой.
 inline void* ParamsFieldPtr(std::vector<uint8_t>& blob, const ParamsFieldSpec& f)
 {
     return (f.offset + f.Bytes() <= blob.size()) ? static_cast<void*>(blob.data() + f.offset) : nullptr;
@@ -171,55 +128,23 @@ inline const void* ParamsFieldPtr(const std::vector<uint8_t>& blob, const Params
     return (f.offset + f.Bytes() <= blob.size()) ? static_cast<const void*>(blob.data() + f.offset) : nullptr;
 }
 
-// Запись блоба в ячейку sp: адресат — ИМЕННО эта sp материала, а не «материал вообще».
-// Нет такой sp у материала → блобу некому ехать, поэтому это ошибка, а не тихий no-op.
-// Не шаблон, чтобы заголовок не тянул SDL ради одного лога.
+// Адресат — именно эта sp материала: нет её у материала, значит блобу некому ехать, и это ошибка.
 void SetMaterialParamsBlob(Material* m, ShaderProgramId sp_id, const std::string& sp_name,
                            const void* data, size_t size, const std::string& type_name);
 
-// Тип-безопасная упаковка per-sp факторов (T = раскладка cbuffer MaterialBlock этой sp).
-// Имя типа берётся из реестра — тег и блоб не могут разойтись.
-// Мутация байт на месте НЕ трогает адрес блоба → ключ texture-батча цел (правка без ребилда).
+// T обязан совпадать с раскладкой cbuffer MaterialBlock этой sp.
 template<class T>
 void SetMaterialParams(Material* m, ShaderProgramId sp_id, const std::string& sp_name, const T& p)
 {
     SetMaterialParamsBlob(m, sp_id, sp_name, &p, sizeof(T), MaterialParamsTypeName(std::type_index(typeid(T))));
 }
 
-// Типизированное чтение блоба sp: nullptr, если sp нет у материала, тип другой/не зарегистрирован
-// или блоб короче.
-template<class T>
-const T* MaterialParamsAs(const Material& m, const ShaderName& sp_name)
-{
-    const SpBinding* b = m.FindBinding(sp_name);
-    if (!b || !b->params) return nullptr;
-    const ParamsSpec* s = ParamsSpecRegistry::Materials().ByType(std::type_index(typeid(T)));
-    if (!s || s->name != b->params_type || b->params->size() < sizeof(T)) return nullptr;
-    return reinterpret_cast<const T*>(b->params->data());
-}
-template<class T>
-T* MaterialParamsAs(Material& m, const ShaderName& sp_name)
-{
-    return const_cast<T*>(MaterialParamsAs<T>(static_cast<const Material&>(m), sp_name));
-}
-
-// Поставить ячейке дефолтный блоб типа (смена типа в дропдауне инспектора).
 void ApplyMaterialParamsSpec(SpBinding* b, const ParamsSpec& s);
-// Снять params вовсе (пункт «(none)» — sp без MaterialBlock в шейдере).
 void ClearMaterialParams(SpBinding* b);
 
-// ── Состояние прохода ((Render|Compute)PassStep::state) ──
-// Второй домен блоба. То, что раньше было ЛОКАЛЬНОЙ структурой в теле прохода: часть полей
-// тело переписывает каждый кадр (номер камеры, размеры раскладки), часть правит редактор и они
-// просто лежат. В СХЕМУ идут только вторые — объявленное поле тем самым и редактируется, и (когда
-// появится персистентность) сохраняется, а покадровому мусору не место ни там, ни там. Поэтому
-// «скрытых» полей у схемы нет: не объявил — значит это не настройка.
-// P шаблонный намеренно: заголовок не тянет RenderCommandData.h (и ничего движкового), а от шага
-// нужна ровно пара полей state/state_type — та же по форме, что params/params_type у Material.
-// Без имени схемы — состояние есть, но редактировать в нём НЕЧЕГО: все поля тело переписывает
-// каждый кадр (номер камеры, размеры раскладки). Блоб тогда чистое хранилище, инспектор честно
-// говорит, что крутить нечего. Схему заводят ровно тогда, когда в блобе появилось хоть одно поле,
-// которое тело НЕ переписывает.
+// Состояние прохода — второй домен блоба. В схему идут только поля, которые тело прохода НЕ
+// переписывает каждым кадром: объявленное поле тем самым и редактируется, и сохраняется.
+// Форма без имени схемы — для состояния, где редактировать нечего.
 template<class P, class T>
 void SetPassState(P* step, const T& v)
 {
@@ -249,7 +174,5 @@ void SetPassState(P* step, const std::string& spec_name, const T& v)
     step->state_type = spec_name;
 }
 
-// Регистрирует встроенные (движковые) типы params: Opaque, Transparent. Идемпотентна —
-// повторный вызов ничего не дублирует. Звать один раз на старте движка (Engine::Init),
-// рядом с RegisterBuiltinComponentSpecs().
+// Идемпотентна. Звать один раз на старте движка, рядом с RegisterBuiltinComponentSpecs().
 void RegisterBuiltinMaterialParamsSpecs();
