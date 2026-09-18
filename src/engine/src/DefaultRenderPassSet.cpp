@@ -43,22 +43,13 @@ namespace DefaultRenderPassNamespace
         return safe_f_u32(f);
     }
 
-    // Размер сценовых таргетов: окно, взятое с частотой сэмплирования сцены.
-    static void RenderTargetSize(uint32_t out_w, uint32_t out_h, uint32_t& w, uint32_t& h)
+    // Размер экранного таргета: окно, взятое с его СОБСТВЕННЫМ множителем. База у всех одна и та
+    // же — окно; множитель одного таргета в размер другого не входит, иначе ползунок эффекта начнёт
+    // означать разное в зависимости от чужой настройки.
+    static void ScreenTargetSize(uint32_t out_w, uint32_t out_h, float scale, uint32_t& w, uint32_t& h)
     {
-        w = ScaleDim(out_w, g_pass_system.render_scale);
-        h = ScaleDim(out_h, g_pass_system.render_scale);
-    }
-
-    // Размер таргета экранного эффекта: его доля от min(сцена, окно). Минимум — ПОЛИТИКА набора:
-    // render_scale поднимает частоту сэмплирования геометрии, а низкочастотному эффекту лишние
-    // сэмплы не нужны; вниз же зажимать обязательно — выше сцены информации просто нет.
-    static void EffectTargetSize(uint32_t out_w, uint32_t out_h, float scale, uint32_t& w, uint32_t& h)
-    {
-        uint32_t rw = 0, rh = 0;
-        RenderTargetSize(out_w, out_h, rw, rh);
-        w = ScaleDim(std::min(rw, out_w), scale);
-        h = ScaleDim(std::min(rh, out_h), scale);
+        w = ScaleDim(out_w, scale);
+        h = ScaleDim(out_h, scale);
     }
 
     bool shadow_pass_inited = false;
@@ -201,7 +192,7 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx)
     uint32_t out_w = 0, out_h = 0;
     OutputSize(ctx, out_w, out_h);
     uint32_t width = 0, height = 0;
-    RenderTargetSize(out_w, out_h, width, height);
+    ScreenTargetSize(out_w, out_h, g_pass_system.render_scale, width, height);
 
     auto depth_tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
     depth_tci.width = width;
@@ -232,25 +223,25 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx)
     tm->CreateResizeInstruction("scene_hdr",
         [a = g_pass_system.scene_hdr, ctx](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  RenderTargetSize(w, h, rw, rh);
+            uint32_t rw, rh;  ScreenTargetSize(w, h, g_pass_system.render_scale, rw, rh);
             t.RecreateAtlasTexture(a, TexturePresets::SceneHDR(rw, rh));
         });
     tm->CreateResizeInstruction("scene_emission",
         [a = g_pass_system.scene_emission, ctx](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  RenderTargetSize(w, h, rw, rh);
+            uint32_t rw, rh;  ScreenTargetSize(w, h, g_pass_system.render_scale, rw, rh);
             t.RecreateAtlasTexture(a, TexturePresets::EmissionHDR(rw, rh));
         });
     tm->CreateResizeInstruction(SCENE_AMBIENT,
         [a = g_pass_system.scene_ambient, ctx](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  RenderTargetSize(w, h, rw, rh);
+            uint32_t rw, rh;  ScreenTargetSize(w, h, g_pass_system.render_scale, rw, rh);
             t.RecreateAtlasTexture(a, TexturePresets::AmbientHDR(rw, rh));
         });
     tm->CreateResizeInstruction("main_depth",
         [a = g_pass_system.main_depth, ctx](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  RenderTargetSize(w, h, rw, rh);
+            uint32_t rw, rh;  ScreenTargetSize(w, h, g_pass_system.render_scale, rw, rh);
             auto tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
             tci.width = rw;  tci.height = rh;               // геометрия из пресета; usage сохранит RecreateAtlasTexture
             t.RecreateAtlasTexture(a, tci);
@@ -525,12 +516,12 @@ void DefaultRenderPassNamespace::SetPresentPass(EngineContext* ctx)
 }
 
 // Размер уровня i пирамиды. Отдельной функцией, потому что вывод нужен и при создании, и в замыкании
-// ресайза. Уровень 0 = доля эффект-домена, дальше вдвое меньше на уровень.
+// ресайза. Уровень 0 = своя доля окна, дальше вдвое меньше на уровень.
 namespace DefaultRenderPassNamespace {
 static void BloomLevelSize(uint32_t out_w, uint32_t out_h, float scale,
                            uint32_t level, uint32_t& w, uint32_t& h)
 {
-    EffectTargetSize(out_w, out_h, scale, w, h);
+    ScreenTargetSize(out_w, out_h, scale, w, h);
     w >>= level;  if (w == 0) w = 1;
     h >>= level;  if (h == 0) h = 1;
 }
@@ -638,24 +629,22 @@ void DefaultRenderPassNamespace::SetDefaultAOPass(EngineContext* ctx)
     // Карта AO и её ping-pong-двойник. Пара, а не одна текстура: блюр разделимый, а сэмплить и писать
     // одну текстуру в одном диспатче нельзя. R32_FLOAT, хотя по точности хватило бы R8: одноканальные
     // 8- и 16-битные форматы не входят в обязательный набор storage-образов Vulkan, а R32_FLOAT входит.
-    // Домен ЭФФЕКТНЫЙ, а не render: карта низкочастотная, композит читает её сэмплером по UV
-    // (ao_composite), поэтому суперсэмплить её незачем — при render выше окна это была бы работа
-    // вчетверо без единого лишнего различимого пикселя. Доля — настройка прохода, см. блум.
-    // Сэмплер LINEAR: композит читает карту с её разрешения на полном, и билинейный апскейл идёт
-    // даром — отдельного шага увеличения не нужно.
+    // Половина окна по умолчанию, и это про частоты, а не про экономию: карта низкочастотная, а
+    // композит читает её сэмплером по UV, поэтому лишние тексели в ней не превращаются в различимые
+    // пиксели. Сэмплер LINEAR: билинейный апскейл при этом идёт даром, отдельного шага не нужно.
     TextureManager* tm = ctx->GetTextureManager();
     SDL_GPUSampler* env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
     uint32_t out_w = 0, out_h = 0;
     OutputSize(ctx, out_w, out_h);
     uint32_t sw = 0, sh = 0;
-    EffectTargetSize(out_w, out_h, PassStateAs<AOState>(ao)->resolution_scale, sw, sh);
+    ScreenTargetSize(out_w, out_h, PassStateAs<AOState>(ao)->resolution_scale, sw, sh);
     for (const std::string& name : { SSAO_TEXTURE, SSAO_TEMP }) {
         TextureAtlas* a = tm->CreateTextureAtlas(name, TexturePresets::AmbientOcclusion(sw, sh), env_sampler,
             ResourceTag::Default | ResourceTag::System);
         tm->CreateResizeInstruction(name, [a, ao, ctx](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
             uint32_t aw, ah;
-            EffectTargetSize(w, h, PassStateAs<AOState>(ao)->resolution_scale, aw, ah);
+            ScreenTargetSize(w, h, PassStateAs<AOState>(ao)->resolution_scale, aw, ah);
             t.RecreateAtlasTexture(a, TexturePresets::AmbientOcclusion(aw, ah));
         });
     }
