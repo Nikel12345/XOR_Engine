@@ -2,8 +2,8 @@
 
 class GpuContext;
 
-// Регистрация буферов физики (PHYS_TRANSFORM / PHYS_VELOCITY / PHYS_COLLIDERS / PHYS_CONTACTS)
-// и их update/readback-инструкций — через GPU-фасад. Каркас: пока пусто.
+// ЗАГОТОВКА: тело пустое, Create не зовёт ни одна игра. Это шов, через который физика
+// получит GPU, не линкуя Engine, — а не мёртвый код.
 namespace PhysicsBufferSet {
 	void Create(GpuContext* gpu);
 }

@@ -8,13 +8,10 @@ std::vector<DebugShape> CollectDebugShapes(ObjectManager& om, SceneData* scene,
 	const ColliderQuery::ModelColliders& colliders_of) {
 	std::vector<DebugShape> out;
 
-	// Лёгкое раздутие рамки (на 3%), чтобы рёбра выходили чуть наружу поверхности и не
-	// прятались за геометрией при depth-тесте. Центр формы не меняется.
+	// Рамка чуть больше формы, иначе её рёбра прячутся за геометрией на depth-тесте.
 	constexpr float kInflate = 1.01f;
 
-	// Локальная матрица формы: column-major glm. Единичная модель ([-1..1] / r=1)
-	// масштабируется полу-размером и сдвигается на offset — всё в пространстве модели
-	// владельца. Поворот/масштаб самого энтити добавит движок через иерархию.
+	// Поворот и масштаб самого энтити добавит движок через иерархию — здесь только форма.
 	auto emit = [&](Entity owner, ShapeKind kind, glm::vec3 half, glm::vec3 offset) {
 		half *= kInflate;
 		DebugShape d{};
@@ -28,8 +25,7 @@ std::vector<DebugShape> CollectDebugShapes(ObjectManager& om, SceneData* scene,
 		out.push_back(d);
 	};
 
-	// Те же активные коллайдеры, что видит детекция (явные + авто по сабмешам), но
-	// рисуем их ЛОКАЛЬНЫЕ формы — трансформ владельца (P/i) не нужен, его добавит движок.
+	// Формы берём ЛОКАЛЬНЫЕ, поэтому трансформ владельца не называем.
 	ColliderQuery::ForEachActiveCollider(om, scene, colliders_of,
 		[&](Entity e, const std::vector<Collider>& shapes, const Positions&, std::size_t) {
 			for (const Collider& c : shapes) {

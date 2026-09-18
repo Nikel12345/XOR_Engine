@@ -16,7 +16,6 @@ struct EntityColliders {
 
 std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene,
 	const ColliderQuery::ModelColliders& colliders_of) {
-	// Собираем мировые формы всех активных коллайдеров сцены (явные + авто по сабмешам).
 	std::vector<EntityColliders> ents;
 	ColliderQuery::ForEachActiveCollider(om, scene, colliders_of,
 		[&](Entity e, const std::vector<Collider>& shapes, const Positions& P, std::size_t i) {

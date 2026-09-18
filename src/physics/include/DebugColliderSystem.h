@@ -2,28 +2,23 @@
 #include <vector>
 #include <cstdint>
 #include "Colliders.h"
-#include "ColliderQuery.h"   // ColliderQuery::ModelColliders в сигнатуре
+#include "ColliderQuery.h"
 
 class ObjectManager;
 struct SceneData;
 
-// Система отладочной визуализации коллайдеров. Отдаёт ЛОКАЛЬНЫЕ (в пространстве
-// модели владельца) матрицы форм — мир считает движок: debug-энтити становится
-// ребёнком owner с этой локальной матрицей, а TransformDataModule::UpdateLocalTransforms
-// даёт world = matrix(owner) × local. Это дебаг физической сущности (коллайдера),
-// потому живёт в либе Physics, а не в рендере.
+// Матрицы ЛОКАЛЬНЫЕ, мир считает движок: debug-энтити становится ребёнком owner, и
+// TransformDataModule::UpdateLocalTransforms даёт world = matrix(owner) x local.
 namespace DebugColliderSystem {
 	using Entity = uint32_t;
 
-	// local[16] — column-major матрица glm, кладущая единичную модель
-	// (куб [-1..1] для Box, сфера r=1 для Sphere) на форму.
+	// local[16] — column-major glm, кладущая ЕДИНИЧНУЮ модель (куб [-1..1] / сфера r=1) на форму.
 	struct DebugShape {
 		Entity    owner;
 		ShapeKind kind;
 		float     local[16];
 	};
 
-	// colliders_of — авто-формы модели (см. ColliderQuery::ModelColliders): нужны fallback-проходу.
 	std::vector<DebugShape> CollectDebugShapes(ObjectManager& om, SceneData* scene,
 		const ColliderQuery::ModelColliders& colliders_of);
 }

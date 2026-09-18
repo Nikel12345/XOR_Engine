@@ -5,7 +5,6 @@
 
 namespace Collision {
 
-// Переводит формы коллайдера из локального пространства в мир матрицей Positions[i].
 // Базис = столбцы матрицы (row-major): col_k; трансляция = (w,d,h).
 void BuildWorldShapes(const Positions& P, std::size_t i,
 	const std::vector<Collider>& shapes, std::vector<WorldShape>& out)
@@ -35,7 +34,6 @@ void BuildWorldShapes(const Positions& P, std::size_t i,
 	}
 }
 
-// Объемлющая сфера набора форм (broad-phase энтити).
 void ComputeBound(const std::vector<WorldShape>& shapes, glm::vec3& c, float& r) {
 	c = glm::vec3(0.0f); r = 0.0f;
 	if (shapes.empty()) return;
@@ -79,7 +77,6 @@ static bool BoxBox(const WorldShape& A, const WorldShape& B) {
 	return true;
 }
 
-// Диспетчер: факт пересечения двух форм. pen — глубина только для sphere-sphere.
 bool Overlap(const WorldShape& a, const WorldShape& b, float& pen) {
 	pen = 0.0f;
 	if (a.kind == ShapeKind::Sphere && b.kind == ShapeKind::Sphere) {

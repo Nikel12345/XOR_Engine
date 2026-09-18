@@ -3,20 +3,18 @@
 #include <cstdint>
 #include <glm/glm.hpp>
 
-//  Компоненты коллайдеров — ЧИСТЫЕ ДАННЫЕ, без логики.
-//  Этот заголовок включают и системы физики (ContactSystem,
-//  DebugColliderSystem), и игра, когда вешает коллайдеры на энтити.
-//  Поэтому здесь нет ни ObjectManager, ни математики — только структуры.
+// Заголовок включает и игра (вешает коллайдеры на энтити) — поэтому тут только структуры,
+// без ObjectManager и без математики.
 
-// Форма коллайдера. Задаётся в ЛОКАЛЬНОМ пространстве модели и переводится в мир
-// матрицей энтити (Positions): позиция, поворот и масштаб. Бокс становится OBB.
+// Формы задаются в ЛОКАЛЬНОМ пространстве модели, в мир их переводит матрица энтити
+// (Positions) — с поворотом и масштабом, поэтому бокс становится OBB.
 enum class ShapeKind : uint8_t { Sphere, Box };
 
 struct Collider {
 	ShapeKind kind   = ShapeKind::Sphere;
-	glm::vec3 offset = glm::vec3(0.0f);   // локальный центр формы
-	float     radius = 0.5f;              // Sphere: радиус (×макс. масштаб энтити)
-	glm::vec3 half   = glm::vec3(0.5f);   // Box: локальные полу-размеры (×масштаб по осям)
+	glm::vec3 offset = glm::vec3(0.0f);
+	float     radius = 0.5f;              // Sphere: множится на МАКСИМАЛЬНЫЙ масштаб энтити
+	glm::vec3 half   = glm::vec3(0.5f);   // Box: множится на масштаб ПО ОСЯМ
 
 	static Collider Sphere(float r, glm::vec3 off = glm::vec3(0.0f)) {
 		return { ShapeKind::Sphere, off, r, glm::vec3(0.0f) };
@@ -26,12 +24,11 @@ struct Collider {
 	}
 };
 
-// Составной коллайдер: несколько форм на энтити. Пустой список => fallback на
-// объемлющую сферу модели (ModelComponent).
+// Пустой список => fallback: авто-боксы по сабмешам модели (ColliderQuery, проход 2).
 struct ColliderComponent {
 	std::vector<Collider> shapes;
 };
 
-// Тег визуализации: энтити рисует рамку коллайдера и НЕ участвует в детекции
-// контактов (иначе его debug-модель попала бы в fallback как авто-коллайдер).
+// Рисует рамку и НЕ участвует в детекции: иначе его debug-модель попала бы в fallback
+// как авто-коллайдер.
 struct DebugColliderTag {};

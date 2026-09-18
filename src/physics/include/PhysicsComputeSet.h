@@ -2,8 +2,7 @@
 
 class GpuContext;
 
-// Регистрация compute-программ физики (integrate / broad-phase / narrow-phase).
-// Берёт узкий GPU-фасад GpuContext — без EngineContext и рендера.
+// ЗАГОТОВКА, как PhysicsBufferSet: compute-программы физики.
 namespace PhysicsComputeSet {
 	void Create(GpuContext* gpu);
 }
