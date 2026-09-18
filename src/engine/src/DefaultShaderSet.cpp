@@ -380,7 +380,7 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
     const char* programs[] = { "ssao", "ssao_blur_h", "ssao_blur_v", "ao_composite" };
     for (const char* name : programs) {
         sm->CreateComputePushInstruction<AOState>(name, [](const PushConstantBinder& b, AOState st) {
-            b.Push(st);
+            b.Push(AOParams{ st.radius, st.intensity, st.power, st.bias });
         });
     }
 

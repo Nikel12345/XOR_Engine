@@ -13,7 +13,6 @@
 #include "SlotController.h"
 #include "ThreadController.h"
 #include "MaterialManager.h"
-#include "ModelManager.h"
 #include "InputManager.h"
 #include "FontManager.h"
 #include "TextureLoader.h"
@@ -34,8 +33,6 @@
 #include "DefaultResourceSet.h"
 #include "ComponentSerializer.h"
 #include "BaseComponents.h"
-#include "MaterialManager.h"
-#include "ModelManager.h"
 #include "ParamsSpec.h"
 #include "PositionStructure.h"
 #include "DefaultCommandSet.h"
@@ -216,7 +213,6 @@ Engine::Engine(const EngineConfig& cfg)
 	if (!InitPlatform(cfg)) return;
 	graphics_config = new GraphicsConfig{ cfg.graphics };
 	size_state.window_size.store(EngineSizeState::Pack(cfg.width, cfg.height), std::memory_order_relaxed);
-	applied_inputs = TargetSizeInputs{ *graphics_config, cfg.width, cfg.height };
 	transfer_manager = new TransferManager(dev);
 	queue_manager = new QueueManager(dev);
 	buffer_manager = new BufferManager(dev, transfer_manager);
@@ -305,8 +301,12 @@ void Engine::InitPasses()
 {
 	using namespace DefaultRenderPassNamespace;
 
+	// Свопчейна ещё нет, а экранные таргеты выводят размер из его атласа — засев обязан лечь ДО
+	// первого Set*Pass, иначе они создадутся 1x1 и молча починятся только первым кадром. Настоящий
+	// размер придёт с первым AcquireSwapchainTexture и, если разошёлся (HiDPI), пересоздаст их сам.
+	pass_manager->SetSwapchain(nullptr, safe_f_u32(GetWindowWidth()), safe_f_u32(GetWindowHeight()));
 	{
-		_SetDefaultCommonResources(engine_context, safe_f_u32(GetWindowWidth()), safe_f_u32(GetWindowHeight()));
+		_SetDefaultCommonResources(engine_context);
 		SetDefaultCullingPass(engine_context);
 		SetDefaultShadowPCFRenderPass(engine_context, light_data_module);
 		SetDefaultMainRenderPass(engine_context, light_data_module);

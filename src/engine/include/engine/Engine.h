@@ -53,16 +53,6 @@ struct EngineSizeState {
     float WindowH() const { return static_cast<float>(H(window_size.load(std::memory_order_relaxed))); }
 };
 
-// Входы, от которых зависят размеры экранных таргетов. Сравнивается СНИМОК целиком, а не счётчик
-// ревизий: ревизия делает ошибку липкой — совпала, и повода пересчитать больше нет, даже если
-// применено было не то. Сравнение сгенерированное, не memcmp: тот прочитал бы и байты выравнивания.
-struct TargetSizeInputs {
-    GraphicsConfig cfg{};
-    uint32_t out_w = 0;   // размер НАЗНАЧЕНИЯ (свопчейн); сейчас это окно, у вида редактора будет панель
-    uint32_t out_h = 0;
-    bool operator==(const TargetSizeInputs&) const = default;
-};
-
 struct EngineConfig {
     const char* title = "SDL_Engine";
     uint32_t width = 800;
@@ -165,7 +155,6 @@ private:
     }
 
     GraphicsConfig* graphics_config = nullptr;
-    TargetSizeInputs applied_inputs{};
 
     // Рендер-поток стоит на всю загрузку сцены: компромисс «редактор читает живой ECS без замков»
     std::mutex scene_swap_mutex;

@@ -290,15 +290,12 @@ bool Engine::RenderFunc(uint8_t slot)
 		return false;
 	}
 
-	// Размер назначения берём из свопчейна: в него и бьёт present-блит.
-	const TargetSizeInputs want{ *graphics_config, w, h };
-	if (want != applied_inputs) {
-		applied_inputs = want;
-		texture_manager->ExecuteResizeInstructions(w, h);
-	}
-	texture_manager->TrashTextures(slot_controller->RenderFencesDone());
-
+	// Свопчейн ставим ДО ресайза: его атлас и есть размер назначения, из которого экранные таргеты
+	// выводят свой (в свопчейн бьёт present-блит). Инструкции зовутся безусловно каждый кадр —
+	// пересоздание гейтит сам таргет, сравнивая с применённым (TextureManager::RecreateAtlasTexture).
 	pass_manager->SetSwapchain(tex, w, h);
+	texture_manager->ExecuteResizeInstructions();
+	texture_manager->TrashTextures(slot_controller->RenderFencesDone());
 	pass_manager->SetRenderFrame(slot, batch_builder->AskLayout(slot));
 	pass_manager->ResolveAllTextureTargets();
 	{

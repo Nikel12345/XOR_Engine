@@ -11,8 +11,6 @@ int main() {
 
     cfg.graphics.render_scale = 1.0f;   // SSAA
     cfg.graphics.global_scale = 1.0f;   // общий сброс качества по ВСЕМ таргетам
-    cfg.graphics.ssao_scale   = 0.5f;
-    cfg.graphics.bloom_scale  = 0.5f;
 
     Engine engine(cfg);
     if (!engine.IsValid()) return 1;

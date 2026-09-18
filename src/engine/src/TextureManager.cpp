@@ -245,11 +245,10 @@ void TextureManager::CreateResizeInstruction(const std::string& texture_name, Te
     resize_instructions_[texture_name] = std::move(fn); 
 }
 
-void TextureManager::ExecuteResizeInstructions(uint32_t w, uint32_t h)
+void TextureManager::ExecuteResizeInstructions()
 {
-    if (w == 0 || h == 0) return;
     for (auto& [name, fn] : resize_instructions_)
-        if (fn) fn(*this, w, h);
+        if (fn) fn(*this);
 }
 
 void TextureManager::RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci)
@@ -257,6 +256,17 @@ void TextureManager::RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCre
     if (!atlas) return;
 
     tci.usage = atlas->tci.usage;
+    // Сравнение с ФАКТОМ, а не со снимком входов: правило вывода размера у каждого таргета своё и
+    // живёт в его инструкции, поэтому единственный способ узнать, надо ли пересоздавать, — спросить
+    // сам атлас. Инструкции от этого можно звать каждый кадр безусловно, и расхождение выведенного
+    // размера с применённым самоисправляется, а не превращается в пересоздание на каждом кадре.
+    if (atlas->tci.format == tci.format && atlas->width == tci.width && atlas->height == tci.height
+        && atlas->tci.layer_count_or_depth == tci.layer_count_or_depth
+        && atlas->tci.num_levels == tci.num_levels
+        && atlas->tci.sample_count == tci.sample_count
+        && atlas->tci.type == tci.type)
+        return;
+
     SDL_GPUTexture* old_tex = atlas->texture_binding.texture;
     atlas->texture_binding.texture = CreateGPU_Texture(tci);
     atlas->tci    = tci;

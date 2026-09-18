@@ -72,7 +72,7 @@ void main(uint3 tid : SV_DispatchThreadID)
     // регулярные полосы. Поэтому адресуем ЯВНО центр верхне-левого текселя накрываемого блока.
     //
     // Отношение СЧИТАЕТСЯ, а не берётся равным двум: разрешения AO и глубины задаются независимо
-    // (GraphicsConfig — ssao_scale против render_scale), и при render выше окна блок глубины на
+    // (AOState::resolution_scale против GraphicsConfig::render_scale), и при render выше окна блок на
     // тексель AO становится 4x4, а не 2x2. Захардкоженная двойка адресовала бы тогда левую верхнюю
     // четверть кадра, растянутую на весь экран.
     uint dw, dh; u_depth.GetDimensions(dw, dh);

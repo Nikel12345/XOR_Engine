@@ -118,9 +118,11 @@ public:
 	void QueueDeleteTexture(SDL_GPUTexture* texture);
 	void TrashTextures(uint64_t fences_done);
 
-	using TextureResizeFunc = std::function<void(TextureManager&, uint32_t new_width, uint32_t new_height)>;
+	// Размер назначения инструкция достаёт сама (атлас свопчейна у PassManager): правило вывода у
+	// каждого таргета своё, и параметром сюда пришлось бы передавать то, что замыкание уже держит.
+	using TextureResizeFunc = std::function<void(TextureManager&)>;
 	void CreateResizeInstruction(const std::string& texture_name, TextureResizeFunc fn);
-	void ExecuteResizeInstructions(uint32_t new_width, uint32_t new_height);
+	void ExecuteResizeInstructions();
 
 	void RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci);
 

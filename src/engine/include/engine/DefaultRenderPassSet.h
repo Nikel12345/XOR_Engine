@@ -56,10 +56,9 @@ namespace DefaultRenderPassNamespace
     void SetDefaultShadowBlurPass(EngineContext* ctx);
 
     // PassSystem: общие ресурсы дефолтного набора проходов (разделяемый depth-таргет, его формат).
-    // Должна вызываться ПЕРЕД Set*Pass, которые их потребляют (main/transparent/debug).
-    // (out_w,out_h) — размер НАЗНАЧЕНИЯ (окно/свопчейн). Внутреннее разрешение и разрешения эффектов
-    // выводятся отсюда и из GraphicsConfig — теми же функциями, что и в инструкциях ресайза.
-    void _SetDefaultCommonResources(EngineContext* ctx, uint32_t out_w, uint32_t out_h);
+    // Должна вызываться ПЕРЕД Set*Pass, которые их потребляют (main/transparent/debug). Таргеты
+    // ЭФФЕКТОВ создаёт не она, а сам эффект: их разрешение — его настройка (см. BloomState::resolution_scale).
+    void _SetDefaultCommonResources(EngineContext* ctx);
 
     // ldm — источник счётчика источников света слота (AskNumLights): проход кладёт его в своё
     // состояние, откуда push-функции программ забирают его в b0 (см. LightCountPushData).
@@ -82,9 +81,8 @@ namespace DefaultRenderPassNamespace
     // Регистрируется последним (приоритет 30). Тонмаппинг появится на этапе bloom-composite.
     void SetPresentPass(EngineContext* ctx);
 
-    // Ресайз экранных таргетов (scene_hdr/emission/bloom/depth) вынесен в ИНСТРУКЦИИ ресайза
-    // TextureManager (зарегистрированы в _SetDefaultCommonResources), исполняемые render-потоком
-    // через tm->ExecuteResizeInstructions — отдельной функции здесь больше нет.
+    // Ресайза отдельной функцией здесь нет и не должно быть: правило вывода размера у каждого
+    // экранного таргета своё и живёт в ИНСТРУКЦИИ ресайза TextureManager рядом с его созданием.
 
     // Push-константы bloom-программ (один layout на все: down/up/composite). Раскладка совпадает с
     // cbuffer BloomParams в шейдерах comp/bloom_*.comp.hlsl.
@@ -122,6 +120,14 @@ namespace DefaultRenderPassNamespace
         // остальных уровнях обычно не нужен — но ветка в bloom_down есть, и теперь достижима.
         uint32_t karis_prefilter = 1;      // 1 — как было (в шейдере он был зашит безусловно)
         uint32_t karis_down = 0;           // 0 — как было (флаг всегда пушился нулём)
+        // Доля эффект-домена у уровня 0 пирамиды (дальше /2 на уровень). Живёт ЗДЕСЬ, а не в
+        // GraphicsConfig: набор проходов открыт, и доля есть только у эффекта, который в набор вошёл.
+        // Опускать ниже 0.5 можно, но с оговоркой. Футпринт ядра bloom_prefilter отношение сокращения
+        // отслеживает (шаг взят в текселях приёмника), так что кадр не «съезжает». Но тапов остаётся
+        // 13 при любом отношении: на 2:1 они накрывают свой блок с запасом, на 4:1 уже с прорехами.
+        // Заметно это будет на том же, на чём всегда, — на мелком ярком. Полноценный ответ — не число
+        // здесь, а двухступенчатое сокращение (полный -> половина -> четверть).
+        float resolution_scale = 0.5f;
     };
     // Имя схемы BloomState в ParamsSpecRegistry::Passes() (регистрирует SetDefaultBloomPass).
     inline const std::string BLOOM_STATE = "BloomState";
@@ -136,6 +142,15 @@ namespace DefaultRenderPassNamespace
     //
     // Состояние прохода = его настройки (радиус/сила/контраст/bias), одно на все четыре программы:
     // они делят один cbuffer AOParams. intensity = 0 выключает эффект целиком, не убирая проход.
+    // Push-константы программ AO. Раскладка совпадает с cbuffer AOParams в comp/ssao*.comp.hlsl —
+    // и отделена от AOState ровно поэтому: в настройки эффекта можно добавить поле, не трогая шейдер.
+    struct alignas(16) AOParams {
+        float radius    = 0.0f;
+        float intensity = 0.0f;
+        float power     = 0.0f;
+        float bias      = 0.0f;
+    };
+
     struct alignas(16) AOState {
         float radius    = 0.5f;    // радиус полусферы в МИРОВЫХ единицах
         float intensity = 1.0f;    // сила затенения; 0 — выключено
@@ -144,6 +159,10 @@ namespace DefaultRenderPassNamespace
         // нормали и квантование буфера глубины растут с дистанцией так же, поэтому абсолютный
         // порог пришлось бы перекручивать под каждый ракурс. Без него плоскость затеняет себя.
         float bias      = 0.01f;
+        // Доля эффект-домена у карты AO — там же, где у блума, и по той же причине. Ограничения
+        // снизу, в отличие от блума, нет вовсе: SSAO не сокращает изображение, а считает своё
+        // значение с нуля, сэмплируя глубину в МИРОВОМ радиусе.
+        float resolution_scale = 0.5f;
     };
     inline const std::string AO_STATE = "AOState";
 
