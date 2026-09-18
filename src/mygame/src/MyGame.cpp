@@ -32,8 +32,8 @@ MyGame::MyGame(Engine* engine)
     threadController = engine->GetThreadController();
     input            = engine->GetInputManager();
 
-    width  = engine->GetWidth();
-    height = engine->GetHeight();
+    width  = engine->GetWindowWidth();
+    height = engine->GetWindowHeight();
 
     ctx = engine->GetEngineContext();
 }

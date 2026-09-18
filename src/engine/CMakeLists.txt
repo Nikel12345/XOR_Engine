@@ -277,7 +277,6 @@ set(ENGINE_UTILS_SRC
 set(ENGINE_UTILS_HDR
     include/engine/BatchBuilder.h
     include/engine/FPSCounter.h
-    include/engine/GraphicsConfig.h
 )
 set(ENGINE_CORE_SRC
     src/Engine.cpp

@@ -9,7 +9,6 @@
 #include <string>
 #include "config.h"
 #include "Aliases.h"
-#include "GraphicsConfig.h"
 
 class QueueManager;
 class TransferManager;
@@ -62,7 +61,6 @@ struct EngineConfig {
     SDL_GPUPresentMode present_mode = SDL_GPU_PRESENTMODE_MAILBOX;
     SDL_GPUSwapchainComposition composition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
     bool gpu_debug = true;
-    GraphicsConfig graphics{};
 };
 
 class Engine
@@ -123,16 +121,11 @@ public:
     // Можно с любого потока; насос заметит на следующей итерации.
     void RequestQuit() { running.store(false, std::memory_order_relaxed); }
 
-    // ВНУТРЕННЕЕ разрешение, и это ЗАПРОС: после правки конфига оно опережает реальные размеры
-    // таргетов на кадр. Там, где расхождение значимо (создание таргета, пиксельные координаты),
-    // годятся только применённые размеры — их знает render-поток. Раскладка UI берёт Window-пару:
-    // размер кнопки задан относительно экрана, а не частоты сэмплирования.
-    float GetWidth()  const { uint32_t w, h; ComputeRenderSize(w, h); return static_cast<float>(w); }
-    float GetHeight() const { uint32_t w, h; ComputeRenderSize(w, h); return static_cast<float>(h); }
+    // Размер ОКНА и единственный размер, который движок знает. Во сколько пикселей рисуется сама
+    // сцена, решает набор проходов, и знать это движку незачем: кому нужны настоящие пиксели —
+    // берёт их с таргета, с которым работает.
     float GetWindowWidth()  const { return size_state.WindowW(); }
     float GetWindowHeight() const { return size_state.WindowH(); }
-
-    GraphicsConfig* GetGraphicsConfig() const { return graphics_config; }
 
     // Звать с MAIN-потока. Публикует размер окна, и только его: таргеты пересоздаст гейт RenderFunc.
     void OnWindowResized(Sint32 window_w, Sint32 window_h);
@@ -148,13 +141,6 @@ private:
     void InitPasses();
 
     EngineSizeState size_state;
-
-    void ComputeRenderSize(uint32_t& w, uint32_t& h) const {
-        const uint64_t win = size_state.window_size.load(std::memory_order_relaxed);
-        GfxRenderTarget(*graphics_config, EngineSizeState::W(win), EngineSizeState::H(win), w, h);
-    }
-
-    GraphicsConfig* graphics_config = nullptr;
 
     // Рендер-поток стоит на всю загрузку сцены: компромисс «редактор читает живой ECS без замков»
     std::mutex scene_swap_mutex;

@@ -7,7 +7,6 @@
 #include "ObjectManager.h"
 #include "BatchBuilder.h"
 #include "EngineContext.h"
-#include "GraphicsConfig.h"   // вывод размеров таргетов: EngineContext даёт только forward-декларацию
 #include "TextureLoader.h"
 #include "LightDataModule.h"
 #include "ParamsSpec.h"
@@ -27,9 +26,40 @@ namespace DefaultRenderPassNamespace
         TextureAtlas*        scene_hdr = nullptr;       // HDR-цвет сцены (location 0 MAIN_PASS), общий для MAIN/TRANSPARENT/DEBUG
         TextureAtlas*        scene_emission = nullptr;  // HDR-эмиссия (location 1 MAIN_PASS, MRT) — источник bloom
         TextureAtlas*        scene_ambient = nullptr;   // затеняемая AO доля цвета (location 2 MAIN_PASS, MRT)
+        // Частота сэмплирования СЦЕНЫ относительно окна. Живёт у набора, а не у прохода: в сценовый
+        // таргет пишут MAIN/TRANSPARENT/DEBUG/UI, читают его BLOOM/AO/PRESENT — владельца-прохода
+        // у него нет. Движок её тоже не знает: сколько пикселей считать, решает набор.
+        float                render_scale = 1.0f;
         bool                 common_inited = false;
     };
     static PassSystemState g_pass_system;
+
+    // Округление ВВЕРХ, а не вниз: при нечётной стороне «вниз» потеряло бы крайний столбец кадра.
+    // Ноль, отрицательное и NaN сводятся к 1 — таргета нулевого размера не бывает.
+    static uint32_t ScaleDim(uint32_t v, float scale)
+    {
+        const float f = std::ceil(static_cast<float>(v) * scale);
+        if (!(f >= 1.0f)) return 1;
+        return safe_f_u32(f);
+    }
+
+    // Размер сценовых таргетов: окно, взятое с частотой сэмплирования сцены.
+    static void RenderTargetSize(uint32_t out_w, uint32_t out_h, uint32_t& w, uint32_t& h)
+    {
+        w = ScaleDim(out_w, g_pass_system.render_scale);
+        h = ScaleDim(out_h, g_pass_system.render_scale);
+    }
+
+    // Размер таргета экранного эффекта: его доля от min(сцена, окно). Минимум — ПОЛИТИКА набора:
+    // render_scale поднимает частоту сэмплирования геометрии, а низкочастотному эффекту лишние
+    // сэмплы не нужны; вниз же зажимать обязательно — выше сцены информации просто нет.
+    static void EffectTargetSize(uint32_t out_w, uint32_t out_h, float scale, uint32_t& w, uint32_t& h)
+    {
+        uint32_t rw = 0, rh = 0;
+        RenderTargetSize(out_w, out_h, rw, rh);
+        w = ScaleDim(std::min(rw, out_w), scale);
+        h = ScaleDim(std::min(rh, out_h), scale);
+    }
 
     bool shadow_pass_inited = false;
 	bool main_pass_inited = false;
@@ -167,12 +197,11 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx)
         return;
     }
     TextureManager* tm = ctx->GetTextureManager();
-    const GraphicsConfig& gc = *ctx->GetGraphicsConfig();
 
     uint32_t out_w = 0, out_h = 0;
     OutputSize(ctx, out_w, out_h);
     uint32_t width = 0, height = 0;
-    GfxRenderTarget(gc, out_w, out_h, width, height);
+    RenderTargetSize(out_w, out_h, width, height);
 
     auto depth_tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
     depth_tci.width = width;
@@ -198,30 +227,30 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx)
 
     // Инструкции ресайза: правило вывода размера — своё у каждого таргета — живёт в ЗАМЫКАНИИ,
     // исполняет их render-поток каждый кадр (Engine::RenderFunc). struct TextureAtlas остаётся
-    // чистым: ресайз в инструкции, а не в методе таргета. Конфиг замыкания читают живьём через
-    // захваченный ctx — писатель у него тот же render-поток (см. GraphicsConfig).
+    // чистым: ресайз в инструкции, а не в методе таргета. Настройки замыкание читает ЖИВЬЁМ
+    // (состояние набора, состояние шага), и писатель у них тот же render-поток.
     tm->CreateResizeInstruction("scene_hdr",
         [a = g_pass_system.scene_hdr, ctx](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  GfxRenderTarget(*ctx->GetGraphicsConfig(), w, h, rw, rh);
+            uint32_t rw, rh;  RenderTargetSize(w, h, rw, rh);
             t.RecreateAtlasTexture(a, TexturePresets::SceneHDR(rw, rh));
         });
     tm->CreateResizeInstruction("scene_emission",
         [a = g_pass_system.scene_emission, ctx](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  GfxRenderTarget(*ctx->GetGraphicsConfig(), w, h, rw, rh);
+            uint32_t rw, rh;  RenderTargetSize(w, h, rw, rh);
             t.RecreateAtlasTexture(a, TexturePresets::EmissionHDR(rw, rh));
         });
     tm->CreateResizeInstruction(SCENE_AMBIENT,
         [a = g_pass_system.scene_ambient, ctx](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  GfxRenderTarget(*ctx->GetGraphicsConfig(), w, h, rw, rh);
+            uint32_t rw, rh;  RenderTargetSize(w, h, rw, rh);
             t.RecreateAtlasTexture(a, TexturePresets::AmbientHDR(rw, rh));
         });
     tm->CreateResizeInstruction("main_depth",
         [a = g_pass_system.main_depth, ctx](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  GfxRenderTarget(*ctx->GetGraphicsConfig(), w, h, rw, rh);
+            uint32_t rw, rh;  RenderTargetSize(w, h, rw, rh);
             auto tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
             tci.width = rw;  tci.height = rh;               // геометрия из пресета; usage сохранит RecreateAtlasTexture
             t.RecreateAtlasTexture(a, tci);
@@ -480,8 +509,8 @@ void DefaultRenderPassNamespace::SetPresentPass(EngineContext* ctx)
     // Engine::RenderFunc мог положить туда свопчейн, — BeginGPURenderPass не звался вовсе.
     // Свопчейн теперь приходит обычным атласом (pm->GetSwapchainAtlas), размеры src/dst
     // берутся из самих атласов, поэтому ресайз не требует ничего перепривязывать.
-    // Фильтр LINEAR, и это НЕ вкусовщина: когда внутреннее разрешение больше окна (GraphicsConfig::
-    // render_w/h выше размера свопчейна), именно этот блит выполняет резолв суперсэмплинга — на ровно
+    // Фильтр LINEAR, и это НЕ вкусовщина: когда сцена считается в разрешении выше окна (частота
+    // сэмплирования больше единицы), именно этот блит выполняет резолв суперсэмплинга — на ровно
     // 2x билинейная выборка попадает в стык четырёх текселей и даёт их точное среднее. NEAREST взял бы
     // один тексель из блока, выбросив остальные: лишние сэмплы были бы посчитаны, но не усреднены, и
     // сглаживания не возникло бы вовсе, только счёт за него.
@@ -497,13 +526,18 @@ void DefaultRenderPassNamespace::SetPresentPass(EngineContext* ctx)
 
 // Размер уровня i пирамиды. Отдельной функцией, потому что вывод нужен и при создании, и в замыкании
 // ресайза. Уровень 0 = доля эффект-домена, дальше вдвое меньше на уровень.
-static void BloomLevelSize(const GraphicsConfig& gc, uint32_t out_w, uint32_t out_h, float scale,
+namespace DefaultRenderPassNamespace {
+static void BloomLevelSize(uint32_t out_w, uint32_t out_h, float scale,
                            uint32_t level, uint32_t& w, uint32_t& h)
 {
-    GfxEffectTarget(gc, out_w, out_h, scale, w, h);
+    EffectTargetSize(out_w, out_h, scale, w, h);
     w >>= level;  if (w == 0) w = 1;
     h >>= level;  if (h == 0) h = 1;
 }
+}
+
+void DefaultRenderPassNamespace::SetSceneResolutionScale(float scale) { g_pass_system.render_scale = scale; }
+float DefaultRenderPassNamespace::SceneResolutionScale() { return g_pass_system.render_scale; }
 
 void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
 {
@@ -556,13 +590,13 @@ void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
     for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
         const std::string name = "bloom_L" + std::to_string(i);
         uint32_t lw = 0, lh = 0;
-        BloomLevelSize(*ctx->GetGraphicsConfig(), out_w, out_h, PassStateAs<BloomState>(bloom)->resolution_scale, i, lw, lh);
+        BloomLevelSize(out_w, out_h, PassStateAs<BloomState>(bloom)->resolution_scale, i, lw, lh);
         TextureAtlas* a = tm->CreateTextureAtlas(name, TexturePresets::BloomLevel(lw, lh), env_sampler,
             ResourceTag::Default | ResourceTag::System);
         tm->CreateResizeInstruction(name, [a, i, bloom, ctx](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
             uint32_t lw, lh;
-            BloomLevelSize(*ctx->GetGraphicsConfig(), w, h, PassStateAs<BloomState>(bloom)->resolution_scale, i, lw, lh);
+            BloomLevelSize(w, h, PassStateAs<BloomState>(bloom)->resolution_scale, i, lw, lh);
             t.RecreateAtlasTexture(a, TexturePresets::BloomLevel(lw, lh));
         });
     }
@@ -614,14 +648,14 @@ void DefaultRenderPassNamespace::SetDefaultAOPass(EngineContext* ctx)
     uint32_t out_w = 0, out_h = 0;
     OutputSize(ctx, out_w, out_h);
     uint32_t sw = 0, sh = 0;
-    GfxEffectTarget(*ctx->GetGraphicsConfig(), out_w, out_h, PassStateAs<AOState>(ao)->resolution_scale, sw, sh);
+    EffectTargetSize(out_w, out_h, PassStateAs<AOState>(ao)->resolution_scale, sw, sh);
     for (const std::string& name : { SSAO_TEXTURE, SSAO_TEMP }) {
         TextureAtlas* a = tm->CreateTextureAtlas(name, TexturePresets::AmbientOcclusion(sw, sh), env_sampler,
             ResourceTag::Default | ResourceTag::System);
         tm->CreateResizeInstruction(name, [a, ao, ctx](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
             uint32_t aw, ah;
-            GfxEffectTarget(*ctx->GetGraphicsConfig(), w, h, PassStateAs<AOState>(ao)->resolution_scale, aw, ah);
+            EffectTargetSize(w, h, PassStateAs<AOState>(ao)->resolution_scale, aw, ah);
             t.RecreateAtlasTexture(a, TexturePresets::AmbientOcclusion(aw, ah));
         });
     }

@@ -9,9 +9,6 @@ int main() {
     cfg.title = "MyGame";
     cfg.present_mode = SDL_GPU_PRESENTMODE_MAILBOX;
 
-    cfg.graphics.render_scale = 1.0f;   // SSAA
-    cfg.graphics.global_scale = 1.0f;   // общий сброс качества по ВСЕМ таргетам
-
     Engine engine(cfg);
     if (!engine.IsValid()) return 1;
 

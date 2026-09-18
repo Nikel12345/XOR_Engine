@@ -35,7 +35,6 @@ class FontManager;
 struct FontData;
 class UI_Yoga;
 class Engine;
-struct GraphicsConfig;
 
 inline constexpr const char* kScenesRoot = "saved_scene";
 
@@ -169,9 +168,6 @@ public:
 
 	void SetEngine(Engine* e) { engine = e; }
 
-	void SetGraphicsConfig(GraphicsConfig* c) { graphics_config = c; }
-	GraphicsConfig* GetGraphicsConfig() const { return graphics_config; }
-
 private:
 	TextureManager* texture_manager = nullptr;
 	MaterialManager* material_manager = nullptr;
@@ -187,7 +183,6 @@ private:
 	FontManager* font_manager = nullptr;
 	UI_Yoga* ui_yoga = nullptr;
 	Engine* engine = nullptr;
-	GraphicsConfig* graphics_config = nullptr;
 
 	GpuContext* gpu_ctx = nullptr;
 };

@@ -34,9 +34,12 @@ void Engine::PrepareFunc(uint8_t slot)
 		ui_yoga->Emit(engine_context, GetWindowWidth(), GetWindowHeight());
 	}
 
+	// Аспект — оконный, хотя сцена рисуется в своём разрешении: масштаб по обеим осям один и тот же,
+	// значит соотношение то же. Появится НЕравномерный размер сценового таргета — аспект придётся
+	// брать с него самого, и молча это не всплывёт никак.
 	if (Camera* cam = camera_manager->GetActiveCamera()) {
-		const float h = GetHeight();
-		if (h > 0.0f) cam->SetAspect(GetWidth() / h);
+		const float h = GetWindowHeight();
+		if (h > 0.0f) cam->SetAspect(GetWindowWidth() / h);
 	}
 
 	{

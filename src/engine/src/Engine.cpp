@@ -211,7 +211,6 @@ bool Engine::InitPlatform(const EngineConfig& cfg)
 Engine::Engine(const EngineConfig& cfg)
 {
 	if (!InitPlatform(cfg)) return;
-	graphics_config = new GraphicsConfig{ cfg.graphics };
 	size_state.window_size.store(EngineSizeState::Pack(cfg.width, cfg.height), std::memory_order_relaxed);
 	transfer_manager = new TransferManager(dev);
 	queue_manager = new QueueManager(dev);
@@ -249,7 +248,6 @@ Engine::Engine(const EngineConfig& cfg)
 	engine_context->SetFontManager(font_manager);
 	engine_context->SetUIYoga(ui_yoga);
 	engine_context->SetEngine(this);
-	engine_context->SetGraphicsConfig(graphics_config);
 	engine_context->CreateGeometryPool(POS_UV_NORM_POOL, sizeof(PosUVNormal), PosUVNormLayout());
 	InitDefaultBufferUpdaters();
 	InitPasses();
@@ -399,7 +397,6 @@ Engine::~Engine()
 	delete tex_state_data_module;
 	delete ui_data_module;
 	delete ui_yoga;
-	delete graphics_config;
 
 	SDL_ReleaseWindowFromGPUDevice(dev, win);
 	SDL_DestroyGPUDevice(dev);
