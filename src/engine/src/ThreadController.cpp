@@ -119,7 +119,7 @@ void ThreadController::SimulationThread()
 
         uint8_t slot;
         {
-            PROF_SCOPE(Sim, "slot_wait (ожидание свободного слота)");
+            PROF_SCOPE(Sim, "slot_wait (waiting for a free slot)");
             slot = slot_controller->GetFreeSlotIndex(UPS_priority);
             if (!UPS_priority and slot == INVALID_SLOT)
             {

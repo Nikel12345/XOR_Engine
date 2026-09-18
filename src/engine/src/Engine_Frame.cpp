@@ -90,7 +90,7 @@ void Engine::PrepareFunc(uint8_t slot)
 	}
 
 	{
-		PROF_SCOPE(Sim, " prepass_undepended (submit загрузки)");
+		PROF_SCOPE(Sim, " prepass_undepended (submit uploads)");
 		PrepareFuncPrepassUndepended(slot);
 	}
 	//PrepareFuncPrepassDepended(slot);
@@ -117,7 +117,7 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 		UploadCopyPass cp = cb.BeginBufferCopyPass();
 		TransferBufferData* tbd;
 		{
-			PROF_SCOPE(Sim, "  exec_update_instructions (всего)");
+			PROF_SCOPE(Sim, "  exec_update_instructions (total)");
 			tbd = buffer_manager->ExecuteUpdateInstructions(cp.Raw());
 		}
 		cp.End();
@@ -145,11 +145,11 @@ void Engine::PrepareFuncPrepassUndepended(uint8_t slot)
 
 	TransferBufferData* undepended_tbd;
 	{
-		PROF_SCOPE(Sim, "  exec_update_instructions (всего)");
+		PROF_SCOPE(Sim, "  exec_update_instructions (total)");
 		pending_upload_tbs[slot] = buffer_manager->ExecuteUpdateInstructions(upload_cp.Raw());
 	}
 	{
-		PROF_SCOPE(Sim, "  exec_upload_tasks (буферы)");
+		PROF_SCOPE(Sim, "  exec_upload_tasks (buffers)");
 		buffer_manager->ExecuteUploadTasks(upload_cp.Raw(), slot);
 		upload_cp.End();
 
@@ -196,8 +196,8 @@ void Engine::UploadFunc(uint8_t slot)
 
 	slot_controller->SetSlotState(slot, SlotState::PREPARED);
 
-	Prof::Upload().Add("upload_gpu (submit->fence, заливка на GPU)", upload_ms);
-	Prof::Upload().Add("upload_fence_wait (CPU-блок)", wait_ms);
+	Prof::Upload().Add("upload_gpu (submit->fence, GPU upload)", upload_ms);
+	Prof::Upload().Add("upload_fence_wait (CPU blocked)", wait_ms);
 	PROF_FRAME(Upload);
 }
 
@@ -274,7 +274,7 @@ bool Engine::RenderFunc(uint8_t slot)
 	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
 
 	// Ранний выход по свопчейну Pop не выполнит — стек чистит Frame() на границе итерации.
-	const size_t prof_render_cpu = Prof::Render().Push("render_cpu (RenderFunc: запись+submit)");
+	const size_t prof_render_cpu = Prof::Render().Push("render_cpu (RenderFunc: recording+submit)");
 	auto t_frame = Prof::Clock::now();
 	RenderCommandBuffer cb = queue_manager->GetRenderQueue().AcquireCommandBuffer();
 
@@ -302,7 +302,7 @@ bool Engine::RenderFunc(uint8_t slot)
 	pass_manager->SetRenderFrame(slot, batch_builder->AskLayout(slot));
 	pass_manager->ResolveAllTextureTargets();
 	{
-		PROF_SCOPE(Render, " execute_passes (запись команд)");
+		PROF_SCOPE(Render, " execute_passes (command recording)");
 		pass_manager->ExecutePassesSteps(cb.Raw(), slot);
 	}
 
@@ -368,8 +368,8 @@ void Engine::FenceFunc(uint8_t slot) {
 	last_frame_done_time = now;
 	last_frame_done_valid = true;
 
-	Prof::Render().Add("= gpu_frame (submit->fence, rabota GPU)", gpu_ms);
-	Prof::Render().Add("= fence_wait (CPU-blok na GPU)", wait_ms);
+	Prof::Render().Add("= gpu_frame (submit->fence, GPU work)", gpu_ms);
+	Prof::Render().Add("= fence_wait (CPU blocked on GPU)", wait_ms);
 	PROF_FRAME(Render);
 }
 
