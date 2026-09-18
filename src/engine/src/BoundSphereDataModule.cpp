@@ -35,7 +35,6 @@ static glm::vec4 ModelSphere(const ModelData* model)
 uint32_t BoundSphereDataModule::CalculateSphereSize(ObjectManager* om, uint64_t revision, uint8_t slot)
 {
 	if (revision == last_revision[slot]) return 0;
-	last_revision[slot] = revision;
 
 	uint32_t rows = 0;
 	om->ForEachArchetype<Positions, DrawComponent>(om->GetActiveScene(),
@@ -49,10 +48,14 @@ uint32_t BoundSphereDataModule::CalculateSphereSize(ObjectManager* om, uint64_t 
 	return total_size;
 }
 
-void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, ObjectManager* om, ModelManager* mm)
+void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, ObjectManager* om, ModelManager* mm,
+	                                         uint64_t revision, uint8_t slot)
 {
+	if (revision == last_revision[slot]) return;
+
 	SceneData* scene = om->GetActiveScene();
 	if (!scene) return;
+	last_revision[slot] = revision;
 
 	// Память на одно последнее имя: без неё это поиск в словаре на КАЖДУЮ строку, а на 1М объектов
 	// он дороже всего остального заполнения. Указатель на строку компонента жив до конца вызова —

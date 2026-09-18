@@ -27,16 +27,18 @@ static bool SameRegions(const PassRegions& a, const PassRegions& b)
 uint32_t IndirectDataModule::CalculateIndirectSize(const PassRegions& regions, uint64_t revision, uint8_t slot)
 {
 	if (revision == last_revision[slot] && SameRegions(regions, last_regions[slot])) return 0;
-	last_revision[slot] = revision;
-	last_regions[slot] = regions;
 
 	total_size = regions.total_commands * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand));
 	return total_size;
 }
 
 void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, UploadTask* task,
-                                       const PassRegions& regions)
+                                       const PassRegions& regions, uint64_t revision, uint8_t slot)
 {
+	if (revision == last_revision[slot] && SameRegions(regions, last_regions[slot])) return;
+	last_revision[slot] = revision;
+	last_regions[slot] = regions;
+
 	const std::vector<RenderPassStep*>& ordered = pm->GetOrderedRenderPasses();
 
 	// Порядок записи ОБЯЗАН совпадать со штампом регионов: пасс-мажорно, внутри прохода —

@@ -16,11 +16,18 @@ struct UploadTask {
 	Uint32 written_size = 0;
 	Uint32 additional_offset = 0;
 	bool resize_dst_buf_only = false;
+	// У назначения нет тела на этот кадр: писать некуда. Единственное, что отменяет вызов
+	// апдейтера снаружи.
+	bool dst_absent = false;
 };
 
 // cp — для инструкции, которая заливает КОПИРОВАНИЕМ GPU→GPU (SDL_CopyGPUBufferToBuffer);
 // та, что пишет через transfer-буфер, работает с task и cp не трогает.
 using UpdateInstructionUpdaterFunc = std::function<void(SDL_GPUCopyPass* cp, BufferManager*, UploadTask&)>;
+// Отвечает только на «сколько занять в transfer-буфере»; 0 значит «ничего не занимать» и вызов
+// апдейтера не отменяет. Писать или нет, апдейтер решает сам, задавая тот же вопрос об изменении
+// ещё раз. Поэтому замер обязан оставаться ЧИСТЫМ: признак изменения снимает только состоявшаяся
+// запись — иначе заливка, не состоявшаяся по любой другой причине, потеряет данные молча.
 using UpdateInstructionSizeFunc = std::function <uint32_t()>;
 using UpdateInstructionOffsetFunc = std::function <uint32_t()>;
 

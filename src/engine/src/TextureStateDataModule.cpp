@@ -22,7 +22,6 @@ TextureStateDataModule::TextureStateDataModule()
 uint32_t TextureStateDataModule::CalculateRankSize(ObjectManager* om, SceneData* scene, uint64_t revision, uint8_t slot)
 {
 	if (revision == last_rank_revision[slot]) return 0;
-	last_rank_revision[slot] = revision;
 
 	struct ArchBase { const Positions* col; uint32_t base; };
 	std::vector<ArchBase> bases;
@@ -56,20 +55,23 @@ uint32_t TextureStateDataModule::CalculateRankSize(ObjectManager* om, SceneData*
 	return SparseRankBytes(rows_);
 }
 
-void TextureStateDataModule::StoreRank(BufferManager* bm, UploadTask* task)
+void TextureStateDataModule::StoreRank(BufferManager* bm, UploadTask* task, uint64_t revision, uint8_t slot)
 {
+	if (revision == last_rank_revision[slot]) return;
+	last_rank_revision[slot] = revision;
 	StoreSparseRank(bm, task, rows_, hit_rows_);
 }
 
 uint32_t TextureStateDataModule::CalculateIndexSize(uint64_t revision, uint8_t slot)
 {
 	if (revision == last_index_revision[slot]) return 0;
-	last_index_revision[slot] = revision;
 	return safe_u32(hit_ofs_.size() * sizeof(uint32_t));
 }
 
-void TextureStateDataModule::StoreIndex(BufferManager* bm, UploadTask* task)
+void TextureStateDataModule::StoreIndex(BufferManager* bm, UploadTask* task, uint64_t revision, uint8_t slot)
 {
+	if (revision == last_index_revision[slot]) return;
+	last_index_revision[slot] = revision;   // носителей может не быть: писать нечего, но ревизия обработана
 	if (hit_ofs_.empty()) return;
 	bm->UploadToTransferBuffer(task, safe_u32(hit_ofs_.size() * sizeof(uint32_t)), hit_ofs_.data());
 }

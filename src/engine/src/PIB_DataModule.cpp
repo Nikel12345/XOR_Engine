@@ -42,8 +42,6 @@ uint32_t PIB_DataModule::CalculatePIBSizes(PassManager* rm, uint64_t revision, u
     if (revision == pib_last_revision[slot]) return 0;
 
     total_elements = ComputeElementCount(rm);
-    pib_last_revision[slot] = revision;
-
     return total_elements * sizeof(uint32_t);
 }
 
@@ -64,8 +62,11 @@ void PIB_DataModule::BuildRowTable(SceneData* scene)
     }
 }
 
-void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* task, ObjectManager* om)
+void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* task, ObjectManager* om,
+                              uint64_t revision, uint8_t slot)
 {
+    if (revision == pib_last_revision[slot]) return;
+
     SceneData* scene = om->GetActiveScene();
     if (!scene) return;
 
@@ -80,6 +81,7 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
     uint32_t* dst = static_cast<uint32_t*>(
         bm->AcquireTransferWritePtr(task, total_elements * sizeof(uint32_t)));
     if (!dst) return;
+    pib_last_revision[slot] = revision;
 
     PROF_SCOPE(Sim, "     pib_gather");
     // Заливка ПИШЕТ в дерево (кэш строки в записи): дерево приватно для sim, на нём же идёт
@@ -111,19 +113,22 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
 uint32_t PIB_DataModule::CalculateEntityToCmd(PassManager* rm, uint64_t revision, uint8_t slot)
 {
     if (revision == e2c_last_revision[slot]) return 0;
-    e2c_last_revision[slot] = revision;
     // Счётчик свой: гейты у двух буферов раздельные, и PIB мог не пересчитаться в этом кадре.
     e2c_elements = ComputeElementCount(rm);
     return e2c_elements * sizeof(uint32_t);
 }
 
-void PIB_DataModule::StoreEntityToCmd(BufferManager* bm, PassManager* rm, UploadTask* task)
+void PIB_DataModule::StoreEntityToCmd(BufferManager* bm, PassManager* rm, UploadTask* task,
+                                      uint64_t revision, uint8_t slot)
 {
+    if (revision == e2c_last_revision[slot]) return;
+
     // Обход и нумерация команд обязаны совпадать со StorePIB и FinalizeOffsets: индекс
     // ЛОКАЛЬНЫЙ для прохода.
     uint32_t* dst = static_cast<uint32_t*>(
         bm->AcquireTransferWritePtr(task, e2c_elements * sizeof(uint32_t)));
     if (!dst) return;
+    e2c_last_revision[slot] = revision;
 
     uint32_t n = 0;
     for (RenderPassStep* rp : rm->GetOrderedRenderPasses()) {

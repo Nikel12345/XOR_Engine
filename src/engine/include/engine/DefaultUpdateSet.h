@@ -32,6 +32,9 @@ namespace DefaultUpdateSet
 	void SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSphereDataModule* bdm);
 	void SetDefaultEntityToCmdUpdater(EngineContext& ctx, PIB_DataModule* pib_dm);
 	void SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModule* ldm);
-	void SetDefaultTexStateUpdaters(EngineContext& ctx, TextureStateDataModule* tsm);
+	// Канал разрежённого ранга: ранг и индекс. Индекс берёт размер из того, что построила size-фаза
+	// ранга, поэтому пара регистрируется одним вызовом.
+	void SetDefaultTexStateChannel(EngineContext& ctx, TextureStateDataModule* tsm);
+	void SetDefaultTexStateUpdater(EngineContext& ctx, TextureStateDataModule* tsm);
 	void SetUITextUpdaters(EngineContext& ctx, UI_DataModule* uidm, FontManager* fm, const std::string& fontName);
 };

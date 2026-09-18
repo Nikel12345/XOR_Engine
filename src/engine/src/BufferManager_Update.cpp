@@ -90,6 +90,7 @@ TransferBufferData* BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* c
         task.dst_buffer_data = instr.buffer_data;
         if (!_GetGPUBufferForFrame(instr.buffer_data, li)) {
             task.size = 0;
+            task.dst_absent = true;
             target_task_vector.push_back(task);
             continue;
         }
@@ -114,10 +115,12 @@ TransferBufferData* BufferManager::_ExecuteUpdateInstructions(SDL_GPUCopyPass* c
         Prof::Sim().Add("  [build_tasks + ensure_capacity]", Prof::MsSince(t));
     }
 
+    // Размер вызов апдейтера не гейтит (см. UpdateInstructionSizeFunc): снаружи его отменяет
+    // только отсутствие тела у назначения.
     for (size_t i = 0; i < target_instr_vector.size(); ++i) {
         auto& instr = target_instr_vector[i];
         auto& task = target_task_vector[i];
-        if (instr.updater && task.size > 0) {
+        if (instr.updater && !task.dst_absent) {
             const char* nm = instr.buffer_data ? instr.buffer_data->debug_name.c_str() : "?";
             const size_t ph = Prof::Sim().Push((std::string(nm) + " .store").c_str());
             auto t = Prof::Clock::now();

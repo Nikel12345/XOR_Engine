@@ -15,10 +15,10 @@ public:
 
 	// Обязана идти ПЕРВОЙ из трёх инструкций: две другие читают её результат.
 	uint32_t CalculateRankSize(ObjectManager* om, SceneData* scene, uint64_t revision, uint8_t slot);
-	void     StoreRank(BufferManager* bm, UploadTask* task);
+	void     StoreRank(BufferManager* bm, UploadTask* task, uint64_t revision, uint8_t slot);
 
 	uint32_t CalculateIndexSize(uint64_t revision, uint8_t slot);
-	void     StoreIndex(BufferManager* bm, UploadTask* task);
+	void     StoreIndex(BufferManager* bm, UploadTask* task, uint64_t revision, uint8_t slot);
 
 	uint32_t CalculateStateSize(ObjectManager* om, SceneData* scene);
 	void     StoreState(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene,

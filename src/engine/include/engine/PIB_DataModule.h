@@ -15,10 +15,12 @@ class PIB_DataModule
 public:
     PIB_DataModule();
     uint32_t CalculatePIBSizes(PassManager* pm, uint64_t revision, uint8_t slot);
-    void StorePIB(BufferManager* bm, PassManager* pm, UploadTask* task, ObjectManager* om);
+    void StorePIB(BufferManager* bm, PassManager* pm, UploadTask* task, ObjectManager* om,
+                  uint64_t revision, uint8_t slot);
 
     uint32_t CalculateEntityToCmd(PassManager* pm, uint64_t revision, uint8_t slot);
-    void StoreEntityToCmd(BufferManager* bm, PassManager* pm, UploadTask* task);
+    void StoreEntityToCmd(BufferManager* bm, PassManager* pm, UploadTask* task,
+                          uint64_t revision, uint8_t slot);
 
 private:
     uint32_t ComputeElementCount(PassManager* pm) const;

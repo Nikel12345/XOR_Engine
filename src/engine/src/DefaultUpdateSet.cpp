@@ -87,7 +87,7 @@ void DefaultUpdateSet::SetDefaultPositionIndexUpdater(EngineContext& ctx, PIB_Da
     auto* bb = ctx.GetBatchBuilder();
 
     bm->CreateUpdateInstruction(DEFAULT_POSITION_INDEX_BUFFER,
-        [om, pm, pib_dm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { pib_dm->StorePIB(bm, pm, &task, om); },
+        [om, pm, pib_dm, bb](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { pib_dm->StorePIB(bm, pm, &task, om, bb->BatchesRevision(), bm->logic_index.load()); },
         [pm, pib_dm, bb, bm]() -> uint32_t { return pib_dm->CalculatePIBSizes(pm, bb->BatchesRevision(), bm->logic_index.load()); });
 }
 
@@ -116,7 +116,7 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
     auto* bb = ctx.GetBatchBuilder();
 
     bm->CreateUpdateInstruction(DEFAULT_INDIRECT_BUFFER,
-        [pm, idm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { idm->StoreIndirect(bm, pm, &task, pm->AskRegions(bm->logic_index.load())); },
+        [pm, idm, bb](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { const uint8_t slot = bm->logic_index.load(); idm->StoreIndirect(bm, pm, &task, pm->AskRegions(slot), bb->BatchesRevision(), slot); },
         [pm, idm, bb, bm]() -> uint32_t { const uint8_t slot = bm->logic_index.load(); return idm->CalculateIndirectSize(pm->AskRegions(slot), bb->BatchesRevision(), slot); });
 }
 
@@ -131,7 +131,7 @@ void DefaultUpdateSet::SetDefaultEntityToCmdUpdater(EngineContext& ctx, PIB_Data
     auto* bb = ctx.GetBatchBuilder();
 
     bm->CreateUpdateInstruction(DEFAULT_ENTITY_TO_CMD_BUFFER,
-        [pm, pib_dm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { pib_dm->StoreEntityToCmd(bm, pm, &task); },
+        [pm, pib_dm, bb](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { pib_dm->StoreEntityToCmd(bm, pm, &task, bb->BatchesRevision(), bm->logic_index.load()); },
         [pm, pib_dm, bb, bm]() -> uint32_t { return pib_dm->CalculateEntityToCmd(pm, bb->BatchesRevision(), bm->logic_index.load()); });
 }
 
@@ -146,7 +146,7 @@ void DefaultUpdateSet::SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSph
     auto* mm = ctx.GetModelManager();
 
     bm->CreateUpdateInstruction(DEFAULT_BOUND_SPHERE_BUFFER,
-        [om, mm, bdm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { bdm->StoreSpheres(bm, &task, om, mm); },
+        [om, mm, bdm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { bdm->StoreSpheres(bm, &task, om, mm, om->EntityRevision() + mm->SpheresRevision(), bm->logic_index.load()); },
         [om, mm, bdm, bm]() -> uint32_t { return bdm->CalculateSphereSize(om, om->EntityRevision() + mm->SpheresRevision(), bm->logic_index.load()); });
 }
 
@@ -164,28 +164,34 @@ void DefaultUpdateSet::SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModu
         [pm, bm]() -> uint32_t { return pm->AskRegions(bm->logic_index.load()).total_pib * sizeof(int32_t); });
 }
 
-void DefaultUpdateSet::SetDefaultTexStateUpdaters(EngineContext& ctx, TextureStateDataModule* tsm)
+void DefaultUpdateSet::SetDefaultTexStateChannel(EngineContext& ctx, TextureStateDataModule* tsm)
 {
     static bool inited = false;
-    if (inited) { SDL_Log("DefaultUpdateSet::SetDefaultTexStateUpdaters: already initialized"); return; }
+    if (inited) { SDL_Log("DefaultUpdateSet::SetDefaultTexStateChannel: already initialized"); return; }
+    inited = true;
+
+    auto* bm = ctx.GetBufferManager();
+    auto* om = ctx.GetObjectManager();
+    auto* bb = ctx.GetBatchBuilder();
+
+    bm->CreateUpdateInstruction(DEFAULT_TEX_STATE_RANK_BUFFER,
+        [om, tsm, bb](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { if (om->GetActiveScene()) tsm->StoreRank(bm, &task, bb->BatchesRevision(), bm->logic_index.load()); },
+        [om, tsm, bb, bm]() -> uint32_t { SceneData* scene = om->GetActiveScene(); return scene ? tsm->CalculateRankSize(om, scene, bb->BatchesRevision(), bm->logic_index.load()) : 0u; });
+
+    bm->CreateUpdateInstruction(DEFAULT_TEX_STATE_INDEX_BUFFER,
+        [tsm, bb](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { tsm->StoreIndex(bm, &task, bb->BatchesRevision(), bm->logic_index.load()); },
+        [tsm, bb, bm]() -> uint32_t { return tsm->CalculateIndexSize(bb->BatchesRevision(), bm->logic_index.load()); });
+}
+
+void DefaultUpdateSet::SetDefaultTexStateUpdater(EngineContext& ctx, TextureStateDataModule* tsm)
+{
+    static bool inited = false;
+    if (inited) { SDL_Log("DefaultUpdateSet::SetDefaultTexStateUpdater: already initialized"); return; }
     inited = true;
 
     auto* bm = ctx.GetBufferManager();
     auto* om = ctx.GetObjectManager();
     auto* mtm = ctx.GetMaterialManager();
-    auto* bb = ctx.GetBatchBuilder();
-
-    // ПОРЯДОК РЕГИСТРАЦИИ ЗНАЧИМ: size_fn'ы гоняются в нём, а канал строит первый из них
-    // (CalculateRankSize) — index берёт готовое число носителей. Тот же приём, что у UI_DataModule
-    // с его BuildStaging в size-фазе первого буфера.
-
-    bm->CreateUpdateInstruction(DEFAULT_TEX_STATE_RANK_BUFFER,
-        [tsm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { tsm->StoreRank(bm, &task); },
-        [om, tsm, bb, bm]() -> uint32_t { SceneData* scene = om->GetActiveScene(); return scene ? tsm->CalculateRankSize(om, scene, bb->BatchesRevision(), bm->logic_index.load()) : 0u; });
-
-    bm->CreateUpdateInstruction(DEFAULT_TEX_STATE_INDEX_BUFFER,
-        [tsm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { tsm->StoreIndex(bm, &task); },
-        [tsm, bb, bm]() -> uint32_t { return tsm->CalculateIndexSize(bb->BatchesRevision(), bm->logic_index.load()); });
 
     bm->CreateUpdateInstruction(DEFAULT_TEX_STATE_BUFFER,
         [om, mtm, tsm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { if (SceneData* scene = om->GetActiveScene()) tsm->StoreState(bm, &task, om, scene, mtm); },
@@ -201,6 +207,9 @@ void DefaultUpdateSet::SetUITextUpdaters(EngineContext& ctx, UI_DataModule* uidm
     auto* bm = ctx.GetBufferManager();
     auto* om = ctx.GetObjectManager();
 
+    // BuildStaging здесь считает размеры ВСЕХ трёх буферов текста разом (UI_DataModule.cpp), а
+    // Calc* ниже — геттеры его полей. Поэтому вынести ранг отсюда нельзя: индекс и текст читают
+    // то, что построила его size-фаза.
     bm->CreateUpdateInstruction(UI_TEXT_RANK_BUFFER,
         [uidm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { uidm->StoreRank(bm, &task); },
         [uidm, om]() -> uint32_t { uidm->BuildStaging(om); return uidm->CalcRankSize(); });

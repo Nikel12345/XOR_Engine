@@ -290,7 +290,8 @@ void Engine::InitDefaultBufferUpdaters()
 	SetDefaultEntityToCmdUpdater(*engine_context, pib_data_module);
 	SetDefaultOutPibUpdater(*engine_context, light_data_module);
 
-	SetDefaultTexStateUpdaters(*engine_context, tex_state_data_module);
+	SetDefaultTexStateChannel(*engine_context, tex_state_data_module);
+	SetDefaultTexStateUpdater(*engine_context, tex_state_data_module);
 
 	SetUITextUpdaters(*engine_context, ui_data_module, font_manager, "default");
 }
@@ -299,12 +300,8 @@ void Engine::InitPasses()
 {
 	using namespace DefaultRenderPassNamespace;
 
-	// Свопчейна ещё нет, а экранные таргеты выводят размер из его атласа — засев обязан лечь ДО
-	// первого Set*Pass, иначе они создадутся 1x1 и молча починятся только первым кадром. Настоящий
-	// размер придёт с первым AcquireSwapchainTexture и, если разошёлся (HiDPI), пересоздаст их сам.
-	pass_manager->SetSwapchain(nullptr, safe_f_u32(GetWindowWidth()), safe_f_u32(GetWindowHeight()));
 	{
-		_SetDefaultCommonResources(engine_context);
+		_SetDefaultCommonResources(engine_context, safe_f_u32(GetWindowWidth()), safe_f_u32(GetWindowHeight()));
 		SetDefaultCullingPass(engine_context);
 		SetDefaultShadowPCFRenderPass(engine_context, light_data_module);
 		SetDefaultMainRenderPass(engine_context, light_data_module);

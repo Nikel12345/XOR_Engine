@@ -118,13 +118,11 @@ public:
 	void QueueDeleteTexture(SDL_GPUTexture* texture);
 	void TrashTextures(uint64_t fences_done);
 
-	// Размер назначения инструкция достаёт сама (атлас свопчейна у PassManager): правило вывода у
-	// каждого таргета своё, и параметром сюда пришлось бы передавать то, что замыкание уже держит.
-	// key — только ключ идемпотентной замены, а не обязательно имя текстуры: вложения одного прохода
-	// обязаны менять размер вместе, поэтому такая группа регистрируется ОДНОЙ инструкцией.
-	using TextureResizeFunc = std::function<void(TextureManager&)>;
+	// Спец-логика вывода размера у каждого таргета своя и живёт в ЗАМЫКАНИИ; сюда приходит размер
+	// НАЗНАЧЕНИЯ (свопчейн). key — ключ идемпотентной замены, обычно имя текстуры.
+	using TextureResizeFunc = std::function<void(TextureManager&, uint32_t new_width, uint32_t new_height)>;
 	void CreateResizeInstruction(const std::string& key, TextureResizeFunc fn);
-	void ExecuteResizeInstructions();
+	void ExecuteResizeInstructions(uint32_t new_width, uint32_t new_height);
 
 	void RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci);
 

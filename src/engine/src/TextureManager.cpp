@@ -245,10 +245,11 @@ void TextureManager::CreateResizeInstruction(const std::string& key, TextureResi
     resize_instructions_[key] = std::move(fn); 
 }
 
-void TextureManager::ExecuteResizeInstructions()
+void TextureManager::ExecuteResizeInstructions(uint32_t w, uint32_t h)
 {
+    if (w == 0 || h == 0) return;
     for (auto& [name, fn] : resize_instructions_)
-        if (fn) fn(*this);
+        if (fn) fn(*this, w, h);
 }
 
 void TextureManager::RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci)
