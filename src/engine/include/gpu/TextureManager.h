@@ -120,8 +120,10 @@ public:
 
 	// Размер назначения инструкция достаёт сама (атлас свопчейна у PassManager): правило вывода у
 	// каждого таргета своё, и параметром сюда пришлось бы передавать то, что замыкание уже держит.
+	// key — только ключ идемпотентной замены, а не обязательно имя текстуры: вложения одного прохода
+	// обязаны менять размер вместе, поэтому такая группа регистрируется ОДНОЙ инструкцией.
 	using TextureResizeFunc = std::function<void(TextureManager&)>;
-	void CreateResizeInstruction(const std::string& texture_name, TextureResizeFunc fn);
+	void CreateResizeInstruction(const std::string& key, TextureResizeFunc fn);
 	void ExecuteResizeInstructions();
 
 	void RecreateAtlasTexture(TextureAtlas* atlas, SDL_GPUTextureCreateInfo tci);

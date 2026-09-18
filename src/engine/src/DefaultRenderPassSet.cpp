@@ -26,10 +26,11 @@ namespace DefaultRenderPassNamespace
         TextureAtlas*        scene_hdr = nullptr;       // HDR-цвет сцены (location 0 MAIN_PASS), общий для MAIN/TRANSPARENT/DEBUG
         TextureAtlas*        scene_emission = nullptr;  // HDR-эмиссия (location 1 MAIN_PASS, MRT) — источник bloom
         TextureAtlas*        scene_ambient = nullptr;   // затеняемая AO доля цвета (location 2 MAIN_PASS, MRT)
-        // Частота сэмплирования СЦЕНЫ относительно окна. Живёт у набора, а не у прохода: в сценовый
-        // таргет пишут MAIN/TRANSPARENT/DEBUG/UI, читают его BLOOM/AO/PRESENT — владельца-прохода
-        // у него нет. Движок её тоже не знает: сколько пикселей считать, решает набор.
-        float                render_scale = 1.0f;
+        // Множитель окна, задающий размер СЦЕНОВОГО ФРЕЙМБУФЕРА — всей четвёрки выше разом, а не
+        // каждого её элемента: они вложения одного прохода (см. инструкцию ресайза ниже). Больше
+        // единицы — это и есть SSAA. Живёт у набора, а не у прохода: в эти таргеты пишут
+        // MAIN/TRANSPARENT/DEBUG/UI, читают BLOOM/AO/PRESENT, владельца-прохода у них нет.
+        float                scene_scale = 1.0f;
         bool                 common_inited = false;
     };
     static PassSystemState g_pass_system;
@@ -50,6 +51,17 @@ namespace DefaultRenderPassNamespace
     {
         w = ScaleDim(out_w, scale);
         h = ScaleDim(out_h, scale);
+    }
+
+    // Авторский tci плюс выведенный размер. У таргета с РУЧНЫМ размером (теневой атлас) правило —
+    // «как в tci», и ресайза у него нет вовсе; у экранного размер приходит отсюда, а tci даёт всё
+    // остальное. Подмена двух ячеек полная: из ширины и высоты пресеты не выводят больше ничего
+    // (TexturesPresets.h) — ни формат, ни мипы, ни число слоёв.
+    static SDL_GPUTextureCreateInfo Sized(SDL_GPUTextureCreateInfo tci, uint32_t w, uint32_t h)
+    {
+        tci.width = w;
+        tci.height = h;
+        return tci;
     }
 
     bool shadow_pass_inited = false;
@@ -192,18 +204,22 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx)
     uint32_t out_w = 0, out_h = 0;
     OutputSize(ctx, out_w, out_h);
     uint32_t width = 0, height = 0;
-    ScreenTargetSize(out_w, out_h, g_pass_system.render_scale, width, height);
+    ScreenTargetSize(out_w, out_h, g_pass_system.scene_scale, width, height);
 
-    auto depth_tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
-    depth_tci.width = width;
-    depth_tci.height = height;
+    // Авторские tci вложения: формат, тип, мипы, число слоёв. Размер в них не значим — его
+    // подставляет Sized, потому что у экранного таргета он выводится, а не задаётся. Эти же четыре
+    // захватывает инструкция ресайза ниже, так что второго описания геометрии в файле нет.
+    const SDL_GPUTextureCreateInfo depth_tci    = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
+    const SDL_GPUTextureCreateInfo hdr_tci      = TexturePresets::SceneHDR(0, 0);
+    const SDL_GPUTextureCreateInfo emission_tci = TexturePresets::EmissionHDR(0, 0);
+    const SDL_GPUTextureCreateInfo ambient_tci  = TexturePresets::AmbientHDR(0, 0);
 
     // Depth — обычный TextureAtlas (как shadow-depth). Сэмплер точечный: глубину сэмплят программы
     // AO-прохода (восстановление view-позиции и веса блюра), а LINEAR смешал бы значения с разных
     // поверхностей в несуществующую точку. usage DEPTH_STENCIL_TARGET доложит декларация
     // SetDepthTexture проходов, SAMPLER — декларации AO-программ, обе до бейка (в самом tci он 0 —
     // CreateTextureAtlas его стрижёт).
-    g_pass_system.main_depth = tm->CreateTextureAtlas("main_depth", depth_tci,
+    g_pass_system.main_depth = tm->CreateTextureAtlas("main_depth", Sized(depth_tci, width, height),
         tm->GetSampler(DefaultSamplersNames::SIMPLE_SAMPLER), ResourceTag::Default | ResourceTag::System);
     g_pass_system.main_depth_format = depth_tci.format;
 
@@ -212,39 +228,28 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx)
     // источник bloom. scene_hdr сэмплится bloom-prefilter'ом (13-тап) → нужен LINEAR + clamp, как у
     // эмиссии и уровней bloom (compute-фильтры). На present-blit фильтр сэмплера не влияет.
     auto env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
-    g_pass_system.scene_hdr      = tm->CreateTextureAtlas("scene_hdr",      TexturePresets::SceneHDR(width, height),    env_sampler, ResourceTag::Default | ResourceTag::System);
-    g_pass_system.scene_emission = tm->CreateTextureAtlas("scene_emission", TexturePresets::EmissionHDR(width, height), env_sampler, ResourceTag::Default | ResourceTag::System);
-    g_pass_system.scene_ambient  = tm->CreateTextureAtlas(SCENE_AMBIENT, TexturePresets::AmbientHDR(width, height), env_sampler, ResourceTag::Default | ResourceTag::System);
+    g_pass_system.scene_hdr      = tm->CreateTextureAtlas("scene_hdr",      Sized(hdr_tci, width, height),      env_sampler, ResourceTag::Default | ResourceTag::System);
+    g_pass_system.scene_emission = tm->CreateTextureAtlas("scene_emission", Sized(emission_tci, width, height), env_sampler, ResourceTag::Default | ResourceTag::System);
+    g_pass_system.scene_ambient  = tm->CreateTextureAtlas(SCENE_AMBIENT,    Sized(ambient_tci, width, height),  env_sampler, ResourceTag::Default | ResourceTag::System);
 
-    // Инструкции ресайза: правило вывода размера — своё у каждого таргета — живёт в ЗАМЫКАНИИ,
-    // исполняет их render-поток каждый кадр (Engine::RenderFunc). struct TextureAtlas остаётся
-    // чистым: ресайз в инструкции, а не в методе таргета. Настройки замыкание читает ЖИВЬЁМ
-    // (состояние набора, состояние шага), и писатель у них тот же render-поток.
-    tm->CreateResizeInstruction("scene_hdr",
-        [a = g_pass_system.scene_hdr, ctx](TextureManager& t) {
+    // Инструкции ресайза: правило вывода размера живёт в ЗАМЫКАНИИ, исполняет их render-поток каждый
+    // кадр (Engine::RenderFunc). struct TextureAtlas остаётся чистым: ресайз в инструкции, а не в
+    // методе таргета. Настройки замыкание читает ЖИВЬЁМ, и писатель у них тот же render-поток.
+    //
+    // На всю четвёрку инструкция ОДНА, и это не экономия строк. Это вложения одного прохода (MRT
+    // 0/1/2 и depth у MAIN_PASS, попарно у TRANSPARENT/DEBUG/UI), а у фреймбуфера размер один.
+    // Разойтись им нельзя, и при расхождении никто не ругается: SDL берёт МИНИМУМ по вложениям и
+    // ставит его же в renderArea, viewport и scissor (SDL_gpu_vulkan.c, BeginRenderPass) — меньший
+    // таргет молча обрежет весь проход до своего угла. Один вывод размера на группу — расходиться
+    // нечему; отсюда же и один множитель на четверых вместо своего у каждого.
+    tm->CreateResizeInstruction("scene_framebuffer",
+        [ctx, hdr_tci, emission_tci, ambient_tci, depth_tci](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  ScreenTargetSize(w, h, g_pass_system.render_scale, rw, rh);
-            t.RecreateAtlasTexture(a, TexturePresets::SceneHDR(rw, rh));
-        });
-    tm->CreateResizeInstruction("scene_emission",
-        [a = g_pass_system.scene_emission, ctx](TextureManager& t) {
-            uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  ScreenTargetSize(w, h, g_pass_system.render_scale, rw, rh);
-            t.RecreateAtlasTexture(a, TexturePresets::EmissionHDR(rw, rh));
-        });
-    tm->CreateResizeInstruction(SCENE_AMBIENT,
-        [a = g_pass_system.scene_ambient, ctx](TextureManager& t) {
-            uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  ScreenTargetSize(w, h, g_pass_system.render_scale, rw, rh);
-            t.RecreateAtlasTexture(a, TexturePresets::AmbientHDR(rw, rh));
-        });
-    tm->CreateResizeInstruction("main_depth",
-        [a = g_pass_system.main_depth, ctx](TextureManager& t) {
-            uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
-            uint32_t rw, rh;  ScreenTargetSize(w, h, g_pass_system.render_scale, rw, rh);
-            auto tci = TexturePresets::GetCreateInfo(TexturePreset::SingleDepth2048);
-            tci.width = rw;  tci.height = rh;               // геометрия из пресета; usage сохранит RecreateAtlasTexture
-            t.RecreateAtlasTexture(a, tci);
+            uint32_t rw, rh;  ScreenTargetSize(w, h, g_pass_system.scene_scale, rw, rh);
+            t.RecreateAtlasTexture(g_pass_system.scene_hdr,      Sized(hdr_tci, rw, rh));
+            t.RecreateAtlasTexture(g_pass_system.scene_emission, Sized(emission_tci, rw, rh));
+            t.RecreateAtlasTexture(g_pass_system.scene_ambient,  Sized(ambient_tci, rw, rh));
+            t.RecreateAtlasTexture(g_pass_system.main_depth,     Sized(depth_tci, rw, rh));
         });
 
     g_pass_system.common_inited = true;
@@ -527,8 +532,8 @@ static void BloomLevelSize(uint32_t out_w, uint32_t out_h, float scale,
 }
 }
 
-void DefaultRenderPassNamespace::SetSceneResolutionScale(float scale) { g_pass_system.render_scale = scale; }
-float DefaultRenderPassNamespace::SceneResolutionScale() { return g_pass_system.render_scale; }
+void DefaultRenderPassNamespace::SetSceneResolutionScale(float scale) { g_pass_system.scene_scale = scale; }
+float DefaultRenderPassNamespace::SceneResolutionScale() { return g_pass_system.scene_scale; }
 
 void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
 {
@@ -578,17 +583,18 @@ void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
     SDL_GPUSampler* env_sampler = tm->GetSampler(DefaultSamplersNames::ENV_SAMPLER);
     uint32_t out_w = 0, out_h = 0;
     OutputSize(ctx, out_w, out_h);
+    const SDL_GPUTextureCreateInfo level_tci = TexturePresets::BloomLevel(0, 0);
     for (uint32_t i = 0; i < BLOOM_LEVELS; ++i) {
         const std::string name = "bloom_L" + std::to_string(i);
         uint32_t lw = 0, lh = 0;
         BloomLevelSize(out_w, out_h, PassStateAs<BloomState>(bloom)->resolution_scale, i, lw, lh);
-        TextureAtlas* a = tm->CreateTextureAtlas(name, TexturePresets::BloomLevel(lw, lh), env_sampler,
+        TextureAtlas* a = tm->CreateTextureAtlas(name, Sized(level_tci, lw, lh), env_sampler,
             ResourceTag::Default | ResourceTag::System);
-        tm->CreateResizeInstruction(name, [a, i, bloom, ctx](TextureManager& t) {
+        tm->CreateResizeInstruction(name, [a, i, bloom, ctx, level_tci](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
             uint32_t lw, lh;
             BloomLevelSize(w, h, PassStateAs<BloomState>(bloom)->resolution_scale, i, lw, lh);
-            t.RecreateAtlasTexture(a, TexturePresets::BloomLevel(lw, lh));
+            t.RecreateAtlasTexture(a, Sized(level_tci, lw, lh));
         });
     }
 }
@@ -638,14 +644,15 @@ void DefaultRenderPassNamespace::SetDefaultAOPass(EngineContext* ctx)
     OutputSize(ctx, out_w, out_h);
     uint32_t sw = 0, sh = 0;
     ScreenTargetSize(out_w, out_h, PassStateAs<AOState>(ao)->resolution_scale, sw, sh);
+    const SDL_GPUTextureCreateInfo map_tci = TexturePresets::AmbientOcclusion(0, 0);
     for (const std::string& name : { SSAO_TEXTURE, SSAO_TEMP }) {
-        TextureAtlas* a = tm->CreateTextureAtlas(name, TexturePresets::AmbientOcclusion(sw, sh), env_sampler,
+        TextureAtlas* a = tm->CreateTextureAtlas(name, Sized(map_tci, sw, sh), env_sampler,
             ResourceTag::Default | ResourceTag::System);
-        tm->CreateResizeInstruction(name, [a, ao, ctx](TextureManager& t) {
+        tm->CreateResizeInstruction(name, [a, ao, ctx, map_tci](TextureManager& t) {
             uint32_t w, h;  if (!OutputSize(ctx, w, h)) return;
             uint32_t aw, ah;
             ScreenTargetSize(w, h, PassStateAs<AOState>(ao)->resolution_scale, aw, ah);
-            t.RecreateAtlasTexture(a, TexturePresets::AmbientOcclusion(aw, ah));
+            t.RecreateAtlasTexture(a, Sized(map_tci, aw, ah));
         });
     }
 }

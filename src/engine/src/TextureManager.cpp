@@ -240,9 +240,9 @@ void TextureManager::TrashTextures(uint64_t fences_done)
     }
 }
 
-void TextureManager::CreateResizeInstruction(const std::string& texture_name, TextureResizeFunc fn)
+void TextureManager::CreateResizeInstruction(const std::string& key, TextureResizeFunc fn)
 {
-    resize_instructions_[texture_name] = std::move(fn); 
+    resize_instructions_[key] = std::move(fn); 
 }
 
 void TextureManager::ExecuteResizeInstructions()
