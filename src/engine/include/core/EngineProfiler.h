@@ -6,20 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
-//  EngineProfiler — кадровый профайлер: именованные слоты копят время за окно, Frame()
-//  раз в report_period_ms печатает дерево и обнуляет окно.
-//
-//    { PROF_SCOPE(Sim, "name"); <работа> }             — замер всего {}-блока
-//    Prof::Sim().Add("name", Prof::MsSince(t0));       — точечный замер
-//
-//  Окно по ВРЕМЕНИ, а не по кадрам: иначе SIM с низким UPS и RENDER с высоким FPS
-//  печатались бы с разной частотой.
-//
-//  ENGINE_PROFILE=0 опустошает Add/Frame и убирает PROF_SCOPE, но Clock::now()/MsSince
-//  остаются рабочими: сквозные замеры (submit_time слота, fence-wait между функциями)
-//  живут вне скоупов и правок под шиппинг не требуют.
-
-#ifndef ENGINE_PROFILE          // на случай сборки без CMake — по умолчанию включён
+#ifndef ENGINE_PROFILE
 #define ENGINE_PROFILE 1
 #endif
 
@@ -33,10 +20,9 @@ public:
     // bytes = 0 — столбец размера не печатать.
     void Add(const char* name, double ms, uint64_t bytes = 0);
 
-    // Родителя задаёт стек открытых скоупов, а НЕ имя: Add() без Push прикрепляется туда,
-    // где выполняется. Стек — ПО ПОТОКУ, и это не перестраховка: один экземпляр обслуживают
-    // несколько потоков (Prof::Render() пишут и render-, и fence-поток). С общим стеком
-    // замеры fence-потока становились детьми открытого render_cpu, и [other] уходил в минус.
+    // Родителя задаёт стек открытых скоупов, а НЕ имя. Стек — ПО ПОТОКУ: один экземпляр
+    // обслуживают несколько потоков (Prof::Render() пишут и render-, и fence-поток), и с общим
+    // стеком замеры fence-потока становились детьми открытого render_cpu, [other] уходил в минус.
     size_t Push(const char* name);
     void   Pop(size_t index, double ms, uint64_t bytes = 0);
 
@@ -65,7 +51,8 @@ private:
     std::unordered_map<std::string, size_t> index;
 };
 
-#else
+#else   // Prof::Clock/MsSince заглушать НЕЛЬЗЯ вместе с этим: сквозные замеры (submit_time,
+        // fence-wait между функциями) зовут их вне скоупов и работают в обеих сборках.
 
 class FrameProfiler {
 public:
@@ -81,9 +68,6 @@ public:
 namespace Prof {
     using Clock = std::chrono::steady_clock;
 
-    //   SIM    = game_iter + PrepareFunc + обновление буферов (sim-поток)
-    //   UPLOAD = UploadFunc: ожидание upload-fence + возврат TB (upload-поток)
-    //   RENDER = RenderFunc + завершение кадра в FenceFunc (ДВА потока — см. Push)
     FrameProfiler& Sim();
     FrameProfiler& Upload();
     FrameProfiler& Render();

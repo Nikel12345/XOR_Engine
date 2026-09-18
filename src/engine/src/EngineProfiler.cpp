@@ -7,8 +7,8 @@
 #if ENGINE_PROFILE
 
 namespace {
-// Открытые скоупы ТЕКУЩЕГО потока. Ищем среди записей СВОЕГО профайлера, а не на вершине:
-// в стеке потока могут лежать скоупы чужого экземпляра (см. Push в заголовке).
+// Ищем среди записей СВОЕГО профайлера, а не на вершине: в стеке потока могут лежать
+// скоупы чужого экземпляра (см. Push в заголовке).
 thread_local std::vector<std::pair<const FrameProfiler*, size_t>> t_open;
 
 size_t OpenParent(const FrameProfiler* p)
@@ -67,8 +67,8 @@ FrameProfiler::Slot& FrameProfiler::Touch(const char* name)
 void FrameProfiler::Frame()
 {
     std::lock_guard<std::mutex> lk(mtx);
-    // Граница итерации: непарный Push (их зовут и напрямую, не только из ScopeTimer) чистится
-    // здесь, а не копится до конца прогона. Только СВОИ записи — стек общий на поток.
+    // Непарный Push (их зовут и напрямую, не только из ScopeTimer) чистится здесь, а не копится
+    // до конца прогона. Только СВОИ записи — стек общий на поток.
     for (auto it = t_open.begin(); it != t_open.end(); )
         it = (it->first == this) ? t_open.erase(it) : it + 1;
     ++frames;
@@ -91,15 +91,13 @@ void FrameProfiler::Frame()
 
 void FrameProfiler::PrintAndReset(double window_ms)
 {
-    // Весь отчёт в одну строку и один fputs: иначе строки sim- и render-потоков
-    // перемешиваются посреди слова.
-    //
-    // ASCII-only в СЛУЖЕБНЫХ подписях: файл в UTF-8, но MSVC собирает строку в CP1251 и
-    // консоль показывает мусор. Имена скоупов приходят от вызывающего и идут как есть.
+    // Один fputs на весь отчёт: иначе строки sim- и render-потоков перемешиваются посреди слова.
+    // ASCII-only: файл в UTF-8, но MSVC собирает литерал в CP1251 и консоль показывает мусор —
+    // это относится и к именам скоупов, которые приходят от вызывающего и идут как есть.
     std::string out;
     char line[256];
 
-    const double tick = frames ? window_ms / (double)frames : 0.0;   // фактический такт по часам
+    const double tick = frames ? window_ms / (double)frames : 0.0;
     const double rate = window_ms > 0.0 ? (frames * 1000.0 / window_ms) : 0.0;
 
     const size_t n = slots.size();
@@ -111,8 +109,8 @@ void FrameProfiler::PrintAndReset(double window_ms)
     for (size_t i = 0; i < n; ++i)
         per_it[i] = frames ? slots[i].sum_ms / (double)frames : 0.0;
 
-    // Дерево берётся ГОТОВЫМ: родителя записал Push/Add в момент замера, восстанавливать
-    // его по именам или порядку не нужно. Порядок детей — порядок первого появления.
+    // Родителя записал Push/Add в момент замера — восстанавливать дерево по именам или
+    // порядку не нужно.
     for (size_t i = 0; i < n; ++i) {
         const size_t p = slots[i].parent;
         if (p == (size_t)-1 || p >= n) { roots.push_back(i); continue; }
@@ -144,8 +142,7 @@ void FrameProfiler::PrintAndReset(double window_ms)
         out += line;
     };
 
-    // Ведущие пробелы в именах — рудимент прежней схемы вложенности, отступ задаёт уровень
-    // дерева; поэтому имя печатается без них.
+    // Ведущие пробелы в именах — рудимент прежней схемы вложенности, ни на что не влияют.
     std::function<void(size_t, int)> emit = [&](size_t i, int level) {
         const std::string& nm = slots[i].name;
         size_t b = nm.find_first_not_of(" =");   // '=' - метка справочного замера, в подписи не нужна
@@ -159,10 +156,10 @@ void FrameProfiler::PrintAndReset(double window_ms)
         "\n===== [%s]  %d iters in %.1f s  |  %.1f/s  |  tick %.3f ms =====\n",
         title.c_str(), frames, window_ms / 1000.0, rate, tick);
     out += line;
-    // ДВЕ СЕКЦИИ, и смешивать их нельзя. Фазы разбивают такт: их сумма плюс [outside scopes]
-    // даёт 100%. Справочные (имя с '=') меряют соседнее - работу GPU, ожидание в другом
-    // потоке, сам такт целиком; они перекрываются и в сумму не входят. В одном списке
-    // получалась чушь вроде "frame_period 100% и рядом outside scopes 96%".
+    // ДВЕ СЕКЦИИ, и смешивать их нельзя. Фазы разбивают такт, их сумма плюс [outside scopes]
+    // даёт 100%. Справочные (имя с '=') меряют соседнее - работу GPU, ожидание в другом потоке,
+    // сам такт целиком; они перекрываются и не суммируются. В одном списке получалась чушь
+    // вроде "frame_period 100% и рядом outside scopes 96%".
     std::vector<size_t> phases, refs;
     for (size_t r : roots) {
         const std::string& nm = slots[r].name;
@@ -177,7 +174,6 @@ void FrameProfiler::PrintAndReset(double window_ms)
     double top_sum = 0.0;
     for (size_t r : phases) { emit(r, 0); top_sum += per_it[r]; }
 
-    // Ноль здесь означает, что фазы действительно разбивают такт и искать больше негде.
     row(0, "[outside scopes]", tick - top_sum, nullptr, true);
 
     if (!refs.empty()) {
@@ -192,7 +188,6 @@ void FrameProfiler::PrintAndReset(double window_ms)
     std::fputs(out.c_str(), stdout);
     std::fflush(stdout);
 
-    // Состав слотов переживает окно — обнуляются только суммы и счётчики.
     for (Slot& s : slots) { s.sum_ms = 0.0; s.max_ms = 0.0; s.calls = 0; }
     frames = 0;
 }
@@ -200,7 +195,8 @@ void FrameProfiler::PrintAndReset(double window_ms)
 #endif // ENGINE_PROFILE
 
 namespace Prof {
-    // Период отчёта — реальное время, не кадры.
+    // Период в РЕАЛЬНОМ времени, не в кадрах: иначе SIM с низким UPS и RENDER с высоким FPS
+    // печатались бы с разной частотой.
     FrameProfiler& Sim()
     {
         static FrameProfiler p("SIM / UPDATE LOOP", 10000.0);   // отчёт раз в ~10 c
