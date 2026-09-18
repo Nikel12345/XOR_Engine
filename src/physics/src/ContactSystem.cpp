@@ -47,4 +47,4 @@ std::vector<Contact> DetectContacts(ObjectManager& om, SceneData* scene,
 	return contacts;
 }
 
-} // namespace ContactSystem
+}

@@ -37,4 +37,4 @@ std::vector<DebugShape> CollectDebugShapes(ObjectManager& om, SceneData* scene,
 	return out;
 }
 
-} // namespace DebugColliderSystem
+}

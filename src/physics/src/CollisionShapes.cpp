@@ -91,4 +91,4 @@ bool Overlap(const WorldShape& a, const WorldShape& b, float& pen) {
 	return BoxBox(a, b);
 }
 
-} // namespace Collision
+}

@@ -6,8 +6,7 @@
 class ObjectManager;
 struct SceneData;
 
-// Stateless: только факт пересечения в текущий момент — ни разрешения контактов, ни
-// памяти между кадрами.
+// Stateless: только факт пересечения в моменте — без разрешения контактов и памяти о них.
 namespace ContactSystem {
 	using Entity = uint32_t;
 
