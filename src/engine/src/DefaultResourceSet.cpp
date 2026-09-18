@@ -114,9 +114,6 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 				float nx = sp * ct, ny = cp, nz = sp * st;
 				PosUVNormal vert{};
 				vert.x = R * nx; vert.y = R * ny; vert.z = R * nz;
-				// U зеркалим (1-u): без этого надпись читалась ЗЕРКАЛЬНО (только изнутри сферы). V уже
-				// v-down (v=0 у полюса φ=0 = верх картинки) — канон, не трогаем. Тангенс — вдоль НОВОГО
-				// +U (∂pos/∂(−θ)) → знак θ-производной инвертируется, чтобы TBN совпал с cross(T,N).
 				vert.u = 1.0f - (float)j / (float)slices;
 				vert.v = (float)i / (float)stacks;
 				vert.nx = nx; vert.ny = ny; vert.nz = nz;
