@@ -46,9 +46,14 @@ struct FieldEditCmd {
 };
 template<> struct CommandPayload<CommandId::HideEntity>         { using type = FieldEditCmd; };
 
+struct ModelLodPaths {
+    std::string vertex_path;
+    std::string index_path;
+    float       switch_px = 0.0f;
+};
+
 struct EntityModelCmd {
     uint32_t    entity;
-    uint32_t    lod;
     std::string model;
 };
 template<> struct CommandPayload<CommandId::SetEntityModel> { using type = EntityModelCmd; };
@@ -60,13 +65,6 @@ struct EntityMaterialCmd {
     std::string material;
 };
 template<> struct CommandPayload<CommandId::SetEntityMaterial> { using type = EntityMaterialCmd; };
-
-struct EntityLodsCmd {
-    uint32_t             entity;
-    uint32_t             lod_count;
-    std::array<float, 3> switches;
-};
-template<> struct CommandPayload<CommandId::SetEntityLods> { using type = EntityLodsCmd; };
 
 struct ShaderProgramNameCmd { std::string shader; };
 template<> struct CommandPayload<CommandId::DeleteShader> { using type = ShaderProgramNameCmd; };
@@ -102,6 +100,7 @@ struct UpsertModelCmd {
     std::string index_path;
     uint32_t    anchor = 0;
     std::string old_name;   // != name → переименование ячейки реестра
+    std::vector<ModelLodPaths> lods;
 };
 template<> struct CommandPayload<CommandId::UpsertModel> { using type = UpsertModelCmd; };
 

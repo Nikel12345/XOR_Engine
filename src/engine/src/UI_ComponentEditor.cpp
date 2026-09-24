@@ -247,57 +247,10 @@ std::vector<uint32_t> PartsOfModel(ModelManager* mdm, ModelId model)
     return out;
 }
 
-// Возвращает уровень, который показывать дальше. У живой сущности уровень, добавленный «+»,
-// появится только после команды, поэтому вызывающий держит его и ждёт.
-uint32_t DrawLodSetup(const EditTarget& t, Renderable& rend, size_t row, uint32_t lod)
-{
-    const uint32_t count = rend.lod_count[row];
-    std::array<float, MAX_LOD - 1> switches = rend.switches[row];
-    uint32_t new_count = count;
-
-    ImGui::PushID("lod");
-    ImGui::TextUnformatted("LOD");
-    ImGui::SameLine();
-    StepArrows(lod, count);
-    ImGui::SameLine();
-    ImGui::BeginDisabled(count >= MAX_LOD);
-    if (ImGui::SmallButton("+")) new_count = count + 1;
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    ImGui::BeginDisabled(count <= 1);
-    if (ImGui::SmallButton("-")) new_count = count - 1;
-    ImGui::EndDisabled();
-    ImGui::PopID();
-
-    bool switch_changed = false;
-    if (lod > 0)
-        switch_changed = ImGui::DragFloat("switch px", &switches[lod - 1], 0.5f, 0.0f, 16384.0f, "%.1f",
-                                          ImGuiSliderFlags_AlwaysClamp);
-
-    if (new_count == count && !switch_changed) return lod;
-    if (t.live()) {
-        cmd::Push<CommandId::SetEntityLods>(t.ctx->GetInputManager(), t.entity, new_count, switches);
-    }
-    else {
-        for (uint32_t L = count; L < new_count; ++L) {
-            rend.models[row][L] = rend.models[row][L - 1];
-            for (MaterialSlot& part : rend.materials[row]) part.per_lod[L] = part.per_lod[L - 1];
-        }
-        for (uint32_t L = new_count; L < count; ++L) {
-            rend.models[row][L] = ModelId{};
-            for (MaterialSlot& part : rend.materials[row]) part.per_lod[L] = MaterialId{};
-        }
-        rend.lod_count[row] = static_cast<uint8_t>(new_count);
-        rend.switches[row] = switches;
-        t.ctx->FitRenderableParts(rend, row);
-    }
-    return new_count > count ? new_count - 1 : std::min(lod, new_count - 1);
-}
-
-void DrawLodModel(const EditTarget& t, Renderable& rend, size_t row, uint32_t lod)
+void DrawModel(const EditTarget& t, Renderable& rend, size_t row)
 {
     ModelManager* mdm = t.ctx->GetModelManager();
-    const std::string& sel = mdm->ModelNameOf(rend.models[row][lod]);
+    const std::string& sel = mdm->ModelNameOf(rend.model[row]);
     if (!ImGui::BeginCombo("model", sel.empty() ? "(none)" : sel.c_str())) return;
     const ModelRegistry& mdreg = mdm->Models();
     for (int32_t mdi = 0; mdi < mdreg.Count(); ++mdi) {
@@ -307,9 +260,9 @@ void DrawLodModel(const EditTarget& t, Renderable& rend, size_t row, uint32_t lo
         const std::string& name = mdreg.At(mdi).name;
         if (!ImGui::Selectable(name.c_str(), name == sel)) continue;
         if (t.live())
-            cmd::Push<CommandId::SetEntityModel>(t.ctx->GetInputManager(), t.entity, lod, name);
+            cmd::Push<CommandId::SetEntityModel>(t.ctx->GetInputManager(), t.entity, name);
         else {
-            rend.models[row][lod] = ModelId{ mdi };
+            rend.model[row] = ModelId{ mdi };
             t.ctx->FitRenderableParts(rend, row);
         }
     }
@@ -349,20 +302,27 @@ void DrawRenderableSection(const EditTarget& t, Archetype& arch, size_t row)
 {
     Renderable& rend = arch.get_array<Renderable>()->data;
     std::vector<MaterialSlot>& parts = rend.materials[row];
+    ModelManager* mdm = t.ctx->GetModelManager();
 
+    DrawModel(t, rend, row);
+
+    const uint32_t levels = std::min(mdm->LevelCount(rend.model[row]), MAX_LOD);
     ImGuiStorage* storage = ImGui::GetStateStorage();
     const ImGuiID lod_key = ImGui::GetID(static_cast<int>(t.entity));
-    const uint32_t wanted = static_cast<uint32_t>(storage->GetInt(lod_key, 0));
-    const uint32_t shown = std::min<uint32_t>(wanted, rend.lod_count[row] - 1u);
-    const uint32_t next = DrawLodSetup(t, rend, row, shown);
-    storage->SetInt(lod_key, static_cast<int>(next != shown ? next : wanted));
-    const uint32_t lod = std::min<uint32_t>(next, rend.lod_count[row] - 1u);
-    DrawLodModel(t, rend, row, lod);
+    uint32_t lod = std::min<uint32_t>(static_cast<uint32_t>(storage->GetInt(lod_key, 0)), levels - 1u);
+    ImGui::PushID("lod");
+    ImGui::TextUnformatted("LOD");
+    ImGui::SameLine();
+    StepArrows(lod, levels);
+    ImGui::PopID();
+    storage->SetInt(lod_key, static_cast<int>(lod));
+    const ModelId level_model = mdm->LevelModel(rend.model[row], lod);
+    if (lod > 0) ImGui::TextDisabled("%s", mdm->ModelNameOf(level_model).c_str());
 
     if (!t.live()) t.ctx->FitRenderableParts(rend, row);
 
     MaterialManager* mmgr = t.ctx->GetMaterialManager();
-    for (const uint32_t k : PartsOfModel(t.ctx->GetModelManager(), rend.models[row][lod])) {
+    for (const uint32_t k : PartsOfModel(mdm, level_model)) {
         if (k >= parts.size()) continue;
         ImGui::PushID(static_cast<int>(k));
         const MaterialId sel_id = parts[k].per_lod[lod];

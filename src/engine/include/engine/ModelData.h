@@ -8,6 +8,7 @@
 #include <SDL3/SDL_stdinc.h>
 #include <glm/glm.hpp>
 #include "ResourceTags.h"
+#include "ResourceId.h"
 
 // Диапазон в буферах пула, В ЭЛЕМЕНТАХ.
 struct GeometryRange {
@@ -39,8 +40,17 @@ struct SubMeshData {
 // L/R = X min/max, B/T = Y min/max (Bottom/Top), B/F = Z min/max (Back/Front).
 enum class AnchorShift { Keep, Center, LBB, RBB, LTB, RTB, LBF, RBF, LTF, RTF };
 
+inline constexpr uint32_t MAX_MODEL_LODS = 4;
+
+// Уровень детализации начиная с 1; уровень 0 — сама модель.
+struct ModelLod {
+    ModelId model;             // может быть самой моделью: та же геометрия, у сущности свои материалы уровня
+    float   switch_px = 0.0f;  // экранный радиус, ниже которого предыдущий уровень уступает этому
+};
+
 struct ModelData {
     std::vector<SubMeshData> submeshes;
+    std::vector<ModelLod>    lods;
     AnchorShift anchor = AnchorShift::Keep;
 
     // Пусто = дефолтный пул.

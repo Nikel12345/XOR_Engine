@@ -14,13 +14,8 @@
             "flags": [
                 0
             ],
-            "lod_count": [
-                1
-            ],
-            "models": [
-                [
-                    "skybox_cube"
-                ]
+            "model": [
+                "skybox_cube"
             ],
             "materials": [
                 [

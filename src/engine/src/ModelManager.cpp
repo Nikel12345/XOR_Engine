@@ -313,6 +313,40 @@ bool ModelManager::RenameModel(ModelId id, const std::string& new_name)
     return models_data.Rename(id, new_name);
 }
 
+void ModelManager::SetModelLods(ModelId id, const std::vector<ModelLodSource>& lods)
+{
+    ModelData* m = models_data.Get(id);
+    if (!m) return;
+    const std::string name = models_data.NameOf(id);
+    m->lods.clear();
+    for (size_t i = 0; i < lods.size() && i + 1 < MAX_MODEL_LODS; ++i) {
+        const ModelLodSource& src = lods[i];
+        ModelLod lod{ id, src.switch_px };
+        if (src.vertex_path != m->model_path || src.index_path != m->index_path) {
+            const std::string level_name = name + "#" + std::to_string(i + 1);
+            ModelData* level = LoadModelFromFile(level_name, src.vertex_path, src.index_path, m->anchor, GetPool(m->pool_name));
+            if (!level) continue;
+            level->tags = level->tags | ResourceTag::System;
+            lod.model = models_data.Find(level_name);
+        }
+        m->lods.push_back(lod);
+    }
+    ++spheres_revision;
+}
+
+uint32_t ModelManager::LevelCount(ModelId id) const
+{
+    const ModelData* m = models_data.Get(id);
+    return m ? 1u + static_cast<uint32_t>(m->lods.size()) : 1u;
+}
+
+ModelId ModelManager::LevelModel(ModelId id, uint32_t level) const
+{
+    if (level == 0) return id;
+    const ModelData* m = models_data.Get(id);
+    return (m && level - 1 < m->lods.size()) ? m->lods[level - 1].model : ModelId{};
+}
+
 size_t ModelManager::ClearSceneModels()
 {
     size_t removed = 0;
@@ -341,6 +375,7 @@ size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries
         // Битый файл стирает прежнюю геометрию: замена под тем же именем — это снос и создание.
         DeleteModel(models_data.Find(e.name), NameSlot::Keep);
         if (!CreateModel(e.name, e.vertex_path, e.index_path, e.anchor, pool)) continue;
+        if (!e.lods.empty()) SetModelLods(models_data.Find(e.name), e.lods);
         ++loaded;
     }
     return loaded;

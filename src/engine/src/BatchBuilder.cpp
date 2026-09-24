@@ -333,11 +333,13 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
     ModelManager* mdm, MaterialManager* mtm, const Renderable& rend, size_t row) {
 
     resolved_scratch.clear();
-    const uint32_t lod_count = rend.lod_count[row];
+    const ModelId root = rend.model[row];
+    const uint32_t lod_count = mdm ? std::min(mdm->LevelCount(root), MAX_LOD) : 1u;
+    const ModelData* root_model = mdm ? mdm->FindModel(root) : nullptr;
     const std::vector<MaterialSlot>& materials = rend.materials[row];
 
     for (uint32_t lod = 0; lod < lod_count; ++lod) {
-        const ModelId model_id = rend.models[row][lod];
+        const ModelId model_id = mdm ? mdm->LevelModel(root, lod) : root;
         // Резолв ТИХИЙ (FindModel, а не логирующий operator[]): он идёт на КАЖДУЮ сущность, и одно
         // битое имя в сцене на миллион объектов дало бы миллион строк лога.
         const ModelData* model = mdm ? mdm->FindModel(model_id) : nullptr;
@@ -388,7 +390,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
     // с одной и той же командой (тень без текстур) обязаны попасть в одну группу.
     uint64_t lod_key = MixKey(lod_count);
     for (uint32_t L = 0; L + 1 < lod_count; ++L)
-        lod_key = MixKey(lod_key ^ std::bit_cast<uint32_t>(rend.switches[row][L]));
+        lod_key = MixKey(lod_key ^ std::bit_cast<uint32_t>(root_model->lods[L].switch_px));
 
     for (size_t first = 0; first < resolved_scratch.size(); ++first) {
         RenderPassStep* rp = resolved_scratch[first].pass;
@@ -402,7 +404,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
         DrawGroup& group = git->second;
         if (created) {
             group.lod_count = static_cast<uint8_t>(lod_count);
-            for (uint32_t L = 0; L + 1 < lod_count; ++L) group.switches[L] = rend.switches[row][L];
+            for (uint32_t L = 0; L + 1 < lod_count; ++L) group.switches[L] = root_model->lods[L].switch_px;
         }
         for (size_t i = first; i < resolved_scratch.size(); ++i) {
             ResolvedCmd& c = resolved_scratch[i];

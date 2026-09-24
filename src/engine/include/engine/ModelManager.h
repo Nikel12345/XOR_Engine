@@ -13,12 +13,19 @@ class BufferManager;
 struct UploadTask;
 struct PoolResidency;
 
+struct ModelLodSource {
+	std::string vertex_path;
+	std::string index_path;
+	float       switch_px = 0.0f;
+};
+
 struct SceneModelEntry {
 	std::string name;
 	std::string vertex_path;
 	std::string index_path;
 	AnchorShift anchor = AnchorShift::Keep;
 	std::string pool;
+	std::vector<ModelLodSource> lods;
 };
 
 struct ModelCell { std::string name; std::unique_ptr<ModelData> object; };
@@ -72,6 +79,10 @@ public:
 	bool CheckDirty() const;
 
 	uint64_t SpheresRevision() const { return spheres_revision; };
+	// Уровень с путями самой модели ссылается на неё; иначе грузится служебной моделью.
+	void SetModelLods(ModelId model, const std::vector<ModelLodSource>& lods);
+	uint32_t LevelCount(ModelId model) const;
+	ModelId  LevelModel(ModelId model, uint32_t level) const;
 	ModelData* operator[](const std::string& name);
 	// Тихий резолв: промах не логируется. Нужен там, где промах законен или част — резолв на
 	// каждую сущность при сборке батчей. Кто ждёт модель наверняка, берёт operator[].

@@ -89,8 +89,9 @@ void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, Ob
 			glm::vec4 sphere(0.0f, 0.0f, 0.0f, -1.0f);
 			if (!is_ui) {
 				// Строка одна на все уровни, поэтому сфера обязана покрыть модель любого из них.
-				for (uint32_t L = 0; L < rend.lod_count[i]; ++L) {
-					const glm::vec4 s = sphere_of(rend.models[i][L]);
+				const uint32_t levels = mm ? mm->LevelCount(rend.model[i]) : 1u;
+				for (uint32_t L = 0; L < levels; ++L) {
+					const glm::vec4 s = sphere_of(mm ? mm->LevelModel(rend.model[i], L) : rend.model[i]);
 					if (s.w < 0.0f) continue;
 					sphere = sphere.w < 0.0f ? s : UnionSpheres(sphere, s);
 				}

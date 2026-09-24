@@ -146,21 +146,16 @@ def city_grid(av_x, av_z, rng):
 
 
 def renderable(model_col, names, hidden=None):
-    """Компонент Renderable. hidden — части, которых нет на уровне 1; без него уровень один."""
+    """Компонент Renderable. hidden — части, которых нет на уровне 1 модели; без него уровень один."""
     count = len(model_col)
     if hidden is None:
-        return collections.OrderedDict([
-            ("visible", [True] * count), ("alpha", [1.0] * count), ("flags", [0] * count),
-            ("lod_count", [1] * count),
-            ("models", [[m] for m in model_col]),
-            ("materials", [[[n] for n in row] for row in names]),
-        ])
+        materials = [[[n] for n in row] for row in names]
+    else:
+        materials = [[[n, None if k in hidden else n] for k, n in enumerate(row)] for row in names]
     return collections.OrderedDict([
         ("visible", [True] * count), ("alpha", [1.0] * count), ("flags", [0] * count),
-        ("lod_count", [2] * count),
-        ("models", [[m, m] for m in model_col]),
-        ("materials", [[[n, None if k in hidden else n] for k, n in enumerate(row)] for row in names]),
-        ("switches", [[DETAIL_HIDE_PX]] * count),
+        ("model", list(model_col)),
+        ("materials", materials),
     ])
 
 
@@ -255,6 +250,11 @@ def sync_models():
             ("index", "%s/%s_i.bin" % (rel, name)),
             ("anchor", 0),
             ("pool", "PosUVNorm"),
+            ("lods", [collections.OrderedDict([
+                ("vertex", "%s/%s_v.bin" % (rel, name)),
+                ("index", "%s/%s_i.bin" % (rel, name)),
+                ("switch", DETAIL_HIDE_PX),
+            ])]),
         ])
 
     generated = re.compile(r"^%s\d+$" % re.escape(MODEL_NAME))

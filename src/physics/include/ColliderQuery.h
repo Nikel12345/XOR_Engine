@@ -30,7 +30,7 @@ namespace ColliderQuery {
 				if (om.Has<ColliderComponent>(scene, e) &&
 					!om.GetComponent<ColliderComponent>(scene, e).shapes.empty())
 					return;   // уже учтён явными формами
-				const ModelId model = r.container().models[r.i()][0];
+				const ModelId model = r.container().model[r.i()];
 				if (!colliders_of || !model) return;
 				const std::vector<Collider> autoShapes = colliders_of(model);
 				if (autoShapes.empty()) return;

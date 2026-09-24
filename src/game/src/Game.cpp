@@ -550,7 +550,7 @@ void Game::SimulateGravity()
         float hx = 0.0f, hy = 0.0f, hz = 0.0f;
         if (objectManager->Has<Renderable>(scene, e)) {
             SoAElement<Renderable> rend = objectManager->GetComponent<Renderable>(scene, e);
-            const ModelData* m = modelManager->FindModel(rend.container().models[rend.i()][0]);
+            const ModelData* m = modelManager->FindModel(rend.container().model[rend.i()]);
             if (m) for (const SubMeshData& sm : m->submeshes) {
                 hx = std::max(hx, std::fabs(sm.aabb_center.x) + sm.aabb_half.x);
                 hy = std::max(hy, std::fabs(sm.aabb_center.y) + sm.aabb_half.y);

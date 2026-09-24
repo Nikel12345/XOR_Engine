@@ -524,29 +524,41 @@ namespace {
 
     void ModelEditor(EngineContext* ctx)
     {
+        struct LevelBuf { char vert[512] = ""; char index[512] = ""; float switch_px = 0.0f; };
         static char        nameBuf[128] = "";
-        static char        modelBuf[512] = "";
-        static char        indexBuf[512] = "";
+        static LevelBuf    levels[MAX_MODEL_LODS];
+        static uint32_t    level_count = 1;
+        static uint32_t    page = 0;
         static AnchorShift anchorSel = AnchorShift::Keep;
         static std::string syncedFor = "\x01";
 
         if (g_sel.name != syncedFor) {
             syncedFor = g_sel.name;
             std::snprintf(nameBuf, sizeof nameBuf, "%s", g_sel.name.c_str());
-            if (!g_sel.name.empty()) {
-                if (const ModelData* m = ctx->GetModelManager()->FindModel(g_sel.name)) {
-                    std::snprintf(modelBuf, sizeof modelBuf, "%s", m->model_path.c_str());
-                    std::snprintf(indexBuf, sizeof indexBuf, "%s", m->index_path.c_str());
-                    anchorSel = m->anchor;
+            for (LevelBuf& l : levels) l = LevelBuf{};
+            level_count = 1;
+            page = 0;
+            ModelManager* mm = ctx->GetModelManager();
+            if (const ModelData* m = g_sel.name.empty() ? nullptr : mm->FindModel(g_sel.name)) {
+                std::snprintf(levels[0].vert, sizeof levels[0].vert, "%s", m->model_path.c_str());
+                std::snprintf(levels[0].index, sizeof levels[0].index, "%s", m->index_path.c_str());
+                anchorSel = m->anchor;
+                for (const ModelLod& lod : m->lods) {
+                    if (level_count >= MAX_MODEL_LODS) break;
+                    LevelBuf& l = levels[level_count++];
+                    if (const ModelData* lm = mm->FindModel(lod.model)) {
+                        std::snprintf(l.vert, sizeof l.vert, "%s", lm->model_path.c_str());
+                        std::snprintf(l.index, sizeof l.index, "%s", lm->index_path.c_str());
+                    }
+                    l.switch_px = lod.switch_px;
                 }
             }
-            else { modelBuf[0] = '\0'; indexBuf[0] = '\0'; }
         }
 
         if ((g_pick_target == PickTarget::ModelVert || g_pick_target == PickTarget::ModelIndex)
             && g_picked_ready.exchange(false, std::memory_order_acquire)) {
             std::lock_guard<std::mutex> lk(g_pick_mtx);
-            char* dst = (g_pick_target == PickTarget::ModelVert) ? modelBuf : indexBuf;
+            char* dst = (g_pick_target == PickTarget::ModelVert) ? levels[page].vert : levels[page].index;
             std::snprintf(dst, 512, "%s", g_picked_path.c_str());
             g_pick_target = PickTarget::None;
         }
@@ -556,13 +568,45 @@ namespace {
         ImGui::TextDisabled("Model (create / edit)");
         ImGui::InputText("Name", nameBuf, sizeof nameBuf);
 
-        ImGui::InputText("Vertices", modelBuf, sizeof modelBuf);
+        ImGui::TextUnformatted("LOD");
+        ImGui::SameLine();
+        ImGui::BeginDisabled(page == 0);
+        if (ImGui::ArrowButton("lod_prev", ImGuiDir_Left)) --page;
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::Text("%u / %u", page, level_count - 1);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(page + 1 >= level_count);
+        if (ImGui::ArrowButton("lod_next", ImGuiDir_Right)) ++page;
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(level_count >= MAX_MODEL_LODS);
+        if (ImGui::SmallButton("+")) {
+            LevelBuf& l = levels[level_count];
+            l = LevelBuf{};
+            l.switch_px = level_count == 1 ? 128.0f : levels[level_count - 1].switch_px * 0.5f;
+            page = level_count++;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(level_count <= 1);
+        if (ImGui::SmallButton("-")) {
+            --level_count;
+            if (page >= level_count) page = level_count - 1;
+        }
+        ImGui::EndDisabled();
+
+        LevelBuf& cur = levels[page];
+        ImGui::InputText("Vertices", cur.vert, sizeof cur.vert);
         ImGui::SameLine();
         if (ImGui::Button("Browse...##v")) OpenFileDialog(PickTarget::ModelVert, filters, 2);
 
-        ImGui::InputText("Indices", indexBuf, sizeof indexBuf);
+        ImGui::InputText("Indices", cur.index, sizeof cur.index);
         ImGui::SameLine();
         if (ImGui::Button("Browse...##i")) OpenFileDialog(PickTarget::ModelIndex, filters, 2);
+
+        if (page > 0)
+            ImGui::DragFloat("Switch px", &cur.switch_px, 0.5f, 0.0f, 16384.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
 
         static const AnchorShift kAnchors[] = {
             AnchorShift::Keep, AnchorShift::Center, AnchorShift::LBB, AnchorShift::RBB,
@@ -578,11 +622,15 @@ namespace {
             ImGui::EndCombo();
         }
 
-        const bool ready = nameBuf[0] && modelBuf[0] && indexBuf[0];
+        bool ready = nameBuf[0] != '\0';
+        for (uint32_t L = 0; L < level_count; ++L) ready = ready && levels[L].vert[0] && levels[L].index[0];
         ImGui::BeginDisabled(!ready);
         if (ImGui::Button("Recreate", ImVec2(160, 0))) {
-            cmd::Push<CommandId::UpsertModel>(ctx->GetInputManager(), nameBuf, modelBuf, indexBuf,
-                                              static_cast<uint32_t>(anchorSel), g_sel.name);
+            std::vector<ModelLodPaths> lods;
+            for (uint32_t L = 1; L < level_count; ++L)
+                lods.push_back({ levels[L].vert, levels[L].index, levels[L].switch_px });
+            cmd::Push<CommandId::UpsertModel>(ctx->GetInputManager(), nameBuf, levels[0].vert, levels[0].index,
+                                              static_cast<uint32_t>(anchorSel), g_sel.name, std::move(lods));
             g_sel = Selection{}; g_sel.kind = SelKind::Model; g_sel.name = nameBuf;
         }
         ImGui::EndDisabled();

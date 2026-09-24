@@ -45,7 +45,7 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 	cmd::Register<CommandId::SetEntityModel>(im,
 		[](EngineContext* ctx, const EntityModelCmd& c)
 		{
-			ctx->ChangeModel(c.entity, c.model, c.lod);
+			ctx->ChangeModel(c.entity, c.model);
 		});
 
 	cmd::Register<CommandId::SetEntityMaterial>(im,
@@ -54,11 +54,6 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 			ctx->ChangeMaterial(c.entity, c.material, c.mat_index, c.lod);
 		});
 
-	cmd::Register<CommandId::SetEntityLods>(im,
-		[](EngineContext* ctx, const EntityLodsCmd& c)
-		{
-			ctx->SetEntityLods(c.entity, c.lod_count, c.switches);
-		});
 
 	cmd::Register<CommandId::SetTransform>(im,
 		[](EngineContext* ctx, const SetTransformCmd& c)
@@ -279,6 +274,16 @@ void DefaultCommandSet::SetModelCommands(InputManager& im)
 				mm->RenameModel(edited, c.name);
 				mm->LoadModelFromFile(c.name, c.model_path, c.index_path,
 					static_cast<AnchorShift>(c.anchor));
+				const ModelId id = mm->ModelIdOf(c.name);
+				std::vector<ModelLodSource> lods;
+				for (const ModelLodPaths& l : c.lods) lods.push_back({ l.vertex_path, l.index_path, l.switch_px });
+				mm->SetModelLods(id, lods);
+				ObjectManager* om = ctx->GetObjectManager();
+				om->ForEachArchetype<Renderable>(om->GetActiveScene(), [ctx, id](ComponentArray<Renderable>* arr) {
+					for (size_t i = 0; i < arr->data.size(); ++i)
+						if (arr->data.model[i] == id) ctx->FitRenderableParts(arr->data, i);
+				});
+				om->BumpEntityRevision();
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 		});

@@ -67,15 +67,12 @@ public:
 
 	// Записью в компонент не заменяется: вместе с моделью меняются длина
 	// Renderable::materials и место сущности в дереве батчей.
-	void ChangeModel(Entity e, const ModelName& model_name, uint32_t lod = 0);
+	void ChangeModel(Entity e, const ModelName& model_name);
 
 	void ChangeMaterial(Entity e, const MaterialName& material_name, uint32_t mat_index = 0, uint32_t lod = 0);
 
-	// Новый уровень наследует модель и материалы предыдущего.
-	void SetEntityLods(Entity e, uint32_t lod_count, const std::array<float, 3>& switches);
-
-	// После смены моделей уровней: частей столько, сколько просит самая широкая модель, а
-	// материал уровня у части, которую его модель не берёт, снимается.
+	// После смены модели или её уровней: частей столько, сколько просит самая широкая модель уровней,
+	// а материал уровня у части, которую модель этого уровня не берёт, снимается.
 	void FitRenderableParts(Renderable& r, size_t row) const;
 
 	FontData* CreateFont(const std::string& name, const char* path, float px, bool sdf = false);

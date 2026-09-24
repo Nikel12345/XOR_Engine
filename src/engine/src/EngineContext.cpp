@@ -216,15 +216,15 @@ void EngineContext::SetEntityTextureVariant(Entity e, uint32_t mat_index, Textur
 	else st.emplace_back(role, variant);
 }
 
-void EngineContext::ChangeModel(Entity e, const ModelName& model_name, uint32_t lod)
+void EngineContext::ChangeModel(Entity e, const ModelName& model_name)
 {
 	SceneData* scene = object_manager ? object_manager->GetActiveScene() : nullptr;
-	if (!scene || lod >= MAX_LOD || !object_manager->Has<Renderable>(scene, e)) return;
+	if (!scene || !object_manager->Has<Renderable>(scene, e)) return;
 	SoAElement<Renderable> r = object_manager->GetComponent<Renderable>(scene, e);
 	Renderable& rc = r.container();
 	const size_t i = r.i();
 
-	rc.models[i][lod] = model_manager->InternModel(model_name);
+	rc.model[i] = model_manager->InternModel(model_name);
 	FitRenderableParts(rc, i);
 
 	// Буфер bound-сфер гейтится ревизией сущностей, а не деревом батчей.
@@ -251,8 +251,9 @@ void EngineContext::FitRenderableParts(Renderable& r, size_t row) const
 	std::vector<MaterialSlot>& parts = r.materials[row];
 	std::array<std::vector<bool>, MAX_LOD> used;
 	size_t count = 0;
-	for (uint32_t L = 0; L < r.lod_count[row]; ++L) {
-		const ModelData* m = model_manager->FindModel(r.models[row][L]);
+	const uint32_t levels = std::min(model_manager->LevelCount(r.model[row]), MAX_LOD);
+	for (uint32_t L = 0; L < levels; ++L) {
+		const ModelData* m = model_manager->FindModel(model_manager->LevelModel(r.model[row], L));
 		if (!m) continue;
 		for (const SubMeshData& sm : m->submeshes) {
 			if (used[L].size() <= sm.material_index) used[L].resize(sm.material_index + 1, false);
@@ -266,33 +267,7 @@ void EngineContext::FitRenderableParts(Renderable& r, size_t row) const
 			if (k >= used[L].size() || !used[L][k]) parts[k].per_lod[L] = MaterialId{};
 }
 
-static_assert(MAX_LOD - 1 == 3, "EntityLodsCmd/SetEntityLods: switches length");
-
-void EngineContext::SetEntityLods(Entity e, uint32_t lod_count, const std::array<float, 3>& switches)
-{
-	SceneData* scene = object_manager ? object_manager->GetActiveScene() : nullptr;
-	if (!scene || !object_manager->Has<Renderable>(scene, e)) return;
-	SoAElement<Renderable> r = object_manager->GetComponent<Renderable>(scene, e);
-	Renderable& rc = r.container();
-	const size_t i = r.i();
-
-	const uint32_t count = rc.lod_count[i];
-	const uint32_t new_count = std::clamp<uint32_t>(lod_count, 1, MAX_LOD);
-	for (uint32_t L = count; L < new_count; ++L) {
-		rc.models[i][L] = rc.models[i][L - 1];
-		for (MaterialSlot& part : rc.materials[i]) part.per_lod[L] = part.per_lod[L - 1];
-	}
-	for (uint32_t L = new_count; L < count; ++L) {
-		rc.models[i][L] = ModelId{};
-		for (MaterialSlot& part : rc.materials[i]) part.per_lod[L] = MaterialId{};
-	}
-	rc.lod_count[i] = static_cast<uint8_t>(new_count);
-	std::copy(switches.begin(), switches.end(), rc.switches[i].begin());
-	FitRenderableParts(rc, i);
-
-	object_manager->BumpEntityRevision();
-	batch_builder->QueueUpdate(e);
-}
+static_assert(MAX_LOD == MAX_MODEL_LODS);
 
 FontData* EngineContext::CreateFont(const std::string& name, const char* path, float px, bool sdf)
 {

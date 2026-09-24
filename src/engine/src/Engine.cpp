@@ -56,20 +56,15 @@ return [mtm, mdm](Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut
     yyjson_mut_val* vis = yyjson_mut_obj_add_arr(doc, comp, "visible");
     yyjson_mut_val* alp = yyjson_mut_obj_add_arr(doc, comp, "alpha");
     yyjson_mut_val* flg = yyjson_mut_obj_add_arr(doc, comp, "flags");
-    yyjson_mut_val* lc  = yyjson_mut_obj_add_arr(doc, comp, "lod_count");
-    yyjson_mut_val* mdl = yyjson_mut_obj_add_arr(doc, comp, "models");
+    yyjson_mut_val* mdl = yyjson_mut_obj_add_arr(doc, comp, "model");
     yyjson_mut_val* mat = yyjson_mut_obj_add_arr(doc, comp, "materials");
-    bool any_lod = false, any_state = false;
+    bool any_state = false;
     for (size_t i = 0; i < count; ++i) {
-        const uint32_t n = r.lod_count[i];
+        const uint32_t n = std::min(mdm->LevelCount(r.model[i]), MAX_LOD);
         yyjson_mut_arr_add_bool(doc, vis, r.visible[i] != 0);
         yyjson_mut_arr_add_real(doc, alp, r.alpha[i]);
         yyjson_mut_arr_add_uint(doc, flg, r.flags[i]);
-        yyjson_mut_arr_add_uint(doc, lc, n);
-        any_lod = any_lod || n > 1;
-
-        yyjson_mut_val* mrow = yyjson_mut_arr_add_arr(doc, mdl);
-        for (uint32_t L = 0; L < n; ++L) add_name(mrow, mdl_list, mdm->ModelNameOf(r.models[i][L]));
+        add_name(mdl, mdl_list, mdm->ModelNameOf(r.model[i]));
 
         yyjson_mut_val* row = yyjson_mut_arr_add_arr(doc, mat);
         for (const MaterialSlot& part : r.materials[i]) {
@@ -79,13 +74,6 @@ return [mtm, mdm](Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut
                 else                 yyjson_mut_arr_add_null(doc, lv);
             }
             any_state = any_state || !part.states.empty();
-        }
-    }
-    if (any_lod) {
-        yyjson_mut_val* sw = yyjson_mut_obj_add_arr(doc, comp, "switches");
-        for (size_t i = 0; i < count; ++i) {
-            yyjson_mut_val* row = yyjson_mut_arr_add_arr(doc, sw);
-            for (uint32_t L = 0; L + 1 < r.lod_count[i]; ++L) yyjson_mut_arr_add_real(doc, row, r.switches[i][L]);
         }
     }
     if (!any_state) return;
@@ -123,24 +111,8 @@ return [mtm, mdm](Archetype& arch, yyjson_val* comp, size_t count, ScenePool* po
     rows_of("visible", [](RenderableProxy& p, yyjson_val* v) { p.visible = yyjson_get_bool(v); });
     rows_of("alpha",   [](RenderableProxy& p, yyjson_val* v) { p.alpha = static_cast<float>(yyjson_get_num(v)); });
     rows_of("flags",   [](RenderableProxy& p, yyjson_val* v) { p.flags = safe_u32(yyjson_get_uint(v)); });
-    // До models/materials: по нему усекаются их строки.
-    rows_of("lod_count", [](RenderableProxy& p, yyjson_val* v) {
-        const uint64_t n = yyjson_get_uint(v);
-        p.lod_count = static_cast<uint8_t>(n < 1 ? 1 : (n > MAX_LOD ? MAX_LOD : n));
-    });
-    rows_of("models", [&](RenderableProxy& p, yyjson_val* row) {
-        size_t L, lm; yyjson_val* v;
-        yyjson_arr_foreach(row, L, lm, v) {
-            if (L >= p.lod_count) break;
-            if (const char* s = name_of(mdl_list, v)) p.models[L] = mdm->InternModel(s);
-        }
-    });
-    rows_of("switches", [](RenderableProxy& p, yyjson_val* row) {
-        size_t L, lm; yyjson_val* v;
-        yyjson_arr_foreach(row, L, lm, v) {
-            if (L + 1 >= MAX_LOD) break;
-            p.switches[L] = static_cast<float>(yyjson_get_num(v));
-        }
+    rows_of("model", [&](RenderableProxy& p, yyjson_val* v) {
+        if (const char* s = name_of(mdl_list, v)) p.model = mdm->InternModel(s);
     });
     rows_of("materials", [&](RenderableProxy& p, yyjson_val* row) {
         size_t k, km; yyjson_val* lv;
@@ -148,7 +120,7 @@ return [mtm, mdm](Archetype& arch, yyjson_val* comp, size_t count, ScenePool* po
             MaterialSlot& part = p.materials.emplace_back();
             size_t L, lm; yyjson_val* v;
             yyjson_arr_foreach(lv, L, lm, v) {
-                if (L >= p.lod_count) break;
+                if (L >= MAX_LOD) break;
                 if (yyjson_is_null(v)) continue;
                 if (const char* s = name_of(mat_list, v)) part.per_lod[L] = mtm->InternMaterial(s);
             }

@@ -343,17 +343,32 @@ static void SaveModels(const std::string& dir, ModelManager* mm)
 	MutDoc d;
 	yyjson_mut_val* arr = d.Arr("models");
 	size_t saved = 0;
+	std::unordered_set<int32_t> levels;
+	for (int32_t mi = 0; mi < mm->Models().Count(); ++mi)
+		if (const ModelData* m = mm->Models().At(mi).object.get())
+			for (const ModelLod& lod : m->lods)
+				if (lod.model.v != mi) levels.insert(lod.model.v);
 	for (int32_t mi = 0; mi < mm->Models().Count(); ++mi) {
 		const ModelCell& cell = mm->Models().At(mi);
 		const ModelData* m = cell.object.get();
 		const std::string& name = cell.name;
-		if (!m || HasTag(m->tags, ResourceTag::CodeOwned) || m->model_path.empty()) continue;
+		if (!m || HasTag(m->tags, ResourceTag::CodeOwned) || m->model_path.empty() || levels.count(mi)) continue;
 		yyjson_mut_val* e = yyjson_mut_arr_add_obj(d.doc, arr);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "name",   name.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "vertex", m->model_path.c_str());
 		yyjson_mut_obj_add_strcpy(d.doc, e, "index",  m->index_path.c_str());
 		yyjson_mut_obj_add_int   (d.doc, e, "anchor", (int)m->anchor);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "pool",   m->pool_name.c_str());
+		if (!m->lods.empty()) {
+			yyjson_mut_val* lods = yyjson_mut_obj_add_arr(d.doc, e, "lods");
+			for (const ModelLod& lod : m->lods) {
+				const ModelData* lm = mm->FindModel(lod.model);
+				yyjson_mut_val* l = yyjson_mut_arr_add_obj(d.doc, lods);
+				yyjson_mut_obj_add_strcpy(d.doc, l, "vertex", lm ? lm->model_path.c_str() : "");
+				yyjson_mut_obj_add_strcpy(d.doc, l, "index",  lm ? lm->index_path.c_str() : "");
+				yyjson_mut_obj_add_real  (d.doc, l, "switch", lod.switch_px);
+			}
+		}
 		++saved;
 	}
 	d.Write(dir, "models.json", "models", saved);
@@ -541,6 +556,10 @@ static void LoadModels(const std::string& dir, ModelManager* mm)
 	ForEachIn(d.root(), "models", [&](yyjson_val* m) {
 		SceneModelEntry entry{ JsonStr(m, "name"), JsonStr(m, "vertex"), JsonStr(m, "index"),
 		                       (AnchorShift)JsonInt(m, "anchor", 0), JsonStr(m, "pool") };
+		ForEachIn(m, "lods", [&](yyjson_val* l) {
+			entry.lods.push_back({ JsonStr(l, "vertex"), JsonStr(l, "index"),
+			                       static_cast<float>(yyjson_get_num(yyjson_obj_get(l, "switch"))) });
+		});
 		entries.push_back(std::move(entry));
 	});
 

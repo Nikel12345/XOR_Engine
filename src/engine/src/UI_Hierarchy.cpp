@@ -74,9 +74,7 @@ namespace {
                 if (s->sig_type == typeid(Renderable)) {
                     const Renderable& from = oa->get_array<Renderable>()->data;
                     Renderable& to = na->get_array<Renderable>()->data;
-                    to.lod_count[nrow] = from.lod_count[orow];
-                    to.models[nrow]    = from.models[orow];
-                    to.switches[nrow]  = from.switches[orow];
+                    to.model[nrow]     = from.model[orow];
                     to.materials[nrow] = from.materials[orow];
                 }
             }
