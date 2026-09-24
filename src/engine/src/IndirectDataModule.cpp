@@ -17,8 +17,9 @@ static bool SameRegions(const PassRegions& a, const PassRegions& b)
 	for (size_t i = 0; i < a.per_pass.size(); ++i) {
 		const PassRegion& x = a.per_pass[i];
 		const PassRegion& y = b.per_pass[i];
+		if (x.command_blocks_count != y.command_blocks_count) return false;
 		if (x.commands != y.commands || x.pib != y.pib) return false;
-		if (x.cmd_base != y.cmd_base || x.first_pib != y.first_pib) return false;
+		if (x.cmd_base != y.cmd_base || x.pib_base != y.pib_base) return false;
 	}
 	return true;
 }
@@ -40,27 +41,31 @@ void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, Uploa
 
 	const std::vector<RenderPassStep*>& ordered = pm->GetOrderedRenderPasses();
 
-	// Порядок записи ОБЯЗАН совпадать со штампом регионов: пасс-мажорно.
+	// Порядок записи ОБЯЗАН совпадать со штампом регионов: пасс-мажорно, внутри прохода —
+	// блок за блоком.
 	for (uint32_t pass_i = 0; pass_i < ordered.size(); ++pass_i) {
 		if (pass_i >= regions.per_pass.size()) break;
 		const PassRegion& reg = regions.per_pass[pass_i];
 		const RenderPassStep* rp = ordered[pass_i];
 
-		uint32_t local_fi = 0;
-		for (const auto& [_, shader_batch] : rp->shader_batches) {
-			for (const auto& [_, atlas_batch] : shader_batch.atlases_batches) {
-				for (const auto& [_, texture_batch] : atlas_batch.texture_batches) {
-					for (const auto& [_, model_batch] : texture_batch.model_batches) {
-						SDL_GPUIndexedIndirectDrawCommand data;
-						data.num_indices = rp->override_index_count ? rp->override_index_count
-						                                            : model_batch.submesh.index_count;
-						data.num_instances = model_batch.instanceCount;
-						data.first_index = model_batch.submesh.index_offset;
-						data.vertex_offset = model_batch.submesh.vertex_offset;
-						data.first_instance = reg.first_pib + local_fi;
-						local_fi += model_batch.instanceCount;
+		for (uint32_t b = 0; b < reg.command_blocks_count; ++b) {
+			uint32_t local_fi = 0;
 
-						bm->UploadToTransferBuffer(task, sizeof(data), &data);
+			for (const auto& [_, shader_batch] : rp->shader_batches) {
+				for (const auto& [_, atlas_batch] : shader_batch.atlases_batches) {
+					for (const auto& [_, texture_batch] : atlas_batch.texture_batches) {
+						for (const auto& [_, model_batch] : texture_batch.model_batches) {
+							SDL_GPUIndexedIndirectDrawCommand data;
+							data.num_indices = rp->override_index_count ? rp->override_index_count
+							                                            : model_batch.submesh.index_count;
+							data.num_instances = model_batch.instanceCount;
+							data.first_index = model_batch.submesh.index_offset;
+							data.vertex_offset = model_batch.submesh.vertex_offset;
+							data.first_instance = reg.first_pib + local_fi;
+							local_fi += model_batch.instanceCount;
+
+							bm->UploadToTransferBuffer(task, sizeof(data), &data);
+						}
 					}
 				}
 			}

@@ -15,16 +15,18 @@ struct Material;
 namespace RenderSnap { struct BatchLayout; }
 
 struct PassRegion {
-    uint32_t draw_count = 0;
+    uint32_t command_blocks_count = 0;
     uint32_t commands = 0;
     uint32_t pib = 0;
     uint32_t first_pib = 0;
     uint32_t cmd_base = 0;
+    uint32_t pib_base = 0;
 };
 
 struct PassRegions {
     std::vector<PassRegion> per_pass;
     uint32_t total_commands = 0;
+    uint32_t total_pib = 0;
 };
 
 class MaterialManager;
@@ -50,7 +52,7 @@ public:
 	void FillRenderPasses();
 	void ExecutePassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_frame);
 	void ExecutePrepassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_frame);
-	void RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass, BufferManager* bm, uint32_t draw_index, const void* push_data_raw);
+	void RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass, BufferManager* bm, uint32_t region_index, const void* push_data_raw);
 	void ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassStep* compute_pass, BufferManager* bm, const void* push_data_raw, const void* dispatch_data_raw, uint8_t pass_frame);
 	void BlitPassStandardBody(SDL_GPUCommandBuffer* cb, BlitPassStep& blit_pass);
 
