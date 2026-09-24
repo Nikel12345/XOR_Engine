@@ -426,8 +426,6 @@ void DefaultRenderPassNamespace::SetDefaultSplatPass(EngineContext* ctx)
         23
     );
 
-    // Точка на ИНСТАНС, а не на индекс: вершинник геометрию не читает (см. splat.vert.hlsl).
-    splatPass->override_index_count = 1;
 
     splatPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr, 0);
     splatPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_emission, 1);

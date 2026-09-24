@@ -11,7 +11,7 @@ struct VSOutput {
 };
 
 StructuredBuffer<float4x4> ModelMatrixBlock    : register(t0, space0);
-// out_pib, блок 0 (камера игрока) — см. main_pass.vert.hlsl. -1 = отсечён каллингом.
+// SV_InstanceID = first_instance + i, а first_instance команды указывает на её записи в Rows.
 StructuredBuffer<int>      Rows              : register(t1, space0);
 
 struct CameraData { float4x4 view; float4x4 proj; };

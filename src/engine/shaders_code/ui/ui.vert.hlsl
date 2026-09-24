@@ -19,7 +19,7 @@ struct VSOutput
 };
 
 StructuredBuffer<float4x4> ModelMatrixBlock : register(t0, space0);
-StructuredBuffer<int>      Rows           : register(t1, space0);   // -1 = отсечён/нет строки
+StructuredBuffer<int>      Rows           : register(t1, space0);   // -1 = нет строки
 struct InstanceData { float alpha; uint flags; };
 StructuredBuffer<InstanceData> InstanceDataBlock : register(t2, space0);
 
@@ -28,7 +28,7 @@ VSOutput main(VSInput input)
     VSOutput o;
 
     int row = Rows[input.instanceID];
-    if (row < 0) {   // нет строки/отсечён — уводим примитив целиком за клип
+    if (row < 0) {   // нет строки — уводим примитив целиком за клип
         o = (VSOutput)0;
         o.position = float4(2.0, 2.0, 2.0, 1.0);
         return o;

@@ -19,19 +19,10 @@ class PassManager;
 // заполнена. Оба случая читаются одинаково.
 inline constexpr uint32_t kPibNoRow = 0xFFFFFFFFu;
 
-// Пара ступеней экранного размера сабмеша в том виде, в каком её читает GPU: по 4 бита в слове
-// entity->cmd. Копия SubMeshData::screen_size_span, но не тот же тип — у модели раскладка своя и
-// переживёт переход на настоящие LOD'ы.
-struct ScreenSizeSpan {
-    uint8_t lod_min = 0;
-    uint8_t lod_max = 0;
-};
-
 struct SubMeshDraw {
     uint32_t index_count = 0;
     uint32_t index_offset = 0;
     uint32_t vertex_offset = 0;
-    ScreenSizeSpan screen_size_span{};
 };
 
 struct PibRecord {
@@ -157,12 +148,6 @@ struct RenderPassStep {
 
     std::vector<TextureAtlas*> global_texture_bindings;
     void SetGlobalTextures(std::vector<TextureAtlas*> atlases);
-
-    // Сколько индексов рисует КАЖДАЯ команда прохода; 0 = сколько у сабмеша. Ненулевое нужно
-    // проходам, рисующим по одному примитиву на инстанс: сплат ставит 1, иначе он дал бы точку
-    // НА ИНДЕКС. Свойство прохода, а не sp: команды собирает обход проходов.
-    // !!! ПЕРЕДЕЛАТЬ С НОРМАЛЬНЫМИ LOD'АМИ!!!
-    uint32_t override_index_count = 0;
 
     // ПОТОКИ: пишет render-поток (тело прохода) и он же UI — UI рисуется внутри RenderFunc.
     std::vector<uint8_t> state;

@@ -5,9 +5,7 @@ struct VSInput {
 
 
 StructuredBuffer<float4x4> ModelMatrixBlock    : register(t0, space0);
-// out_pib (выход GPU-каллинга): регион на группу камер, внутри — блок на камеру. Адрес
-// куска записей команды приходит в её first_instance, поэтому индексируем прямо по
-// SV_InstanceID (= first_instance + i). -1 = инстанс не виден этой камерой.
+// SV_InstanceID = first_instance + i, а first_instance команды указывает на её записи в Rows.
 StructuredBuffer<int>      Rows              : register(t1, space0);
 
 struct LightCamera {
@@ -31,11 +29,9 @@ struct VSOutput {
 VSOutput main(VSInput input)
 {
     VSOutput o;
-    // Адрес блока не считаем: first_instance команды уже абсолютный адрес её куска в out_pib,
-    // а SV_InstanceID = first_instance + i. Раскладку регионов знает только StoreIndirect.
     int row = Rows[input.instanceID];
     if (row < 0) {
-        // Инстанс не виден ЭТОЙ световой камерой → вырожденная позиция (клипается целиком).
+        // Строки нет → вырожденная позиция (клипается целиком).
         o = (VSOutput)0;
         o.sv_pos = float4(2.0, 2.0, 2.0, 1.0);
         return o;

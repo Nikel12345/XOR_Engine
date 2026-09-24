@@ -409,8 +409,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
                     ModelBatchData& leaf = lit->second;
                     leaf.group = &group;
                     leaf.level = c.level;
-                    leaf.submesh = { c.submesh->indexCount, c.submesh->indexOffset, c.submesh->vertexOffset,
-                                     { c.submesh->screen_size_span.lod_min, c.submesh->screen_size_span.lod_max } };
+                    leaf.submesh = { c.submesh->indexCount, c.submesh->indexOffset, c.submesh->vertexOffset };
                 }
             }
             c.pass = nullptr;
