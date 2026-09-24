@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "TextureData.h"
 class EngineContext;
 class LightDataModule;
@@ -9,7 +9,6 @@ namespace DefaultRenderPassNamespace
     inline constexpr const char* DEPTH_PASS = "DefaultDepthRenderPass";
     inline constexpr const char* MAIN_PASS = "DefaultMainRenderPass";
     inline constexpr const char* TRANSPARENT_PASS = "DefaultTransparentRenderPass";
-    inline constexpr const char* SPLAT_PASS = "DefaultSplatRenderPass";
     inline constexpr const char* DEBUG_PASS = "DefaultDebugRenderPass";
     inline constexpr const char* PRESENT_PASS = "DefaultPresentPass";
     inline constexpr const char* BLOOM_PASS = "DefaultBloomPass";
@@ -210,18 +209,6 @@ namespace DefaultRenderPassNamespace
         uint32_t pad[3] = {};
     };
     void SetDefaultCullingPass(EngineContext* ctx);
-
-    // Сплат-проход: объекты, отсеянные из MAIN по экранному размеру, рисуются здесь одной точкой
-    // на объект. Не «маршрутизация» — у объекта ДВЕ записи (BatchBuilder заводит их по одной на sp
-    // материала, раскладывая по sp->render_pass_name), и два каллинга независимо решают каждый про
-    // свою, взаимно дополнительными тестами. Поэтому проходы ничего друг о друге не знают.
-    //
-    // Порядок 23: после MAIN (20) — нужна его глубина и его же таргеты по LOAD; после AO (21) —
-    // точка в один пиксель экранным AO не затеняется, а её всплеск в глубине дал бы SSAO ореол;
-    // до TRANSPARENT (24, сдвинут с 22 ради этого места) — сплаты непрозрачные, стекло обязано
-    // ложиться поверх. Глубину пишет, поэтому туман (27) достаётся ему сам, а bloom (26) увидит
-    // его эмиссию, когда та появится.
-    void SetDefaultSplatPass(EngineContext* ctx);
 
     inline const std::string CULLING_STATE = "CullingState";
 

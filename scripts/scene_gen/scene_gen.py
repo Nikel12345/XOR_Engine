@@ -109,6 +109,9 @@ RANDOM_SEED = 42
 
 # Материалы (уже зарегистрированы в Game.cpp / materials.json) — раздаются кубам случайно.
 CUBE_MATERIALS = ["m_orange", "m_gray", "metal1", "metal2", "emission"]
+# Уровни моделей cube_* в игре (Game.cpp): 1 — quad, 2 — точка. Материал уровня — тот же с этим
+# суффиксом, на программе LOD_Quad / LOD_Splat (materials.json сцены).
+CUBE_LEVEL_SUFFIXES = ["", "_lod", "_splat"]
 
 # ----------------------------------------------------------------------------
 #  Модели кубов — процедурные параллелепипеды из Game.cpp с именами cube_0..cube_(N-1).
@@ -300,7 +303,8 @@ def emit_section(section, cols):
         cols.model.append(str(cols.models.intern(random.choice(CUBE_MODELS))))
 
         # jagged: один материал на куб, в ячейке — индекс в словаре materials
-        cols.material.append('[{}]'.format(cols.materials.intern(random.choice(CUBE_MATERIALS))))
+        mat = random.choice(CUBE_MATERIALS)
+        cols.material.append('[[{}]]'.format(','.join(str(cols.materials.intern(mat + s)) for s in CUBE_LEVEL_SUFFIXES)))
 
         vx, vy, vz = orbital_velocity(pos)
         cols.vx.append(_fmt(vx))
@@ -311,22 +315,18 @@ def emit_section(section, cols):
 # Ключи архетипов = отсортированные по алфавиту имена компонентов через запятую (так их строит
 # SaveScene движка). Держим их константами: по ним же определяется порядок блоков в файле.
 CUBES_ARCHETYPE = "Renderable,Shadow,Transform,Velocity"
-CUBE_LOD_LEVELS = 2   # у моделей cube_* в игре уровень 1 — quad (Game.cpp)
 CENTER_ARCHETYPE = "Gravity,Renderable,Transform"
 
 
-def _renderable_obj(n, model_cells, material_rows, levels=1):
+def _renderable_obj(n, model_cells, material_rows):
     """Тело Renderable. model_cells — индексы моделей строками, material_rows — строки-массивы частей
-    '[i, j, ...]' (по материалу на часть); материал части один на все levels уровней модели."""
-    def per_lod(row):
-        cells = [c for c in row.strip('[]').split(',') if c]
-        return '[' + ','.join('[' + ','.join([c] * levels) + ']' for c in cells) + ']'
+    '[[L0, L1, ...], ...]' (по списку материалов уровней на часть)."""
     return ",".join([
         _num_col("visible", ["true"] * n),
         _num_col("alpha", ["1"] * n),
         _num_col("flags", ["0"] * n),
         _num_col("model", model_cells),
-        _num_col("materials", [per_lod(r) for r in material_rows]),
+        _num_col("materials", material_rows),
     ])
 
 
@@ -341,7 +341,7 @@ def _gravity_center_block(entity_id, cols):
     transform_obj = ",".join(_num_col(TRANSFORM_COLS[k], [_fmt(transform[k])]) for k in range(16))
     gravity_obj = _num_col("gm", [_fmt(GM)])
     rend_obj = _renderable_obj(1, [str(cols.models.intern(GRAVITY_CENTER_MODEL))],
-                               ['[' + str(cols.materials.intern(GRAVITY_CENTER_MATERIAL)) + ']'])
+                               ['[[' + str(cols.materials.intern(GRAVITY_CENTER_MATERIAL)) + ']]'])
     return ('"' + CENTER_ARCHETYPE + '":{'
             '"count":1,'
             '"entities":[' + str(entity_id) + '],'
@@ -416,7 +416,7 @@ def build_scene():
 
     transform_obj = ",".join(_num_col(TRANSFORM_COLS[k], cols.transform[k]) for k in range(16))
     velocity_obj = ",".join([_num_col("x", cols.vx), _num_col("y", cols.vy), _num_col("z", cols.vz)])
-    rend_obj = _renderable_obj(n, cols.model, cols.material, levels=CUBE_LOD_LEVELS)
+    rend_obj = _renderable_obj(n, cols.model, cols.material)
 
     cubes_block = ('"' + CUBES_ARCHETYPE + '":{'
                    '"count":' + str(n) + ','

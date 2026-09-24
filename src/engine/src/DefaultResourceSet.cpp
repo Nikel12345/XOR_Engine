@@ -101,6 +101,11 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 		i = { 0, 1, 2, 0, 2, 3 };
 	}, AnchorShift::Keep, ResourceTag::CodeOwned | ResourceTag::Default);
 
+	ctx->CreateModel<PosUVNormal>("point", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
+		v = { { 0,0,0,  0.5f,0.5f,  0,0,1,  1,0,0 } };
+		i = { 0 };
+	}, AnchorShift::Keep, ResourceTag::CodeOwned | ResourceTag::Default);
+
 	ctx->CreateModel<PosUVNormal>("sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
 		const uint32_t stacks = 32;
 		const uint32_t slices = 48;

@@ -194,7 +194,8 @@ SDL_AppResult Game::MainInit()
             }
         }, AnchorShift::Keep, ResourceTag::CodeOwned);   // процедурные кубы игры — в models.json не идут
         modelManager->SetModelLods(modelManager->ModelIdOf("cube_" + std::to_string(ci)),
-                                   { ModelLod{ modelManager->ModelIdOf("quad"), 6.0f } });
+                                   { ModelLod{ modelManager->ModelIdOf("quad"), 8.0f },
+                                     ModelLod{ modelManager->ModelIdOf("point"), 2.0f } });
     }
 
     // --- "two_quads": ОДИН меш из двух НЕСВЯЗАННЫХ островов (ни общих вершин, ни общих рёбер). ---
@@ -522,7 +523,8 @@ static constexpr float kBounceMaskGain = 1e6f;   // см. маску отско�
 static constexpr float kTouchMargin = 3.0f;   // запас поверх габарита источника, юниты мира
 static constexpr float kBounceSpeed = 15.0f;   // |vy| после касания; боковая скорость гасится в 0
 static constexpr float kBounceSpread = 1.0f;   // разброс vx/vz после касания, юниты/с
-static const char* const kBounceMaterial = "jet";   // материал отскочившего (лежит в materials.json сцены)
+// Материал отскочившего по уровням модели куба (materials.json сцены): модель, quad (LOD_Quad), точка (LOD_Splat).
+static const char* const kBounceMaterials[] = { "jet", "jet_lod", "jet_splat" };
 
 // Монетка отскока. Статик без синхронизации: SimulateGravity зовётся только из Game::MainMenu_Update,
 // то есть всегда с sim-потока. Seed фиксированный — прогон воспроизводим, а «настоящая»
@@ -652,9 +654,11 @@ void Game::SimulateGravity()
             if (!objectManager->Has<Renderable>(scene, ents[i])) continue;
             SoAElement<Renderable> rend = objectManager->GetComponent<Renderable>(scene, ents[i]);
             const std::vector<MaterialSlot>& parts = rend.container().materials[rend.i()];
-            const uint32_t levels = std::min(modelManager->LevelCount(rend.container().model[rend.i()]), MAX_LOD);
+            const uint32_t levels = std::min<uint32_t>(modelManager->LevelCount(rend.container().model[rend.i()]),
+                                                       static_cast<uint32_t>(std::size(kBounceMaterials)));
             for (uint32_t L = 0; L < levels; ++L)
-                if (!parts.empty() && parts[0].per_lod[L]) ctx->ChangeMaterial(ents[i], kBounceMaterial, 0, L);
+                if (!parts.empty() && parts[0].per_lod[L])
+                    ctx->ChangeMaterial(ents[i], kBounceMaterials[L], 0, L);
         }
 
         // ── C ── позиции (wdh) скоростями (xyz)

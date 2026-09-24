@@ -336,10 +336,6 @@ void Engine::InitPasses()
 		SetDefaultMainRenderPass(engine_context, light_data_module);
 		SetDefaultAOPass(engine_context);
 		//SetDefaultFogPass(engine_context);          // атмосфера по глубине main'а: ПОСЛЕ AO, до прозрачных
-		// SetDefaultSplatPass(engine_context);  ВЫКЛЮЧЕН: сплат — это терминальный уровень LOD, и
-		// строить его раньше самой LOD-цепочки оказалось преждевременно. Код прохода, шейдеры и
-		// перевёрнутый тест каллинга оставлены на месте; чтобы включить обратно, нужны эта строка,
-		// программа "Splat" ниже в InitDefaultShaders и её sp в списке материала.
 		SetTransparentPass(engine_context, light_data_module);
 		SetDebugColliderPass(engine_context);
 		SetDefaultBloomPass(engine_context);

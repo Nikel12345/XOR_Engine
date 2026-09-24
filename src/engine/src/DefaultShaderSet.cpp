@@ -51,6 +51,10 @@ void DefaultShaderProgramSet::SetDefaultPushes(EngineContext* ctx)
         [](const PushConstantBinder& b, RP::ShadowPushData data) { b.Push(data.camera_index); });
     sm->CreatePushInstruction<RP::ShadowPushData>("ShadowCaster", PushStage::Fragment,
         [](const PushConstantBinder& b, RP::ShadowPushData data) { b.Push(data); });
+    sm->CreatePushInstruction<RP::ShadowPushData>("LOD_QuadShadow", PushStage::Vertex,
+        [](const PushConstantBinder& b, RP::ShadowPushData data) { b.Push(data.camera_index); });
+    sm->CreatePushInstruction<RP::ShadowPushData>("LOD_QuadShadow", PushStage::Fragment,
+        [](const PushConstantBinder& b, RP::ShadowPushData data) { b.Push(data); });
     sm->CreatePushInstruction<RP::DebugColliderPushData>("Wireframe", PushStage::Fragment,
         [](const PushConstantBinder& b, RP::DebugColliderPushData data) { b.Push(data); });
 }
@@ -84,6 +88,12 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::CodeOwned | ResourceTag::Default);
 	ctx->CreateVertexShader("shadow_vs", "../engine/shaders_code/shadow_pass/shadow_pass.vert.hlsl",
 		POS_UV_NORM_POOL, { POSITION }, ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateVertexShader("lod_quad_vs", "../engine/shaders_code/main_pass/lod_quad.vert.hlsl",
+		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateVertexShader("lod_quad_shadow_vs", "../engine/shaders_code/shadow_pass/lod_quad_shadow.vert.hlsl",
+		POS_UV_NORM_POOL, { POSITION }, ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateVertexShader("lod_splat_vs", "../engine/shaders_code/main_pass/lod_splat.vert.hlsl",
+		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::CodeOwned | ResourceTag::Default);
 	ctx->CreateVertexShader("skybox_vs", "../engine/shaders_code/skybox/skybox.vert.hlsl",
 		POS_UV_NORM_POOL, { POSITION }, ResourceTag::CodeOwned | ResourceTag::Default);
 	ctx->CreateVertexShader("debug_collider_vs", "../engine/shaders_code/debug/debug_collider.vert.hlsl",
@@ -124,6 +134,20 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 			{ TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive },
 			ResourceTag::CodeOwned | ResourceTag::Default);
 
+		ctx->CreateShaderProgram("LOD_Quad", spd, RP::MAIN_PASS,
+			"lod_quad_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
+			{ TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive },
+			ResourceTag::CodeOwned | ResourceTag::Default);
+
+		ShaderProgramDescription splat_spd;
+		splat_spd.BehavesAsOpaqueGeometry()->AsPointList();
+		ctx->CreateShaderProgram("LOD_Splat", splat_spd, RP::MAIN_PASS,
+			"lod_splat_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
+			{ TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive },
+			ResourceTag::CodeOwned | ResourceTag::Default);
+
 		ctx->CreateShaderProgram("LitColor", spd, RP::MAIN_PASS,
 			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"untextured_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
@@ -143,6 +167,9 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ctx->CreateShaderProgram("ShadowCaster", spd, RP::SHADOW_PASS,
 			"shadow_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"shadow_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
+		ctx->CreateShaderProgram("LOD_QuadShadow", spd, RP::SHADOW_PASS,
+			"lod_quad_shadow_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"shadow_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 	{
 		ShaderProgramDescription spd;
@@ -151,17 +178,6 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 			"debug_collider_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
 			"debug_collider_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
-	// Сплат ВЫКЛЮЧЕН вместе со своим проходом (см. Engine::Init). Держать sp живой нельзя:
-	// её render_pass_name указывал бы на незарегистрированный SPLAT_PASS, а PipeManager на такое
-	// ругается на каждой сборке пайплайна. Включать — вместе с SetDefaultSplatPass.
-	//
-	//	{
-	//		ShaderProgramDescription spd;
-	//		spd.BehavesAsOpaqueGeometry()->AsPointList();
-	//		ctx->CreateShaderProgram("Splat", spd, RP::SPLAT_PASS,
-	//			"splat_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
-	//			"splat_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
-	//	}
 	{
 		ShaderProgramDescription spd;
 		// z=w в вершиннике даёт глубину РОВНО на клире, поэтому LESS не пройдёт.

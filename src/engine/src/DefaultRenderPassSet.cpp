@@ -394,47 +394,6 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
     debugPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
 }
 
-void DefaultRenderPassNamespace::SetDefaultSplatPass(EngineContext* ctx)
-{
-    PassManager* pm = ctx->GetPassManager();
-    BufferManager* bm = ctx->GetBufferManager();
-
-    if (!main_pass_inited || !g_pass_system.common_inited) {
-        SDL_Log("SetDefaultSplatPass: MAIN_PASS / common resources must be initialized first.");
-        return;
-    }
-
-    // Таргеты MAIN'а по LOAD: сплаты дописываются в уже отрисованную сцену. Их ТРИ, как у MAIN, и
-    // это не задел «на будущее», а требование: число выходов фрагментника обязано совпадать с
-    // числом color-таргетов прохода, иначе attachment получает мусор (см. pass_targets.hlsl).
-    // Глубина — MAIN'а, LOAD + STORE: тест по ней даёт корректное перекрытие геометрией, запись —
-    // корректный туман (27) и перекрытие прозрачными.
-    RenderPassTexturesInfo splat_rptd{};
-    splat_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
-    splat_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,0 }, g_pass_system.scene_emission->format);
-    splat_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,0 }, g_pass_system.scene_ambient->format);
-    splat_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, g_pass_system.main_depth_format);
-
-    auto splatPass = pm->CreateRenderPass(
-        SPLAT_PASS,
-        [pm, bm](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
-    {
-        // Резолв ДО гарда — иначе вечный пропуск (таргеты привязаны атласами, texture заполняет
-        // только ResolveTargets); та же причина, что у DEBUG_PASS.
-        rp.renderPassTexsData.ResolveTargets();
-        if (rp.renderPassTexsData.color_targets.empty() || !rp.renderPassTexsData.color_targets[0].info.texture) return;
-        pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
-    },
-        std::move(splat_rptd),
-        23
-    );
-
-
-    splatPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr, 0);
-    splatPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_emission, 1);
-    splatPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_ambient, 2);
-    splatPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);
-}
 
 void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx, LightDataModule* ldm)
 {
@@ -471,7 +430,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx, LightDat
         pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
     },
         std::move(transparent_rptd),
-        24   // между AO (21) и DEBUG (25); 23 оставлен свободным под SPLAT_PASS (сейчас не регистрируется)
+        24   // между AO (21) и DEBUG (25)
     );
 
     transparentPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr, 0);
