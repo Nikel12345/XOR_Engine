@@ -14,6 +14,7 @@
 #include "PositionStructure.h"
 #include "ModelData.h"
 #include "TextureData.h"
+#include <bit>
 #include <unordered_set>
 
 using namespace BatchKeys;
@@ -272,141 +273,154 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
     }
 }
 
-void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManager* pass_manager, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
-    ModelManager* mdm, MaterialManager* mtm,
-    ModelId model_id, const std::vector<MaterialSlot>& materials, uint32_t lod) {
-
-    // Резолв ТИХИЙ (FindModel, а не логирующий operator[]): он идёт на КАЖДУЮ сущность, и одно
-    // битое имя в сцене на миллион объектов дало бы миллион строк лога.
-    ModelData* model = mdm ? mdm->FindModel(model_id) : nullptr;
-
-    if (!model) {
-        return;
-    }
-
-    uint32_t submesh_index = 0;
-    for (SubMeshData& submesh : model->submeshes)
+TextureBatchData* BatchBuilder::ResolveTextureBatch(RenderPassStep* rp, ShaderProgram* sp, const ShaderName& sp_name,
+    const std::shared_ptr<std::vector<uint8_t>>& sp_params, const MatSpLayout& lay, uint32_t section,
+    PipeManager* pm, ShaderManager* sm, BufferManager* bm, uint64_t& path_key)
+{
+    auto& shader_map = rp->shader_batches;
+    const ShaderBatchKey sp_key = HashShaderBatchKey(sp);
+    auto it = shader_map.find(sp_key);
+    if (it == shader_map.end())
     {
-        const uint32_t si = submesh_index++;
-        if (submesh.indexCount == 0) continue;
+        auto pipe = pm->GetGraphicPipeline(sp);
+        if (!pipe) return nullptr;
 
-        if (submesh.material_index >= materials.size()) {
-            continue;
+        ShaderBatchData new_batch{};
+        new_batch.push_instructions = sm->CollectPushInstructions(sp_name);
+        new_batch.pipeline = std::move(pipe);
+        auto resolve_buffers = [bm](const std::vector<BufferDataName>& names) {
+            std::vector<BufferData*> out; out.reserve(names.size());
+            for (BufferDataName n : names)
+                if (BufferData* b = bm->GetBufferData(n)) out.push_back(b);
+            return out;
+        };
+        new_batch.vertexStorageBuffers   = resolve_buffers(sp->vertex_shader_buffer_names);
+        new_batch.fragmentStorageBuffers = resolve_buffers(sp->fragment_shader_buffer_names);
+
+        if (VertexShaderData* vsd = sm->GetVertexShader(sp->vs_id)) {
+            new_batch.vertexBuffers = resolve_buffers(vsd->vertex_buffer_names);
+            if (vsd->index_buffer)
+                new_batch.indexBuffer = bm->GetBufferData(vsd->index_buffer);
         }
-        const MaterialId material_id = materials[submesh.material_index].per_lod[lod];
-        Material* material = mtm ? mtm->GetMaterial(material_id) : nullptr;
-        if (!material) {
-            continue;
-        }
+        it = shader_map.emplace(sp_key, std::move(new_batch)).first;
+    }
 
-        for (const SpBinding& binding : material->shader_programs)
-        {
-            const std::shared_ptr<std::vector<uint8_t>>& sp_params =
-                (binding.params && !binding.params->empty()) ? binding.params : kNoParams;
-            ShaderProgram* sp = sm ? sm->GetShaderProgram(binding.sp) : nullptr;
-            // Имя РЕАЛЬНО взятой программы: по нему резолвятся push-инструкции, и на фолбэк-ветке
-            // с запрошенным именем программа получила бы чужие пуши.
-            ShaderProgramId resolved_id = binding.sp;
-            if (!sp) {
-                sp = sm ? sm->GetShaderProgram(fallback_sp) : nullptr;
-                if (!sp) continue;
-                resolved_id = fallback_sp;
-            }
-            const ShaderName* resolved_name = &sm->ShaderProgramNameOf(resolved_id);
-            RenderPassStep* rp = pass_manager->GetRenderPassStep(sp->render_pass_name);
-            if (!rp) continue;
+    auto& atlas_map = it->second.atlases_batches;
+    auto atlas_it = atlas_map.find(lay.atlas_key);
+    if (atlas_it == atlas_map.end()) {
+        AtlasBatchData new_atlas{};
+        new_atlas.texture_binding = lay.texture_binding;
+        atlas_it = atlas_map.emplace(lay.atlas_key, std::move(new_atlas)).first;
+    }
 
-            auto& shader_map = rp->shader_batches;
-            auto sp_key = HashShaderBatchKey(sp);
-            auto it = shader_map.find(sp_key);
-            if (it == shader_map.end())
-            {
-                auto pipe = pm->GetGraphicPipeline(sp);
-                if (!pipe) continue;
+    const TextureBatchKey tex_key = HashTextureBatchKey(lay.res_key, section);
+    auto& tex_map = atlas_it->second.texture_batches;
+    auto tex_it = tex_map.find(tex_key);
+    if (tex_it == tex_map.end()) {
+        TextureBatchData new_texb{};
+        new_texb.params = sp_params;
+        new_texb.texture_uvl = lay.uvl;
+        std::copy(std::begin(lay.slot), std::end(lay.slot), std::begin(new_texb.variant_layout.slot));
+        new_texb.variant_layout.material_index = section;
+        tex_it = tex_map.emplace(tex_key, std::move(new_texb)).first;
+    }
 
-                ShaderBatchData new_batch{};
-                new_batch.push_instructions = sm->CollectPushInstructions(*resolved_name);
-                new_batch.pipeline = std::move(pipe);
-                auto resolve_buffers = [bm](const std::vector<BufferDataName>& names) {
-                    std::vector<BufferData*> out; out.reserve(names.size());
-                    for (BufferDataName n : names)
-                        if (BufferData* b = bm->GetBufferData(n)) out.push_back(b);
-                    return out;
-                };
-                new_batch.vertexStorageBuffers   = resolve_buffers(sp->vertex_shader_buffer_names);
-                new_batch.fragmentStorageBuffers = resolve_buffers(sp->fragment_shader_buffer_names);
+    path_key = MixKey(MixKey(MixKey(sp_key) ^ lay.atlas_key) ^ tex_key);
+    return &tex_it->second;
+}
 
-                if (VertexShaderData* vsd = sm->GetVertexShader(sp->vs_id)) {
-                    new_batch.vertexBuffers = resolve_buffers(vsd->vertex_buffer_names);
-                    if (vsd->index_buffer)
-                        new_batch.indexBuffer = bm->GetBufferData(vsd->index_buffer);
+void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManager* pass_manager, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+    ModelManager* mdm, MaterialManager* mtm, const Renderable& rend, size_t row) {
+
+    resolved_scratch.clear();
+    const uint32_t lod_count = rend.lod_count[row];
+    const std::vector<MaterialSlot>& materials = rend.materials[row];
+
+    for (uint32_t lod = 0; lod < lod_count; ++lod) {
+        const ModelId model_id = rend.models[row][lod];
+        // Резолв ТИХИЙ (FindModel, а не логирующий operator[]): он идёт на КАЖДУЮ сущность, и одно
+        // битое имя в сцене на миллион объектов дало бы миллион строк лога.
+        const ModelData* model = mdm ? mdm->FindModel(model_id) : nullptr;
+        if (!model) continue;
+
+        for (uint32_t si = 0; si < model->submeshes.size(); ++si) {
+            const SubMeshData& submesh = model->submeshes[si];
+            if (submesh.indexCount == 0) continue;
+            if (submesh.material_index >= materials.size()) continue;
+
+            Material* material = mtm ? mtm->GetMaterial(materials[submesh.material_index].per_lod[lod]) : nullptr;
+            if (!material) continue;
+
+            for (const SpBinding& binding : material->shader_programs) {
+                const std::shared_ptr<std::vector<uint8_t>>& sp_params =
+                    (binding.params && !binding.params->empty()) ? binding.params : kNoParams;
+                ShaderProgram* sp = sm ? sm->GetShaderProgram(binding.sp) : nullptr;
+                // Имя РЕАЛЬНО взятой программы: по нему резолвятся push-инструкции, и на фолбэк-ветке
+                // с запрошенным именем программа получила бы чужие пуши.
+                ShaderProgramId resolved_id = binding.sp;
+                if (!sp) {
+                    sp = sm ? sm->GetShaderProgram(fallback_sp) : nullptr;
+                    if (!sp) continue;
+                    resolved_id = fallback_sp;
                 }
-                shader_map[sp_key] = std::move(new_batch);
+                RenderPassStep* rp = pass_manager->GetRenderPassStep(sp->render_pass_name);
+                if (!rp) continue;
+
+                auto lay_it = mat_sp_layouts.find(HashMatSpMemo(material, sp, sp_params.get()));
+                if (lay_it == mat_sp_layouts.end() || !lay_it->second.bindable) continue;
+                const MatSpLayout& lay = lay_it->second;
+
+                // Секция нужна только узлу с вариантами: иначе она дробила бы узел по номеру
+                // части, ничего не меняя в пуше.
+                const uint32_t section = lay.variative ? StateSection(submesh.material_index, lod) : 0u;
+                uint64_t path_key = 0;
+                TextureBatchData* tb = ResolveTextureBatch(rp, sp, sm->ShaderProgramNameOf(resolved_id),
+                    sp_params, lay, section, pm, sm, bm, path_key);
+                if (!tb) continue;
+
+                const uint64_t cmd_key = MixKey(MixKey(HashModelBatchKey(model_id, si) + lod) ^ path_key);
+                resolved_scratch.push_back({ rp, tb, &submesh, cmd_key, static_cast<uint8_t>(lod) });
             }
-
-            ShaderBatchData& sb = shader_map[sp_key];
-
-            auto lay_it = mat_sp_layouts.find(HashMatSpMemo(material, sp, sp_params.get()));
-            if (lay_it == mat_sp_layouts.end()) continue;
-            const MatSpLayout& lay = lay_it->second;
-            if (!lay.bindable) continue;
-
-            auto& atlas_map = sb.atlases_batches;
-            auto atlas_it = atlas_map.find(lay.atlas_key);
-            if (atlas_it == atlas_map.end())
-            {
-                AtlasBatchData new_tex{};
-                new_tex.texture_binding = lay.texture_binding;
-                atlas_map[lay.atlas_key] = std::move(new_tex);
-            }
-
-            AtlasBatchData& atlas_batch = atlas_map[lay.atlas_key];
-
-            // Номер материала нужен только узлу с вариантами: иначе он дробил бы узел по номеру
-            // сабмеша, ничего не меняя в пуше.
-            const uint32_t material_index = lay.variative ? StateSection(submesh.material_index, lod) : 0u;
-            TextureBatchKey tex_key = HashTextureBatchKey(lay.res_key, material_index);
-
-            auto& tex_map = atlas_batch.texture_batches;
-            auto texb_it = tex_map.find(tex_key);
-            if (texb_it == tex_map.end()) {
-                TextureBatchData new_texb{};
-                new_texb.params = sp_params;
-                new_texb.texture_uvl = lay.uvl;
-                std::copy(std::begin(lay.slot), std::end(lay.slot), std::begin(new_texb.variant_layout.slot));
-                new_texb.variant_layout.material_index = material_index;
-
-                tex_map[tex_key] = std::move(new_texb);
-            }
-
-            TextureBatchData& tex_batch = tex_map[tex_key];
-            ModelBatchKey model_key = HashModelBatchKey(model_id, si);
-
-            auto& model_map = tex_batch.model_batches;
-            auto model_it = model_map.find(model_key);
-            if (model_it == model_map.end())
-            {
-                ModelBatchData new_model{};
-                new_model.submesh = { submesh.indexCount, submesh.indexOffset, submesh.vertexOffset,
-                                      { submesh.screen_size_span.lod_min,
-                                        submesh.screen_size_span.lod_max } };
-                new_model.instanceCount = 0;
-                new_model.pib_sub_buffer.reserve(16);
-                model_map[model_key] = std::move(new_model);
-            }
-
-            ModelBatchData& model_batch = model_map[model_key];
-
-            uint32_t slot_index = safe_u32(model_batch.pib_sub_buffer.size());
-            model_batch.instanceCount++;
-            // Строка ещё не известна: базы архетипов раздаёт RecalculateInstanceOffsets в конце
-            // сборки, а саму строку добьёт ближайшая заливка PIB.
-            model_batch.pib_sub_buffer.push_back({ entity, kPibNoRow });
-            entity_slots[entity].push_back({ &model_batch, slot_index });
-
         }
     }
 
+    // Ключ группы — по разрешённым командам, а не по id материалов: сущности на разных материалах
+    // с одной и той же командой (тень без текстур) обязаны попасть в одну группу.
+    uint64_t lod_key = MixKey(lod_count);
+    for (uint32_t L = 0; L + 1 < lod_count; ++L)
+        lod_key = MixKey(lod_key ^ std::bit_cast<uint32_t>(rend.switches[row][L]));
+
+    for (size_t first = 0; first < resolved_scratch.size(); ++first) {
+        RenderPassStep* rp = resolved_scratch[first].pass;
+        if (!rp) continue;
+
+        uint64_t group_key = lod_key;
+        for (size_t i = first; i < resolved_scratch.size(); ++i)
+            if (resolved_scratch[i].pass == rp) group_key = MixKey(group_key ^ resolved_scratch[i].key);
+
+        auto [git, created] = rp->draw_groups.try_emplace(group_key);
+        DrawGroup& group = git->second;
+        for (size_t i = first; i < resolved_scratch.size(); ++i) {
+            ResolvedCmd& c = resolved_scratch[i];
+            if (c.pass != rp) continue;
+            if (created) {
+                auto [lit, leaf_created] = c.texture->model_batches.try_emplace(MixKey(group_key ^ c.key));
+                if (leaf_created) {
+                    ModelBatchData& leaf = lit->second;
+                    leaf.group = &group;
+                    leaf.level = c.level;
+                    leaf.submesh = { c.submesh->indexCount, c.submesh->indexOffset, c.submesh->vertexOffset,
+                                     { c.submesh->screen_size_span.lod_min, c.submesh->screen_size_span.lod_max } };
+                }
+            }
+            c.pass = nullptr;
+        }
+
+        // Строка ещё не известна: базы архетипов раздаёт RecalculateInstanceOffsets в конце
+        // сборки, а саму строку добьёт ближайшая заливка PIB.
+        entity_slots[entity].push_back({ &group, safe_u32(group.records.size()) });
+        group.records.push_back({ entity, kPibNoRow });
+    }
 }
 
 void BatchBuilder::RemoveEntityFromBatches(Entity entity)
@@ -415,22 +429,20 @@ void BatchBuilder::RemoveEntityFromBatches(Entity entity)
     if (it == entity_slots.end()) return;
 
     for (const PibSlot& slot : it->second) {
-        ModelBatchData* model_batch = slot.model_batch;
-        std::vector<PibRecord>& pib = model_batch->pib_sub_buffer;
-        uint32_t last_index = safe_u32(pib.size()) - 1;
+        std::vector<PibRecord>& records = slot.group->records;
+        const uint32_t last_index = safe_u32(records.size()) - 1;
 
         if (slot.slot_index != last_index) {
-            Entity moved_entity = pib[last_index].entity;
-            pib[slot.slot_index] = pib[last_index];
+            const Entity moved_entity = records[last_index].entity;
+            records[slot.slot_index] = records[last_index];
             for (PibSlot& moved_slot : entity_slots[moved_entity]) {
-                if (moved_slot.model_batch == model_batch && moved_slot.slot_index == last_index) {
+                if (moved_slot.group == slot.group && moved_slot.slot_index == last_index) {
                     moved_slot.slot_index = slot.slot_index;
                     break;
                 }
             }
         }
-        pib.pop_back();
-        model_batch->instanceCount--;
+        records.pop_back();
     }
     entity_slots.erase(it);
 }
@@ -482,6 +494,7 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
 {
     for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses()) {
         rp->shader_batches.clear();
+        rp->draw_groups.clear();
     }
     entity_slots.clear();
 
@@ -501,7 +514,7 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
         const Renderable& r = arr->data;
         for (size_t i = 0; i < ents.size(); ++i) {
             if (!r.visible[i]) continue;
-            AddEntityToBatches(ents[i], pm, pass_manager, tm, sm, bm, mdm, mtm, r.models[i][0], r.materials[i], 0);
+            AddEntityToBatches(ents[i], pm, pass_manager, tm, sm, bm, mdm, mtm, r, i);
         }
     });
 
@@ -527,7 +540,7 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
         const Renderable& r = el.container();
         const size_t i = el.i();
         if (!r.visible[i]) return;
-        AddEntityToBatches(entity, pm, pass_manager, tm, sm, bm, mdm, mtm, r.models[i][0], r.materials[i], 0);
+        AddEntityToBatches(entity, pm, pass_manager, tm, sm, bm, mdm, mtm, r, i);
     };
 
     // «Перевесить» — первыми: после этого энтити уже в дереве, поэтому парный QueueCreate погасит
@@ -566,6 +579,11 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
     {
         RenderSnap::PassDrawList pass_list;
         pass_list.first_instance = offset;
+        for (auto& [_, group] : rp->draw_groups) {
+            group.pib_first = offset;
+            offset += safe_u32(group.records.size());
+        }
+        pass_list.num_instances = offset - pass_list.first_instance;
         pass_list.shaders.reserve(rp->shader_batches.size());
 
         // Нумерация команд ЛОКАЛЬНА для прохода: его регион содержит только его команды
@@ -614,8 +632,8 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
 
                     for (auto& [model_key, model_batch] : texture_batch.model_batches)
                     {
-                        model_batch.firstInstance = offset;
-                        offset += model_batch.instanceCount;
+                        model_batch.firstInstance = model_batch.group->pib_first;
+                        model_batch.instanceCount = model_batch.level == 0 ? safe_u32(model_batch.group->records.size()) : 0u;
                         pass_cmd_index++;
                     }
                     pass_cmds += td.draw_count;
@@ -625,7 +643,6 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
             }
             pass_list.shaders.push_back(std::move(sg));
         }
-        pass_list.num_instances = offset - pass_list.first_instance;
         pass_list.num_commands = pass_cmds;
         layout->passes.push_back(std::move(pass_list));
     }

@@ -39,10 +39,18 @@ struct PibRecord {
     uint32_t row = kPibNoRow;
 };
 
+// Сущности, которые в проходе рисуются одинаковым набором команд. Все листы группы делят её
+// записи PIB: first_instance/num_instances у них общие.
+struct DrawGroup {
+    std::vector<PibRecord> records;
+    uint32_t pib_first = 0;
+};
+
 struct ModelBatchData {
-    std::vector<PibRecord> pib_sub_buffer;
-    uint32_t firstInstance = 0;
-    uint32_t instanceCount = 0;
+    DrawGroup*  group = nullptr;
+    uint8_t     level = 0;
+    uint32_t    firstInstance = 0;
+    uint32_t    instanceCount = 0;
     SubMeshDraw submesh;
 };
 
@@ -144,6 +152,7 @@ private:
 struct RenderPassStep {
     RenderPassTexturesInfo renderPassTexsData;
     std::unordered_map<BatchKeys::ShaderBatchKey, ShaderBatchData> shader_batches;
+    std::unordered_map<BatchKeys::GroupKey, DrawGroup> draw_groups;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function;
 
     std::vector<TextureAtlas*> global_texture_bindings;

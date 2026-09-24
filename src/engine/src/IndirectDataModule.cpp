@@ -49,8 +49,6 @@ void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, Uploa
 		const RenderPassStep* rp = ordered[pass_i];
 
 		for (uint32_t b = 0; b < reg.command_blocks_count; ++b) {
-			uint32_t local_fi = 0;
-
 			for (const auto& [_, shader_batch] : rp->shader_batches) {
 				for (const auto& [_, atlas_batch] : shader_batch.atlases_batches) {
 					for (const auto& [_, texture_batch] : atlas_batch.texture_batches) {
@@ -61,8 +59,7 @@ void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, Uploa
 							data.num_instances = model_batch.instanceCount;
 							data.first_index = model_batch.submesh.index_offset;
 							data.vertex_offset = model_batch.submesh.vertex_offset;
-							data.first_instance = reg.first_pib + local_fi;
-							local_fi += model_batch.instanceCount;
+							data.first_instance = model_batch.firstInstance;
 
 							bm->UploadToTransferBuffer(task, sizeof(data), &data);
 						}

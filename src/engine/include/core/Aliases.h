@@ -20,4 +20,5 @@ namespace BatchKeys {
 	using AtlasBatchKey = uint64_t;
 	using ShaderBatchKey = uint64_t;
 	using MatSpKey = uint64_t;
+	using GroupKey = uint64_t;
 };

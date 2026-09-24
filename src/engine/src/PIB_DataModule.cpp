@@ -18,20 +18,8 @@ uint32_t PIB_DataModule::ComputeElementCount(PassManager* rm) const
     uint32_t count = 0;
 
     for (RenderPassStep* rp : rm->GetOrderedRenderPasses())
-    {
-        for (const auto& [_, sb] : rp->shader_batches)
-        {
-            for (const auto& [_, ab] : sb.atlases_batches)
-            {
-                for (const auto& [_, tb] : ab.texture_batches)
-                {
-                    for (const auto& [_, mb] : tb.model_batches) {
-                        count += mb.instanceCount;
-                    }
-                };
-            }
-        }
-    }
+        for (const auto& [_, group] : rp->draw_groups)
+            count += safe_u32(group.records.size());
 
     return count;
 }
@@ -87,24 +75,21 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
     // заливка, а запись идемпотентна — повтор по слотам буферизации безвреден.
     uint32_t n = 0;
     for (RenderPassStep* rp : rm->GetOrderedRenderPasses())
-        for (auto& [_, sb] : rp->shader_batches)
-            for (auto& [_, ab] : sb.atlases_batches)
-                for (auto& [_, tb] : ab.texture_batches)
-                    for (auto& [_, mb] : tb.model_batches) {
-                        if (n + mb.pib_sub_buffer.size() > total_elements) continue;
-                        for (PibRecord& rec : mb.pib_sub_buffer) {
-                            if (refresh || rec.row == kPibNoRow) {
-                                rec.row = (rec.entity < row_of.size()) ? row_of[rec.entity] : kPibNoRow;
-                            }
+        for (auto& [_, group] : rp->draw_groups) {
+            if (n + group.records.size() > total_elements) continue;
+            for (PibRecord& rec : group.records) {
+                if (refresh || rec.row == kPibNoRow) {
+                    rec.row = (rec.entity < row_of.size()) ? row_of[rec.entity] : kPibNoRow;
+                }
 #ifndef NDEBUG
-                            else {
-                                // Расхождение кэша с таблицей = состав сущностей изменился без
-                                // ++entity_revision. Наяву это не краш, а чужая матрица у одного
-                                // объекта из миллиона.
-                                assert(rec.row == ((rec.entity < row_of.size()) ? row_of[rec.entity] : kPibNoRow));
-                            }
+                else {
+                    // Расхождение кэша с таблицей = состав сущностей изменился без
+                    // ++entity_revision. Наяву это не краш, а чужая матрица у одного
+                    // объекта из миллиона.
+                    assert(rec.row == ((rec.entity < row_of.size()) ? row_of[rec.entity] : kPibNoRow));
+                }
 #endif
-                            dst[n++] = rec.row;
-                        }
-                    }
+                dst[n++] = rec.row;
+            }
+        }
 }

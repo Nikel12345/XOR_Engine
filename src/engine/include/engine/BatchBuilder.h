@@ -24,6 +24,12 @@ class MaterialManager;
 struct SceneData;
 struct ModelBatchData;
 struct MaterialSlot;
+struct Renderable;
+struct DrawGroup;
+struct TextureBatchData;
+struct MatSpLayout;
+struct RenderPassStep;
+struct SubMeshData;
 struct TextureHandle;
 struct ShaderProgram;
 
@@ -60,9 +66,18 @@ public:
 
 private:
 	struct PibSlot {
-		ModelBatchData* model_batch = nullptr;
-		uint32_t        slot_index = 0;
+		DrawGroup* group = nullptr;
+		uint32_t   slot_index = 0;
 	};
+
+	struct ResolvedCmd {
+		RenderPassStep*    pass = nullptr;
+		TextureBatchData*  texture = nullptr;
+		const SubMeshData* submesh = nullptr;
+		uint64_t           key = 0;
+		uint8_t            level = 0;
+	};
+	std::vector<ResolvedCmd> resolved_scratch;
 
 	void BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
 		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
@@ -80,7 +95,10 @@ private:
 
 	void AddEntityToBatches(Entity entity, PipeManager* pm, PassManager* pass_manager, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
 		ModelManager* mdm, MaterialManager* mtm,
-		ModelId model_id, const std::vector<MaterialSlot>& materials, uint32_t lod);
+		const Renderable& rend, size_t row);
+	TextureBatchData* ResolveTextureBatch(RenderPassStep* rp, ShaderProgram* sp, const ShaderName& sp_name,
+		const std::shared_ptr<std::vector<uint8_t>>& sp_params, const MatSpLayout& lay, uint32_t section,
+		PipeManager* pm, ShaderManager* sm, BufferManager* bm, uint64_t& path_key);
 	void RemoveEntityFromBatches(Entity entity);
 
 	TextureId dummy_texture;
