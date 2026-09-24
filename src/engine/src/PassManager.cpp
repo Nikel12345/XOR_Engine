@@ -241,17 +241,17 @@ void PassManager::ExecutePrepassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_f
 	}
 }
 
-void PassManager::RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass_step, BufferManager* bm, uint32_t region_index, const void* push_data_raw)
+void PassManager::RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassStep* render_pass_step, BufferManager* bm, uint32_t draw_index, const void* push_data_raw)
 {
 	const PassRegions& stamped = AskRegions(render_frame);
 	uint32_t first_command = 0;
 	if (render_pass_step->ordinal < stamped.per_pass.size()) {
 		const PassRegion& region = stamped.per_pass[render_pass_step->ordinal];
-		if (region_index >= region.command_blocks_count) {
-			SDL_Log("RenderPassStandardBody: pass '%s' draws block %u, but its region count instruction asked for %u - the draw reads a neighbour region",
-				render_pass_step->debug_name.c_str(), region_index, region.command_blocks_count);
+		if (draw_index >= region.draw_count) {
+			SDL_Log("RenderPassStandardBody: pass '%s' draws #%u, but its region count instruction asked for %u",
+				render_pass_step->debug_name.c_str(), draw_index, region.draw_count);
 		}
-		first_command = region.cmd_base + region_index * region.commands;
+		first_command = region.cmd_base;
 	}
 	const uint32_t additional_offset = first_command * safe_u32(sizeof(SDL_GPUIndexedIndirectDrawCommand));
 
@@ -341,7 +341,6 @@ void PassManager::StampRegions(uint8_t slot, const RenderSnap::BatchLayout* layo
 	PassRegions& stamped = regions[slot];
 	stamped.per_pass.clear();
 	stamped.total_commands = 0;
-	stamped.total_pib = 0;
 	if (!layout) return;
 
 	stamped.per_pass.resize(layout->passes.size());
@@ -349,7 +348,7 @@ void PassManager::StampRegions(uint8_t slot, const RenderSnap::BatchLayout* layo
 	for (uint32_t i = 0; i < stamped.per_pass.size(); ++i) {
 		const RenderSnap::PassDrawList& pass_list = layout->passes[i];
 		PassRegion& region = stamped.per_pass[i];
-		region.command_blocks_count = 1;
+		region.draw_count = 1;
 		region.commands = pass_list.num_commands;
 		region.pib = pass_list.num_instances;
 		region.first_pib = pass_list.first_instance;
@@ -359,20 +358,16 @@ void PassManager::StampRegions(uint8_t slot, const RenderSnap::BatchLayout* layo
 		if (!count_fn) continue;
 		RenderPassStep* rp = GetRenderPassStep(name);
 		if (!rp || rp->ordinal >= stamped.per_pass.size()) continue;
-		stamped.per_pass[rp->ordinal].command_blocks_count = count_fn(slot);
+		stamped.per_pass[rp->ordinal].draw_count = count_fn(slot);
 	}
 
 	uint32_t cmd_base = 0;
-	uint32_t pib_base = 0;
 	for (PassRegion& region : stamped.per_pass) {
 		region.cmd_base = cmd_base;
-		region.pib_base = pib_base;
-		cmd_base += region.command_blocks_count * region.commands;
-		pib_base += region.command_blocks_count * region.pib;
+		cmd_base += region.commands;
 	}
 
 	stamped.total_commands = cmd_base;
-	stamped.total_pib = pib_base;
 }
 
 RenderPassStep* PassManager::GetRenderPassStep(const RenderPassName& name)

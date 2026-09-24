@@ -169,8 +169,6 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
         10
     );
     shadowPass->renderPassTexsData.SetDepthTexture(shadow_temp);
-    // Проход рисуется по разу на теневую камеру — значит столько же блоков в индиректе/out_pib.
-    // Больше он ни о чём не сообщает: где эти блоки лягут, решает PassManager::StampRegions.
     pm->CreateRegionCountInstruction(SHADOW_PASS,
         [ldm](uint8_t slot) { return ldm->AskNumLightCameras(slot); });
     SetPassState(shadowPass, ShadowPushData{});   // хранилище: все поля покадровые, схемы нет
