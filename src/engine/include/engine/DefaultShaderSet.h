@@ -25,7 +25,6 @@ namespace DefaultShaderProgramSet
     // Зовёт их игра из MainInit — ординал своего прохода каждая программа снимает на создании,
     // то есть проходы к этому моменту обязаны существовать.
 
-    void SetCullingPibPrograms(EngineContext* ctx);
     void SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm);
     void SetBloomPrograms(EngineContext* ctx);
     void SetAOPrograms(EngineContext* ctx);

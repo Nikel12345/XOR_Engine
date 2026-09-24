@@ -1,5 +1,5 @@
 // UI-вершинник: NDC-квад. Трансформ (Positions 4x4) = ЭКРАННАЯ матрица, дающая clip напрямую —
-// view/proj НЕТ (UI не зависит от камеры мира). row из OutPib индексирует трансформ и инстанс-
+// view/proj НЕТ (UI не зависит от камеры мира). row из Rows индексирует трансформ и инстанс-
 // данные (как main_pass.vert), и передаётся во фрагментник для разреженного текст-канала.
 // Модель — юнит-квад [0,1]²; матрица раскладывает его в нужный NDC-прямоугольник.
 
@@ -19,7 +19,7 @@ struct VSOutput
 };
 
 StructuredBuffer<float4x4> ModelMatrixBlock : register(t0, space0);
-StructuredBuffer<int>      OutPib           : register(t1, space0);   // -1 = отсечён/нет строки
+StructuredBuffer<int>      Rows           : register(t1, space0);   // -1 = отсечён/нет строки
 struct InstanceData { float alpha; uint flags; };
 StructuredBuffer<InstanceData> InstanceDataBlock : register(t2, space0);
 
@@ -27,7 +27,7 @@ VSOutput main(VSInput input)
 {
     VSOutput o;
 
-    int row = OutPib[input.instanceID];
+    int row = Rows[input.instanceID];
     if (row < 0) {   // нет строки/отсечён — уводим примитив целиком за клип
         o = (VSOutput)0;
         o.position = float4(2.0, 2.0, 2.0, 1.0);

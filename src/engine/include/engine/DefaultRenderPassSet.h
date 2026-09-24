@@ -229,10 +229,6 @@ namespace DefaultRenderPassNamespace
         // csp_cull_main рисует при px >= L, csp_cull_splat при px < L. Синхронизировать нечего.
         uint32_t invert_span = 0;
     };
-    // culling_clear.comp: обнуляет num_instances всех (камера,команда) перед scatter.
-    struct alignas(16) CullingClearUniform {
-        uint32_t total_slots;      // PassRegions::total_commands слота — все блоки всех проходов
-    };
     void SetDefaultCullingPass(EngineContext* ctx);
 
     // Сплат-проход: объекты, отсеянные из MAIN по экранному размеру, рисуются здесь одной точкой

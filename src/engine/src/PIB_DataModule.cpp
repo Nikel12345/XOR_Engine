@@ -11,7 +11,6 @@
 PIB_DataModule::PIB_DataModule()
 {
     for (uint64_t& r : pib_last_revision) r = ~0ull;
-    for (uint64_t& r : e2c_last_revision) r = ~0ull;
 }
 
 uint32_t PIB_DataModule::ComputeElementCount(PassManager* rm) const
@@ -108,42 +107,4 @@ void PIB_DataModule::StorePIB(BufferManager* bm, PassManager* rm, UploadTask* ta
                             dst[n++] = rec.row;
                         }
                     }
-}
-
-uint32_t PIB_DataModule::CalculateEntityToCmd(PassManager* rm, uint64_t revision, uint8_t slot)
-{
-    if (revision == e2c_last_revision[slot]) return 0;
-    // Счётчик свой: гейты у двух буферов раздельные, и PIB мог не пересчитаться в этом кадре.
-    e2c_elements = ComputeElementCount(rm);
-    return e2c_elements * sizeof(uint32_t);
-}
-
-void PIB_DataModule::StoreEntityToCmd(BufferManager* bm, PassManager* rm, UploadTask* task,
-                                      uint64_t revision, uint8_t slot)
-{
-    if (revision == e2c_last_revision[slot]) return;
-
-    // Обход и нумерация команд обязаны совпадать со StorePIB и FinalizeOffsets: индекс
-    // ЛОКАЛЬНЫЙ для прохода.
-    uint32_t* dst = static_cast<uint32_t*>(
-        bm->AcquireTransferWritePtr(task, e2c_elements * sizeof(uint32_t)));
-    if (!dst) return;
-    e2c_last_revision[slot] = revision;
-
-    uint32_t n = 0;
-    for (RenderPassStep* rp : rm->GetOrderedRenderPasses()) {
-        uint32_t cmd_idx = 0;
-        for (const auto& [_, sb] : rp->shader_batches)
-            for (const auto& [_, ab] : sb.atlases_batches)
-                for (const auto& [_, tb] : ab.texture_batches)
-                    for (const auto& [_, mb] : tb.model_batches) {
-                        const size_t cnt = mb.pib_sub_buffer.size();
-                        const uint32_t word = MakeEntityToCmdWord(cmd_idx, mb.submesh.screen_size_span);
-                        if (n + cnt <= e2c_elements) {
-                            std::fill_n(dst + n, cnt, word);
-                            n += safe_u32(cnt);
-                        }
-                        cmd_idx++;
-                    }
-    }
 }

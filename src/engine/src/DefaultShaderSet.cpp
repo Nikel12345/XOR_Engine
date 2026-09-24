@@ -18,66 +18,8 @@ using namespace ShaderBase;
 
 namespace DefaultShaderProgramSet
 {
-    bool culling_pib_inited = false;
     bool shadow_blur_inited = false;
 
-}
-
-namespace {
-    PassRegion RegionOfPass(PassManager* pm, uint32_t pass_ordinal, uint8_t slot)
-    {
-        const PassRegions& regions = pm->AskRegions(slot);
-        if (pass_ordinal < regions.per_pass.size()) {
-            return regions.per_pass[pass_ordinal];
-        }
-        return PassRegion{};
-    }
-
-    void CreateCullingProgram(EngineContext* ctx, ShaderManager* sm, PassManager* pm,
-                              const std::string& program_name, const RenderPassName& pass_name,
-                              BufferDataName camera_buffer, TextureAtlas* screen_target = nullptr,
-                              bool invert_span = false)
-    {
-        namespace RP = DefaultRenderPassNamespace;
-        using namespace DefaultBuffersNames;
-
-        uint32_t pass_ordinal = UINT32_MAX;
-        RenderPassStep* pass = pm->GetRenderPassStep(pass_name);
-        if (pass) {
-            pass_ordinal = pass->ordinal;
-        }
-
-        ctx->CreateComputeShaderProgram(program_name, "culling_pib_cs",
-            { DEFAULT_OUT_PIB_BUFFER, DEFAULT_INDIRECT_BUFFER },
-            { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_ENTITY_TO_CMD_BUFFER, DEFAULT_BOUND_SPHERE_BUFFER,
-              camera_buffer, DEFAULT_TRANSFORM_BUFFER },
-            {}, {}, {},
-            RP::CULLING_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
-
-        sm->CreateComputePushInstruction<RP::CullingPibUniform>(program_name,
-            [pm, pass_ordinal, screen_target, invert_span](const PushConstantBinder& binder, RP::CullingPibUniform data) {
-            const PassRegion region = RegionOfPass(pm, pass_ordinal, binder.frame);
-            data.range_start = region.first_pib;
-            data.range_count = region.pib;
-            data.num_blocks  = region.command_blocks_count;
-            data.cmd_base    = region.cmd_base;
-            data.commands    = region.commands;
-            if (screen_target) data.target_height = screen_target->height;
-            else               data.min_screen_radius_px = 0.0f;
-            data.invert_span = invert_span ? 1u : 0u;
-            binder.Push(data);
-        });
-
-        sm->CreateDispatchInstruction<RP::DummyDispatchData>(program_name,
-            [pm, pass_ordinal](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-            const PassRegion region = RegionOfPass(pm, pass_ordinal, binder.frame);
-            uint32_t records = region.pib;
-            if (region.command_blocks_count == 0) {
-                records = 0;
-            }
-            binder.element_count = { records, 1, 1 };
-        });
-    }
 }
 
 void DefaultShaderProgramSet::SetDefaultPushes(EngineContext* ctx)
@@ -130,7 +72,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry()->DoesNotCull();
 		ctx->CreateShaderProgram("Fallback", spd, RP::MAIN_PASS,
-			"fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"fallback_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
 			{ }, ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
 		ctx->GetBatchBuilder()->SetFallbackShader(ctx->GetShaderManager()->InternShaderProgram("Fallback"));
@@ -167,14 +109,12 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 	ctx->CreateComputeShader("ssao_blur_v_cs",     "../engine/shaders_code/comp/ssao_blur_v.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
 	ctx->CreateComputeShader("ao_composite_cs",    "../engine/shaders_code/comp/ao_composite.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
 	ctx->CreateComputeShader("fog_cs",             "../engine/shaders_code/comp/fog.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateComputeShader("culling_clear_cs",   "../engine/shaders_code/comp/culling_clear.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateComputeShader("culling_pib_cs",     "../engine/shaders_code/comp/culling_pib.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
 
 	{
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry();
 		ctx->CreateShaderProgram("Lit", spd, RP::MAIN_PASS,
-			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			// Буферы вариантов — во ФРАГМЕНТНОМ списке: main_pass_vs общий и с программами игр,
 			// а буфер в вершинном списке обязана была бы биндить КАЖДАЯ из них — иначе
 			// «Missing vertex storage buffer binding».
@@ -183,7 +123,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 			ResourceTag::CodeOwned | ResourceTag::Default);
 
 		ctx->CreateShaderProgram("LitColor", spd, RP::MAIN_PASS,
-			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"untextured_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
 			{ }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
@@ -191,7 +131,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ShaderProgramDescription spd;
 		spd.BehavesAsTransparentGeometry();
 		ctx->CreateShaderProgram("LitTransparent", spd, RP::TRANSPARENT_PASS,
-			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
+			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
 			"transparent_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo, TextureSlotRole::Normal }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
@@ -199,14 +139,14 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ShaderProgramDescription spd;
 		spd.BehavesAsShadowCaster();
 		ctx->CreateShaderProgram("ShadowCaster", spd, RP::SHADOW_PASS,
-			"shadow_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"shadow_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"shadow_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 	{
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry()->IgnoresDepth()->AsLineList();
 		ctx->CreateShaderProgram("Wireframe", spd, RP::DEBUG_PASS,
-			"debug_collider_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
+			"debug_collider_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER },
 			"debug_collider_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 	// Сплат ВЫКЛЮЧЕН вместе со своим проходом (см. Engine::Init). Держать sp живой нельзя:
@@ -217,7 +157,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 	//		ShaderProgramDescription spd;
 	//		spd.BehavesAsOpaqueGeometry()->AsPointList();
 	//		ctx->CreateShaderProgram("Splat", spd, RP::SPLAT_PASS,
-	//			"splat_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
+	//			"splat_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER },
 	//			"splat_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	//	}
 	{
@@ -237,51 +177,12 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ShaderProgramDescription spd;
 		spd.BehavesAsUIOverlay();
 		ctx->CreateShaderProgram("UI", spd, RP::UI_PASS,
-			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_INSTANCE_BUFFER },
+			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_INSTANCE_BUFFER },
 			"ui_fs", { UI_TEXT_RANK_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER,
 			           DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 
-}
-
-void DefaultShaderProgramSet::SetCullingPibPrograms(EngineContext* ctx)
-{
-    ShaderManager* sm = ctx->GetShaderManager();
-    using namespace DefaultBuffersNames;
-    if (culling_pib_inited) {
-        SDL_Log("Culling PIB program already initialized.");
-        return;
-    }
-
-    namespace RP = DefaultRenderPassNamespace;
-    PassManager* pm = ctx->GetPassManager();
-
-    ComputeShaderProgram* csp_clear = ctx->CreateComputeShaderProgram("csp_culling_clear", "culling_clear_cs",
-        { DEFAULT_INDIRECT_BUFFER },
-        {}, {}, {}, {},
-        RP::CULLING_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
-    sm->CreateComputePushInstruction<RP::CullingClearUniform>("csp_culling_clear",
-        [pm](const PushConstantBinder& binder, RP::CullingClearUniform data) {
-        data.total_slots = pm->AskRegions(binder.frame).total_commands;
-        binder.Push(data);
-    });
-    sm->CreateDispatchInstruction<RP::DummyDispatchData>("csp_culling_clear",
-        [pm](DispatchSizeBinder& binder, RP::DummyDispatchData) {
-        binder.element_count = { pm->AskRegions(binder.frame).total_commands, 1, 1 };
-    });
-
-    TextureAtlas* scene_hdr = ctx->GetTextureAtlas(std::string("scene_hdr"));
-    CreateCullingProgram(ctx, sm, pm, "csp_cull_shadow",      RP::SHADOW_PASS,      DEFAULT_LIGHT_CAMERA_BUFFER);
-    CreateCullingProgram(ctx, sm, pm, "csp_cull_main",        RP::MAIN_PASS,        DEFAULT_CAMERA_BUFFER, scene_hdr);
-    // Сплат выключен вместе со своим проходом (Engine::Init); механизм invert_span остаётся в
-    // шейдере и включается этой строкой.
-    // CreateCullingProgram(ctx, sm, pm, "csp_cull_splat", RP::SPLAT_PASS, DEFAULT_CAMERA_BUFFER, scene_hdr, /*invert_span=*/true);
-    CreateCullingProgram(ctx, sm, pm, "csp_cull_transparent", RP::TRANSPARENT_PASS, DEFAULT_CAMERA_BUFFER);
-    CreateCullingProgram(ctx, sm, pm, "csp_cull_debug",       RP::DEBUG_PASS,       DEFAULT_CAMERA_BUFFER);
-    CreateCullingProgram(ctx, sm, pm, "csp_cull_ui",          RP::UI_PASS,          DEFAULT_CAMERA_BUFFER);
-
-    culling_pib_inited = true;
 }
 
 void DefaultShaderProgramSet::SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm)

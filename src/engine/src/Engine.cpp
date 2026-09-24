@@ -343,10 +343,6 @@ void Engine::InitDefaultBufferUpdaters()
 	SetDefaultLightCamerasUpdater(*engine_context, light_data_module);
 	SetDefaultIndirectUpdater(*engine_context, indirect_data_module, light_data_module);
 
-	SetDefaultBoundSphereUpdater(*engine_context, bound_sphere_data_module);
-	SetDefaultEntityToCmdUpdater(*engine_context, pib_data_module);
-	SetDefaultOutPibUpdater(*engine_context, light_data_module);
-
 	SetDefaultTexStateChannel(*engine_context, tex_state_data_module);
 	SetDefaultTexStateUpdater(*engine_context, tex_state_data_module);
 

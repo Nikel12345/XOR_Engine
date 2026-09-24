@@ -19,7 +19,7 @@ struct VSInput {
 StructuredBuffer<float4x4> ModelMatrixBlock : register(t0, space0);
 // out_pib: адрес куска записей команды лежит в её first_instance, а SV_InstanceID = first_instance + i,
 // поэтому индексируем напрямую. -1 = инстанс отсечён каллингом.
-StructuredBuffer<int>      OutPib           : register(t1, space0);
+StructuredBuffer<int>      Rows           : register(t1, space0);
 
 struct CameraData { float4x4 view; float4x4 proj; };
 StructuredBuffer<CameraData> Camera : register(t2, space0);
@@ -36,7 +36,7 @@ VSOutput main(VSInput input)
     VSOutput o;
     o.psize = 1.0;
 
-    int row = OutPib[input.instanceID];
+    int row = Rows[input.instanceID];
     if (row < 0) {
         // Отсечён: вырожденная позиция за клип-плоскостью. Голый return оставил бы SV_Position UB.
         o.sv_pos = float4(2.0, 2.0, 2.0, 1.0);

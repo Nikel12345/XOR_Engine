@@ -26,9 +26,6 @@ namespace DefaultBuffersNames {
 	inline constexpr const char* DEFAULT_TEX_STATE_BUFFER        = "DefaultTexStateBuffer";
 
 	inline constexpr const char* DEFAULT_INDIRECT_BUFFER = "DefaultIndirectBuffer";
-	inline constexpr const char* DEFAULT_BOUND_SPHERE_BUFFER = "DefaultBoundSphereBuffer";
-	inline constexpr const char* DEFAULT_OUT_PIB_BUFFER = "DefaultOutPibBuffer";
-	inline constexpr const char* DEFAULT_ENTITY_TO_CMD_BUFFER = "DefaultEntityToCmdBuffer";
 
 	inline constexpr const char* UI_TEXT_RANK_BUFFER     = "UITextRank";
 	inline constexpr const char* UI_TEXT_INDEX_BUFFER    = "UITextIndex";

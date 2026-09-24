@@ -88,7 +88,6 @@ SDL_AppResult Game::MainInit()
         SetBloomPrograms(ctx);
         SetAOPrograms(ctx);           // SSAO: глубина main'а → карта AO → вычитание из scene_hdr
         SetFogProgram(ctx);           // туман: линейная стена по дистанции, поверх глубины main'а
-        SetCullingPibPrograms(ctx);   // GPU-каллинг: программа на проход, регионы у PassManager
     }
     // Push/dispatch своих sp — ДО первого LoadScene: реестр ShaderManager вешает их на sp сам.
     GameShaderSet::RegisterShaderFuncs(ctx);

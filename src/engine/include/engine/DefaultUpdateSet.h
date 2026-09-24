@@ -29,9 +29,6 @@ namespace DefaultUpdateSet
 	void SetDefaultPositionIndexUpdater(EngineContext& ctx, PIB_DataModule* pib_dm);
 	void SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDataModule* ldm);
 	void SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDataModule* idm, LightDataModule* ldm);
-	void SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSphereDataModule* bdm);
-	void SetDefaultEntityToCmdUpdater(EngineContext& ctx, PIB_DataModule* pib_dm);
-	void SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModule* ldm);
 	// Канал разрежённого ранга: ранг и индекс. Индекс берёт размер из того, что построила size-фаза
 	// ранга, поэтому пара регистрируется одним вызовом.
 	void SetDefaultTexStateChannel(EngineContext& ctx, TextureStateDataModule* tsm);

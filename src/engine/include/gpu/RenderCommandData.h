@@ -27,14 +27,6 @@ struct ScreenSizeSpan {
     uint8_t lod_max = 0;
 };
 
-inline constexpr uint32_t kCmdIndexMask = 0x00FFFFFFu;
-inline uint32_t MakeEntityToCmdWord(uint32_t cmd_index, ScreenSizeSpan span) {
-    assert(cmd_index <= kCmdIndexMask);
-    return (cmd_index & kCmdIndexMask)
-         | (static_cast<uint32_t>(span.lod_min & 0xFu) << 24)
-         | (static_cast<uint32_t>(span.lod_max & 0xFu) << 28);
-}
-
 struct SubMeshDraw {
     uint32_t index_count = 0;
     uint32_t index_offset = 0;

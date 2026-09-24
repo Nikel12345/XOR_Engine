@@ -120,50 +120,6 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
         [pm, idm, bb, bm]() -> uint32_t { const uint8_t slot = bm->logic_index.load(); return idm->CalculateIndirectSize(pm->AskRegions(slot), bb->BatchesRevision(), slot); });
 }
 
-void DefaultUpdateSet::SetDefaultEntityToCmdUpdater(EngineContext& ctx, PIB_DataModule* pib_dm)
-{
-    static bool inited = false;
-    if (inited) { SDL_Log("DefaultUpdateSet::SetDefaultEntityToCmdUpdater: already initialized"); return; }
-    inited = true;
-
-    auto* bm = ctx.GetBufferManager();
-    auto* pm = ctx.GetPassManager();
-    auto* bb = ctx.GetBatchBuilder();
-
-    bm->CreateUpdateInstruction(DEFAULT_ENTITY_TO_CMD_BUFFER,
-        [pm, pib_dm, bb](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { pib_dm->StoreEntityToCmd(bm, pm, &task, bb->BatchesRevision(), bm->logic_index.load()); },
-        [pm, pib_dm, bb, bm]() -> uint32_t { return pib_dm->CalculateEntityToCmd(pm, bb->BatchesRevision(), bm->logic_index.load()); });
-}
-
-void DefaultUpdateSet::SetDefaultBoundSphereUpdater(EngineContext& ctx, BoundSphereDataModule* bdm)
-{
-    static bool inited = false;
-    if (inited) { SDL_Log("DefaultUpdateSet::SetDefaultBoundSphereUpdater: already initialized"); return; }
-    inited = true;
-
-    auto* bm = ctx.GetBufferManager();
-    auto* om = ctx.GetObjectManager();
-    auto* mm = ctx.GetModelManager();
-
-    bm->CreateUpdateInstruction(DEFAULT_BOUND_SPHERE_BUFFER,
-        [om, mm, bdm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { bdm->StoreSpheres(bm, &task, om, mm, om->EntityRevision() + mm->SpheresRevision(), bm->logic_index.load()); },
-        [om, mm, bdm, bm]() -> uint32_t { return bdm->CalculateSphereSize(om, om->EntityRevision() + mm->SpheresRevision(), bm->logic_index.load()); });
-}
-
-void DefaultUpdateSet::SetDefaultOutPibUpdater(EngineContext& ctx, LightDataModule* ldm)
-{
-    static bool inited = false;
-    if (inited) { SDL_Log("DefaultUpdateSet::SetDefaultOutPibUpdater: already initialized"); return; }
-    inited = true;
-
-    auto* bm = ctx.GetBufferManager();
-    auto* pm = ctx.GetPassManager();
-
-    bm->CreateUpdateInstruction(DEFAULT_OUT_PIB_BUFFER,
-        nullptr,
-        [pm, bm]() -> uint32_t { return pm->AskRegions(bm->logic_index.load()).total_pib * sizeof(int32_t); });
-}
-
 void DefaultUpdateSet::SetDefaultTexStateChannel(EngineContext& ctx, TextureStateDataModule* tsm)
 {
     static bool inited = false;

@@ -58,11 +58,10 @@ void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, Uploa
 							SDL_GPUIndexedIndirectDrawCommand data;
 							data.num_indices = rp->override_index_count ? rp->override_index_count
 							                                            : model_batch.submesh.index_count;
-							data.num_instances = 0;
+							data.num_instances = model_batch.instanceCount;
 							data.first_index = model_batch.submesh.index_offset;
 							data.vertex_offset = model_batch.submesh.vertex_offset;
-							// first_instance — АБСОЛЮТНЫЙ адрес куска в out_pib, а не номер инстанса.
-							data.first_instance = reg.pib_base + b * reg.pib + local_fi;
+							data.first_instance = reg.first_pib + local_fi;
 							local_fi += model_batch.instanceCount;
 
 							bm->UploadToTransferBuffer(task, sizeof(data), &data);
