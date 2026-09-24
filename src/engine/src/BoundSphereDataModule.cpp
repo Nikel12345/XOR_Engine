@@ -37,9 +37,9 @@ uint32_t BoundSphereDataModule::CalculateSphereSize(ObjectManager* om, uint64_t 
 	if (revision == last_revision[slot]) return 0;
 
 	uint32_t rows = 0;
-	om->ForEachArchetype<Positions, DrawComponent>(om->GetActiveScene(),
+	om->ForEachArchetype<Positions, Renderable>(om->GetActiveScene(),
 		[&](ComponentArray<Positions, void>* posArr,
-			ComponentArray<DrawComponent, void>*)
+			ComponentArray<Renderable, void>*)
 	{
 		rows += safe_u32(posArr->size());
 	});
@@ -72,7 +72,7 @@ void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, Ob
 
 	// Отбор и порядок обязаны совпадать с RecalculateInstanceOffsets и TransformDataModule.
 	for (auto& [sig, arch] : scene->archetypes) {
-		if (!arch.get_array<DrawComponent>() || !arch.get_array<Positions>()) continue;
+		if (!arch.get_array<Renderable>() || !arch.get_array<Positions>()) continue;
 
 		const size_t n = arch.entities.size();
 		if (n == 0) continue;
@@ -80,13 +80,12 @@ void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, Ob
 		// UI живёт в NDC, и мировой фрустум мис-каллил бы его — уходит вырожденной сферой.
 		const bool is_ui = arch.get_array<UIComponent>() != nullptr;
 
-		auto* model_arr = arch.get_array<ModelComponent>();
+		const Renderable& rend = arch.get_array<Renderable>()->data;
 		glm::vec4* dst = static_cast<glm::vec4*>(
 			bm->AcquireTransferWritePtr(task, safe_u32(n * sizeof(glm::vec4))));
 		if (!dst) return;
 
 		for (size_t i = 0; i < n; ++i)
-			dst[i] = (is_ui || !model_arr) ? glm::vec4(0.0f, 0.0f, 0.0f, -1.0f)
-			                               : sphere_of((*model_arr)[i].model);
+			dst[i] = is_ui ? glm::vec4(0.0f, 0.0f, 0.0f, -1.0f) : sphere_of(rend.models[i][0]);
 	}
 }

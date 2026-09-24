@@ -24,14 +24,15 @@ namespace ColliderQuery {
 				fn(e, col.shapes, p.container(), p.i());
 			});
 
-		om.ForEach<Positions, ModelComponent>(scene,
-			[&](Entity e, SoAElement<Positions> p, ModelComponent& mc) {
+		om.ForEach<Positions, Renderable>(scene,
+			[&](Entity e, SoAElement<Positions> p, SoAElement<Renderable> r) {
 				if (om.Has<DebugColliderTag>(scene, e)) return;
 				if (om.Has<ColliderComponent>(scene, e) &&
 					!om.GetComponent<ColliderComponent>(scene, e).shapes.empty())
 					return;   // уже учтён явными формами
-				if (!colliders_of || !mc.model) return;
-				const std::vector<Collider> autoShapes = colliders_of(mc.model);
+				const ModelId model = r.container().models[r.i()][0];
+				if (!colliders_of || !model) return;
+				const std::vector<Collider> autoShapes = colliders_of(model);
 				if (autoShapes.empty()) return;
 
 				fn(e, autoShapes, p.container(), p.i());

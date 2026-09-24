@@ -23,8 +23,7 @@ class ModelManager;
 class MaterialManager;
 struct SceneData;
 struct ModelBatchData;
-struct MaterialComponent;
-struct ModelComponent;
+struct MaterialSlot;
 struct TextureHandle;
 struct ShaderProgram;
 
@@ -81,7 +80,7 @@ private:
 
 	void AddEntityToBatches(Entity entity, PipeManager* pm, PassManager* pass_manager, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
 		ModelManager* mdm, MaterialManager* mtm,
-		const MaterialComponent& material_component, const ModelComponent& model_component);
+		ModelId model_id, const std::vector<MaterialSlot>& materials, uint32_t lod);
 	void RemoveEntityFromBatches(Entity entity);
 
 	TextureId dummy_texture;

@@ -105,12 +105,13 @@ namespace {
         if (kids_it != scene->children.end() && !kids_it->second.empty()) {
             ImGui::SeparatorText("Debug colliders");
             for (Entity c : kids_it->second) {
-                if (!om->Has<DrawComponent>(scene, c)) continue;
-                bool visible = om->GetComponent<DrawComponent>(scene, c).visible;
+                if (!om->Has<Renderable>(scene, c)) continue;
+                SoAElement<Renderable> rend = om->GetComponent<Renderable>(scene, c);
+                bool visible = rend.container().visible[rend.i()] != 0;
                 char clabel[40]; snprintf(clabel, sizeof(clabel), "visible (collider %u)", static_cast<unsigned>(c));
                 if (ImGui::Checkbox(clabel, &visible))
                     cmd::Push<CommandId::HideEntity>(ctx->GetInputManager(),
-                        c, "Draw", "visible", visible ? 1.0 : 0.0);
+                        c, "Renderable", "visible", visible ? 1.0 : 0.0);
             }
         }
 

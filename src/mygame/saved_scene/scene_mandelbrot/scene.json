@@ -1,22 +1,10 @@
 {
-    "Draw,Material,Model": {
+    "Renderable": {
         "count": 1,
         "entities": [
             0
         ],
-        "Model": {
-            "name": [
-                "skybox_cube"
-            ]
-        },
-        "Material": {
-            "names": [
-                [
-                    "skybox"
-                ]
-            ]
-        },
-        "Draw": {
+        "Renderable": {
             "visible": [
                 true
             ],
@@ -25,6 +13,21 @@
             ],
             "flags": [
                 0
+            ],
+            "lod_count": [
+                1
+            ],
+            "models": [
+                [
+                    "skybox_cube"
+                ]
+            ],
+            "materials": [
+                [
+                    [
+                        "skybox"
+                    ]
+                ]
             ]
         }
     }

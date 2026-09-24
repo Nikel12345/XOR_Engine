@@ -19,15 +19,15 @@ void UI_DataModule::BuildStaging(ObjectManager* om)
 	rows_ = 0;
 	rank_size_ = index_size_ = text_size_ = 0;
 
-	om->ForEachArchetype<Positions, DrawComponent>(scene,
-		[&](ComponentArray<Positions, void>* posArr, ComponentArray<DrawComponent, void>*)
+	om->ForEachArchetype<Positions, Renderable>(scene,
+		[&](ComponentArray<Positions, void>* posArr, ComponentArray<Renderable, void>*)
 		{
 			rows_ += safe_u32(posArr->size());
 		});
 	if (rows_ == 0) return;
 
-	om->ForEach<DrawComponent, UIComponent, UITextComponent>(scene,
-		[&](Entity e, DrawComponent&, UIComponent&, UITextComponent& txt)
+	om->ForEach<Renderable, UIComponent, UITextComponent>(scene,
+		[&](Entity e, SoAElement<Renderable>, UIComponent&, UITextComponent& txt)
 		{
 			if (!om->Has<Positions>(scene, e)) return;
 			hit_rows_.push_back(scene->entity_to_archetype[e]->render_instance_base

@@ -10,6 +10,7 @@ enum class CommandId : uint32_t {
     HideEntity,
     SetEntityModel,
     SetEntityMaterial,
+    SetEntityLods,
     SetTransform,
     SaveScene,
     LoadScene,

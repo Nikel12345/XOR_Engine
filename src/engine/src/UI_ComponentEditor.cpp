@@ -222,26 +222,152 @@ bool ui::DrawParamsFields(const ParamsSpec& spec, std::vector<uint8_t>& blob)
 
 namespace {
 
-void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
+bool StepArrows(uint32_t& value, uint32_t count)
 {
-    MaterialComponent& mats = (*arch.get_array<MaterialComponent>())[row];
+    const uint32_t before = value;
+    ImGui::BeginDisabled(value == 0);
+    if (ImGui::ArrowButton("prev", ImGuiDir_Left)) --value;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::Text("%u / %u", value, count - 1);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(value + 1 >= count);
+    if (ImGui::ArrowButton("next", ImGuiDir_Right)) ++value;
+    ImGui::EndDisabled();
+    return value != before;
+}
 
-    if (!t.live()) {
-        size_t sub_count = 0;
-        if (auto* mdl_arr = arch.get_array<ModelComponent>()) {
-            if (const ModelData* m = t.ctx->GetModelManager()->FindModel((*mdl_arr)[row].model))
-                sub_count = m->submeshes.size();
-        }
-        if (mats.materials.size() != sub_count) mats.materials.resize(sub_count);
+std::vector<uint32_t> PartsOfModel(ModelManager* mdm, ModelId model)
+{
+    std::vector<uint32_t> out;
+    if (const ModelData* m = mdm->FindModel(model))
+        for (const SubMeshData& sm : m->submeshes) out.push_back(sm.material_index);
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+// Возвращает уровень, который показывать дальше. У живой сущности уровень, добавленный «+»,
+// появится только после команды, поэтому вызывающий держит его и ждёт.
+uint32_t DrawLodSetup(const EditTarget& t, Renderable& rend, size_t row, uint32_t lod)
+{
+    const uint32_t count = rend.lod_count[row];
+    std::array<float, MAX_LOD - 1> switches = rend.switches[row];
+    uint32_t new_count = count;
+
+    ImGui::PushID("lod");
+    ImGui::TextUnformatted("LOD");
+    ImGui::SameLine();
+    StepArrows(lod, count);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(count >= MAX_LOD);
+    if (ImGui::SmallButton("+")) new_count = count + 1;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(count <= 1);
+    if (ImGui::SmallButton("-")) new_count = count - 1;
+    ImGui::EndDisabled();
+    ImGui::PopID();
+
+    bool switch_changed = false;
+    if (lod > 0)
+        switch_changed = ImGui::DragFloat("switch", &switches[lod - 1], 0.001f, 0.0f, 1.0f, "%.4f");
+
+    if (new_count == count && !switch_changed) return lod;
+    if (t.live()) {
+        cmd::Push<CommandId::SetEntityLods>(t.ctx->GetInputManager(), t.entity, new_count, switches);
     }
+    else {
+        for (uint32_t L = count; L < new_count; ++L) {
+            rend.models[row][L] = rend.models[row][L - 1];
+            for (MaterialSlot& part : rend.materials[row]) part.per_lod[L] = part.per_lod[L - 1];
+        }
+        for (uint32_t L = new_count; L < count; ++L) {
+            rend.models[row][L] = ModelId{};
+            for (MaterialSlot& part : rend.materials[row]) part.per_lod[L] = MaterialId{};
+        }
+        rend.lod_count[row] = static_cast<uint8_t>(new_count);
+        rend.switches[row] = switches;
+        t.ctx->FitRenderableParts(rend, row);
+    }
+    return new_count > count ? new_count - 1 : std::min(lod, new_count - 1);
+}
 
-    for (size_t k = 0; k < mats.materials.size(); ++k) {
+void DrawLodModel(const EditTarget& t, Renderable& rend, size_t row, uint32_t lod)
+{
+    ModelManager* mdm = t.ctx->GetModelManager();
+    const std::string& sel = mdm->ModelNameOf(rend.models[row][lod]);
+    if (!ImGui::BeginCombo("model", sel.empty() ? "(none)" : sel.c_str())) return;
+    const ModelRegistry& mdreg = mdm->Models();
+    for (int32_t mdi = 0; mdi < mdreg.Count(); ++mdi) {
+        const auto& m = mdreg.At(mdi).object;
+        if (!m) continue;
+        if (!g_show_internal && HasTag(m->tags, ResourceTag::System)) continue;
+        const std::string& name = mdreg.At(mdi).name;
+        if (!ImGui::Selectable(name.c_str(), name == sel)) continue;
+        if (t.live())
+            cmd::Push<CommandId::SetEntityModel>(t.ctx->GetInputManager(), t.entity, lod, name);
+        else {
+            rend.models[row][lod] = ModelId{ mdi };
+            t.ctx->FitRenderableParts(rend, row);
+        }
+    }
+    ImGui::EndCombo();
+}
+
+void DrawVariants(const EditTarget& t, MaterialSlot& part, const Material& mat, size_t part_index)
+{
+    const VariativeRoles vr = CollectVariativeRoles(mat);
+    for (uint32_t c = 0; c < vr.count; ++c) {
+        const TextureSlotRole role = vr.role[c];
+        const uint32_t count = safe_u32(mat.textures.at(role).size());
+
+        auto& st = part.states;
+        auto sit = std::find_if(st.begin(), st.end(),
+            [role](const auto& pr) { return pr.first == role; });
+        const uint32_t cur = (sit != st.end() && sit->second < count) ? sit->second : 0u;
+
+        ImGui::PushID(static_cast<int>(role));
+        ImGui::TextUnformatted(RoleName(role));
+        ImGui::SameLine();
+        uint32_t next = cur;
+        StepArrows(next, count);
+        ImGui::PopID();
+
+        if (next == cur) continue;
+        if (t.live())
+            cmd::Push<CommandId::SetEntityTextureVariant>(t.ctx->GetInputManager(),
+                t.entity, safe_u32(part_index), static_cast<uint32_t>(role), next);
+        else if (next == 0) { if (sit != st.end()) st.erase(sit); }
+        else if (sit != st.end()) sit->second = next;
+        else st.emplace_back(role, next);
+    }
+}
+
+void DrawRenderableSection(const EditTarget& t, Archetype& arch, size_t row)
+{
+    Renderable& rend = arch.get_array<Renderable>()->data;
+    std::vector<MaterialSlot>& parts = rend.materials[row];
+
+    ImGuiStorage* storage = ImGui::GetStateStorage();
+    const ImGuiID lod_key = ImGui::GetID(static_cast<int>(t.entity));
+    const uint32_t wanted = static_cast<uint32_t>(storage->GetInt(lod_key, 0));
+    const uint32_t shown = std::min<uint32_t>(wanted, rend.lod_count[row] - 1u);
+    const uint32_t next = DrawLodSetup(t, rend, row, shown);
+    storage->SetInt(lod_key, static_cast<int>(next != shown ? next : wanted));
+    const uint32_t lod = std::min<uint32_t>(next, rend.lod_count[row] - 1u);
+    DrawLodModel(t, rend, row, lod);
+
+    if (!t.live()) t.ctx->FitRenderableParts(rend, row);
+
+    MaterialManager* mmgr = t.ctx->GetMaterialManager();
+    for (const uint32_t k : PartsOfModel(t.ctx->GetModelManager(), rend.models[row][lod])) {
+        if (k >= parts.size()) continue;
         ImGui::PushID(static_cast<int>(k));
-        MaterialManager* mmgr = t.ctx->GetMaterialManager();
-        const MaterialId sel_id = mats.materials[k].material;
+        const MaterialId sel_id = parts[k].per_lod[lod];
         const std::string sel = mmgr->MaterialNameOf(sel_id);
         char label[32];
-        snprintf(label, sizeof(label), "submesh %zu", k);
+        snprintf(label, sizeof(label), "part %u", k);
 
         if (ImGui::BeginCombo(label, sel.empty() ? "(none)" : sel.c_str())) {
             const MaterialRegistry& mreg = mmgr->Materials();
@@ -252,49 +378,18 @@ void DrawMaterialSection(const EditTarget& t, Archetype& arch, size_t row)
                 if (!ImGui::Selectable(mc.name.c_str(), mc.name == sel)) continue;
                 if (t.live())
                     cmd::Push<CommandId::SetEntityMaterial>(t.ctx->GetInputManager(),
-                        t.entity, "Material", "names", (double)k, mc.name);
-                else
-                    mats.materials[k] = MaterialRef{ MaterialId{ mi }, {} };
+                        t.entity, k, lod, mc.name);
+                else {
+                    parts[k].per_lod[lod] = MaterialId{ mi };
+                    if (lod == 0) parts[k].states.clear();
+                }
             }
             ImGui::EndCombo();
         }
 
-        const Material* mat = mmgr->GetMaterial(sel_id);
-        if (mat) {
-            const VariativeRoles vr = CollectVariativeRoles(*mat);
-            for (uint32_t c = 0; c < vr.count; ++c) {
-                const TextureSlotRole role = vr.role[c];
-                const uint32_t count = safe_u32(mat->textures.at(role).size());
-
-                auto& st = mats.materials[k].states;
-                auto sit = std::find_if(st.begin(), st.end(),
-                    [role](const auto& pr) { return pr.first == role; });
-                uint32_t cur = (sit != st.end() && sit->second < count) ? sit->second : 0u;
-
-                ImGui::PushID(static_cast<int>(role));
-                ImGui::TextUnformatted(RoleName(role));
-                ImGui::SameLine();
-                uint32_t next = cur;
-                ImGui::BeginDisabled(cur == 0);
-                if (ImGui::ArrowButton("prev", ImGuiDir_Left)) --next;
-                ImGui::EndDisabled();
-                ImGui::SameLine();
-                ImGui::Text("%u / %u", cur, count - 1);
-                ImGui::SameLine();
-                ImGui::BeginDisabled(cur + 1 >= count);
-                if (ImGui::ArrowButton("next", ImGuiDir_Right)) ++next;
-                ImGui::EndDisabled();
-                ImGui::PopID();
-
-                if (next == cur) continue;
-                if (t.live())
-                    cmd::Push<CommandId::SetEntityTextureVariant>(t.ctx->GetInputManager(),
-                        t.entity, safe_u32(k), static_cast<uint32_t>(role), next);
-                else if (next == 0) { if (sit != st.end()) st.erase(sit); }
-                else if (sit != st.end()) sit->second = next;
-                else st.emplace_back(role, next);
-            }
-        }
+        // Роли вариантов на GPU берутся у материала уровня 0 (TextureStateDataModule), states общие.
+        if (lod == 0)
+            if (const Material* mat = mmgr->GetMaterial(sel_id)) DrawVariants(t, parts[k], *mat, k);
         ImGui::PopID();
     }
 }
@@ -312,8 +407,8 @@ void ui::DrawEntityComponents(const EditTarget& target, Archetype& arch, size_t 
         }
         if (!ImGui::CollapsingHeader(s.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) continue;
 
-        if (s.custom_save) DrawMaterialSection(target, arch, row);
-        else               DrawComponentFields(target, s, arch, row);
+        DrawComponentFields(target, s, arch, row);
+        if (s.sig_type == typeid(Renderable)) DrawRenderableSection(target, arch, row);
     }
     if (!tags.empty()) { ImGui::Separator(); ImGui::Text("Tags: %s", tags.c_str()); }
 }

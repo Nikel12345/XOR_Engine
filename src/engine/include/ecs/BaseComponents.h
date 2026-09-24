@@ -5,7 +5,9 @@
 // пары расписан в ComponentStorage.h.
 #include "ComponentStorage.h"
 #include "ResourceId.h"
+#include <array>
 #include <cmath>
+#include <initializer_list>
 #include <SDL3/SDL.h>
 
 struct Accelerations : SoAProxyAddable<Accelerations> {
@@ -148,19 +150,62 @@ struct LocalOffsetProxy {
     }
 };
 
-struct ModelComponent {
-    ModelId model;
-};
-
 enum class TextureSlotRole;
 
-struct MaterialRef {
-    MaterialId                                        material;
+inline constexpr uint32_t MAX_LOD = 4;
+
+// Индекс в Renderable::materials = SubMeshData::material_index сабмеша ЛЮБОГО уровня: модели
+// уровней обязаны договориться о номерах частей.
+struct MaterialSlot {
+    MaterialId                                        per_lod[MAX_LOD];   // пустой = часть на уровне не рисуется
     std::vector<std::pair<TextureSlotRole, uint32_t>> states;
 };
 
-struct MaterialComponent {
-    std::vector<MaterialRef> materials;
+// Пуш VariantLayout (BatchBuilder) и раскладка ячеек (TextureStateDataModule) обязаны считать
+// секцию одинаково — только через эту функцию.
+inline uint32_t StateSection(uint32_t material_index, uint32_t /*L*/) { return material_index; }
+
+// lod_count, models, switches и materials[i].per_lod скопированы в дерево батчей: прямая запись
+// его не обновит, правка идёт через EngineContext::ChangeModel/ChangeMaterial.
+struct Renderable : SoAProxyAddable<Renderable> {
+    using soa_tag = void;
+    std::vector<uint8_t>                        visible;
+    std::vector<float>                          alpha;
+    std::vector<uint32_t>                       flags;
+    std::vector<uint8_t>                        lod_count;
+    std::vector<std::array<ModelId, MAX_LOD>>   models;
+    std::vector<std::array<float, MAX_LOD - 1>> switches;
+    std::vector<std::vector<MaterialSlot>>      materials;
+    size_t size() const { return visible.size(); }
+    auto columns() { return std::tie(visible, alpha, flags, lod_count, models, switches, materials); }
+};
+
+struct RenderableProxy {
+    bool                              visible = true;
+    float                             alpha = 1.0f;
+    uint32_t                          flags = 0;
+    uint8_t                           lod_count = 1;
+    std::array<ModelId, MAX_LOD>      models{};
+    std::array<float, MAX_LOD - 1>    switches{};
+    std::vector<MaterialSlot>         materials;
+    using related_soa = Renderable;
+
+    static RenderableProxy Single(ModelId model, std::initializer_list<MaterialId> mats, bool visible = true)
+    {
+        RenderableProxy p;
+        p.visible = visible;
+        p.models[0] = model;
+        p.materials.reserve(mats.size());
+        for (MaterialId m : mats) { MaterialSlot s; s.per_lod[0] = m; p.materials.push_back(std::move(s)); }
+        return p;
+    }
+
+    template<class SoA>
+    void emplace_to(SoA& soa) const {
+        soa.visible.push_back(visible ? 1 : 0);  soa.alpha.push_back(alpha);  soa.flags.push_back(flags);
+        soa.lod_count.push_back(lod_count);      soa.models.push_back(models);
+        soa.switches.push_back(switches);        soa.materials.push_back(materials);
+    }
 };
 
 struct TextureStateComponent {};
@@ -305,12 +350,6 @@ struct DirectLightComponent {
 struct ShadowCasterComponent{};
 
 struct ShadowComponent {};
-
-struct DrawComponent {
-	bool     visible = true;
-	float    alpha   = 1.0f;
-	uint32_t flags   = 0;
-};
 
 struct UIComponent {};
 

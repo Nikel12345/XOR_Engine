@@ -43,15 +43,21 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 		});
 
 	cmd::Register<CommandId::SetEntityModel>(im,
-		[](EngineContext* ctx, const FieldEditCmd& c)
+		[](EngineContext* ctx, const EntityModelCmd& c)
 		{
-			ctx->ChangeModel(c.entity, c.str);
+			ctx->ChangeModel(c.entity, c.model, c.lod);
 		});
 
 	cmd::Register<CommandId::SetEntityMaterial>(im,
-		[](EngineContext* ctx, const FieldEditCmd& c)
+		[](EngineContext* ctx, const EntityMaterialCmd& c)
 		{
-			ctx->ChangeMaterial(c.entity, c.str, safe_f_u32(static_cast<float>(c.num)));
+			ctx->ChangeMaterial(c.entity, c.material, c.mat_index, c.lod);
+		});
+
+	cmd::Register<CommandId::SetEntityLods>(im,
+		[](EngineContext* ctx, const EntityLodsCmd& c)
+		{
+			ctx->SetEntityLods(c.entity, c.lod_count, c.switches);
 		});
 
 	cmd::Register<CommandId::SetTransform>(im,

@@ -119,10 +119,9 @@ SDL_AppResult MyGame::MainInit()
         FractalUpdateSet::FractalPos root_pos;
         root_pos.local = glm::dvec3(3.0, 0.0, 0.0);
         ctx->CreateEntity(scene_name,
-            MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial(kAnchorMaterial) } } },
-            ModelComponent{ ctx->GetModelManager()->InternModel(kAnchorModel) },
+            RenderableProxy::Single(ctx->GetModelManager()->InternModel(kAnchorModel),
+                                    { ctx->GetMaterialManager()->InternMaterial(kAnchorMaterial) }),
             PositionProxy16{ 0,0,0,0,  0,0,0,0,  0,0,0,0,  0,0,0,1 },
-            DrawComponent{},
             GeneratedComponent{},
             FractalUpdateSet::FractalAnchorComponent{ root_pos });
     }
@@ -207,10 +206,9 @@ SDL_AppResult MyGame::MainIterate()
                     p.local += glm::dvec3(camera->GetForward()) * (1.5 * cam.sigma);
                     p.sigma  = 0.5 * cam.sigma;
                     ctx->CreateEntity("scene_fractal",
-                        MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial(kAnchorMaterial) } } },
-                        ModelComponent{ ctx->GetModelManager()->InternModel(kAnchorModel) },
+                        RenderableProxy::Single(ctx->GetModelManager()->InternModel(kAnchorModel),
+                                                { ctx->GetMaterialManager()->InternMaterial(kAnchorMaterial) }),
                         PositionProxy16{ 0,0,0,0,  0,0,0,0,  0,0,0,0,  0,0,0,1 },
-                        DrawComponent{},
                         GeneratedComponent{},
                         FractalUpdateSet::FractalAnchorComponent{ std::move(p) });
                     SDL_Log("Anchored cube spawned: depth=%d sigma=%.4f",
@@ -263,10 +261,10 @@ SDL_AppResult MyGame::MainIterate()
         // inf/NaN в буфере. Свежеспавненный куб попадает в этот же проход.
         const double fog_far = FractalUpdateSet::MengerFogFar();
         const glm::mat3 view_rot(camera->GetView());   // для HUD-позы несомого (оси взгляда)
-        objectManager->ForEach<FractalUpdateSet::FractalAnchorComponent, ModelComponent, Positions>(
+        objectManager->ForEach<FractalUpdateSet::FractalAnchorComponent, Renderable, Positions>(
             objectManager->GetActiveScene(),
             [this, fog_far, view_rot](Entity e, FractalUpdateSet::FractalAnchorComponent& a,
-                                      ModelComponent& mc, SoAElement<Positions> el)
+                                      SoAElement<Renderable> rend, SoAElement<Positions> el)
         {
             Positions& P = el.container();
             const size_t i = el.i();
@@ -329,7 +327,7 @@ SDL_AppResult MyGame::MainIterate()
             // получается прежний √3). Пер-осевое растяжение гизмо в отсев входит максимумом
             // (консервативно), а в правило размера — НЕ входит (см. MengerObjectScaleTick).
             // Модель у энтити — имя, поэтому ищем её в словаре: якорей десятки, поиск на тик копеечный.
-            const ModelData* model = modelManager->FindModel(mc.model);
+            const ModelData* model = modelManager->FindModel(rend.container().models[rend.i()][0]);
             double r_model = 0.0;
             if (model)
                 for (const SubMeshData& sm : model->submeshes)

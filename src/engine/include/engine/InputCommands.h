@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -44,8 +45,28 @@ struct FieldEditCmd {
     std::string str;
 };
 template<> struct CommandPayload<CommandId::HideEntity>         { using type = FieldEditCmd; };
-template<> struct CommandPayload<CommandId::SetEntityModel>     { using type = FieldEditCmd; };
-template<> struct CommandPayload<CommandId::SetEntityMaterial>  { using type = FieldEditCmd; };
+
+struct EntityModelCmd {
+    uint32_t    entity;
+    uint32_t    lod;
+    std::string model;
+};
+template<> struct CommandPayload<CommandId::SetEntityModel> { using type = EntityModelCmd; };
+
+struct EntityMaterialCmd {
+    uint32_t    entity;
+    uint32_t    mat_index;
+    uint32_t    lod;
+    std::string material;
+};
+template<> struct CommandPayload<CommandId::SetEntityMaterial> { using type = EntityMaterialCmd; };
+
+struct EntityLodsCmd {
+    uint32_t             entity;
+    uint32_t             lod_count;
+    std::array<float, 3> switches;
+};
+template<> struct CommandPayload<CommandId::SetEntityLods> { using type = EntityLodsCmd; };
 
 struct ShaderProgramNameCmd { std::string shader; };
 template<> struct CommandPayload<CommandId::DeleteShader> { using type = ShaderProgramNameCmd; };

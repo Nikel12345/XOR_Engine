@@ -17,10 +17,10 @@ InstanceDataModule::InstanceDataModule()
 uint32_t InstanceDataModule::CalculateInstanceSize(ObjectManager* om, SceneData* scene)
 {
 	uint32_t total = 0;
-	om->ForEachArchetype<Positions, DrawComponent>(
+	om->ForEachArchetype<Positions, Renderable>(
 		scene,
 		[&](ComponentArray<Positions, void>* posArr,
-			ComponentArray<DrawComponent, void>*)
+			ComponentArray<Renderable, void>*)
 	{
 		total += safe_u32(posArr->size()) * sizeof(InstanceData);
 	});
@@ -29,11 +29,11 @@ uint32_t InstanceDataModule::CalculateInstanceSize(ObjectManager* om, SceneData*
 
 void InstanceDataModule::StoreInstanceData(BufferManager* bm, UploadTask* task, ObjectManager* om, SceneData* scene)
 {
-	om->ForEachArchetype<Positions, DrawComponent>(scene,
+	om->ForEachArchetype<Positions, Renderable>(scene,
 		[&](ComponentArray<Positions, void>*,
-			ComponentArray<DrawComponent, void>* drawArr)
+			ComponentArray<Renderable, void>* drawArr)
 	{
-		const std::vector<DrawComponent>& D = drawArr->data;
+		const Renderable& D = drawArr->data;
 		const size_t n = D.size();
 		if (n == 0) return;
 
@@ -42,8 +42,8 @@ void InstanceDataModule::StoreInstanceData(BufferManager* bm, UploadTask* task, 
 		if (!dst) return;
 
 		for (size_t e = 0; e < n; ++e) {
-			dst[e].alpha = D[e].alpha;
-			dst[e].flags = D[e].flags;
+			dst[e].alpha = D.alpha[e];
+			dst[e].flags = D.flags[e];
 		}
 	});
 }

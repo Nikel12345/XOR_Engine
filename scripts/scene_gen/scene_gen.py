@@ -17,8 +17,8 @@ scene_gen.py — генератор игровой сцены для SDL_Engine 
 Внутри каждый компонент — КОЛОНКИ по полям (SoA-стиль): значение i-й сущности лежит
 в i-й позиции каждой колонки. Все кубы делят ОДИН архетип → один компактный блок.
 
-Имена ассетов лежат в СЛОВАРЯХ в шапке файла ("models"/"materials"), а колонки Model.name и
-Material.names хранят ИНДЕКС в них: на миллионе кубов десяток имён иначе повторяется миллион
+Имена ассетов лежат в СЛОВАРЯХ в шапке файла ("models"/"materials"), а колонки
+Renderable.models и Renderable.materials хранят ИНДЕКС в них: на миллионе кубов десяток имён иначе повторяется миллион
 раз. Движок принимает в ячейке и строку («имя как есть»), но пишем индексами — ради этого
 словарь и заводился (см. ScenePool в ComponentSerializer.h).
 
@@ -97,8 +97,8 @@ ORBIT_SPEED_SPREAD = 0.07   # индивидуальный разброс ско
 
 # --- Сущность-центр притяжения (Transform + GravityComponent) ---
 # Гравитация в игре привязана к СУЩНОСТИ: центр там, где её Transform, сила = её gm. Поэтому
-# центр генерируется сюда же, в сцену, — без него кубы полетят по инерции. Draw+Model+Material
-# ему нужны только чтобы его было видно в кадре и в списке объектов редактора.
+# центр генерируется сюда же, в сцену, — без него кубы полетят по инерции. Renderable
+# ему нужен только чтобы его было видно в кадре и в списке объектов редактора.
 GRAVITY_CENTER_POS = (0.0, 0.0, 0.0)
 GRAVITY_CENTER_SCALE = 12.0
 GRAVITY_CENTER_MODEL = "cube_0"
@@ -112,7 +112,7 @@ CUBE_MATERIALS = ["m_orange", "m_gray", "metal1", "metal2", "emission"]
 
 # ----------------------------------------------------------------------------
 #  Модели кубов — процедурные параллелепипеды из Game.cpp с именами cube_0..cube_(N-1).
-#  Питон только раздаёт эти имена в поле Model.name сцены; сама геометрия строится в игре.
+#  Питон только раздаёт эти имена в поле Renderable.models сцены; сама геометрия строится в игре.
 #  NUM_CUBE_MODELS ДОЛЖЕН быть равен kCubeVariants в Game.cpp — иначе имена не сойдутся
 #  (движок не найдёт модель по имени и сущность не отрисуется).
 # ----------------------------------------------------------------------------
@@ -310,12 +310,28 @@ def emit_section(section, cols):
 
 # Ключи архетипов = отсортированные по алфавиту имена компонентов через запятую (так их строит
 # SaveScene движка). Держим их константами: по ним же определяется порядок блоков в файле.
-CUBES_ARCHETYPE = "Draw,Material,Model,Shadow,Transform,Velocity"
-CENTER_ARCHETYPE = "Draw,Gravity,Material,Model,Transform"
+CUBES_ARCHETYPE = "Renderable,Shadow,Transform,Velocity"
+CENTER_ARCHETYPE = "Gravity,Renderable,Transform"
+
+
+def _renderable_obj(n, model_cells, material_rows):
+    """Тело Renderable с одним уровнем. model_cells — индексы моделей строками, material_rows —
+    строки-массивы частей '[i, j, ...]' (по материалу на часть)."""
+    def per_lod(row):
+        cells = [c for c in row.strip('[]').split(',') if c]
+        return '[' + ','.join('[' + c + ']' for c in cells) + ']'
+    return ",".join([
+        _num_col("visible", ["true"] * n),
+        _num_col("alpha", ["1"] * n),
+        _num_col("flags", ["0"] * n),
+        _num_col("lod_count", ["1"] * n),
+        _num_col("models", ['[' + m + ']' for m in model_cells]),
+        _num_col("materials", [per_lod(r) for r in material_rows]),
+    ])
 
 
 def _gravity_center_block(entity_id, cols):
-    """Блок архетипа Draw,Gravity,Material,Model,Transform — сама сущность-центр (одна штука).
+    """Блок архетипа Gravity,Renderable,Transform — сама сущность-центр (одна штука).
 
     Имена компонентов идут по алфавиту: тем же порядком их пишет SaveScene движка, так что
     пересохранение сцены из редактора не переставляет ключи в файле.
@@ -324,14 +340,13 @@ def _gravity_center_block(entity_id, cols):
     transform = make_transform(GRAVITY_CENTER_POS, ident, GRAVITY_CENTER_SCALE)
     transform_obj = ",".join(_num_col(TRANSFORM_COLS[k], [_fmt(transform[k])]) for k in range(16))
     gravity_obj = _num_col("gm", [_fmt(GM)])
-    draw_obj = ",".join([_num_col("visible", ["true"]), _num_col("alpha", ["1"]), _num_col("flags", ["0"])])
+    rend_obj = _renderable_obj(1, [str(cols.models.intern(GRAVITY_CENTER_MODEL))],
+                               ['[' + str(cols.materials.intern(GRAVITY_CENTER_MATERIAL)) + ']'])
     return ('"' + CENTER_ARCHETYPE + '":{'
             '"count":1,'
             '"entities":[' + str(entity_id) + '],'
-            '"Draw":{' + draw_obj + '},'
             '"Gravity":{' + gravity_obj + '},'
-            '"Material":{"names":[[' + str(cols.materials.intern(GRAVITY_CENTER_MATERIAL)) + ']]},'
-            '"Model":{' + _num_col("name", [str(cols.models.intern(GRAVITY_CENTER_MODEL))]) + '},'
+            '"Renderable":{' + rend_obj + '},'
             '"Transform":{' + transform_obj + '}}')
 
 
@@ -400,22 +415,13 @@ def build_scene():
     ids = ",".join(str(cubes_base + i) for i in range(n))
 
     transform_obj = ",".join(_num_col(TRANSFORM_COLS[k], cols.transform[k]) for k in range(16))
-    model_obj = _num_col("name", cols.model)          # индексы в словаре models
-    material_obj = '"names":[{}]'.format(",".join(cols.material))
     velocity_obj = ",".join([_num_col("x", cols.vx), _num_col("y", cols.vy), _num_col("z", cols.vz)])
-    # Draw: все кубы видимы, alpha=1, flags=0.
-    draw_obj = ",".join([
-        _num_col("visible", ["true"] * n),
-        _num_col("alpha", ["1"] * n),
-        _num_col("flags", ["0"] * n),
-    ])
+    rend_obj = _renderable_obj(n, cols.model, cols.material)
 
     cubes_block = ('"' + CUBES_ARCHETYPE + '":{'
                    '"count":' + str(n) + ','
                    '"entities":[' + ids + '],'
-                   '"Draw":{' + draw_obj + '},'
-                   '"Material":{' + material_obj + '},'
-                   '"Model":{' + model_obj + '},'
+                   '"Renderable":{' + rend_obj + '},'
                    '"Shadow":{},'
                    '"Transform":{' + transform_obj + '},'
                    '"Velocity":{' + velocity_obj + '}}')

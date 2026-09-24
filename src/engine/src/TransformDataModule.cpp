@@ -118,8 +118,8 @@ uint32_t TransformDataModule::CalculateTransformSize(ObjectManager* om, SceneDat
     size_revision_ = rev;
     total_size = 0;
 
-    om->ForEachArchetype<Positions, DrawComponent>(scene,
-        [&](ComponentArray<Positions, void>* posArr, ComponentArray<DrawComponent, void>*)
+    om->ForEachArchetype<Positions, Renderable>(scene,
+        [&](ComponentArray<Positions, void>* posArr, ComponentArray<Renderable, void>*)
     {
         total_size += safe_u32(posArr->size()) * sizeof(PositionProxy16);
     });
@@ -220,8 +220,8 @@ void TransformDataModule::StoreTransforms(BufferManager* bm, UploadTask* task, O
 {
     UpdateLocalTransforms(om, scene);
 
-    om->ForEachArchetype<Positions, DrawComponent>(scene,
-        [&](ComponentArray<Positions, void>* posArr, ComponentArray<DrawComponent, void>*)
+    om->ForEachArchetype<Positions, Renderable>(scene,
+        [&](ComponentArray<Positions, void>* posArr, ComponentArray<Renderable, void>*)
     {
         const Positions& P = posArr->data;
         const size_t n = P.size();
@@ -241,8 +241,8 @@ uint32_t TransformDataModule::AskNumTransform(ObjectManager* om, SceneData* scen
 {
     uint32_t num_transform = 0;
 
-    om->ForEachArchetype<Positions, DrawComponent>(scene,
-        [&](ComponentArray<Positions, void>* posArr, ComponentArray<DrawComponent, void>*)
+    om->ForEachArchetype<Positions, Renderable>(scene,
+        [&](ComponentArray<Positions, void>* posArr, ComponentArray<Renderable, void>*)
     {
         num_transform += safe_u32(posArr->size());
     });

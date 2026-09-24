@@ -51,7 +51,7 @@ void PIB_DataModule::BuildRowTable(SceneData* scene)
     row_of.assign(scene->next_entity_id, kPibNoRow);
 
     for (auto& [sig, arch] : scene->archetypes) {
-        if (!arch.get_array<DrawComponent>() || !arch.get_array<Positions>()) continue;
+        if (!arch.get_array<Renderable>() || !arch.get_array<Positions>()) continue;
 
         const uint32_t base = arch.render_instance_base;
         const size_t   n    = arch.entities.size();

@@ -64,7 +64,7 @@ LIGHT = collections.OrderedDict([
     ("cascade_count", 4), ("cascade_ratio", 3.15),
 ])
 
-BUILDING_ARCHETYPE = "Draw,Material,Model,Transform"
+BUILDING_ARCHETYPE = "Renderable,Transform"
 MAT4_KEYS = ("x", "y", "z", "w", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l")
 
 
@@ -159,9 +159,15 @@ def city_grid(av_x, av_z, rng):
             yield ix, iz, model + 1, quarter, (lx - ox) * SPACING, (lz - oz) * SPACING
 
 
-def draw_columns(count):
+def renderable(model_col, names):
+    """Компонент Renderable с одним уровнем: модель и материалы частей на уровне 0."""
+    count = len(model_col)
     return collections.OrderedDict([
-        ("visible", [True] * count), ("alpha", [1.0] * count), ("flags", [0] * count)])
+        ("visible", [True] * count), ("alpha", [1.0] * count), ("flags", [0] * count),
+        ("lod_count", [1] * count),
+        ("models", [[m] for m in model_col]),
+        ("materials", [[[n] for n in row] for row in names]),
+    ])
 
 
 def build_scene(rng):
@@ -206,18 +212,14 @@ def build_scene(rng):
         ("DirectLight", collections.OrderedDict((k, [v]) for k, v in LIGHT.items())),
         ("ShadowCaster", {}),
     ])
-    scene["Draw,Material,Model"] = collections.OrderedDict([
+    scene["Renderable"] = collections.OrderedDict([
         ("count", 1), ("entities", [1]),
-        ("Draw", draw_columns(1)),
-        ("Material", {"names": [[sky_mat]]}),
-        ("Model", {"name": [sky_model]}),
+        ("Renderable", renderable([sky_model], [[sky_mat]])),
     ])
     scene[BUILDING_ARCHETYPE] = collections.OrderedDict([
         ("count", count),
         ("entities", list(range(2, 2 + count))),
-        ("Draw", draw_columns(count)),
-        ("Material", {"names": names}),
-        ("Model", {"name": model_col}),
+        ("Renderable", renderable(model_col, names)),
         ("Transform", cols),
     ])
     return scene, cells, av_x, av_z

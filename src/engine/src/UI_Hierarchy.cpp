@@ -71,9 +71,14 @@ namespace {
                     if (f.get_num && f.set_num)      f.set_num(*na, nrow, f.get_num(*oa, orow));
                     else if (f.get_str && f.set_str) f.set_str(*na, nrow, f.get_str(*oa, orow));
                 }
-                if (s->name == "Material")
-                    (*na->get_array<MaterialComponent>())[nrow].materials =
-                        (*oa->get_array<MaterialComponent>())[orow].materials;
+                if (s->sig_type == typeid(Renderable)) {
+                    const Renderable& from = oa->get_array<Renderable>()->data;
+                    Renderable& to = na->get_array<Renderable>()->data;
+                    to.lod_count[nrow] = from.lod_count[orow];
+                    to.models[nrow]    = from.models[orow];
+                    to.switches[nrow]  = from.switches[orow];
+                    to.materials[nrow] = from.materials[orow];
+                }
             }
             om->DeleteEntity(stg, old_e);
         }
@@ -215,7 +220,7 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
             g_ce_open = !g_ce_open;
             if (g_ce_open) {
                 if (g_ce_checked.empty())
-                    g_ce_checked = { "Transform", "Model", "Material", "Draw" };
+                    g_ce_checked = { "Transform", "Renderable" };
                 if (g_ce_entity == kNoEntity) RebuildStaging(om, om->GetScene("staging"));
             }
         }
@@ -227,8 +232,7 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
         std::vector<EntRange> ranges;
         int total = 0;
         for (auto& [sig, arch] : scene->archetypes) {
-            if (!arch.get_array<Positions>() || !arch.get_array<MaterialComponent>()
-                || !arch.get_array<ModelComponent>()) continue;
+            if (!arch.get_array<Positions>() || !arch.get_array<Renderable>()) continue;
             if (arch.get_array<EditorHiddenComponent>()) continue;
             if (arch.get_array<UIComponent>()) continue;
             if (arch.entities.empty()) continue;

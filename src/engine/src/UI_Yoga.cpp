@@ -259,16 +259,14 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
             // десятки, лишний элемент из нулей в буфере состояний ничего не стоит.
             if (!r.glyphs.empty())
                 e = ctx->CreateEntity(scene_name,
-                        DrawComponent{ true, 1.0f, 0 },
-                        ModelComponent{ ctx->GetModelManager()->InternModel(r.quad) },
-                        MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial(r.material) } } },
+                        RenderableProxy::Single(ctx->GetModelManager()->InternModel(r.quad),
+                                                { ctx->GetMaterialManager()->InternMaterial(r.material) }),
                         m, UIComponent{}, GeneratedComponent{}, TextureStateComponent{},
                         UITextComponent{ r.glyphs, r.font });
             else
                 e = ctx->CreateEntity(scene_name,
-                        DrawComponent{ true, 1.0f, 0 },
-                        ModelComponent{ ctx->GetModelManager()->InternModel(r.quad) },
-                        MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial(r.material) } } },
+                        RenderableProxy::Single(ctx->GetModelManager()->InternModel(r.quad),
+                                                { ctx->GetMaterialManager()->InternMaterial(r.material) }),
                         m, UIComponent{}, GeneratedComponent{}, TextureStateComponent{});
             r.entity = e;  r.has_entity = true;
             impl->created.push_back(e);

@@ -274,11 +274,11 @@ void BatchBuilder::BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, M
 
 void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManager* pass_manager, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
     ModelManager* mdm, MaterialManager* mtm,
-    const MaterialComponent& material_component, const ModelComponent& model_component) {
+    ModelId model_id, const std::vector<MaterialSlot>& materials, uint32_t lod) {
 
     // Резолв ТИХИЙ (FindModel, а не логирующий operator[]): он идёт на КАЖДУЮ сущность, и одно
     // битое имя в сцене на миллион объектов дало бы миллион строк лога.
-    ModelData* model = mdm ? mdm->FindModel(model_component.model) : nullptr;
+    ModelData* model = mdm ? mdm->FindModel(model_id) : nullptr;
 
     if (!model) {
         return;
@@ -290,10 +290,10 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
         const uint32_t si = submesh_index++;
         if (submesh.indexCount == 0) continue;
 
-        if (submesh.material_index >= material_component.materials.size()) {
+        if (submesh.material_index >= materials.size()) {
             continue;
         }
-        const MaterialId material_id = material_component.materials[submesh.material_index].material;
+        const MaterialId material_id = materials[submesh.material_index].per_lod[lod];
         Material* material = mtm ? mtm->GetMaterial(material_id) : nullptr;
         if (!material) {
             continue;
@@ -364,7 +364,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
             // Номер материала нужен только узлу с вариантами: иначе он дробил бы узел по номеру
             // сабмеша, ничего не меняя в пуше.
-            const uint32_t material_index = lay.variative ? submesh.material_index : 0u;
+            const uint32_t material_index = lay.variative ? StateSection(submesh.material_index, lod) : 0u;
             TextureBatchKey tex_key = HashTextureBatchKey(lay.res_key, material_index);
 
             auto& tex_map = atlas_batch.texture_batches;
@@ -380,7 +380,7 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
             }
 
             TextureBatchData& tex_batch = tex_map[tex_key];
-            ModelBatchKey model_key = HashModelBatchKey(model_component.model, si);
+            ModelBatchKey model_key = HashModelBatchKey(model_id, si);
 
             auto& model_map = tex_batch.model_batches;
             auto model_it = model_map.find(model_key);
@@ -468,7 +468,7 @@ inline void RecalculateInstanceOffsets(SceneData* scene)
 {
     uint32_t base = 0;
     for (auto& [sig, arch] : scene->archetypes) {
-        if (arch.get_array<DrawComponent>() &&
+        if (arch.get_array<Renderable>() &&
             arch.get_array<Positions>()) {
             arch.render_instance_base = base;
             base += safe_u32(arch.entities.size());
@@ -493,20 +493,17 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
         entities_to_update.clear();
     }
 
-    // Отбор по маркеру DrawComponent, Positions НЕ требуется: transformless-дровабл (скайбокс
-    // строит позицию из камеры) батчится как все, просто строки у него нет.
-    om->ForEach<DrawComponent>(
-        scene,
-        [&](Entity entity, const DrawComponent& draw)
+    // Отбор по Renderable, Positions НЕ требуется: transformless-дровабл (скайбокс строит позицию
+    // из камеры) батчится как все, просто строки у него нет.
+    om->ForEachArchetype<Renderable>(scene,
+        [&](ComponentArray<Renderable>* arr, const std::vector<Entity>& ents)
     {
-        if (!draw.visible) return;
-        if (!om->Has<ModelComponent>(scene, entity) || !om->Has<MaterialComponent>(scene, entity))
-            return;
-        const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
-        const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
-        AddEntityToBatches(entity, pm, pass_manager, tm, sm, bm, mdm, mtm, material_component, model_component);
-    }
-    );
+        const Renderable& r = arr->data;
+        for (size_t i = 0; i < ents.size(); ++i) {
+            if (!r.visible[i]) continue;
+            AddEntityToBatches(ents[i], pm, pass_manager, tm, sm, bm, mdm, mtm, r.models[i][0], r.materials[i], 0);
+        }
+    });
 
     RecalculateInstanceOffsets(scene);
 }
@@ -525,13 +522,12 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
     if (creates.empty() && deletes.empty() && updates.empty()) return false;
 
     auto add_if_drawable = [&](Entity entity) {
-        if (!om->Has<ModelComponent>(scene, entity) || !om->Has<MaterialComponent>(scene, entity))
-            return;
-        if (!om->Has<DrawComponent>(scene, entity) || !om->GetComponent<DrawComponent>(scene, entity).visible)
-            return;
-        const MaterialComponent& material_component = om->GetComponent<MaterialComponent>(scene, entity);
-        const ModelComponent& model_component = om->GetComponent<ModelComponent>(scene, entity);
-        AddEntityToBatches(entity, pm, pass_manager, tm, sm, bm, mdm, mtm, material_component, model_component);
+        if (!om->Has<Renderable>(scene, entity)) return;
+        SoAElement<Renderable> el = om->GetComponent<Renderable>(scene, entity);
+        const Renderable& r = el.container();
+        const size_t i = el.i();
+        if (!r.visible[i]) return;
+        AddEntityToBatches(entity, pm, pass_manager, tm, sm, bm, mdm, mtm, r.models[i][0], r.materials[i], 0);
     };
 
     // «Перевесить» — первыми: после этого энтити уже в дереве, поэтому парный QueueCreate погасит

@@ -228,7 +228,7 @@ SDL_AppResult Game::MainInit()
     if (FontData* uifont = ctx->GetFontManager()->GetFont("default")) {
         UI_Yoga*      ui    = ctx->GetUIYoga();
         FontManager*  fm    = ctx->GetFontManager();
-        // Ассеты узла — по имени (как в ModelComponent/MaterialComponent); резолвит их сборка батчей.
+        // Ассеты узла — по имени (как в Renderable); резолвит их сборка батчей.
         const std::string uimat = "ui_mat";
         const std::string quad  = "quad";
 
@@ -287,20 +287,21 @@ void Game::UpdateUIHover()
     const float ny = 1.0f - 2.0f * input->MouseY() / wh;   // y вниз в окне → вверх в NDC
 
     MaterialManager* mm = ctx->GetMaterialManager();
-    objectManager->ForEach<Positions, UIComponent, MaterialComponent>(scene,
-        [&](Entity e, SoAElement<Positions> pos, UIComponent&, MaterialComponent& mc)
+    objectManager->ForEach<Positions, UIComponent, Renderable>(scene,
+        [&](Entity e, SoAElement<Positions> pos, UIComponent&, SoAElement<Renderable> rend)
     {
+        const std::vector<MaterialSlot>& parts = rend.container().materials[rend.i()];
         Positions& P = pos.container();
         const size_t i = pos.i();
         const float x0 = P.w[i], x1 = x0 + P.x[i];
         const float y0 = P.d[i], y1 = y0 + P.b[i];
         const bool hit = (nx >= x0 && nx <= x1 && ny >= y0 && ny <= y1);
 
-        for (uint32_t k = 0; k < mc.materials.size(); ++k) {
+        for (uint32_t k = 0; k < parts.size(); ++k) {
             // Узлы на невариативном материале (текст, фон панели) пропускаем: писать им состояние
             // значило бы затащить их в буфер состояний ради значения, которое шейдер всё равно
             // сожмёт клампом в дефолт.
-            const Material* mat = mm->GetMaterial(mc.materials[k].material);
+            const Material* mat = mm->GetMaterial(parts[k].per_lod[0]);
             if (!mat) continue;
             auto tit = mat->textures.find(TextureSlotRole::Albedo);
             if (tit == mat->textures.end() || tit->second.size() < 2) continue;
@@ -349,7 +350,7 @@ SDL_AppResult Game::MainIterate()
         break;
     }
 
-    // Энтити с ColliderComponent берут явный радиус; остальные с ModelComponent — модельную сферу.
+    // Энтити с ColliderComponent берут явный радиус; остальные с Renderable — модельную сферу.
 
     return SDL_APP_CONTINUE;
 }
@@ -382,12 +383,11 @@ void Game::CreateDebugColliders()
         LocalMatrixProxy16 lm{};   // SoA-локаль: в CreateEntity едет как прокси (как PositionProxy16)
         for (int i = 0; i < 16; ++i) lm.m[i] = s.local[i];
         ctx->CreateEntity(kStartScene,
-            MaterialComponent{ { MaterialRef{ ctx->GetMaterialManager()->InternMaterial("debug_collider") } } },
-            ModelComponent{ ctx->GetModelManager()->InternModel(model_name) },
+            RenderableProxy::Single(ctx->GetModelManager()->InternModel(model_name),
+                                    { ctx->GetMaterialManager()->InternMaterial("debug_collider") }, false),
             PositionProxy16{},          // перезапишется композицией parent × local
             ParentComponent{ s.owner },
             lm,
-            DrawComponent{ false, 1.0f, 0 },
             DebugColliderTag{},
             EditorHiddenComponent{},    // движковый тег: не показывать в списке объектов UI
             GeneratedComponent{});      // сгенерировано кодом → не сериализуется, пересоздаётся генератором
@@ -549,8 +549,9 @@ void Game::SimulateGravity()
         // (SubMeshData::aabb_*). Нет модели/имя не резолвится — габарит нулевой, останется голый
         // kTouchMargin.
         float hx = 0.0f, hy = 0.0f, hz = 0.0f;
-        if (objectManager->Has<ModelComponent>(scene, e)) {
-            const ModelData* m = modelManager->FindModel(objectManager->GetComponent<ModelComponent>(scene, e).model);
+        if (objectManager->Has<Renderable>(scene, e)) {
+            SoAElement<Renderable> rend = objectManager->GetComponent<Renderable>(scene, e);
+            const ModelData* m = modelManager->FindModel(rend.container().models[rend.i()][0]);
             if (m) for (const SubMeshData& sm : m->submeshes) {
                 hx = std::max(hx, std::fabs(sm.aabb_center.x) + sm.aabb_half.x);
                 hy = std::max(hy, std::fabs(sm.aabb_center.y) + sm.aabb_half.y);

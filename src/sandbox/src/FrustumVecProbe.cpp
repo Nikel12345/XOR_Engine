@@ -94,7 +94,7 @@ double MsSince(Clock::time_point t) {
 // ── Ограничивающая сфера как SoA-компонент ──────────────────────────────────
 // На GPU сфера приезжает отдельным буфером по строкам трансформа
 // (BoundSphereDataModule), и процессору она нужна тем же способом — колонками.
-// Путь «взять ModelComponent сущности и спросить у ModelManager сферу модели»
+// Путь «взять модель из Renderable сущности и спросить у ModelManager сферу модели»
 // для горячего прохода не годится: это поиск в словаре на каждый объект и
 // AoS-чтение посреди float-арифметики, то есть отказ от векторизации по
 // построению. Компонент объявлен здесь же: движок для этого не правится.
@@ -448,9 +448,9 @@ bool SphereVisibleAsInShader(const glm::mat4& vp, const glm::vec3& c, float r)
 // скрытые сущности выбывают раньше, на сборке батчей (EngineContext::HideEntity).
 void F0_ShaderShape(ObjectManager& om, SceneData* scene, const glm::mat4& vp)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>* pos_arr, ComponentArray<BoundSpheres, void>* sph_arr,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         Positions&    P = pos_arr->data;
         BoundSpheres& S = sph_arr->data;
@@ -481,9 +481,9 @@ void F0_ShaderShape(ObjectManager& om, SceneData* scene, const glm::mat4& vp)
 // и шесть длин нормалей больше не считаются на объект. Ветка и сборка на месте.
 void F1_HoistedPlanes(ObjectManager& om, SceneData* scene, const Frustum& F)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>* pos_arr, ComponentArray<BoundSpheres, void>* sph_arr,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         Positions&    P = pos_arr->data;
         BoundSpheres& S = sph_arr->data;
@@ -524,9 +524,9 @@ void F1_HoistedPlanes(ObjectManager& om, SceneData* scene, const Frustum& F)
 // читались И писались (v += a); здесь чтение и запись — разные массивы.
 void F2_MarginPass(ObjectManager& om, SceneData* scene, const Frustum& F)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>* pos_arr, ComponentArray<BoundSpheres, void>* sph_arr,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         Positions&    P = pos_arr->data;
         BoundSpheres& S = sph_arr->data;
@@ -569,9 +569,9 @@ void F2_MarginPass(ObjectManager& om, SceneData* scene, const Frustum& F)
 // ── F3: указатели __restrict и индекс int ───────────────────────────────────
 void F3_RestrictInt(ObjectManager& om, SceneData* scene, const Frustum& F)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>* pos_arr, ComponentArray<BoundSpheres, void>* sph_arr,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         const int n = safe_size_i(ents.size());
         if (n == 0) return;
@@ -587,9 +587,9 @@ void F3_RestrictInt(ObjectManager& om, SceneData* scene, const Frustum& F)
 // том, берёт ли векторизатор три sqrtps подряд.
 void F4_ThreeSqrt(ObjectManager& om, SceneData* scene, const Frustum& F)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>* pos_arr, ComponentArray<BoundSpheres, void>* sph_arr,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         const int n = safe_size_i(ents.size());
         if (n == 0) return;
@@ -641,9 +641,9 @@ void F4_ThreeSqrt(ObjectManager& om, SceneData* scene, const Frustum& F)
 // ── F5-F6: тот же тест другими средствами ───────────────────────────────────
 void F5_Avx2(ObjectManager& om, SceneData* scene, const Frustum& F)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>* pos_arr, ComponentArray<BoundSpheres, void>* sph_arr,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         const int n = safe_size_i(ents.size());
         if (n == 0) return;
@@ -656,9 +656,9 @@ void F5_Avx2(ObjectManager& om, SceneData* scene, const Frustum& F)
 
 void PrepareWorldSpheres(ObjectManager& om, SceneData* scene)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>* pos_arr, ComponentArray<BoundSpheres, void>* sph_arr,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         Positions&    P = pos_arr->data;
         BoundSpheres& S = sph_arr->data;
@@ -682,9 +682,9 @@ void PrepareWorldSpheres(ObjectManager& om, SceneData* scene)
 
 void F6_WorldSphere(ObjectManager& om, SceneData* scene, const Frustum& F)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>*, ComponentArray<BoundSpheres, void>*,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         const int n = safe_size_i(ents.size());
         if (n == 0) return;
@@ -700,9 +700,9 @@ void F6_WorldSphere(ObjectManager& om, SceneData* scene, const Frustum& F)
 template <class Collect>
 void CollectOnly(ObjectManager& om, SceneData* scene, Collect&& collect)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>*, ComponentArray<BoundSpheres, void>*,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         g_count = collect(g_margin.data(), ents.data(), g_out.data(), g_count, safe_size_i(ents.size()));
     });
@@ -711,9 +711,9 @@ void CollectOnly(ObjectManager& om, SceneData* scene, Collect&& collect)
 // ── F10-F11: тест и сборка, обе векторные ───────────────────────────────────
 void F10_AvxBoth(ObjectManager& om, SceneData* scene, const Frustum& F)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>* pos_arr, ComponentArray<BoundSpheres, void>* sph_arr,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         const int n = safe_size_i(ents.size());
         if (n == 0) return;
@@ -726,9 +726,9 @@ void F10_AvxBoth(ObjectManager& om, SceneData* scene, const Frustum& F)
 
 void F11_WorldAvx(ObjectManager& om, SceneData* scene, const Frustum& F)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>*, ComponentArray<BoundSpheres, void>*,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         const int n = safe_size_i(ents.size());
         if (n == 0) return;
@@ -744,9 +744,9 @@ std::vector<float> g_m4[K_CAMS];
 
 void F12_MultiOnePass(ObjectManager& om, SceneData* scene, const Frustum* FS)
 {
-    om.ForEachArchetype<Positions, BoundSpheres, DrawComponent>(scene,
+    om.ForEachArchetype<Positions, BoundSpheres, Renderable>(scene,
         [&](ComponentArray<Positions, void>*, ComponentArray<BoundSpheres, void>*,
-            ComponentArray<DrawComponent, void>*, const std::vector<Entity>& ents)
+            ComponentArray<Renderable, void>*, const std::vector<Entity>& ents)
     {
         const int n = safe_size_i(ents.size());
         if (n == 0) return;
@@ -809,7 +809,7 @@ void Bench(const char* name, size_t bytes_per_obj, Fn&& fn)
 int main(int, char**)
 {
     std::printf("\n=== FrustumVecProbe: N = %zu объектов, %d прогонов на вариант ===\n", N, kRepeats);
-    std::printf("    Обход - настоящий ObjectManager::ForEachArchetype<Positions, BoundSpheres, DrawComponent>.\n");
+    std::printf("    Обход - настоящий ObjectManager::ForEachArchetype<Positions, BoundSpheres, Renderable>.\n");
     std::printf("    Тест - тот же, что в culling_pib.comp.hlsl. AVX2+FMA: %s.\n",
         (SDL_HasAVX2() && SDL_HasAVX()) ? "да" : "нет");
     std::printf("    Вердикт векторизации - python scripts/vec_check.py (метки VEC_HOT).\n\n");
@@ -848,7 +848,7 @@ int main(int, char**)
         s.cy = 0.5f * static_cast<float>(n & 1u);
         s.r  = r_model[n & 3u];
 
-        om.CreateEntity("probe", p, s, DrawComponent{});
+        om.CreateEntity("probe", p, s, RenderableProxy{});
     }
     std::printf("  сборка сцены: %.0f мс (%zu сущностей)\n", MsSince(t_build), N);
 

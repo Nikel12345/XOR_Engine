@@ -204,8 +204,9 @@ Material* EngineContext::CreateMaterial(std::string name, std::initializer_list<
 void EngineContext::SetEntityTextureVariant(Entity e, uint32_t mat_index, TextureSlotRole role, uint32_t variant)
 {
 	SceneData* scene = object_manager ? object_manager->GetActiveScene() : nullptr;
-	if (!scene || !object_manager->Has<MaterialComponent>(scene, e)) return;
-	auto& mats = object_manager->GetComponent<MaterialComponent>(scene, e).materials;
+	if (!scene || !object_manager->Has<Renderable>(scene, e)) return;
+	SoAElement<Renderable> r = object_manager->GetComponent<Renderable>(scene, e);
+	auto& mats = r.container().materials[r.i()];
 	if (mat_index >= mats.size()) return;
 
 	auto& st = mats[mat_index].states;
@@ -215,34 +216,81 @@ void EngineContext::SetEntityTextureVariant(Entity e, uint32_t mat_index, Textur
 	else st.emplace_back(role, variant);
 }
 
-void EngineContext::ChangeModel(Entity e, const ModelName& model_name)
+void EngineContext::ChangeModel(Entity e, const ModelName& model_name, uint32_t lod)
 {
 	SceneData* scene = object_manager ? object_manager->GetActiveScene() : nullptr;
-	if (!scene || !object_manager->Has<ModelComponent>(scene, e)) return;
+	if (!scene || lod >= MAX_LOD || !object_manager->Has<Renderable>(scene, e)) return;
+	SoAElement<Renderable> r = object_manager->GetComponent<Renderable>(scene, e);
+	Renderable& rc = r.container();
+	const size_t i = r.i();
 
-	object_manager->GetComponent<ModelComponent>(scene, e).model = model_manager->InternModel(model_name);
-
-	if (object_manager->Has<MaterialComponent>(scene, e)) {
-		const ModelData* model = model_manager->FindModel(model_name);
-		object_manager->GetComponent<MaterialComponent>(scene, e).materials.resize(
-			model ? model->submeshes.size() : 0);
-	}
+	rc.models[i][lod] = model_manager->InternModel(model_name);
+	FitRenderableParts(rc, i);
 
 	// Буфер bound-сфер гейтится ревизией сущностей, а не деревом батчей.
 	object_manager->BumpEntityRevision();
 	batch_builder->QueueUpdate(e);
 }
 
-void EngineContext::ChangeMaterial(Entity e, const MaterialName& material_name, uint32_t submesh)
+void EngineContext::ChangeMaterial(Entity e, const MaterialName& material_name, uint32_t mat_index, uint32_t lod)
 {
 	SceneData* scene = object_manager ? object_manager->GetActiveScene() : nullptr;
-	if (!scene || !object_manager->Has<MaterialComponent>(scene, e)) return;
-	auto& mats = object_manager->GetComponent<MaterialComponent>(scene, e).materials;
-	if (submesh >= mats.size()) return;
+	if (!scene || lod >= MAX_LOD || !object_manager->Has<Renderable>(scene, e)) return;
+	SoAElement<Renderable> r = object_manager->GetComponent<Renderable>(scene, e);
+	auto& mats = r.container().materials[r.i()];
+	if (mat_index >= mats.size()) return;
 
-	mats[submesh].material = material_manager->InternMaterial(material_name);
-	mats[submesh].states.clear();
+	mats[mat_index].per_lod[lod] = material_manager->InternMaterial(material_name);
+	if (lod == 0) mats[mat_index].states.clear();
 
+	batch_builder->QueueUpdate(e);
+}
+
+void EngineContext::FitRenderableParts(Renderable& r, size_t row) const
+{
+	std::vector<MaterialSlot>& parts = r.materials[row];
+	std::array<std::vector<bool>, MAX_LOD> used;
+	size_t count = 0;
+	for (uint32_t L = 0; L < r.lod_count[row]; ++L) {
+		const ModelData* m = model_manager->FindModel(r.models[row][L]);
+		if (!m) continue;
+		for (const SubMeshData& sm : m->submeshes) {
+			if (used[L].size() <= sm.material_index) used[L].resize(sm.material_index + 1, false);
+			used[L][sm.material_index] = true;
+		}
+		count = std::max(count, used[L].size());
+	}
+	parts.resize(count);
+	for (size_t k = 0; k < count; ++k)
+		for (uint32_t L = 0; L < MAX_LOD; ++L)
+			if (k >= used[L].size() || !used[L][k]) parts[k].per_lod[L] = MaterialId{};
+}
+
+static_assert(MAX_LOD - 1 == 3, "EntityLodsCmd/SetEntityLods: switches length");
+
+void EngineContext::SetEntityLods(Entity e, uint32_t lod_count, const std::array<float, 3>& switches)
+{
+	SceneData* scene = object_manager ? object_manager->GetActiveScene() : nullptr;
+	if (!scene || !object_manager->Has<Renderable>(scene, e)) return;
+	SoAElement<Renderable> r = object_manager->GetComponent<Renderable>(scene, e);
+	Renderable& rc = r.container();
+	const size_t i = r.i();
+
+	const uint32_t count = rc.lod_count[i];
+	const uint32_t new_count = std::clamp<uint32_t>(lod_count, 1, MAX_LOD);
+	for (uint32_t L = count; L < new_count; ++L) {
+		rc.models[i][L] = rc.models[i][L - 1];
+		for (MaterialSlot& part : rc.materials[i]) part.per_lod[L] = part.per_lod[L - 1];
+	}
+	for (uint32_t L = new_count; L < count; ++L) {
+		rc.models[i][L] = ModelId{};
+		for (MaterialSlot& part : rc.materials[i]) part.per_lod[L] = MaterialId{};
+	}
+	rc.lod_count[i] = static_cast<uint8_t>(new_count);
+	std::copy(switches.begin(), switches.end(), rc.switches[i].begin());
+	FitRenderableParts(rc, i);
+
+	object_manager->BumpEntityRevision();
 	batch_builder->QueueUpdate(e);
 }
 
@@ -281,10 +329,7 @@ void EngineContext::DeleteEntity(const SceneName& scene_name, Entity e)
 		for (Entity c : kids) DeleteEntity(scene_name, c);
 	}
 
-	const bool needs_pib = object_manager->Has<ModelComponent>(target_scene, e)
-		&& object_manager->Has<Positions>(target_scene, e);
-
-	if (needs_pib && target_scene == object_manager->GetActiveScene()) {
+	if (object_manager->Has<Renderable>(target_scene, e) && target_scene == object_manager->GetActiveScene()) {
 		batch_builder->QueueDelete(e);
 	}
 
@@ -296,16 +341,15 @@ void EngineContext::HideEntity(const SceneName& scene_name, Entity e, bool visib
 	SceneData* target_scene = object_manager->GetScene(scene_name);
 	if (!target_scene) return;
 
-	// visible живёт в DrawComponent, потому что полная пересборка перечитывает флаг оттуда.
-	if (!object_manager->Has<DrawComponent>(target_scene, e)) return;
-	DrawComponent& draw = object_manager->GetComponent<DrawComponent>(target_scene, e);
-	if (draw.visible == visible) return;
+	// visible живёт в компоненте, потому что полная пересборка перечитывает флаг оттуда.
+	if (!object_manager->Has<Renderable>(target_scene, e)) return;
+	SoAElement<Renderable> r = object_manager->GetComponent<Renderable>(target_scene, e);
+	uint8_t& flag = r.container().visible[r.i()];
+	if ((flag != 0) == visible) return;
 
-	draw.visible = visible;
+	flag = visible ? 1 : 0;
 
-	const bool batched = object_manager->Has<ModelComponent>(target_scene, e)
-		&& object_manager->Has<Positions>(target_scene, e);
-	if (!batched || target_scene != object_manager->GetActiveScene()) return;
+	if (target_scene != object_manager->GetActiveScene()) return;
 
 	if (visible) batch_builder->QueueCreate(e);
 	else         batch_builder->QueueDelete(e);

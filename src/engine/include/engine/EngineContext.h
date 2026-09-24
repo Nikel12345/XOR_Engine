@@ -1,8 +1,9 @@
 #pragma once
 #include "ComponentStorage.h"
-struct DrawComponent;
-struct ModelComponent;
+struct Renderable;
+struct RenderableProxy;
 #include <SDL3/SDL_gpu.h>
+#include <array>
 #include <functional>
 #include <vector>
 #include <string>
@@ -65,10 +66,17 @@ public:
 	void SetEntityTextureVariant(Entity e, uint32_t mat_index, TextureSlotRole role, uint32_t variant);
 
 	// Записью в компонент не заменяется: вместе с моделью меняются длина
-	// MaterialComponent::materials и место сущности в дереве батчей.
-	void ChangeModel(Entity e, const ModelName& model_name);
+	// Renderable::materials и место сущности в дереве батчей.
+	void ChangeModel(Entity e, const ModelName& model_name, uint32_t lod = 0);
 
-	void ChangeMaterial(Entity e, const MaterialName& material_name, uint32_t submesh = 0);
+	void ChangeMaterial(Entity e, const MaterialName& material_name, uint32_t mat_index = 0, uint32_t lod = 0);
+
+	// Новый уровень наследует модель и материалы предыдущего.
+	void SetEntityLods(Entity e, uint32_t lod_count, const std::array<float, 3>& switches);
+
+	// После смены моделей уровней: частей столько, сколько просит самая широкая модель, а
+	// материал уровня у части, которую его модель не берёт, снимается.
+	void FitRenderableParts(Renderable& r, size_t row) const;
 
 	FontData* CreateFont(const std::string& name, const char* path, float px, bool sdf = false);
 
@@ -98,8 +106,7 @@ public:
 
 	template<typename... Components>
 	Entity CreateEntity(const std::string& scene_name, Components&&... comps) {
-		constexpr bool needs_pib = contains_type_v<DrawComponent, Components...>
-			&& contains_type_v<ModelComponent, Components...>;
+		constexpr bool needs_pib = contains_type_v<RenderableProxy, Components...>;
 
 		Entity entity = object_manager->CreateEntity(scene_name, std::forward<Components>(comps)...);
 

@@ -8,9 +8,10 @@
 #include "SparseRankChannel.h"
 
 
-static inline uint32_t ElementCells(const MaterialComponent& mc)
+// Полагается на StateSection(i, L) == i: секции лежат в порядке обхода materials.
+static inline uint32_t ElementCells(SoAElement<Renderable> r)
 {
-	return safe_u32(mc.materials.size()) * MAX_VARIATIVE_SLOTS;
+	return safe_u32(r.container().materials[r.i()].size()) * MAX_VARIATIVE_SLOTS;
 }
 
 TextureStateDataModule::TextureStateDataModule()
@@ -26,9 +27,9 @@ uint32_t TextureStateDataModule::CalculateRankSize(ObjectManager* om, SceneData*
 	struct ArchBase { const Positions* col; uint32_t base; };
 	std::vector<ArchBase> bases;
 	rows_ = 0;
-	om->ForEachArchetype<Positions, DrawComponent>(scene,
+	om->ForEachArchetype<Positions, Renderable>(scene,
 		[&](ComponentArray<Positions, void>* posArr,
-			ComponentArray<DrawComponent, void>*)
+			ComponentArray<Renderable, void>*)
 	{
 		bases.push_back(ArchBase{ &posArr->data, rows_ });
 		rows_ += safe_u32(posArr->size());
@@ -39,8 +40,8 @@ uint32_t TextureStateDataModule::CalculateRankSize(ObjectManager* om, SceneData*
 	hit_rows_.clear();
 	hit_ofs_.clear();
 	uint32_t running = 0;
-	om->ForEach<Positions, DrawComponent, MaterialComponent, TextureStateComponent>(scene,
-		[&](SoAElement<Positions> pos, DrawComponent&, MaterialComponent& mc, TextureStateComponent&)
+	om->ForEach<Positions, Renderable, TextureStateComponent>(scene,
+		[&](SoAElement<Positions> pos, SoAElement<Renderable> mc, TextureStateComponent&)
 	{
 		const Positions* col = pos.soa;
 		for (const ArchBase& a : bases) {
@@ -79,8 +80,8 @@ void TextureStateDataModule::StoreIndex(BufferManager* bm, UploadTask* task, uin
 uint32_t TextureStateDataModule::CalculateStateSize(ObjectManager* om, SceneData* scene)
 {
 	uint32_t cells = 0;
-	om->ForEach<Positions, DrawComponent, MaterialComponent, TextureStateComponent>(scene,
-		[&](SoAElement<Positions>, DrawComponent&, MaterialComponent& mc, TextureStateComponent&)
+	om->ForEach<Positions, Renderable, TextureStateComponent>(scene,
+		[&](SoAElement<Positions>, SoAElement<Renderable> mc, TextureStateComponent&)
 	{
 		cells += ElementCells(mc);
 	});
@@ -91,14 +92,14 @@ uint32_t TextureStateDataModule::CalculateStateSize(ObjectManager* om, SceneData
 void TextureStateDataModule::StoreState(BufferManager* bm, UploadTask* task, ObjectManager* om,
 	SceneData* scene, MaterialManager* mtm)
 {
-	om->ForEach<Positions, DrawComponent, MaterialComponent, TextureStateComponent>(scene,
-		[&](SoAElement<Positions>, DrawComponent&, MaterialComponent& mc, TextureStateComponent&)
+	om->ForEach<Positions, Renderable, TextureStateComponent>(scene,
+		[&](SoAElement<Positions>, SoAElement<Renderable> mc, TextureStateComponent&)
 	{
-		for (const MaterialRef& m : mc.materials) {
+		for (const MaterialSlot& m : mc.container().materials[mc.i()]) {
 			uint32_t cells[MAX_VARIATIVE_SLOTS] = {};
 
 			// Резолв ТИХИЙ: GetMaterial логирует промах, а вызов идёт на каждую сущность.
-			const Material* mat = mtm ? mtm->GetMaterial(m.material) : nullptr;
+			const Material* mat = mtm ? mtm->GetMaterial(m.per_lod[0]) : nullptr;
 
 			if (mat) {
 				const VariativeRoles vr = CollectVariativeRoles(*mat);
