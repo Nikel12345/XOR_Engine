@@ -311,21 +311,21 @@ def emit_section(section, cols):
 # Ключи архетипов = отсортированные по алфавиту имена компонентов через запятую (так их строит
 # SaveScene движка). Держим их константами: по ним же определяется порядок блоков в файле.
 CUBES_ARCHETYPE = "Renderable,Shadow,Transform,Velocity"
+CUBE_LOD_LEVELS = 2   # у моделей cube_* в игре уровень 1 — quad (Game.cpp)
 CENTER_ARCHETYPE = "Gravity,Renderable,Transform"
 
 
-def _renderable_obj(n, model_cells, material_rows):
-    """Тело Renderable с одним уровнем. model_cells — индексы моделей строками, material_rows —
-    строки-массивы частей '[i, j, ...]' (по материалу на часть)."""
+def _renderable_obj(n, model_cells, material_rows, levels=1):
+    """Тело Renderable. model_cells — индексы моделей строками, material_rows — строки-массивы частей
+    '[i, j, ...]' (по материалу на часть); материал части один на все levels уровней модели."""
     def per_lod(row):
         cells = [c for c in row.strip('[]').split(',') if c]
-        return '[' + ','.join('[' + c + ']' for c in cells) + ']'
+        return '[' + ','.join('[' + ','.join([c] * levels) + ']' for c in cells) + ']'
     return ",".join([
         _num_col("visible", ["true"] * n),
         _num_col("alpha", ["1"] * n),
         _num_col("flags", ["0"] * n),
-        _num_col("lod_count", ["1"] * n),
-        _num_col("models", ['[' + m + ']' for m in model_cells]),
+        _num_col("model", model_cells),
         _num_col("materials", [per_lod(r) for r in material_rows]),
     ])
 
@@ -416,7 +416,7 @@ def build_scene():
 
     transform_obj = ",".join(_num_col(TRANSFORM_COLS[k], cols.transform[k]) for k in range(16))
     velocity_obj = ",".join([_num_col("x", cols.vx), _num_col("y", cols.vy), _num_col("z", cols.vz)])
-    rend_obj = _renderable_obj(n, cols.model, cols.material)
+    rend_obj = _renderable_obj(n, cols.model, cols.material, levels=CUBE_LOD_LEVELS)
 
     cubes_block = ('"' + CUBES_ARCHETYPE + '":{'
                    '"count":' + str(n) + ','

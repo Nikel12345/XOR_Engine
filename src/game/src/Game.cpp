@@ -35,7 +35,7 @@
 // Стартовая сцена: имя ОДНО и то же для ECS и для файлов — папка сцены зовётся так же
 // (saved_scene/scene1, см. kScenesRoot). Литерал в одном месте: разъедься имя сцены с именем
 // папки — LoadScene молча грузил бы пустоту, а генератор навесился бы на чужую сцену.
-static const char* const kStartScene = "scene2";
+static const char* const kStartScene = "scene1M";
 
 Game::Game(Engine* engine)
 {
@@ -193,6 +193,8 @@ SDL_AppResult Game::MainInit()
                 idx.push_back(vbase + 0); idx.push_back(vbase + 2); idx.push_back(vbase + 3);
             }
         }, AnchorShift::Keep, ResourceTag::CodeOwned);   // процедурные кубы игры — в models.json не идут
+        modelManager->SetModelLods(modelManager->ModelIdOf("cube_" + std::to_string(ci)),
+                                   { ModelLod{ modelManager->ModelIdOf("quad"), 6.0f } });
     }
 
     // --- "two_quads": ОДИН меш из двух НЕСВЯЗАННЫХ островов (ни общих вершин, ни общих рёбер). ---

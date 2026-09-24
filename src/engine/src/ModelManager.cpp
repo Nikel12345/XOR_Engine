@@ -334,6 +334,15 @@ void ModelManager::SetModelLods(ModelId id, const std::vector<ModelLodSource>& l
     ++spheres_revision;
 }
 
+void ModelManager::SetModelLods(ModelId id, std::vector<ModelLod> lods)
+{
+    ModelData* m = models_data.Get(id);
+    if (!m) return;
+    if (lods.size() + 1 > MAX_MODEL_LODS) lods.resize(MAX_MODEL_LODS - 1);
+    m->lods = std::move(lods);
+    ++spheres_revision;
+}
+
 uint32_t ModelManager::LevelCount(ModelId id) const
 {
     const ModelData* m = models_data.Get(id);

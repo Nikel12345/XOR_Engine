@@ -81,6 +81,7 @@ public:
 	uint64_t SpheresRevision() const { return spheres_revision; };
 	// Уровень с путями самой модели ссылается на неё; иначе грузится служебной моделью.
 	void SetModelLods(ModelId model, const std::vector<ModelLodSource>& lods);
+	void SetModelLods(ModelId model, std::vector<ModelLod> lods);
 	uint32_t LevelCount(ModelId model) const;
 	ModelId  LevelModel(ModelId model, uint32_t level) const;
 	ModelData* operator[](const std::string& name);
