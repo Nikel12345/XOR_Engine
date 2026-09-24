@@ -649,7 +649,12 @@ void Game::SimulateGravity()
             vy[i] = (g_bounce_rng() & 1u) ? kBounceSpeed : -kBounceSpeed;
             vz[i] = g_bounce_spread(g_bounce_rng);
 
-            ctx->ChangeMaterial(ents[i], kBounceMaterial);
+            if (!objectManager->Has<Renderable>(scene, ents[i])) continue;
+            SoAElement<Renderable> rend = objectManager->GetComponent<Renderable>(scene, ents[i]);
+            const std::vector<MaterialSlot>& parts = rend.container().materials[rend.i()];
+            const uint32_t levels = std::min(modelManager->LevelCount(rend.container().model[rend.i()]), MAX_LOD);
+            for (uint32_t L = 0; L < levels; ++L)
+                if (!parts.empty() && parts[0].per_lod[L]) ctx->ChangeMaterial(ents[i], kBounceMaterial, 0, L);
         }
 
         // ── C ── позиции (wdh) скоростями (xyz)
