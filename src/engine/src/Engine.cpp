@@ -23,7 +23,6 @@
 #include "TextureStateDataModule.h"
 #include "LightDataModule.h"
 #include "IndirectDataModule.h"
-#include "BoundSphereDataModule.h"
 #include "UI_DataModule.h"
 #include "UI_Yoga.h"
 #include "EngineContext.h"
@@ -295,7 +294,6 @@ Engine::Engine(const EngineConfig& cfg)
 	instance_data_module = new InstanceDataModule();
 	light_data_module = new LightDataModule();
 	indirect_data_module = new IndirectDataModule();
-	bound_sphere_data_module = new BoundSphereDataModule();
 	tex_state_data_module = new TextureStateDataModule();
 	ui_data_module = new UI_DataModule();
 	ui_yoga = new UI_Yoga();
@@ -443,7 +441,6 @@ Engine::~Engine()
 	delete instance_data_module;
 	delete light_data_module;
 	delete indirect_data_module;
-	delete bound_sphere_data_module;
 	delete tex_state_data_module;
 	delete ui_data_module;
 	delete ui_yoga;

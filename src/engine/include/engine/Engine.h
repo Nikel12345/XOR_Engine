@@ -32,7 +32,6 @@ class TransformDataModule;
 class InstanceDataModule;
 class LightDataModule;
 class IndirectDataModule;
-class BoundSphereDataModule;
 class TextureStateDataModule;
 class UI_DataModule;
 class UI_Yoga;
@@ -171,7 +170,6 @@ private:
     InstanceDataModule* instance_data_module = nullptr;
     LightDataModule* light_data_module = nullptr;
     IndirectDataModule* indirect_data_module = nullptr;
-    BoundSphereDataModule* bound_sphere_data_module = nullptr;
     TextureStateDataModule* tex_state_data_module = nullptr;
     UI_DataModule* ui_data_module = nullptr;
     UI_Yoga* ui_yoga = nullptr;

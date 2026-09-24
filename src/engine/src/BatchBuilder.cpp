@@ -288,10 +288,13 @@ TextureBatchData* BatchBuilder::ResolveTextureBatch(RenderPassStep* rp, ShaderPr
         ShaderBatchData new_batch{};
         new_batch.push_instructions = sm->CollectPushInstructions(sp_name);
         new_batch.pipeline = std::move(pipe);
-        auto resolve_buffers = [bm](const std::vector<BufferDataName>& names) {
+        auto resolve_buffers = [bm, rp](const std::vector<BufferDataName>& names) {
             std::vector<BufferData*> out; out.reserve(names.size());
-            for (BufferDataName n : names)
+            for (BufferDataName n : names) {
+                for (const auto& [from, to] : rp->buffer_substitutes)
+                    if (from == n) { n = to.c_str(); break; }
                 if (BufferData* b = bm->GetBufferData(n)) out.push_back(b);
+            }
             return out;
         };
         new_batch.vertexStorageBuffers   = resolve_buffers(sp->vertex_shader_buffer_names);
@@ -400,6 +403,10 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
         auto [git, created] = rp->draw_groups.try_emplace(group_key);
         DrawGroup& group = git->second;
+        if (created) {
+            group.lod_count = static_cast<uint8_t>(lod_count);
+            for (uint32_t L = 0; L + 1 < lod_count; ++L) group.switches[L] = rend.switches[row][L];
+        }
         for (size_t i = first; i < resolved_scratch.size(); ++i) {
             ResolvedCmd& c = resolved_scratch[i];
             if (c.pass != rp) continue;

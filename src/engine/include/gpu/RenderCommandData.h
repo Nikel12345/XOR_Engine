@@ -35,6 +35,8 @@ struct PibRecord {
 struct DrawGroup {
     std::vector<PibRecord> records;
     uint32_t pib_first = 0;
+    uint8_t  lod_count = 1;
+    float    switches[3] = {};
 };
 
 struct ModelBatchData {
@@ -144,6 +146,9 @@ struct RenderPassStep {
     RenderPassTexturesInfo renderPassTexsData;
     std::unordered_map<BatchKeys::ShaderBatchKey, ShaderBatchData> shader_batches;
     std::unordered_map<BatchKeys::GroupKey, DrawGroup> draw_groups;
+    // Буферы, которые программы прохода получают ВМЕСТО названных в их списках: {что, чем}.
+    // Так отсев подменяет PIB своим выходом, не трогая программы (их списки — данные сцены).
+    std::vector<std::pair<std::string, std::string>> buffer_substitutes;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function;
 
     std::vector<TextureAtlas*> global_texture_bindings;

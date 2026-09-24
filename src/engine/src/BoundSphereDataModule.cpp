@@ -85,7 +85,17 @@ void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, Ob
 			bm->AcquireTransferWritePtr(task, safe_u32(n * sizeof(glm::vec4))));
 		if (!dst) return;
 
-		for (size_t i = 0; i < n; ++i)
-			dst[i] = is_ui ? glm::vec4(0.0f, 0.0f, 0.0f, -1.0f) : sphere_of(rend.models[i][0]);
+		for (size_t i = 0; i < n; ++i) {
+			glm::vec4 sphere(0.0f, 0.0f, 0.0f, -1.0f);
+			if (!is_ui) {
+				// Строка одна на все уровни, поэтому сфера обязана покрыть модель любого из них.
+				for (uint32_t L = 0; L < rend.lod_count[i]; ++L) {
+					const glm::vec4 s = sphere_of(rend.models[i][L]);
+					if (s.w < 0.0f) continue;
+					sphere = sphere.w < 0.0f ? s : UnionSpheres(sphere, s);
+				}
+			}
+			dst[i] = sphere;
+		}
 	}
 }

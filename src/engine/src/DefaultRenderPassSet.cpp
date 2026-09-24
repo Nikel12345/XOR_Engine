@@ -148,7 +148,11 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
             st->camera_index = camera_index;
             st->max_range = cam.max_range;         // spot/sphere: max distance, direct: per-cascade far
             st->is_ortho = cam.is_ortho;           // 1 → линейная осевая глубина (directional)
-            pm->RenderPassStandardBody(cb, &rp, bm, 0, st);
+            // Блок на камеру заводит отсев (своя копия команд под каждый результат); без него блок один.
+            const PassRegions& regions = pm->AskRegions(slot);
+            const bool per_camera = rp.ordinal < regions.per_pass.size()
+                && regions.per_pass[rp.ordinal].command_blocks_count > 1;
+            pm->RenderPassStandardBody(cb, &rp, bm, per_camera ? camera_index : 0u, st);
 
             auto cp = SDL_BeginGPUCopyPass(cb);
             SDL_GPUTextureLocation src = {
@@ -745,11 +749,11 @@ void DefaultRenderPassNamespace::SetDefaultCullingPass(EngineContext* ctx)
     // порог отсева по экранному размеру, ради него схема и заведена.
     {
         using K = ParamsFieldKind;
-        ParamsSpecRegistry::Passes().Register(MakeParamsSpec<CullingPibUniform>(CULLING_STATE, {
-            ParamsFieldSpec::Num(PARAMS_FIELD(CullingPibUniform, min_screen_radius_px),
+        ParamsSpecRegistry::Passes().Register(MakeParamsSpec<CullingState>(CULLING_STATE, {
+            ParamsFieldSpec::Num(PARAMS_FIELD(CullingState, min_screen_radius_px),
                                  K::F32, 0.0f, 16.0f, 0.05f).Label("Cull below radius (px)"),
         }));
     }
-    SetPassState(culling, CULLING_STATE, CullingPibUniform{});
+    SetPassState(culling, CULLING_STATE, CullingState{});
 }
 
