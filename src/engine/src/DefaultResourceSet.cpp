@@ -28,6 +28,13 @@ void DefaultResourceSet::CreateDefaultBuffers(BufferManager* bm)
     bm->CreateBufferData(DEFAULT_INDIRECT_BUFFER, sizeof(SDL_GPUIndexedIndirectDrawCommand) * 10, BufferDataType::Dynamic)
         ->usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
 
+    bm->CreateBufferData(DEFAULT_OUT_PIB_BUFFER,         BASE_TB_SIZE / 16 / 10, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(DEFAULT_BOUND_SPHERE_BUFFER,    BASE_TB_SIZE / 40,      BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(DEFAULT_CULL_COUNTERS_BUFFER,   sizeof(uint32_t) * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(DEFAULT_RECORD_GROUP_BUFFER,    BASE_TB_SIZE / 16 / 10, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(DEFAULT_GROUP_TABLE_BUFFER,     32 * 64,                BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(DEFAULT_CMD_GROUP_LEVEL_BUFFER, sizeof(uint32_t) * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+
     bm->CreateBufferData(UI_TEXT_RANK_BUFFER,     sizeof(uint32_t) * 2 * 64,  BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
     bm->CreateBufferData(UI_TEXT_INDEX_BUFFER,    sizeof(uint32_t) * 2 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
     bm->CreateBufferData(UI_TEXT_BUFFER,          sizeof(uint32_t) * 4096,    BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);

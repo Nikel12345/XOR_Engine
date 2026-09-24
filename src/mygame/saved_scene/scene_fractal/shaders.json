@@ -19,7 +19,7 @@
             "pass": "DefaultMainRenderPass",
             "vs_buffers": [
                 "DefaultTransformBuffer",
-                "DefaultPositionIndexBuffer",
+                "DefaultOutPibBuffer",
                 "cameraBuffer",
                 "DefaultInstanceBuffer"
             ],

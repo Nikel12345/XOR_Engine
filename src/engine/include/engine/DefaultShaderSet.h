@@ -9,6 +9,7 @@ class ObjectManager;
 class BatchBuilder;
 class EngineContext;
 class LightDataModule;
+class CullingDataModule;
 
 namespace DefaultShaderProgramSet
 {
@@ -25,6 +26,8 @@ namespace DefaultShaderProgramSet
     // Зовёт их игра из MainInit — ординал своего прохода каждая программа снимает на создании,
     // то есть проходы к этому моменту обязаны существовать.
 
+    // Отсев и выбор уровня: clear → scatter на проход → fixup на проход, все в CULLING_PASS.
+    void SetCullingPrograms(EngineContext* ctx, CullingDataModule* cdm);
     void SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm);
     void SetBloomPrograms(EngineContext* ctx);
     void SetAOPrograms(EngineContext* ctx);

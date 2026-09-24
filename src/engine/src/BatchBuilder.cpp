@@ -288,13 +288,10 @@ TextureBatchData* BatchBuilder::ResolveTextureBatch(RenderPassStep* rp, ShaderPr
         ShaderBatchData new_batch{};
         new_batch.push_instructions = sm->CollectPushInstructions(sp_name);
         new_batch.pipeline = std::move(pipe);
-        auto resolve_buffers = [bm, rp](const std::vector<BufferDataName>& names) {
+        auto resolve_buffers = [bm](const std::vector<BufferDataName>& names) {
             std::vector<BufferData*> out; out.reserve(names.size());
-            for (BufferDataName n : names) {
-                for (const auto& [from, to] : rp->buffer_substitutes)
-                    if (from == n) { n = to.c_str(); break; }
+            for (BufferDataName n : names)
                 if (BufferData* b = bm->GetBufferData(n)) out.push_back(b);
-            }
             return out;
         };
         new_batch.vertexStorageBuffers   = resolve_buffers(sp->vertex_shader_buffer_names);

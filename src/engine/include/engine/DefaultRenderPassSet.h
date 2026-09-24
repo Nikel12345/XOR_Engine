@@ -204,7 +204,7 @@ namespace DefaultRenderPassNamespace
     // в кадр ровно тем RGB, что задан в состоянии, без сжатия HDR.
     void SetDefaultFogPass(EngineContext* ctx);
 
-    // Настройка прохода отсева (DefaultCullingSet). Покадровые величины программы считают сами.
+    // Настройка прохода отсева. Покадровые величины программы (SetCullingPrograms) считают сами.
     struct alignas(16) CullingState {
         float    min_screen_radius_px = 0.7f;   // мелочь в проходе камеры игрока; 0 = не отсекать
         uint32_t pad[3] = {};

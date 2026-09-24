@@ -28,6 +28,8 @@ class TextureLoader;
 class FontManager;
 class BatchBuilder;
 class PIB_DataModule;
+class BoundSphereDataModule;
+class CullingDataModule;
 class TransformDataModule;
 class InstanceDataModule;
 class LightDataModule;
@@ -166,6 +168,8 @@ private:
     BatchBuilder* batch_builder = nullptr;
 
     PIB_DataModule* pib_data_module = nullptr;
+    BoundSphereDataModule* bound_sphere_data_module = nullptr;
+    CullingDataModule* culling_data_module = nullptr;
     TransformDataModule* transform_data_module = nullptr;
     InstanceDataModule* instance_data_module = nullptr;
     LightDataModule* light_data_module = nullptr;

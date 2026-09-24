@@ -148,11 +148,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
             st->camera_index = camera_index;
             st->max_range = cam.max_range;         // spot/sphere: max distance, direct: per-cascade far
             st->is_ortho = cam.is_ortho;           // 1 → линейная осевая глубина (directional)
-            // Блок на камеру заводит отсев (своя копия команд под каждый результат); без него блок один.
-            const PassRegions& regions = pm->AskRegions(slot);
-            const bool per_camera = rp.ordinal < regions.per_pass.size()
-                && regions.per_pass[rp.ordinal].command_blocks_count > 1;
-            pm->RenderPassStandardBody(cb, &rp, bm, per_camera ? camera_index : 0u, st);
+            pm->RenderPassStandardBody(cb, &rp, bm, camera_index, st);
 
             auto cp = SDL_BeginGPUCopyPass(cb);
             SDL_GPUTextureLocation src = {
@@ -171,6 +167,9 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
         10
     );
     shadowPass->renderPassTexsData.SetDepthTexture(shadow_temp);
+    // Своя копия команд на каждую световую камеру: у каждой свой результат отсева.
+    pm->CreateRegionCountInstruction(SHADOW_PASS,
+        [ldm](uint8_t slot) { return ldm->AskNumLightCameras(slot); });
     SetPassState(shadowPass, ShadowPushData{});   // хранилище: все поля покадровые, схемы нет
 
     shadow_pass_inited = true;

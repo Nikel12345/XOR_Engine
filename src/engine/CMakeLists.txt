@@ -248,6 +248,7 @@ set(ENGINE_STRUCTS_HDR
 )
 set(ENGINE_DATAMODULES_SRC
     src/BoundSphereDataModule.cpp
+    src/CullingDataModule.cpp
     src/TextureStateDataModule.cpp
     src/IndirectDataModule.cpp
     src/LightDataModule.cpp
@@ -258,6 +259,7 @@ set(ENGINE_DATAMODULES_SRC
 )
 set(ENGINE_DATAMODULES_HDR
     include/engine/BoundSphereDataModule.h
+    include/engine/CullingDataModule.h
     include/engine/TextureStateDataModule.h
     include/engine/IndirectDataModule.h
     include/engine/LightDataModule.h
@@ -285,7 +287,6 @@ set(ENGINE_CORE_SRC
     src/Engine_PrepassBench.cpp
     src/DefaultRenderPassSet.cpp
     src/DefaultShaderSet.cpp
-    src/DefaultCullingSet.cpp
     src/DefaultResourceSet.cpp
     src/DefaultUpdateSet.cpp
     src/DefaultCommandSet.cpp
@@ -303,7 +304,6 @@ set(ENGINE_CORE_HDR
     include/engine/Engine.h
     include/engine/DefaultRenderPassSet.h
     include/engine/DefaultShaderSet.h
-    include/engine/DefaultCullingSet.h
     include/engine/DefaultResourceSet.h
     include/engine/DefaultUpdateSet.h
     include/engine/DefaultCommandSet.h

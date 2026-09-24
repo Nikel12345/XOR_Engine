@@ -15,6 +15,7 @@ class ModelManager;
 class PassManager;
 class IndirectDataModule;
 class BoundSphereDataModule;
+class CullingDataModule;
 class TextureStateDataModule;
 class BatchBuilder;
 
@@ -31,6 +32,8 @@ namespace DefaultUpdateSet
 	void SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDataModule* idm, LightDataModule* ldm);
 	// Канал разрежённого ранга: ранг и индекс. Индекс берёт размер из того, что построила size-фаза
 	// ранга, поэтому пара регистрируется одним вызовом.
+	// Отсев: таблицы групп, out_pib и счётчики (размер — раскладка слота), bound-сферы.
+	void SetDefaultCullingUpdaters(EngineContext& ctx, CullingDataModule* cdm, BoundSphereDataModule* bdm);
 	void SetDefaultTexStateChannel(EngineContext& ctx, TextureStateDataModule* tsm);
 	void SetDefaultTexStateUpdater(EngineContext& ctx, TextureStateDataModule* tsm);
 	void SetUITextUpdaters(EngineContext& ctx, UI_DataModule* uidm, FontManager* fm, const std::string& fontName);

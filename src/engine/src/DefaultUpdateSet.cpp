@@ -12,6 +12,7 @@
 #include "TextureStateDataModule.h"
 #include "IndirectDataModule.h"
 #include "BoundSphereDataModule.h"
+#include "CullingDataModule.h"
 #include "UI_DataModule.h"
 #include "FontManager.h"
 #include "ObjectManager.h"
@@ -118,6 +119,45 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
     bm->CreateUpdateInstruction(DEFAULT_INDIRECT_BUFFER,
         [pm, idm, bb](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { const uint8_t slot = bm->logic_index.load(); idm->StoreIndirect(bm, pm, &task, pm->AskRegions(slot), bb->BatchesRevision(), slot); },
         [pm, idm, bb, bm]() -> uint32_t { const uint8_t slot = bm->logic_index.load(); return idm->CalculateIndirectSize(pm->AskRegions(slot), bb->BatchesRevision(), slot); });
+}
+
+void DefaultUpdateSet::SetDefaultCullingUpdaters(EngineContext& ctx, CullingDataModule* cdm, BoundSphereDataModule* bdm)
+{
+    static bool inited = false;
+    if (inited) { SDL_Log("DefaultUpdateSet::SetDefaultCullingUpdaters: already initialized"); return; }
+    inited = true;
+
+    auto* bm = ctx.GetBufferManager();
+    auto* pm = ctx.GetPassManager();
+    auto* bb = ctx.GetBatchBuilder();
+    auto* om = ctx.GetObjectManager();
+    auto* mm = ctx.GetModelManager();
+
+    auto stamp = [pm, bb, cdm](uint8_t slot) { cdm->Stamp(pm, bb->BatchesRevision(), slot); };
+
+    bm->CreateUpdateInstruction(DEFAULT_OUT_PIB_BUFFER, nullptr,
+        [bm, cdm, stamp]() -> uint32_t { const uint8_t s = bm->logic_index.load(); stamp(s); return cdm->TotalOut(s) * sizeof(int32_t); });
+    bm->CreateUpdateInstruction(DEFAULT_CULL_COUNTERS_BUFFER, nullptr,
+        [bm, cdm, stamp]() -> uint32_t { const uint8_t s = bm->logic_index.load(); stamp(s); return cdm->TotalCounters(s) * sizeof(uint32_t); });
+
+    using Table = CullingDataModule::Table;
+    auto table = [bm, bb, cdm, stamp](BufferDataName name, Table t) {
+        bm->CreateUpdateInstruction(name,
+            [bb, cdm, t](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) {
+                cdm->StoreTable(bm, &task, t, bb->BatchesRevision(), bm->logic_index.load()); },
+            [bm, bb, cdm, stamp, t]() -> uint32_t {
+                const uint8_t s = bm->logic_index.load(); stamp(s);
+                return cdm->TableSize(t, bb->BatchesRevision(), s); });
+    };
+    table(DEFAULT_RECORD_GROUP_BUFFER,    Table::RecordGroup);
+    table(DEFAULT_GROUP_TABLE_BUFFER,     Table::Groups);
+    table(DEFAULT_CMD_GROUP_LEVEL_BUFFER, Table::CmdGroupLevel);
+
+    bm->CreateUpdateInstruction(DEFAULT_BOUND_SPHERE_BUFFER,
+        [om, mm, bdm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) {
+            bdm->StoreSpheres(bm, &task, om, mm, om->EntityRevision() + mm->SpheresRevision(), bm->logic_index.load()); },
+        [om, mm, bdm, bm]() -> uint32_t {
+            return bdm->CalculateSphereSize(om, om->EntityRevision() + mm->SpheresRevision(), bm->logic_index.load()); });
 }
 
 void DefaultUpdateSet::SetDefaultTexStateChannel(EngineContext& ctx, TextureStateDataModule* tsm)

@@ -11,7 +11,6 @@
 #include "ThreadController.h"
 #include "LightDataModule.h"
 #include "DefaultShaderSet.h"
-#include "DefaultCullingSet.h"
 #include "FractalShaderSet.h"
 #include "BufferManager.h"
 #include "FractalUpdateSet.h"
@@ -63,7 +62,6 @@ SDL_AppResult MyGame::MainInit()
         // по масштабу не будут. Осознанно принято: отбор «чья это атмосфера» — свойство шейдера, а
         // не пикселя, и экранному проходу недоступен. Max opacity = 0 выключает его в редакторе.
         SetFogProgram(ctx);
-        DefaultCullingSet::Enable(ctx, engine->GetLightDataModule());
     }
 
     // Сцена = выбор фрактала. Всё сценозависимое — буфер кадра (CreateBufferData) и его

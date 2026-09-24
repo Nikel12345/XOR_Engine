@@ -19,7 +19,7 @@
             "pass": "DefaultTransparentRenderPass",
             "vs_buffers": [
                 "DefaultTransformBuffer",
-                "DefaultPositionIndexBuffer",
+                "DefaultOutPibBuffer",
                 "cameraBuffer",
                 "DefaultInstanceBuffer"
             ],
@@ -52,7 +52,7 @@
             "pass": "DefaultMainRenderPass",
             "vs_buffers": [
                 "DefaultTransformBuffer",
-                "DefaultPositionIndexBuffer",
+                "DefaultOutPibBuffer",
                 "cameraBuffer",
                 "DefaultInstanceBuffer",
                 "DefaultLightCameraBuffer"
@@ -90,7 +90,7 @@
             "pass": "DefaultMainRenderPass",
             "vs_buffers": [
                 "DefaultTransformBuffer",
-                "DefaultPositionIndexBuffer",
+                "DefaultOutPibBuffer",
                 "cameraBuffer",
                 "DefaultInstanceBuffer",
                 "DefaultLightCameraBuffer"

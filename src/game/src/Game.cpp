@@ -14,7 +14,6 @@
 #include "UI_ImGui.h"
 #include "TexturesPresets.h"
 #include "DefaultShaderSet.h"
-#include "DefaultCullingSet.h"
 #include "GameShaderSet.h"
 #include "MaterialParams.h"
 #include "BufferManager.h"
@@ -89,7 +88,6 @@ SDL_AppResult Game::MainInit()
         SetBloomPrograms(ctx);
         SetAOPrograms(ctx);           // SSAO: глубина main'а → карта AO → вычитание из scene_hdr
         SetFogProgram(ctx);           // туман: линейная стена по дистанции, поверх глубины main'а
-        DefaultCullingSet::Enable(ctx, engine->GetLightDataModule());
     }
     // Push/dispatch своих sp — ДО первого LoadScene: реестр ShaderManager вешает их на sp сам.
     GameShaderSet::RegisterShaderFuncs(ctx);

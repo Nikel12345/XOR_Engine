@@ -18,6 +18,8 @@
 #include "TextureLoader.h"
 #include "BatchBuilder.h"
 #include "PIB_DataModule.h"
+#include "BoundSphereDataModule.h"
+#include "CullingDataModule.h"
 #include "TransformDataModule.h"
 #include "InstanceDataModule.h"
 #include "TextureStateDataModule.h"
@@ -290,6 +292,8 @@ Engine::Engine(const EngineConfig& cfg)
 	batch_builder = new BatchBuilder();
 
 	pib_data_module = new PIB_DataModule();
+	bound_sphere_data_module = new BoundSphereDataModule();
+	culling_data_module = new CullingDataModule();
 	transform_data_module = new TransformDataModule();
 	instance_data_module = new InstanceDataModule();
 	light_data_module = new LightDataModule();
@@ -326,6 +330,7 @@ Engine::Engine(const EngineConfig& cfg)
 	UI_ImGui::Init(win, dev);
 	DefaultResourceSet::SetDefaultResources(engine_context);
 	DefaultShaderProgramSet::SetDefaultShaders(engine_context);
+	DefaultShaderProgramSet::SetCullingPrograms(engine_context, culling_data_module);
 	init_ok = true;
 }
 
@@ -340,6 +345,7 @@ void Engine::InitDefaultBufferUpdaters()
 	SetDefaultPositionIndexUpdater(*engine_context, pib_data_module);
 	SetDefaultLightCamerasUpdater(*engine_context, light_data_module);
 	SetDefaultIndirectUpdater(*engine_context, indirect_data_module, light_data_module);
+	SetDefaultCullingUpdaters(*engine_context, culling_data_module, bound_sphere_data_module);
 
 	SetDefaultTexStateChannel(*engine_context, tex_state_data_module);
 	SetDefaultTexStateUpdater(*engine_context, tex_state_data_module);
@@ -437,6 +443,8 @@ Engine::~Engine()
 	delete font_manager;
 	delete batch_builder;
 	delete pib_data_module;
+	delete bound_sphere_data_module;
+	delete culling_data_module;
 	delete transform_data_module;
 	delete instance_data_module;
 	delete light_data_module;

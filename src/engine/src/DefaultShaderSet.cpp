@@ -15,6 +15,8 @@ using namespace ShaderBase;
 #include "PassManager.h"
 #include "BatchBuilder.h"
 #include "RenderSnapshot.h"
+#include "CullingDataModule.h"
+#include "TextureData.h"
 
 namespace DefaultShaderProgramSet
 {
@@ -72,7 +74,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry()->DoesNotCull();
 		ctx->CreateShaderProgram("Fallback", spd, RP::MAIN_PASS,
-			"fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"fallback_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"fallback_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
 			{ }, ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
 		ctx->GetBatchBuilder()->SetFallbackShader(ctx->GetShaderManager()->InternShaderProgram("Fallback"));
@@ -114,7 +116,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry();
 		ctx->CreateShaderProgram("Lit", spd, RP::MAIN_PASS,
-			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			// Буферы вариантов — во ФРАГМЕНТНОМ списке: main_pass_vs общий и с программами игр,
 			// а буфер в вершинном списке обязана была бы биндить КАЖДАЯ из них — иначе
 			// «Missing vertex storage buffer binding».
@@ -123,7 +125,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 			ResourceTag::CodeOwned | ResourceTag::Default);
 
 		ctx->CreateShaderProgram("LitColor", spd, RP::MAIN_PASS,
-			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"untextured_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER },
 			{ }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
@@ -131,7 +133,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ShaderProgramDescription spd;
 		spd.BehavesAsTransparentGeometry();
 		ctx->CreateShaderProgram("LitTransparent", spd, RP::TRANSPARENT_PASS,
-			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
+			"main_pass_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER },
 			"transparent_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo, TextureSlotRole::Normal }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
@@ -139,14 +141,14 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ShaderProgramDescription spd;
 		spd.BehavesAsShadowCaster();
 		ctx->CreateShaderProgram("ShadowCaster", spd, RP::SHADOW_PASS,
-			"shadow_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+			"shadow_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
 			"shadow_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 	{
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry()->IgnoresDepth()->AsLineList();
 		ctx->CreateShaderProgram("Wireframe", spd, RP::DEBUG_PASS,
-			"debug_collider_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER },
+			"debug_collider_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
 			"debug_collider_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 	// Сплат ВЫКЛЮЧЕН вместе со своим проходом (см. Engine::Init). Держать sp живой нельзя:
@@ -157,7 +159,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 	//		ShaderProgramDescription spd;
 	//		spd.BehavesAsOpaqueGeometry()->AsPointList();
 	//		ctx->CreateShaderProgram("Splat", spd, RP::SPLAT_PASS,
-	//			"splat_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CAMERA_BUFFER },
+	//			"splat_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER },
 	//			"splat_fs", { }, { }, ResourceTag::CodeOwned | ResourceTag::Default);
 	//	}
 	{
@@ -177,7 +179,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ShaderProgramDescription spd;
 		spd.BehavesAsUIOverlay();
 		ctx->CreateShaderProgram("UI", spd, RP::UI_PASS,
-			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_INSTANCE_BUFFER },
+			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_INSTANCE_BUFFER },
 			"ui_fs", { UI_TEXT_RANK_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER,
 			           DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo }, ResourceTag::CodeOwned | ResourceTag::Default);
@@ -424,4 +426,110 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
     }
 
     inited = true;
+}
+
+namespace {
+    struct alignas(16) CullScatterPush {
+        uint32_t range_start, range_count, num_blocks, out_base;
+        uint32_t out_cap, cnt_base, gl_count, target_height;
+        float    min_screen_radius_px;
+        uint32_t pad[3];
+    };
+
+    struct alignas(16) CullFixupPush {
+        uint32_t num_blocks, cmd_base, commands, first_cmd;
+        uint32_t out_base, out_cap, cnt_base, gl_count;
+    };
+
+    struct alignas(16) CullClearPush {
+        uint32_t total;
+        uint32_t pad[3];
+    };
+}
+
+void DefaultShaderProgramSet::SetCullingPrograms(EngineContext* ctx, CullingDataModule* cdm)
+{
+    namespace RP = DefaultRenderPassNamespace;
+    using namespace DefaultBuffersNames;
+    ShaderManager* sm = ctx->GetShaderManager();
+    PassManager*   pm = ctx->GetPassManager();
+    const ResourceTag tags = ResourceTag::CodeOwned | ResourceTag::Default;
+
+    ctx->CreateComputeShader("culling_clear_cs",   "../engine/shaders_code/comp/culling_clear.comp.hlsl", tags);
+    ctx->CreateComputeShader("culling_scatter_cs", "../engine/shaders_code/comp/culling_scatter.comp.hlsl", tags);
+    ctx->CreateComputeShader("culling_fixup_cs",   "../engine/shaders_code/comp/culling_fixup.comp.hlsl", tags);
+
+    // Порядок создания программ = порядок исполнения: clear → все scatter → все fixup.
+    ctx->CreateComputeShaderProgram("csp_cull_clear", "culling_clear_cs", { DEFAULT_CULL_COUNTERS_BUFFER }, {}, {}, {}, {}, RP::CULLING_PASS, tags);
+    sm->CreateComputePushInstruction<RP::CullingState>("csp_cull_clear",
+        [cdm](const PushConstantBinder& b, RP::CullingState) { b.Push(CullClearPush{ cdm->TotalCounters(b.frame), {} }); });
+    sm->CreateDispatchInstruction<RP::DummyDispatchData>("csp_cull_clear",
+        [cdm](DispatchSizeBinder& b, RP::DummyDispatchData) { b.Dispatch(cdm->TotalCounters(b.frame)); });
+
+    struct Culled { const char* pass; BufferDataName cameras; bool player_view; };
+    const Culled culled[] = {
+        { RP::SHADOW_PASS,      DEFAULT_LIGHT_CAMERA_BUFFER, false },
+        { RP::MAIN_PASS,        DEFAULT_CAMERA_BUFFER,       true  },
+        { RP::TRANSPARENT_PASS, DEFAULT_CAMERA_BUFFER,       false },
+        { RP::DEBUG_PASS,       DEFAULT_CAMERA_BUFFER,       false },
+        { RP::UI_PASS,          DEFAULT_CAMERA_BUFFER,       false },
+    };
+    TextureAtlas* lod_target = ctx->GetTextureAtlas(std::string("scene_hdr"));
+
+    for (const Culled& c : culled) {
+        RenderPassStep* rp = pm->GetRenderPassStep(c.pass);
+        if (!rp) continue;
+        const uint32_t ordinal = rp->ordinal;
+        const std::string name = std::string("csp_cull_scatter_") + c.pass;
+
+        ctx->CreateComputeShaderProgram(name, "culling_scatter_cs",
+            { DEFAULT_OUT_PIB_BUFFER, DEFAULT_CULL_COUNTERS_BUFFER },
+            { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_RECORD_GROUP_BUFFER, DEFAULT_GROUP_TABLE_BUFFER,
+              DEFAULT_BOUND_SPHERE_BUFFER, DEFAULT_TRANSFORM_BUFFER, c.cameras, DEFAULT_CAMERA_BUFFER },
+            {}, {}, {}, RP::CULLING_PASS, tags);
+        sm->CreateComputePushInstruction<RP::CullingState>(name,
+            [cdm, ordinal, lod_target, player_view = c.player_view](const PushConstantBinder& b, RP::CullingState st) {
+                const CullPassLayout& p = cdm->Pass(b.frame, ordinal);
+                CullScatterPush push{};
+                push.range_start = p.first_pib;
+                push.range_count = p.records;
+                push.num_blocks = p.blocks;
+                push.out_base = p.out_base;
+                push.out_cap = p.out_cap;
+                push.cnt_base = p.cnt_base;
+                push.gl_count = p.gl;
+                push.target_height = lod_target ? lod_target->height : 0u;
+                // Мелочь отсекается только в проходе камеры игрока: у теней своё разрешение.
+                push.min_screen_radius_px = player_view ? st.min_screen_radius_px : 0.0f;
+                b.Push(push);
+            });
+        sm->CreateDispatchInstruction<RP::DummyDispatchData>(name,
+            [cdm, ordinal](DispatchSizeBinder& b, RP::DummyDispatchData) {
+                const CullPassLayout& p = cdm->Pass(b.frame, ordinal);
+                b.Dispatch(p.blocks ? p.records : 0u);
+            });
+    }
+
+    for (const Culled& c : culled) {
+        RenderPassStep* rp = pm->GetRenderPassStep(c.pass);
+        if (!rp) continue;
+        const uint32_t ordinal = rp->ordinal;
+        const std::string name = std::string("csp_cull_fixup_") + c.pass;
+
+        ctx->CreateComputeShaderProgram(name, "culling_fixup_cs",
+            { DEFAULT_INDIRECT_BUFFER },
+            { DEFAULT_CMD_GROUP_LEVEL_BUFFER, DEFAULT_GROUP_TABLE_BUFFER, DEFAULT_CULL_COUNTERS_BUFFER },
+            {}, {}, {}, RP::CULLING_PASS, tags);
+        sm->CreateComputePushInstruction<RP::CullingState>(name,
+            [cdm, ordinal](const PushConstantBinder& b, RP::CullingState) {
+                const CullPassLayout& p = cdm->Pass(b.frame, ordinal);
+                b.Push(CullFixupPush{ p.blocks, p.cmd_base, p.commands, p.first_cmd,
+                                      p.out_base, p.out_cap, p.cnt_base, p.gl });
+            });
+        sm->CreateDispatchInstruction<RP::DummyDispatchData>(name,
+            [cdm, ordinal](DispatchSizeBinder& b, RP::DummyDispatchData) {
+                const CullPassLayout& p = cdm->Pass(b.frame, ordinal);
+                b.Dispatch(p.blocks * p.commands);
+            });
+    }
 }
