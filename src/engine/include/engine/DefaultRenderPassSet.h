@@ -223,11 +223,6 @@ namespace DefaultRenderPassNamespace
         // и UI своё разрешение, и «мелкое в пикселях» там значит не то же самое.
         float    min_screen_radius_px = 0.7f;   // 0 = отсев выключен
         uint32_t target_height = 0;             // высота цветового таргета прохода, px
-        // 1 = проход рисует то, что НИЖЕ нижней границы сабмеша (сплат), а не то, что внутри
-        // диапазона. Обе стороны получаются из ОДНОЙ пары ступеней, поэтому порог живёт в одном
-        // месте (SubMeshData::screen_size_span), а какую его сторону взять — решает проход:
-        // csp_cull_main рисует при px >= L, csp_cull_splat при px < L. Синхронизировать нечего.
-        uint32_t invert_span = 0;
     };
     void SetDefaultCullingPass(EngineContext* ctx);
 

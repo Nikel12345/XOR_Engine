@@ -313,15 +313,6 @@ bool ModelManager::RenameModel(ModelId id, const std::string& new_name)
     return models_data.Rename(id, new_name);
 }
 
-void ModelManager::SetSubmeshSpan(const std::string& name, size_t submesh, SubMeshSpan span)
-{
-    ModelData* m = FindModel(name);
-    if (!m || submesh >= m->submeshes.size()) return;
-    SubMeshSpan& dst = m->submeshes[submesh].screen_size_span;
-    if (dst.lod_min == span.lod_min && dst.lod_max == span.lod_max) return;
-    dst = span;
-}
-
 size_t ModelManager::ClearSceneModels()
 {
     size_t removed = 0;
@@ -351,10 +342,6 @@ size_t ModelManager::LoadSceneModels(const std::vector<SceneModelEntry>& entries
         DeleteModel(models_data.Find(e.name), NameSlot::Keep);
         if (!CreateModel(e.name, e.vertex_path, e.index_path, e.anchor, pool)) continue;
         ++loaded;
-        // Диапазоны приходят из манифеста, а не из .bin, и в построении геометрии не участвуют.
-        ModelData* md = models_data.Get(models_data.Find(e.name));
-        const size_t n = std::min(e.screen_size_span.size(), md->submeshes.size());
-        for (size_t i = 0; i < n; ++i) md->submeshes[i].screen_size_span = e.screen_size_span[i];
     }
     return loaded;
 }

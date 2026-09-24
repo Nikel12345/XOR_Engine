@@ -174,7 +174,7 @@ struct Renderable : SoAProxyAddable<Renderable> {
     std::vector<uint32_t>                       flags;
     std::vector<uint8_t>                        lod_count;
     std::vector<std::array<ModelId, MAX_LOD>>   models;
-    std::vector<std::array<float, MAX_LOD - 1>> switches;
+    std::vector<std::array<float, MAX_LOD - 1>> switches;    // экранный радиус (px), ниже которого уровень L уступает L+1
     std::vector<std::vector<MaterialSlot>>      materials;
     size_t size() const { return visible.size(); }
     auto columns() { return std::tie(visible, alpha, flags, lod_count, models, switches, materials); }

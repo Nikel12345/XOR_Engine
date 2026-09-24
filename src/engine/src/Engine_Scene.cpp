@@ -354,12 +354,6 @@ static void SaveModels(const std::string& dir, ModelManager* mm)
 		yyjson_mut_obj_add_strcpy(d.doc, e, "index",  m->index_path.c_str());
 		yyjson_mut_obj_add_int   (d.doc, e, "anchor", (int)m->anchor);
 		yyjson_mut_obj_add_strcpy(d.doc, e, "pool",   m->pool_name.c_str());
-		yyjson_mut_val* span = yyjson_mut_obj_add_arr(d.doc, e, "screen_size_span");
-		for (const SubMeshData& sm : m->submeshes) {
-			yyjson_mut_val* pair = yyjson_mut_arr_add_arr(d.doc, span);
-			yyjson_mut_arr_add_int(d.doc, pair, sm.screen_size_span.lod_min);
-			yyjson_mut_arr_add_int(d.doc, pair, sm.screen_size_span.lod_max);
-		}
 		++saved;
 	}
 	d.Write(dir, "models.json", "models", saved);
@@ -547,11 +541,6 @@ static void LoadModels(const std::string& dir, ModelManager* mm)
 	ForEachIn(d.root(), "models", [&](yyjson_val* m) {
 		SceneModelEntry entry{ JsonStr(m, "name"), JsonStr(m, "vertex"), JsonStr(m, "index"),
 		                       (AnchorShift)JsonInt(m, "anchor", 0), JsonStr(m, "pool") };
-		ForEachIn(m, "screen_size_span", [&](yyjson_val* pair) {
-			entry.screen_size_span.push_back(
-				{ safe_i_u8((int)yyjson_get_int(yyjson_arr_get(pair, 0))),
-				  safe_i_u8((int)yyjson_get_int(yyjson_arr_get(pair, 1))) });
-		});
 		entries.push_back(std::move(entry));
 	});
 

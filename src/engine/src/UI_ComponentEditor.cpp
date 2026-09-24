@@ -271,7 +271,8 @@ uint32_t DrawLodSetup(const EditTarget& t, Renderable& rend, size_t row, uint32_
 
     bool switch_changed = false;
     if (lod > 0)
-        switch_changed = ImGui::DragFloat("switch", &switches[lod - 1], 0.001f, 0.0f, 1.0f, "%.4f");
+        switch_changed = ImGui::DragFloat("switch px", &switches[lod - 1], 0.5f, 0.0f, 16384.0f, "%.1f",
+                                          ImGuiSliderFlags_AlwaysClamp);
 
     if (new_count == count && !switch_changed) return lod;
     if (t.live()) {

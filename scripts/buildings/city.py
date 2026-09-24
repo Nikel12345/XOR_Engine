@@ -68,28 +68,14 @@ BUILDING_ARCHETYPE = "Renderable,Transform"
 MAT4_KEYS = ("x", "y", "z", "w", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l")
 
 
-def span_step(px):
-    """Ступень порога для screen_size_span: движок хранит НОМЕР ступени, а не пиксели.
+# Уровень 1 дома — та же модель без деталей. Порог — экранный РАДИУС дома (не детали), px.
+DETAIL_HIDE_PX = 128.0
 
-    Пара ступеней лежит в четырёх свободных битах слова EntityToCmd (ModelData.h::PackLodRange) —
-    числа в пикселях туда не влезет. Лесенка: 0 = границы нет, иначе порог = 0.5 * 2^(L-1) px."""
-    if px <= 0:
-        return 0
-    return int(round(math.log(px / 0.5, 2))) + 1
-
-
-# Экранный РАДИУС дома (не окна), ниже которого окна перестают рисоваться.
-WINDOW_HIDE_PX = 100.0
-
-# Диапазоны экранных размеров по сабмешам: {слот: (нижняя ступень, верхняя)}. Чего нет в словаре,
-# получает (0, 0) — «рисовать всегда».
-#
-# Окна выключаются вдали потому, что они НАКЛАДКА на сплошной фасад, а не вырез: убрать их можно
-# без дырок, а платит за них кадр дважды — квад далёкого окна субпиксельный (растеризатор всё
-# равно выдаёт квад 2x2, три лейна из четырёх в мусор) и вдобавок шейдит стену вторым слоем.
-# Слот берётся у generate.py, а не числом: раскладку слотов задаёт он.
-SUBMESH_SPANS = {SUBMESH_SLOTS["windows"]: (span_step(WINDOW_HIDE_PX), 0), SUBMESH_SLOTS["tower"]: (span_step(128), 0),
-                 SUBMESH_SLOTS["radiotower"]: (span_step(128), 0)}
+# Детали, которых нет на уровне 1. Окна убираются вдали потому, что они НАКЛАДКА на сплошной фасад,
+# а не вырез: убрать их можно без дырок, а платит за них кадр дважды — квад далёкого окна
+# субпиксельный (растеризатор всё равно выдаёт квад 2x2, три лейна из четырёх в мусор) и вдобавок
+# шейдит стену вторым слоем. Номер части = номер слота generate.py (mat_ids ниже).
+LEVEL1_HIDDEN = {SUBMESH_SLOTS["windows"], SUBMESH_SLOTS["tower"], SUBMESH_SLOTS["radiotower"]}
 
 
 
@@ -159,14 +145,22 @@ def city_grid(av_x, av_z, rng):
             yield ix, iz, model + 1, quarter, (lx - ox) * SPACING, (lz - oz) * SPACING
 
 
-def renderable(model_col, names):
-    """Компонент Renderable с одним уровнем: модель и материалы частей на уровне 0."""
+def renderable(model_col, names, hidden=None):
+    """Компонент Renderable. hidden — части, которых нет на уровне 1; без него уровень один."""
     count = len(model_col)
+    if hidden is None:
+        return collections.OrderedDict([
+            ("visible", [True] * count), ("alpha", [1.0] * count), ("flags", [0] * count),
+            ("lod_count", [1] * count),
+            ("models", [[m] for m in model_col]),
+            ("materials", [[[n] for n in row] for row in names]),
+        ])
     return collections.OrderedDict([
         ("visible", [True] * count), ("alpha", [1.0] * count), ("flags", [0] * count),
-        ("lod_count", [1] * count),
-        ("models", [[m] for m in model_col]),
-        ("materials", [[[n] for n in row] for row in names]),
+        ("lod_count", [2] * count),
+        ("models", [[m, m] for m in model_col]),
+        ("materials", [[[n, None if k in hidden else n] for k, n in enumerate(row)] for row in names]),
+        ("switches", [[DETAIL_HIDE_PX]] * count),
     ])
 
 
@@ -219,7 +213,7 @@ def build_scene(rng):
     scene[BUILDING_ARCHETYPE] = collections.OrderedDict([
         ("count", count),
         ("entities", list(range(2, 2 + count))),
-        ("Renderable", renderable(model_col, names)),
+        ("Renderable", renderable(model_col, names, LEVEL1_HIDDEN)),
         ("Transform", cols),
     ])
     return scene, cells, av_x, av_z
@@ -261,10 +255,6 @@ def sync_models():
             ("index", "%s/%s_i.bin" % (rel, name)),
             ("anchor", 0),
             ("pool", "PosUVNorm"),
-            # Пара на КАЖДЫЙ сабмеш и в его порядке: позиция в массиве и есть адрес сабмеша,
-            # своего имени у него нет. Длина — из .bin по той же причине, что и в submesh_count.
-            ("screen_size_span", [list(SUBMESH_SPANS.get(i, (0, 0)))
-                                  for i in range(submesh_count(name))]),
         ])
 
     generated = re.compile(r"^%s\d+$" % re.escape(MODEL_NAME))
@@ -277,9 +267,7 @@ def sync_models():
     added = [n for n in want if n not in had]
     dropped = sorted(had - set(want))
     out = ["models.json: %d building entries (added %d, dropped %d)"
-           % (len(want), len(added), len(dropped)),
-           "screen_size_span: submesh %d (windows) off below %g px"
-           % (SUBMESH_SLOTS["windows"], WINDOW_HIDE_PX)]
+           % (len(want), len(added), len(dropped))]
     if dropped:
         out.append("dropped stale: " + ", ".join(dropped))
     if missing_files:

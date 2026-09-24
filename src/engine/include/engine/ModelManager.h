@@ -18,10 +18,7 @@ struct SceneModelEntry {
 	std::string vertex_path;
 	std::string index_path;
 	AnchorShift anchor = AnchorShift::Keep;
-	std::string pool; 
-	// Длина списка с числом сабмешей совпадать не обязана: лишнее игнорируется, недостающим
-	// остаётся (0,0) = «границ нет».
-	std::vector<SubMeshSpan> screen_size_span;
+	std::string pool;
 };
 
 struct ModelCell { std::string name; std::unique_ptr<ModelData> object; };
@@ -75,9 +72,6 @@ public:
 	bool CheckDirty() const;
 
 	uint64_t SpheresRevision() const { return spheres_revision; };
-	// Запись диапазона и бамп ревизии ОДНОЙ операцией: забытый бамп даёт правку, которая молча не
-	// доедет до GPU. Запись того же значения — no-op (ползунок редактора дёргает это покадрово).
-	void SetSubmeshSpan(const std::string& name, size_t submesh, SubMeshSpan span);
 	ModelData* operator[](const std::string& name);
 	// Тихий резолв: промах не логируется. Нужен там, где промах законен или част — резолв на
 	// каждую сущность при сборке батчей. Кто ждёт модель наверняка, берёт operator[].

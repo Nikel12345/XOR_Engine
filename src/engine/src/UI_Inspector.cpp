@@ -522,52 +522,6 @@ namespace {
         }
     }
 
-    const char* SpanStepLabel(int step)
-    {
-        static char buf[24];
-        if (step <= 0) return "off";
-        std::snprintf(buf, sizeof buf, "%.4g px", 0.5 * std::exp2(double(step - 1)));
-        return buf;
-    }
-
-    // Пишем поле на месте: пересоздание модели перечитало бы .bin и обнулило остальные спаны.
-    // Батч держит КОПИЮ диапазона, поэтому правка обязана пересобрать дерево.
-    void ModelSpansEditor(EngineContext* ctx)
-    {
-        if (g_sel.name.empty()) return;
-        ModelManager* mm = ctx->GetModelManager();
-        ModelData* m = mm->FindModel(g_sel.name);
-        if (!m) return;
-
-        ImGui::SeparatorText("Screen size span");
-        if (m->submeshes.empty()) {
-            ImGui::TextDisabled("(model has no submeshes)");
-            return;
-        }
-        ImGui::TextDisabled("Порог = экранный РАДИУС всего объекта. off = границы нет.");
-
-        for (size_t i = 0; i < m->submeshes.size(); ++i) {
-            const SubMeshSpan cur = m->submeshes[i].screen_size_span;
-            int mn = cur.lod_min;
-            int mx = cur.lod_max;
-
-            ImGui::PushID(static_cast<int>(i));
-            ImGui::Text("#%zu (mat %u)", i, m->submeshes[i].material_index);
-            ImGui::SameLine(120.0f);
-            ImGui::SetNextItemWidth(120.0f);
-            bool changed = ImGui::SliderInt("##min", &mn, 0, 15, SpanStepLabel(mn));
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(120.0f);
-            changed |= ImGui::SliderInt("##max", &mx, 0, 15, SpanStepLabel(mx));
-            ImGui::PopID();
-
-            if (changed) {
-                mm->SetSubmeshSpan(g_sel.name, i, { safe_i_u8(mn), safe_i_u8(mx) });
-                ctx->GetBatchBuilder()->SetDirtyBatches(true);
-            }
-        }
-    }
-
     void ModelEditor(EngineContext* ctx)
     {
         static char        nameBuf[128] = "";
@@ -633,7 +587,6 @@ namespace {
         }
         ImGui::EndDisabled();
 
-        ModelSpansEditor(ctx);
     }
 
     // У sp, созданной из UI, push-констант нет: push и dispatch — это код.

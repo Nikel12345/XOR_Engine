@@ -25,12 +25,6 @@ inline void WriteVertices(std::vector<std::byte>& out, const std::vector<V>& src
     if (!src.empty()) std::memcpy(out.data() + base, src.data(), src.size() * sizeof(V));
 }
 
-// LOD "для бедных"
-struct SubMeshSpan {
-    uint8_t lod_min = 0;
-    uint8_t lod_max = 0;
-};
-
 struct SubMeshData {
     Uint32 vertexOffset = 0;
     Uint32 indexOffset = 0;
@@ -40,7 +34,6 @@ struct SubMeshData {
     glm::vec4 sphere;
     glm::vec3 aabb_center = glm::vec3(0.0f);
     glm::vec3 aabb_half   = glm::vec3(0.0f);
-    SubMeshSpan screen_size_span;
 };
 
 // L/R = X min/max, B/T = Y min/max (Bottom/Top), B/F = Z min/max (Back/Front).
