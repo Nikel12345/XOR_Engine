@@ -21,10 +21,6 @@ target_link_libraries(ImGui PUBLIC
     SDL3::SDL3          # include-пути SDL приходят вместе с целью (см. корневой CMakeLists)
 )
 
-# SPIRV (spirv_reflect) удалён из сборки: рефлексия идёт через shadercross
-# (SDL_ShaderCross_Reflect*), а SpvReflect* в коде не вызывается. Файлы в
-# external/SPIRV оставлены на месте — при необходимости вернуть таргет сюда.
-
 # yyjson — вендорный JSON (файлы сцены/ресурсов: Engine::Save/LoadScene). C-либа из одного
 # .c/.h (external/yyjson, MIT). Линкуется только Engine (PRIVATE): json — деталь файлового IO,
 # наружу торчат лишь Save/LoadScene(папка).
@@ -196,7 +192,7 @@ target_link_libraries(EngineGpu PUBLIC
     SDL3::SDL3          # SDL3-инклуды публичных заголовков GPU-кора приходят вместе с целью
 )
 target_link_libraries(EngineGpu PRIVATE
-    "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/lib/SDL3_shadercross.lib"  # компиляция шейдеров — только внутри
+    SDL3_shadercross::SDL3_shadercross-static   # компиляция шейдеров — только внутри
 )
 
 target_precompile_headers(EngineGpu PRIVATE [["PCH.h"]])

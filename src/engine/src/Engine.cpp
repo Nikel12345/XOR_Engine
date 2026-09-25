@@ -193,9 +193,24 @@ bool Engine::InitPlatform(const EngineConfig& cfg)
 		return false;
 	}
 
-	dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, cfg.gpu_debug, nullptr);
+	// Vulkan 1.3 — официальный минимум движка. SDL по умолчанию объявляет 1.0; объявленная версия
+	// у нас ТРЕБОВАНИЕ: форк отсекает устройства ниже неё (ENGINE-FORK в DeterminePhysicalDevice).
+	// Число собрано вручную по раскладке VK_MAKE_API_VERSION: заголовков Vulkan в движке нет.
+	constexpr Uint32 VULKAN_API_1_3 = (1u << 22) | (3u << 12);
+	SDL_GPUVulkanOptions vk_options{};
+	vk_options.vulkan_api_version = VULKAN_API_1_3;
+
+	const SDL_PropertiesID dev_props = SDL_CreateProperties();
+	SDL_SetBooleanProperty(dev_props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true);
+	SDL_SetBooleanProperty(dev_props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, cfg.gpu_debug);
+	SDL_SetPointerProperty(dev_props, SDL_PROP_GPU_DEVICE_CREATE_VULKAN_OPTIONS_POINTER, &vk_options);
+	dev = SDL_CreateGPUDeviceWithProperties(dev_props);
+	SDL_DestroyProperties(dev_props);
 	if (!dev) {
 		SDL_Log("SDL_CreateGPUDevice failed: %s", SDL_GetError());
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, cfg.title,
+			"No suitable GPU found: Vulkan 1.3 is required.\n"
+			"Updating the graphics driver may help.", win);
 		return false;
 	}
 	SDL_Log("GPU backend: %s", SDL_GetGPUDeviceDriver(dev));

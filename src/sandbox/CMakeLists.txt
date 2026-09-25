@@ -3,7 +3,9 @@
 # Площадки для запуска подсистем движка по отдельности.
 # Каждый сценарий — свой .cpp; main решает, что именно запустить.
 set(SANDBOX_SRC
-    src/IndirectEmptyCmdProbe.cpp     # ЗОНД: цена пустых команд (num_instances = 0) в indirect-мультидроу (см. шапку файла)
+    src/ShadercrossBuildProbe.cpp     # ЗОНД: shadercross из исходников компилирует и рефлексирует, DXC берётся из каталога exe (см. шапку файла)
+    # src/VulkanVersionProbe.cpp      # ЗОНД: отсечение устройств по объявленной версии Vulkan (см. шапку файла)
+    # src/IndirectEmptyCmdProbe.cpp   # ЗОНД: цена пустых команд (num_instances = 0) в indirect-мультидроу (см. шапку файла)
     # src/FrustumVecProbe.cpp         # ЗОНД: фрустум-отсев 1М объектов на CPU через ECS - форма, которая векторизуется
     # src/TransposeVecProbe.cpp       # ЗОНД: нужны ли интринсики в TransformDataModule (транспонирование SoA->AoS и умножение)
     # src/GravityVecProbe.cpp           # ЗОНД: векторизуется ли гравитационный шаг через ForEach (без интринсиков)

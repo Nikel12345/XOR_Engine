@@ -7,7 +7,8 @@ function(copy_runtime_dlls target)
             "${CMAKE_SOURCE_DIR}/external/SDL3_image/lib/x64/SDL3_image.dll"
             $<TARGET_FILE_DIR:${target}>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/bin/SDL3_shadercross.dll"
+            "${SHADERCROSS_DXC_BIN}/dxcompiler.dll"
+            "${SHADERCROSS_DXC_BIN}/dxil.dll"
             $<TARGET_FILE_DIR:${target}>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/external/SDL3_ttf/lib/x64/SDL3_ttf.dll"
