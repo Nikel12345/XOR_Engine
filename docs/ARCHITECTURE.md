@@ -216,6 +216,7 @@ id раньше, чем появится сам ресурс. Имя при эт
 | Как устроен кадр: слоты, слепки, гейты | `docs/render-pipeline/frame.md` |
 | Дерево батчей: группировка, слепок раскладки, вызовы отрисовки | `docs/render-pipeline/batches.md` |
 | Индирект, регионы проходов, GPU-каллинг | `docs/render-pipeline/culling.md` |
+| Уровни детализации: цепочка модели, материалы уровней, выбор уровня | `docs/render-pipeline/lod.md` |
 | Как инстанс находит свои данные: строки, PIB, разреженные каналы | `docs/render-pipeline/instance-data.md` |
 | Переключаемые варианты текстур | `docs/render-pipeline/materials.md` |
 | Шейдерная программа: реестры, компиляция, пуши | `docs/gpu/shaders/programs.md` |
