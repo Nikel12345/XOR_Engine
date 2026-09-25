@@ -32,6 +32,7 @@ struct RenderPassStep;
 struct SubMeshData;
 struct TextureHandle;
 struct ShaderProgram;
+struct ModelData;
 
 using Entity = uint32_t;
 
@@ -79,6 +80,14 @@ private:
 	};
 	std::vector<ResolvedCmd> resolved_scratch;
 
+	struct ResolvedGroup {
+		RenderPassStep*  pass = nullptr;
+		uint64_t         key = 0;
+		uint8_t          lod_count = 1;
+		const ModelData* root_model = nullptr;
+	};
+	std::vector<ResolvedGroup> group_scratch;
+
 	void BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
 		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
 		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
@@ -93,9 +102,10 @@ private:
 	void BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, MaterialManager* mtm);
 	std::unordered_map<BatchKeys::MatSpKey, MatSpLayout> mat_sp_layouts;
 
-	void AddEntityToBatches(Entity entity, PipeManager* pm, PassManager* pass_manager, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
-		ModelManager* mdm, MaterialManager* mtm,
-		const Renderable& rend, size_t row);
+	void ResolveEntity(PipeManager* pm, PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
+		ModelManager* mdm, MaterialManager* mtm, const Renderable& rend, size_t row);
+	bool StaysInSameGroups(Entity entity) const;
+	void InsertResolvedEntity(Entity entity);
 	TextureBatchData* ResolveTextureBatch(RenderPassStep* rp, ShaderProgram* sp, const ShaderName& sp_name,
 		const std::shared_ptr<std::vector<uint8_t>>& sp_params, const MatSpLayout& lay, uint32_t section,
 		PipeManager* pm, ShaderManager* sm, BufferManager* bm, uint64_t& path_key);

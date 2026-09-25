@@ -329,10 +329,11 @@ TextureBatchData* BatchBuilder::ResolveTextureBatch(RenderPassStep* rp, ShaderPr
     return &tex_it->second;
 }
 
-void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManager* pass_manager, TextureManager* tm, ShaderManager* sm, BufferManager* bm,
+void BatchBuilder::ResolveEntity(PipeManager* pm, PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
     ModelManager* mdm, MaterialManager* mtm, const Renderable& rend, size_t row) {
 
     resolved_scratch.clear();
+    group_scratch.clear();
     const ModelId root = rend.model[row];
     const uint32_t lod_count = mdm ? std::min(mdm->LevelCount(root), MAX_LOD) : 1u;
     const ModelData* root_model = mdm ? mdm->FindModel(root) : nullptr;
@@ -394,23 +395,44 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
 
     for (size_t first = 0; first < resolved_scratch.size(); ++first) {
         RenderPassStep* rp = resolved_scratch[first].pass;
-        if (!rp) continue;
+        bool seen = false;
+        for (size_t i = 0; i < first && !seen; ++i) seen = resolved_scratch[i].pass == rp;
+        if (seen) continue;
 
         uint64_t group_key = lod_key;
         for (size_t i = first; i < resolved_scratch.size(); ++i)
             if (resolved_scratch[i].pass == rp) group_key = MixKey(group_key ^ resolved_scratch[i].key);
+        group_scratch.push_back({ rp, group_key, static_cast<uint8_t>(lod_count), root_model });
+    }
+}
 
-        auto [git, created] = rp->draw_groups.try_emplace(group_key);
+bool BatchBuilder::StaysInSameGroups(Entity entity) const
+{
+    auto it = entity_slots.find(entity);
+    const size_t held = it == entity_slots.end() ? 0 : it->second.size();
+    if (held != group_scratch.size()) return false;
+
+    for (const ResolvedGroup& g : group_scratch) {
+        auto git = g.pass->draw_groups.find(g.key);
+        if (git == g.pass->draw_groups.end()) return false;
+        const DrawGroup* group = &git->second;
+        if (std::none_of(it->second.begin(), it->second.end(), [group](const PibSlot& s) { return s.group == group; }))
+            return false;
+    }
+    return true;
+}
+
+void BatchBuilder::InsertResolvedEntity(Entity entity)
+{
+    for (const ResolvedGroup& g : group_scratch) {
+        auto [git, created] = g.pass->draw_groups.try_emplace(g.key);
         DrawGroup& group = git->second;
         if (created) {
-            group.lod_count = static_cast<uint8_t>(lod_count);
-            for (uint32_t L = 0; L + 1 < lod_count; ++L) group.switches[L] = root_model->lods[L].switch_px;
-        }
-        for (size_t i = first; i < resolved_scratch.size(); ++i) {
-            ResolvedCmd& c = resolved_scratch[i];
-            if (c.pass != rp) continue;
-            if (created) {
-                auto [lit, leaf_created] = c.texture->model_batches.try_emplace(MixKey(group_key ^ c.key));
+            group.lod_count = g.lod_count;
+            for (uint32_t L = 0; L + 1u < g.lod_count; ++L) group.switches[L] = g.root_model->lods[L].switch_px;
+            for (const ResolvedCmd& c : resolved_scratch) {
+                if (c.pass != g.pass) continue;
+                auto [lit, leaf_created] = c.texture->model_batches.try_emplace(MixKey(g.key ^ c.key));
                 if (leaf_created) {
                     ModelBatchData& leaf = lit->second;
                     leaf.group = &group;
@@ -418,7 +440,6 @@ void BatchBuilder::AddEntityToBatches(Entity entity, PipeManager* pm, PassManage
                     leaf.submesh = { c.submesh->indexCount, c.submesh->indexOffset, c.submesh->vertexOffset };
                 }
             }
-            c.pass = nullptr;
         }
 
         // Строка ещё не известна: базы архетипов раздаёт RecalculateInstanceOffsets в конце
@@ -458,7 +479,7 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
 {
     if (!scene) return;
 
-    // Предпроход ДО развилки: AddEntityToBatches общая для полной пересборки и инкремента, и обе
+    // Предпроход ДО развилки: ResolveEntity общая для полной пересборки и инкремента, и обе
     // стороны читают памятку.
     BuildMaterialLayouts(tm, sm, mtm);
 
@@ -519,7 +540,8 @@ void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager
         const Renderable& r = arr->data;
         for (size_t i = 0; i < ents.size(); ++i) {
             if (!r.visible[i]) continue;
-            AddEntityToBatches(ents[i], pm, pass_manager, tm, sm, bm, mdm, mtm, r, i);
+            ResolveEntity(pm, pass_manager, sm, bm, mdm, mtm, r, i);
+            InsertResolvedEntity(ents[i]);
         }
     });
 
@@ -539,20 +561,29 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
     }
     if (creates.empty() && deletes.empty() && updates.empty()) return false;
 
-    auto add_if_drawable = [&](Entity entity) {
-        if (!om->Has<Renderable>(scene, entity)) return;
+    auto resolve_if_drawable = [&](Entity entity) {
+        if (!om->Has<Renderable>(scene, entity)) return false;
         SoAElement<Renderable> el = om->GetComponent<Renderable>(scene, entity);
         const Renderable& r = el.container();
         const size_t i = el.i();
-        if (!r.visible[i]) return;
-        AddEntityToBatches(entity, pm, pass_manager, tm, sm, bm, mdm, mtm, r, i);
+        if (!r.visible[i]) return false;
+        ResolveEntity(pm, pass_manager, sm, bm, mdm, mtm, r, i);
+        return true;
     };
+
+    bool changed = !creates.empty() || !deletes.empty();
 
     // «Перевесить» — первыми: после этого энтити уже в дереве, поэтому парный QueueCreate погасит
     // гард идемпотентности, а парный QueueDelete отработает ниже и уберёт её целиком.
+    // Перевес в те же группы пропускается: он лишь переставил бы записи внутри групп, а ревизия
+    // заставила бы перезалить PIB целиком.
     for (Entity entity : updates) {
+        const bool drawable = resolve_if_drawable(entity);
+        if (!drawable) group_scratch.clear();
+        if (StaysInSameGroups(entity)) continue;
         RemoveEntityFromBatches(entity);
-        add_if_drawable(entity);
+        if (drawable) InsertResolvedEntity(entity);
+        changed = true;
     }
 
     // Созданная И удалённая в одном кадре с add-стороны выпадает: её компонентов в ECS уже нет.
@@ -562,12 +593,13 @@ bool BatchBuilder::ApplyIncremental(PipeManager* pm, PassManager* pass_manager, 
         if (deleted_set.count(entity)) continue;
         // Видимость тыкают повторно, и повторный Add наплодил бы дубликаты слотов в PIB.
         if (entity_slots.count(entity)) continue;
-        add_if_drawable(entity);
+        if (resolve_if_drawable(entity)) InsertResolvedEntity(entity);
     }
     for (Entity entity : deletes) {
         RemoveEntityFromBatches(entity);
     }
 
+    if (!changed) return false;
     RecalculateInstanceOffsets(scene);
     return true;
 }
