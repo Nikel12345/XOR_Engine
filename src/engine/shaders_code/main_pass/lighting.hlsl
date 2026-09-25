@@ -5,6 +5,13 @@
 // Spot — угловой конус. Sphere — обычный точечный источник (радиус источника
 // больше не используется). Без wrap-diffuse, edge-soft, source radius и т.п.
 
+// LOD_Quad и LOD_Splat повёрнуты к камере, и их нормаль о направлении на свет ничего не говорит.
+#ifdef LIGHT_IGNORES_NORMAL
+#define LAMBERT(normal, L) 1.0
+#else
+#define LAMBERT(normal, L) max(dot(normal, L), 0.0)
+#endif
+
 struct Light {
     float4 position_radius;   // xyz = позиция; w = радиус источника (НЕ используется)
     float4 direction_angle;   // xyz = направление конуса; w = tan(полуугла)
@@ -34,7 +41,7 @@ float computeSpotLight(float3 normal, Light light, float3 L, float dist, float m
     float cone = smoothstep(cosHalf, cosHalf + 0.02, cosFrag);
     if (cone <= 0.0) return 0.0;
 
-    float NdotL = max(dot(normal, L), 0.0);
+    float NdotL = LAMBERT(normal, L);
     float atten = distanceAttenuation(dist, maxRange);
 
     return NdotL * cone * atten * light.color_power.a;
@@ -42,7 +49,7 @@ float computeSpotLight(float3 normal, Light light, float3 L, float dist, float m
 
 float computePointLight(float3 normal, Light light, float3 L, float dist, float maxRange)
 {
-    float NdotL = max(dot(normal, L), 0.0);
+    float NdotL = LAMBERT(normal, L);
     float atten = distanceAttenuation(dist, maxRange);
 
     return NdotL * atten * light.color_power.a;
@@ -52,7 +59,7 @@ float computePointLight(float3 normal, Light light, float3 L, float dist, float 
 // L уже = направление К свету (= -direction источника), нормализован.
 float computeDirectionalLight(float3 normal, Light light, float3 L)
 {
-    float NdotL = max(dot(normal, L), 0.0);
+    float NdotL = LAMBERT(normal, L);
     return NdotL * light.color_power.a;
 }
 

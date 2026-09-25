@@ -106,6 +106,9 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		{ "MAX_UVL_BLOCKS",      std::to_string(MAX_UVL_BLOCKS) },
 	};
 	ctx->CreateFragmentShader("main_surface_fs",        "../engine/shaders_code/main_pass/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
+	ShaderDefines facing_defines = kVariantDefines;
+	facing_defines.push_back({ "LIGHT_IGNORES_NORMAL", "1" });
+	ctx->CreateFragmentShader("facing_surface_fs",      "../engine/shaders_code/main_pass/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default, facing_defines);
 	ctx->CreateFragmentShader("untextured_surface_fs",  "../engine/shaders_code/main_pass/untextured/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
 	ctx->CreateFragmentShader("transparent_surface_fs", "../engine/shaders_code/transparent_pass/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
 	ctx->CreateFragmentShader("shadow_fs",              "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
@@ -136,7 +139,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 
 		ctx->CreateShaderProgram("LOD_Quad", spd, RP::MAIN_PASS,
 			"lod_quad_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-			"main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
+			"facing_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive },
 			ResourceTag::CodeOwned | ResourceTag::Default);
 
@@ -144,7 +147,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		splat_spd.BehavesAsOpaqueGeometry()->AsPointList();
 		ctx->CreateShaderProgram("LOD_Splat", splat_spd, RP::MAIN_PASS,
 			"lod_splat_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_INSTANCE_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
-			"main_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
+			"facing_surface_fs", { DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER, DEFAULT_CAMERA_BUFFER, DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo, TextureSlotRole::Normal, TextureSlotRole::ORM, TextureSlotRole::Emissive },
 			ResourceTag::CodeOwned | ResourceTag::Default);
 
