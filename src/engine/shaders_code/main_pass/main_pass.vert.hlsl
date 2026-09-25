@@ -1,64 +1,9 @@
-struct VSInput
-{
-    float3 a_pos     : POSITION;
-    float2 a_uv      : TEXCOORD0;
-    float3 a_normal  : NORMAL;
-    float3 a_tangent : TANGENT;
-    uint instanceID  : SV_InstanceID;
-};
-
-struct VSOutput
-{
-    float4 position         : SV_Position;
-    float2 v_uv             : TEXCOORD0;
-    float3 v_worldPos       : TEXCOORD1;
-    float3 v_worldNormal    : TEXCOORD2;
-    float3 v_worldTangent   : TEXCOORD3;
-    float3 v_worldBitangent : TEXCOORD4;
-    float  v_alpha          : TEXCOORD5;
-    // Строка трансформа этого инстанса (-1 = строки нет). Нужна фрагментнику, чтобы
-    // прочитать префикс состояний вариантов; сам буфер вершинник НЕ читает — иначе его обязана
-    // была бы биндить КАЖДАЯ sp с этим вершинником, включая чужие (теневые, фрактальные игровые).
-    // nointerpolation: это индекс, а не величина.
-    // Член ОБЯЗАН быть и в PSInput всех трёх прологов (main/transparent/untextured): вершинник
-    // общий, разъехавшийся PSInput = молча битые локейшены.
-    nointerpolation int v_row : TEXCOORD6;
-};
-
-// GLSL std430 buffer → HLSL StructuredBuffer
-StructuredBuffer<float4x4> ModelMatrixBlock     : register(t0, space0);
-// SV_InstanceID = first_instance + i, а first_instance команды указывает на её записи в Rows.
-StructuredBuffer<int>      Rows               : register(t1, space0);
-
-// GLSL std140 buffer → HLSL cbuffer
-struct CameraData
-{
-    float4x4 view;
-    float4x4 proj;
-};
-StructuredBuffer<CameraData> Camera : register(t2, space0);
-
-// Per-instance данные (alpha/flags). Индексируются ТЕМ ЖЕ row, что и матрица
-// (PositionIndexBuffer[instanceID]). Дублирует struct InstanceData в BaseComponents.h.
-struct InstanceData { float alpha; uint flags; };
-StructuredBuffer<InstanceData> InstanceDataBlock : register(t3, space0);
+#include "main_pass/vertex_common.hlsl"
 
 VSOutput main(VSInput input)
 {
-    VSOutput output;
-
     int row = Rows[input.instanceID];   // строка трансформа = строка инстанс-данных
-    if (row < 0) {
-        // Все вершины за одну clip-плоскость → примитив целиком клипается, фрагментов нет.
-        // Голый return нельзя — SV_Position был бы UB.
-        output = (VSOutput)0;
-        output.position = float4(2.0, 2.0, 2.0, 1.0);
-        output.v_row = -1;   // строки нет → читать буфер состояний нечем
-        return output;
-    }
-
-    float4x4 view = Camera[0].view;
-    float4x4 proj = Camera[0].proj;
+    if (row < 0) return CulledVertex();
 
     float4x4 modelMatrix = ModelMatrixBlock[row];
     float4 worldPos = mul(modelMatrix, float4(input.a_pos, 1.0));
@@ -72,14 +17,5 @@ VSOutput main(VSInput input)
     // v-down развёрткой (quad/sphere). Единый глобальный знак — без per-material флагов.
     float3 worldBitangent = normalize(cross(worldTangent, worldNormal));
 
-    output.position         = mul(proj, mul(view, worldPos));
-    output.v_worldPos       = worldPos.xyz;
-    output.v_worldNormal    = worldNormal;
-    output.v_uv             = input.a_uv;
-    output.v_worldTangent   = worldTangent;
-    output.v_worldBitangent = worldBitangent;
-    output.v_alpha          = InstanceDataBlock[row].alpha;
-    output.v_row            = row;
-
-    return output;
+    return FinishVertex(input, row, worldPos.xyz, worldNormal, worldTangent, worldBitangent);
 }
