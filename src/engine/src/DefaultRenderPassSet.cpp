@@ -92,7 +92,7 @@ namespace DefaultRenderPassNamespace
             // faceSize пресета — единственный источник истины о разрешении env-куба: крест сцены
             // нарежется под него (CreateCubeMapTexture). Мип-цепочка обязательна: сэмпл окружения
             // переводит roughness в мип-LOD, при одном уровне отражение перестаёт размываться.
-            default_env_atlas = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(512), env_sampler, ResourceTag::Default);
+            default_env_atlas = tm->CreateTextureAtlas("env_skybox", TexturePresets::EnvCube(1048), env_sampler, ResourceTag::Default);
         }
         return default_env_atlas;
     }

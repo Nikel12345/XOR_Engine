@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-scene_gen.py — генератор игровой сцены для SDL_Engine (НОВЫЙ формат сцены-папки).
+scene_gen2.py — генератор игровой сцены для SDL_Engine (НОВЫЙ формат сцены-папки).
+
+Копия scene_gen.py, к которой добавлены СПИРАЛЬНЫЕ РУКАВА и ДЖЕТЫ.
+
+Рукава: кубы секций ложатся не равномерно по кругу, а вдоль N логарифмических спиралей (SPIRAL_*).
+Чтобы рукава не закрутились дифференциальным вращением, центр — однородный шар радиуса
+GRAVITY_CORE_RADIUS: внутри него притяжение линейно по расстоянию, период обращения одинаков на
+любом радиусе, и узор вращается целиком (см. GRAVITY_CORE_RADIUS).
+
+Джеты: у каждого центра гравитации — пул кубов,
+летящих из него двумя встречными конусами вдоль его оси Y (см. JET_* ниже). Кубы джета
+несут компонент Jet со ссылкой на свой центр (Jet.center == Gravity.id); гравитация их не
+тянет, а ушедший дальше JET_RANGE куб игра возвращает в его центр с той же скоростью
+(Game.cpp::ReturnJets).
 
 Сцена теперь — ПАПКА: scene.json (ECS) + рядом манифесты ресурсов
 (materials.json / textures.json / models.json / shaders.json). Этот скрипт пишет
@@ -42,7 +55,7 @@ fill = 1 — законченный шар с шаровым же вырезом
 (цикл по kCubeVariants). NUM_CUBE_MODELS ниже ОБЯЗАН совпадать с kCubeVariants.
 
 Запуск (без параметров):
-    python scene_gen.py      (или: py scene_gen.py)
+    python scene_gen2.py      (или: py scene_gen2.py)
 
 Результат пишется СРАЗУ в папку сцены игры: src/game/saved_scene/scene1M/scene.json
 (движок грузит папку "saved_scene/<имя сцены>" из рабочей папки src/game, см. Game::MainInit →
@@ -70,9 +83,9 @@ Section = namedtuple("Section", "name count inner_radius outer_radius fill")
 
 SECTIONS = [
     #        имя           кубов   R внутр  R внеш   fill
-    Section("inner_disk",  200000,    70.0,   180.0,   0.15),
-    Section("mid_ring",    400000,   200.0,   380.0,   0.05),
-    Section("outer_ring",  400000,   320.0,   550.0,   0.0),
+    Section("inner_disk",  200000,    40.0,   220.0,   0.04),
+    Section("mid_ring",    400000,   220.0,   420.0,   0.025),
+    Section("outer_ring",  400000,   370.0,   650.0,   0.0),
 
 ]
 
@@ -92,24 +105,66 @@ CUBE_SCALE_MAX = 0.9
 # GM ОБЯЗАН совпадать с полем gm у сущности-центра (GravityComponent), иначе орбиты «поедут»:
 # скорости здесь считаются по нему, а притягивает в игре именно оно.
 GRAVITY_CONST = 1.0         # G без крошечной степени
-CENTRAL_MASS = 5000.0       # масса гравитационного объекта в (0,0)
+CENTRAL_MASS = 200000.0     # масса гравитационного объекта в (0,0); x40 к scene_gen.py — оборот диска ~1 мин
 GM = GRAVITY_CONST * CENTRAL_MASS   # μ — стандартный гравитационный параметр
 ORBIT_SPEED_SPREAD = 0.07   # индивидуальный разброс скорости, доля (±доля); 0 = идеальные круги
+
+# Радиус однородного шара-центра (пишется в Gravity.core_radius). Внутри шара ускорение
+# a = GM*r/R^3 — линейно по r, поэтому угловая скорость omega = sqrt(GM/R^3) у всех кубов одна:
+# диск вращается как колесо и рукава не закручиваются. Снаружи — обычное GM/r^2. Весь диск
+# должен лежать внутри шара, поэтому по умолчанию R = внешний радиус самой дальней секции.
+# 0 = точечная масса, как в scene_gen.py (рукава закрутятся за пару минут).
+# Период оборота 2*pi*sqrt(R^3/GM): быстрее вращение — больше CENTRAL_MASS (период ~ 1/sqrt(GM)).
+GRAVITY_CORE_RADIUS = max(sec.outer_radius for sec in SECTIONS)
+# Шаг симуляции — только для отчёта о периоде в тиках. ОБЯЗАН совпадать с kSimDt в Game.cpp.
+SIM_DT = 0.05
+
+# --- Спиральные рукава ---
+# Рукав — логарифмическая спираль theta = theta_k - ln(r / r0) / tan(pitch) в плоскости XZ.
+# Знак минус — рукава ЗАКРУЧЕНЫ ПРОТИВ вращения (трейлинговые, как у настоящих галактик):
+# концы рукавов отстают от вращения. Радиус и высоту точки по-прежнему дают секции.
+SPIRAL_ARMS = 4             # число рукавов
+SPIRAL_PITCH_DEG = 15.0     # угол закрутки: между рукавом и окружностью; меньше — туже спираль
+SPIRAL_ARM_WIDTH = 75.0     # ширина рукава (sigma поперёк, юниты мира) — одна на любом радиусе
+SPIRAL_BACKGROUND = 0.1     # доля кубов вне рукавов, равномерно по кругу
 
 # --- Сущность-центр притяжения (Transform + GravityComponent) ---
 # Гравитация в игре привязана к СУЩНОСТИ: центр там, где её Transform, сила = её gm. Поэтому
 # центр генерируется сюда же, в сцену, — без него кубы полетят по инерции. Renderable
 # ему нужен только чтобы его было видно в кадре и в списке объектов редактора.
 GRAVITY_CENTER_POS = (0.0, 0.0, 0.0)
-GRAVITY_CENTER_SCALE = 12.0
-GRAVITY_CENTER_MODEL = "cube_0"
-GRAVITY_CENTER_MATERIAL = "emission"
+# Центр — чёрная сфера: движковая модель "sphere" радиуса 1, масштаб = радиус в юнитах мира.
+# Материал black_hole (materials.json сцены) — metallic 1 при нулевом цвете: гаснут и диффуз,
+# и отражение окружения.
+GRAVITY_CENTER_SCALE = 25.0
+GRAVITY_CENTER_MODEL = "sphere"
+GRAVITY_CENTER_MATERIAL = "black_hole"
+
+# --- Скайбокс ---
+# Сущность из одного Renderable, без Transform: вершинник скайбокса ставит куб вокруг камеры сам.
+# Модель, материал и env-кубмапа (env_skybox_cube) — в манифестах сцены.
+SKYBOX_MODEL = "skybox_cube"
+SKYBOX_MATERIAL = "skybox"
+
+# --- Джеты (на КАЖДЫЙ центр гравитации) ---
+# Два встречных конуса вдоль оси Y центра, кубы делятся между ними поровну. Скорость у всех
+# одна и та же по модулю, направление — случайное внутри конуса.
+JET_COUNT = 35000         # кубов на центр, на оба конуса вместе
+JET_SPREAD_DEG = 3.0      # полуугол конуса, градусы
+JET_SPEED = 30.0          # юниты/с (в тех же единицах, что и орбитальные скорости)
+# Дистанция от центра, дальше которой игра возвращает куб в центр. ОБЯЗАНА совпадать с
+# kJetReturnDistance в Game.cpp. Кубы изначально разложены по всей длине джета: если бы все
+# стартовали из центра, то при одной скорости они и возвращались бы разом — джет пульсировал бы
+# волной вместо ровной струи.
+JET_RANGE = 2500.0
+# Материал уровней LOD — через те же суффиксы CUBE_LEVEL_SUFFIXES (jet / jet_lod / jet_splat).
+JET_MATERIAL = "jet"
 
 # Фиксированный сид → одна и та же сцена при каждом запуске (None = каждый раз новая).
 RANDOM_SEED = 42
 
-# Материалы (уже зарегистрированы в Game.cpp / materials.json) — раздаются кубам случайно.
-CUBE_MATERIALS = ["m_orange", "m_gray", "metal1", "metal2", "emission"]
+# Материалы (materials.json сцены) — раздаются кубам случайно.
+CUBE_MATERIALS = ["Emission_LitColor"]
 # Уровни моделей cube_* в игре (Game.cpp): 1 — quad, 2 — точка. Материал уровня — тот же с этим
 # суффиксом, на программе LOD_Quad / LOD_Splat (materials.json сцены).
 CUBE_LEVEL_SUFFIXES = ["", "_lod", "_splat"]
@@ -189,7 +244,8 @@ def _fmt(v):
 #  Генерация точек / поворотов / скоростей
 # ============================================================================
 def sample_point(inner_radius, outer_radius, fill):
-    """Случайная точка шарового слоя секции, развёрнутого по меридиану на fill * 90 градусов.
+    """Случайная точка шарового слоя секции, развёрнутого по меридиану на fill * 90 градусов;
+    по кругу — вдоль спиральных рукавов (spiral_theta).
 
     Радиус |(x,y,z)| берётся по sqrt — равномерно по площади кольца, ровно как раньше: правится
     ТОЛЬКО раскладка по широте. Широта задаётся через СИНУС, а не через сам угол: у сферы
@@ -203,8 +259,24 @@ def sample_point(inner_radius, outer_radius, fill):
     rho = math.sqrt(u * (outer_radius ** 2 - inner_radius ** 2) + inner_radius ** 2)
     sin_lat = random.uniform(-1.0, 1.0) * math.sin(fill * math.pi * 0.5)
     r_xz = rho * math.sqrt(max(0.0, 1.0 - sin_lat * sin_lat))
-    theta = random.uniform(0.0, 2.0 * math.pi)
+    theta = spiral_theta(r_xz)
     return (r_xz * math.cos(theta), rho * sin_lat, r_xz * math.sin(theta))
+
+
+# Радиус, на котором рукава начинаются с углов 2*pi*k/N, — внутренняя кромка диска. Сдвигает
+# только поворот узора целиком.
+_SPIRAL_R0 = max(1.0, min(sec.inner_radius for sec in SECTIONS))
+
+
+def spiral_theta(r_xz):
+    """Угол точки на радиусе r_xz: SPIRAL_BACKGROUND из них — равномерно по кругу, остальные —
+    на случайном рукаве с гауссовым разбросом поперёк. Разброс задан в юнитах и переведён в угол
+    делением на радиус, поэтому рукав одной ширины и у центра, и на краю."""
+    if random.random() < SPIRAL_BACKGROUND or r_xz < 1e-6:
+        return random.uniform(0.0, 2.0 * math.pi)
+    arm = random.randrange(SPIRAL_ARMS)
+    wind = math.log(r_xz / _SPIRAL_R0) / math.tan(math.radians(SPIRAL_PITCH_DEG))
+    return 2.0 * math.pi * arm / SPIRAL_ARMS - wind + random.gauss(0.0, SPIRAL_ARM_WIDTH / r_xz)
 
 
 def random_rotation():
@@ -216,9 +288,14 @@ def random_rotation():
 
 
 def orbital_velocity(pos):
-    """Вектор скорости для круговой орбиты вокруг центра (0,0,0). Правило то же, что было
-    в XZ, только радиус теперь ПОЛНЫЙ: |v| = sqrt(GM / |(x,y,z)|), направление —
-    перпендикуляр к радиусу, разброс ±ORBIT_SPEED_SPREAD.
+    """Вектор скорости для круговой орбиты вокруг центра (0,0,0), разброс ±ORBIT_SPEED_SPREAD.
+
+    Внутри шара-центра (|p| < GRAVITY_CORE_RADIUS) — вращение колесом: v = omega * (-z, 0, x),
+    омега общая на всех. Тогда в проекции на XZ узор поворачивается как целое и рукава держат
+    форму. Высота y при этом сама качается с тем же периодом (притяжение шара тянет и по y):
+    толщина диска «дышит», а вид сверху не меняется.
+
+    Снаружи шара — прежнее правило ниже.
 
     Перпендикуляров к радиусу бесконечно много; берём тот, что даёт общий для всей сцены обход
     вокруг оси Y. Тогда куб с ненулевой высотой летит по НАКЛОННОЙ круговой орбите (её
@@ -233,11 +310,25 @@ def orbital_velocity(pos):
     r_xz = math.hypot(x, z)
     if r < 1e-6 or r_xz < 1e-6:
         return (0.0, 0.0, 0.0)
-    v = math.sqrt(GM / r)
-    v *= 1.0 + random.uniform(-ORBIT_SPEED_SPREAD, ORBIT_SPEED_SPREAD)
+    spread = 1.0 + random.uniform(-ORBIT_SPEED_SPREAD, ORBIT_SPEED_SPREAD)
+    if r < GRAVITY_CORE_RADIUS:
+        w = math.sqrt(GM / GRAVITY_CORE_RADIUS ** 3) * spread
+        return (-z * w, 0.0, x * w)
+    v = math.sqrt(GM / r) * spread
     # (-z, 0, x)/r_xz — единичный и строго перпендикулярный (x,y,z) при ЛЮБОМ y:
     # скалярное произведение = (-z*x + x*z)/r_xz = 0.
     return (-z / r_xz * v, 0.0, x / r_xz * v)
+
+
+def jet_direction(axis_sign):
+    """Случайное единичное направление внутри конуса с полууглом JET_SPREAD_DEG вокруг
+    (0, axis_sign, 0). Косинус угла от оси берётся равномерно — так точки равномерны по
+    площади сферической шапки, а не сгущены к оси."""
+    cos_max = math.cos(math.radians(JET_SPREAD_DEG))
+    cos_t = random.uniform(cos_max, 1.0)
+    sin_t = math.sqrt(max(0.0, 1.0 - cos_t * cos_t))
+    phi = random.uniform(0.0, 2.0 * math.pi)
+    return (sin_t * math.cos(phi), axis_sign * cos_t, sin_t * math.sin(phi))
 
 
 # ============================================================================
@@ -278,6 +369,7 @@ class _Columns:
         self.model = []
         self.material = []
         self.vx, self.vy, self.vz = [], [], []
+        self.jet_center = []   # только у колонок джетов: Jet.center
         self.models = _Pool()
         self.materials = _Pool()
 
@@ -313,10 +405,37 @@ def emit_section(section, cols):
         cols.vz.append(_fmt(vz))
 
 
+def emit_jets(center_pos, center_id, cols):
+    """Досыпает кубы двух джетов одного центра в колонки cols (свои, не колонки секций: у
+    кубов джета другой архетип). Конусы чередуются через куб — делятся поровну. center_id
+    уходит в Jet.center — по нему игра находит центр куба."""
+    cx, cy, cz = center_pos
+    mat_row = '[[{}]]'.format(','.join(str(cols.materials.intern(JET_MATERIAL + s)) for s in CUBE_LEVEL_SUFFIXES))
+    for i in range(JET_COUNT):
+        dx, dy, dz = jet_direction(1.0 if i % 2 == 0 else -1.0)
+        t = random.uniform(0.0, JET_RANGE)
+        pos = (cx + dx * t, cy + dy * t, cz + dz * t)
+
+        scale = random.uniform(CUBE_SCALE_MIN, CUBE_SCALE_MAX)
+        transform = make_transform(pos, random_rotation(), scale)
+        for k in range(16):
+            cols.transform[k].append(_fmt(transform[k]))
+
+        cols.model.append(str(cols.models.intern(random.choice(CUBE_MODELS))))
+        cols.material.append(mat_row)
+
+        cols.vx.append(_fmt(dx * JET_SPEED))
+        cols.vy.append(_fmt(dy * JET_SPEED))
+        cols.vz.append(_fmt(dz * JET_SPEED))
+        cols.jet_center.append(str(center_id))
+
+
 # Ключи архетипов = отсортированные по алфавиту имена компонентов через запятую (так их строит
 # SaveScene движка). Держим их константами: по ним же определяется порядок блоков в файле.
 CUBES_ARCHETYPE = "Renderable,Shadow,Transform,Velocity"
 CENTER_ARCHETYPE = "Gravity,Renderable,Transform"
+JETS_ARCHETYPE = "Jet,Renderable,Transform,Velocity"
+SKYBOX_ARCHETYPE = "Renderable"
 
 
 def _renderable_obj(n, model_cells, material_rows):
@@ -331,7 +450,7 @@ def _renderable_obj(n, model_cells, material_rows):
     ])
 
 
-def _gravity_center_block(entity_id, cols):
+def _gravity_center_block(entity_id, center_id, cols):
     """Блок архетипа Gravity,Renderable,Transform — сама сущность-центр (одна штука).
 
     Имена компонентов идут по алфавиту: тем же порядком их пишет SaveScene движка, так что
@@ -340,7 +459,8 @@ def _gravity_center_block(entity_id, cols):
     ident = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
     transform = make_transform(GRAVITY_CENTER_POS, ident, GRAVITY_CENTER_SCALE)
     transform_obj = ",".join(_num_col(TRANSFORM_COLS[k], [_fmt(transform[k])]) for k in range(16))
-    gravity_obj = _num_col("gm", [_fmt(GM)])
+    gravity_obj = ",".join([_num_col("gm", [_fmt(GM)]), _num_col("id", [str(center_id)]),
+                            _num_col("core_radius", [_fmt(GRAVITY_CORE_RADIUS)])])
     rend_obj = _renderable_obj(1, [str(cols.models.intern(GRAVITY_CENTER_MODEL))],
                                ['[[' + str(cols.materials.intern(GRAVITY_CENTER_MATERIAL)) + ']]'])
     return ('"' + CENTER_ARCHETYPE + '":{'
@@ -397,18 +517,34 @@ def build_scene():
     for sec in sections:
         emit_section(sec, cols)
 
+    # Джеты — ПОСЛЕ секций: тогда правка JET_* не сдвигает случайную последовательность секций
+    # и раскладка диска от неё не меняется. Колонки свои (другой архетип), словари имён — общие.
+    jet_cols = _Columns()
+    jet_cols.models, jet_cols.materials = cols.models, cols.materials
+    # id центра = его номер в списке: у каждого центра свой, по нему джеты ссылаются на центр.
+    centers = [GRAVITY_CENTER_POS]
+    for center_id, center_pos in enumerate(centers):
+        emit_jets(center_pos, center_id, jet_cols)
+
     n = cols.count()
+    n_jets = jet_cols.count()
 
     # Блоки идут ПО КЛЮЧУ АРХЕТИПА, и id раздаются в том же порядке. Это не косметика: движок
     # в SaveScene сортирует блоки по ключу, а LoadScene нумерует сущности по порядку блоков в
     # файле. Совпасть с этим порядком здесь — значит выдать канонический файл, который первое
     # же пересохранение из редактора не переставит и в котором не поедут id.
     next_id = 1 if EMIT_DIRECT_LIGHT else 0   # свет, если включён, занимает id 0
-    center_id = cubes_base = 0
-    for key in sorted([CENTER_ARCHETYPE, CUBES_ARCHETYPE]):
+    center_id = cubes_base = jets_base = skybox_id = 0
+    for key in sorted([CENTER_ARCHETYPE, CUBES_ARCHETYPE, JETS_ARCHETYPE, SKYBOX_ARCHETYPE]):
         if key == CENTER_ARCHETYPE:
             center_id = next_id
             next_id += 1
+        elif key == SKYBOX_ARCHETYPE:
+            skybox_id = next_id
+            next_id += 1
+        elif key == JETS_ARCHETYPE:
+            jets_base = next_id
+            next_id += n_jets
         else:
             cubes_base = next_id
             next_id += n
@@ -427,21 +563,39 @@ def build_scene():
                    '"Transform":{' + transform_obj + '},'
                    '"Velocity":{' + velocity_obj + '}}')
 
-    # Центр строим ДО сборки шапки: он интернирует свои имена ассетов в те же словари, а они
+    jet_ids = ",".join(str(jets_base + i) for i in range(n_jets))
+    jet_transform_obj = ",".join(_num_col(TRANSFORM_COLS[k], jet_cols.transform[k]) for k in range(16))
+    jet_velocity_obj = ",".join([_num_col("x", jet_cols.vx), _num_col("y", jet_cols.vy), _num_col("z", jet_cols.vz)])
+    jets_block = ('"' + JETS_ARCHETYPE + '":{'
+                  '"count":' + str(n_jets) + ','
+                  '"entities":[' + jet_ids + '],'
+                  '"Jet":{' + _num_col("center", jet_cols.jet_center) + '},'
+                  '"Renderable":{' + _renderable_obj(n_jets, jet_cols.model, jet_cols.material) + '},'
+                  '"Transform":{' + jet_transform_obj + '},'
+                  '"Velocity":{' + jet_velocity_obj + '}}')
+
+    # Центр и скайбокс строим ДО сборки шапки: они интернируют свои имена ассетов в те же словари, а они
     # уходят в файл первыми.
-    center_block = _gravity_center_block(center_id, cols)
+    center_block = _gravity_center_block(center_id, 0, cols)   # единственный центр = centers[0]
+    skybox_block = ('"' + SKYBOX_ARCHETYPE + '":{'
+                    '"count":1,'
+                    '"entities":[' + str(skybox_id) + '],'
+                    '"Renderable":{' + _renderable_obj(1, [str(cols.models.intern(SKYBOX_MODEL))],
+                                                       ['[[' + str(cols.materials.intern(SKYBOX_MATERIAL)) + ']]']) + '}}')
 
     # Словари — ПЕРВЫМИ: колонки ассетов ссылаются в них индексами. Порядок списков как у
     # движка (std::map → по алфавиту), чтобы пересохранение не переставляло шапку.
     blocks = [cols.materials.json("materials"), cols.models.json("models")]
     # if EMIT_DIRECT_LIGHT:
     #     blocks.append(_light_block())
-    by_key = {CENTER_ARCHETYPE: center_block, CUBES_ARCHETYPE: cubes_block}
+    by_key = {CENTER_ARCHETYPE: center_block, CUBES_ARCHETYPE: cubes_block, SKYBOX_ARCHETYPE: skybox_block}
+    if n_jets:
+        by_key[JETS_ARCHETYPE] = jets_block
     for key in sorted(by_key):
         blocks.append(by_key[key])
 
     text = "{\n" + ",\n".join(blocks) + "\n}\n"
-    return text, cols.models.names, sections
+    return text, cols.models.names, sections, n_jets
 
 
 def main():
@@ -452,7 +606,7 @@ def main():
     if not os.path.isdir(out_dir):
         raise SystemExit("Папки сцены нет: {}\n(ожидается src/game/saved_scene/scene1M с манифестами ресурсов)".format(out_dir))
 
-    text, used_models, sections = build_scene()
+    text, used_models, sections, n_jets = build_scene()
 
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
@@ -465,6 +619,12 @@ def main():
             sec.fill * 90.0, sec.outer_radius * math.sin(sec.fill * math.pi * 0.5)))
     if COUNT_SCALE != 1.0:
         print("  (COUNT_SCALE={:g})".format(COUNT_SCALE))
+    if GRAVITY_CORE_RADIUS > 0:
+        period = 2.0 * math.pi * math.sqrt(GRAVITY_CORE_RADIUS ** 3 / GM)
+        print("Рукава: {}, закрутка {:g} град., ширина {:g}; шар-центр R {:g}, оборот диска {:.0f} тиков".format(
+            SPIRAL_ARMS, SPIRAL_PITCH_DEG, SPIRAL_ARM_WIDTH, GRAVITY_CORE_RADIUS, period / SIM_DT))
+    print("Джеты: {} кубов ({} на центр), конус +/-{:g} град., скорость {:g}, возврат дальше {:g}".format(
+        n_jets, JET_COUNT, JET_SPREAD_DEG, JET_SPEED, JET_RANGE))
     print("Свет (entity 0): {}".format("да" if EMIT_DIRECT_LIGHT else "нет"))
     print("Использовано моделей: {} из {} (cube_0..cube_{}).".format(
         len(used_models), NUM_CUBE_MODELS, NUM_CUBE_MODELS - 1))

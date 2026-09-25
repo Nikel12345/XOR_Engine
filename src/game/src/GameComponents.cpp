@@ -13,5 +13,11 @@ void RegisterGameComponents()
 
     reg.Register({ .name = "Gravity", .sig_type = typeid(GravityComponent),
         .add_default = AddDefaultAoS<GravityComponent>,
-        .fields = { FieldSpec::Num("gm", F32, AOS_NUM(GravityComponent, gm), 0, FLT_MAX, 1.0f) } });
+        .fields = { FieldSpec::Num("gm", F32, AOS_NUM(GravityComponent, gm), 0, FLT_MAX, 1.0f),
+                    FieldSpec::Num("id", U32, AOS_NUM(GravityComponent, id), 0, 0, 1),
+                    FieldSpec::Num("core_radius", F32, AOS_NUM(GravityComponent, core_radius), 0, FLT_MAX, 1.0f) } });
+
+    reg.Register({ .name = "Jet", .sig_type = typeid(JetComponent),
+        .add_default = AddDefaultAoS<JetComponent>,
+        .fields = { FieldSpec::Num("center", U32, AOS_NUM(JetComponent, center), 0, 0, 1) } });
 }

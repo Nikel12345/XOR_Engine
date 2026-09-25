@@ -241,7 +241,7 @@ SDL_AppResult Game::MainInit()
         // Панель у нижнего края: колонка, внутренний отступ + зазор между строками, по центру.
         UIStyle panelS; panelS.dir = UIDir::Column; panelS.align = UIAlign::Center;
         panelS.padding = 1.0f; panelS.gap = 8.0f; panelS.margin = 160.0f;
-        UI_Yoga::Node panel = ui->Box(root, panelS, uimat, quad);
+        //UI_Yoga::Node panel = ui->Box(root, panelS, uimat, quad);
 
         // Две текстовые строки (intrinsic-размер из метрик шрифта).
         //UIStyle textS;
@@ -255,7 +255,7 @@ SDL_AppResult Game::MainInit()
         UIStyle btnS;
         btnS.wmode = UISize::Points; btnS.w = 256.0f;
         btnS.hmode = UISize::Points; btnS.h = 74.0f;
-        ui->Box(panel, btnS, "m_hover", quad);
+        //ui->Box(panel, btnS, "m_hover", quad);
     }
 
     {
@@ -441,6 +441,7 @@ void Game::MainMenu_Iterate()
 void Game::MainMenu_Update()
 {
     SimulateGravity();   // симуляция идёт всегда, до раннего выхода по WantCaptureMouse
+    ReturnJets();
 
     if (UI_ImGui::WantCaptureMouse()) return;
 
@@ -514,23 +515,13 @@ void Game::MainMenu_Update()
 static constexpr float kSimDt    = 0.05f;
 static constexpr float kGravSoft = 1e-3f;   // защита от деления на ~0 у самого центра
 static constexpr float kGravSoft2 = kGravSoft * kGravSoft;   // зажим r2 значением, без ветки
-static constexpr float kBounceMaskGain = 1e6f;   // см. маску отскока в проходе A
 
-// Касание центра тяжести. Геометрии тут нет (у кубов сцены нет коллайдеров), поэтому
-// «столкнулись» = сущность вошла в осевую рамку источника: его габарит (AABB модели x масштаб,
-// считается в проходе 1) плюс запас ниже. Рамка ОСЕВАЯ и поворот источника не учитывает —
-// проверка задумана грубой.
-static constexpr float kTouchMargin = 3.0f;   // запас поверх габарита источника, юниты мира
-static constexpr float kBounceSpeed = 15.0f;   // |vy| после касания; боковая скорость гасится в 0
-static constexpr float kBounceSpread = 1.0f;   // разброс vx/vz после касания, юниты/с
-// Материал отскочившего по уровням модели куба (materials.json сцены): модель, quad (LOD_Quad), точка (LOD_Splat).
-static const char* const kBounceMaterials[] = { "jet", "jet_lod", "jet_splat" };
-
-// Монетка отскока. Статик без синхронизации: SimulateGravity зовётся только из Game::MainMenu_Update,
-// то есть всегда с sim-потока. Seed фиксированный — прогон воспроизводим, а «настоящая»
-// случайность тут не нужна.
-static std::mt19937 g_bounce_rng{ 1337u };
-static std::uniform_real_distribution<float> g_bounce_spread(-kBounceSpread, kBounceSpread);
+// Дистанция от своего центра, дальше которой куб джета возвращается в центр. ОБЯЗАНА совпадать
+// с JET_RANGE в scripts/scene_gen/scene_gen2.py: генератор раскладывает стартовые позиции по всей
+// этой длине, и при другой дистанции часть кубов вернётся разом — струя пойдёт волной.
+static constexpr float kJetReturnDistance = 2500.0f;
+// Материал джета по уровням модели (materials.json сцены): модель, quad (LOD_Quad), точка (LOD_Splat).
+static const char* const kJetMaterials[] = { "jet", "jet_lod", "jet_splat" };
 
 void Game::SimulateGravity()
 {
@@ -543,50 +534,29 @@ void Game::SimulateGravity()
     // его поставила сцена (или редактор).
     gravity_sources.clear();
     objectManager->ForEach<Positions, GravityComponent>(scene,
-        [this, scene](Entity e, SoAElement<Positions> pos_el, GravityComponent& G)
+        [this](SoAElement<Positions> pos_el, GravityComponent& G)
     {
         Positions& P = pos_el.container();
         const size_t i = pos_el.i();
-
-        // Габарит источника в ЮНИТАХ МОДЕЛИ: объединение локальных AABB сабмешей вокруг origin
-        // (SubMeshData::aabb_*). Нет модели/имя не резолвится — габарит нулевой, останется голый
-        // kTouchMargin.
-        float hx = 0.0f, hy = 0.0f, hz = 0.0f;
-        if (objectManager->Has<Renderable>(scene, e)) {
-            SoAElement<Renderable> rend = objectManager->GetComponent<Renderable>(scene, e);
-            const ModelData* m = modelManager->FindModel(rend.container().model[rend.i()]);
-            if (m) for (const SubMeshData& sm : m->submeshes) {
-                hx = std::max(hx, std::fabs(sm.aabb_center.x) + sm.aabb_half.x);
-                hy = std::max(hy, std::fabs(sm.aabb_center.y) + sm.aabb_half.y);
-                hz = std::max(hz, std::fabs(sm.aabb_center.z) + sm.aabb_half.z);
-            }
-        }
-        // Масштаб — длины столбцов 3x3 трансформа (row-major: столбец 0 = (x,a,e)): так он берётся
-        // и при повороте, а не только у осевой матрицы из генератора сцены.
-        const float sx = std::sqrt(P.x[i] * P.x[i] + P.a[i] * P.a[i] + P.e[i] * P.e[i]);
-        const float sy = std::sqrt(P.y[i] * P.y[i] + P.b[i] * P.b[i] + P.f[i] * P.f[i]);
-        const float sz = std::sqrt(P.z[i] * P.z[i] + P.c[i] * P.c[i] + P.g[i] * P.g[i]);
-
-        gravity_sources.push_back({ P.w[i], P.d[i], P.h[i], G.gm,
-                                    hx * sx + kTouchMargin, hy * sy + kTouchMargin, hz * sz + kTouchMargin });
+        gravity_sources.push_back({ P.w[i], P.d[i], P.h[i], G.gm, G.id,
+                                    std::max(G.core_radius * G.core_radius, kGravSoft2) });
     });
 
-    // Проход 2 — притягиваемые. Три подпрохода вместо одного цикла, и это не украшение:
-    // цикл такой формы векторизуется только если в теле нет ни ветвлений, ни внутреннего
-    // цикла, а указатели колонок подняты в локальные __restrict. Замерено на 800k
-    // (sandbox/GravityVecProbe.cpp): прежняя форма 8.8 мс, эта 2.2-2.7.
-    //   A) по каждому источнику, векторный: скорость += ускорение (отскочившим — маской,
-    //      а не веткой) и глубина в рамке ЗАПИСЬЮ ЗНАЧЕНИЯ: условная запись флага
-    //      ломает векторизацию при любой ширине элемента, проверено;
-    //   B) скалярный по кандидатам: сам отскок и смена материала. Кандидатов единицы,
-    //      а сжатие в список не векторизуется никогда;
-    //   C) векторный: интеграция позиций.
-    // B перед C — чтобы отскочившая сущность в тот же тик поехала уже новой скоростью,
-    // как было в прежней однопроходной версии.
-    //
-    // Обход — ForEachArchetype: он отдаёт колонки целиком плюс entities архетипа (id нужен
-    // ChangeMaterial), а цикл по сущностям пишем сами. Поэлементная форма ForEach здесь не
-    // годится: она невекторизуема в принципе, тело получает объект на каждую сущность.
+    {
+        float centers[GameShaderSet::MAX_GRAVITY_CENTERS][3];
+        const size_t n = std::min(gravity_sources.size(), GameShaderSet::MAX_GRAVITY_CENTERS);
+        for (size_t k = 0; k < n; ++k) {
+            centers[k][0] = gravity_sources[k].x;
+            centers[k][1] = gravity_sources[k].y;
+            centers[k][2] = gravity_sources[k].z;
+        }
+        GameShaderSet::PublishGravityCenters(centers, n);
+    }
+
+    // Проход 2 — притягиваемые: сначала скорость по каждому источнику, потом интеграция позиций.
+    // Два отдельных цикла без ветвлений и с колонками в локальных __restrict — только в такой
+    // форме тело векторизуется (замерено на 800k, sandbox/GravityVecProbe.cpp). Поэтому и обход —
+    // ForEachArchetype: поэлементная форма ForEach невекторизуема в принципе.
     const std::vector<GravitySource>& sources = gravity_sources;
     objectManager->ForEachArchetype<Positions, Velocities>(scene,
         [&](ComponentArray<Positions, void>* pos_arr, ComponentArray<Velocities, void>* vel_arr,
@@ -596,77 +566,68 @@ void Game::SimulateGravity()
         Velocities& V = vel_arr->data;
         const int n = static_cast<int>(ents.size());
         if (n == 0) return;
-        if (static_cast<int>(touch_depth.size()) < n) touch_depth.resize(n);
 
-        float* __restrict pw    = P.w.data();
-        float* __restrict pd    = P.d.data();
-        float* __restrict ph    = P.h.data();
-        float* __restrict vx    = V.x.data();
-        float* __restrict vy    = V.y.data();
-        float* __restrict vz    = V.z.data();
-        float* __restrict depth = touch_depth.data();
+        float* __restrict pw = P.w.data();
+        float* __restrict pd = P.d.data();
+        float* __restrict ph = P.h.data();
+        float* __restrict vx = V.x.data();
+        float* __restrict vy = V.y.data();
+        float* __restrict vz = V.z.data();
 
-        std::fill(depth, depth + n, std::numeric_limits<float>::max());
+        // Состав компонентов у всех сущностей архетипа один, поэтому джет ли это — решает первая.
+        const bool attracted = !objectManager->Has<JetComponent>(scene, ents[0]);
 
-        // ── A ── скорость и глубина в рамке
-        for (const GravitySource& s : sources) {
-            const float sx = s.x, sy = s.y, sz = s.z, gm = s.gm;
-            const float hx = s.hx, hy = s.hy, hz = s.hz;
+        if (attracted) for (const GravitySource& s : sources) {
+            const float sx = s.x, sy = s.y, sz = s.z, gm = s.gm, r2_floor = s.r2_floor;
             VEC_HOT("gravity_step");
             for (int i = 0; i < n; ++i) {
                 const float dx = sx - pw[i], dy = sy - pd[i], dz = sz - ph[i];
                 const float rr = dx * dx + dy * dy + dz * dz;
-                const float r2 = rr < kGravSoft2 ? kGravSoft2 : rr;   // зажим = max, его векторизатор берёт
+                // Зажим = max, его векторизатор берёт. Внутри шара r2 = R^2, и k*d = gm*d/R^3 —
+                // ровно линейное ускорение однородного шара; снаружи прежнее gm/r^2.
+                const float r2 = rr < r2_floor ? r2_floor : rr;
                 const float k  = gm / (r2 * std::sqrt(r2));
-
-                // Отскочившей гравитация не считается: множитель 0/1 вместо ветки. Почему
-                // вообще не считается — см. kBounceSpeed: 15 против gm=5000 у поверхности
-                // источника это далеко не вторая космическая, и объект бы просто завис.
-                const float t    = std::fabs(std::fabs(vy[i]) - kBounceSpeed) * kBounceMaskGain;
-                const float live = t < 1.0f ? t : 1.0f;   // именно min: бленд 0/1 не векторизуется
-                vx[i] += dx * k * kSimDt * live;
-                vy[i] += dy * k * kSimDt * live;
-                vz[i] += dz * k * kSimDt * live;
-
-                // Глубина: <= 0 ровно тогда, когда сущность внутри осевой рамки источника.
-                // Тернарники здесь законны, потому что все три сводятся к min/max — их
-                // векторизатор берёт. А вот общий бленд (cond ? 0 : 1) он расширять не
-                // умеет, поэтому маска отскока выше и записана как min (замерено).
-                const float ox = std::fabs(dx) - hx;
-                const float oy = std::fabs(dy) - hy;
-                const float oz = std::fabs(dz) - hz;
-                const float m1 = ox > oy ? ox : oy;
-                const float o  = m1 > oz ? m1 : oz;
-                const float d  = depth[i];
-                depth[i] = o < d ? o : d;
+                vx[i] += dx * k * kSimDt;
+                vy[i] += dy * k * kSimDt;
+                vz[i] += dz * k * kSimDt;
             }
         }
 
-        // ── B ── кандидаты: знак выбирается один раз, на входе в рамку
-        for (int i = 0; i < n; ++i) {
-            if (depth[i] > 0.0f) continue;                          // вне всех рамок
-            if (std::fabs(vy[i]) == kBounceSpeed) continue;         // уже отскочил
-
-            vx[i] = g_bounce_spread(g_bounce_rng);
-            vy[i] = (g_bounce_rng() & 1u) ? kBounceSpeed : -kBounceSpeed;
-            vz[i] = g_bounce_spread(g_bounce_rng);
-
-            if (!objectManager->Has<Renderable>(scene, ents[i])) continue;
-            SoAElement<Renderable> rend = objectManager->GetComponent<Renderable>(scene, ents[i]);
-            const std::vector<MaterialSlot>& parts = rend.container().materials[rend.i()];
-            const uint32_t levels = std::min<uint32_t>(modelManager->LevelCount(rend.container().model[rend.i()]),
-                                                       static_cast<uint32_t>(std::size(kBounceMaterials)));
-            for (uint32_t L = 0; L < levels; ++L)
-                if (!parts.empty() && parts[0].per_lod[L])
-                    ctx->ChangeMaterial(ents[i], kBounceMaterials[L], 0, L);
-        }
-
-        // ── C ── позиции (wdh) скоростями (xyz)
+        // Позиции (wdh) скоростями (xyz)
         VEC_HOT("integrate_positions");
         for (int i = 0; i < n; ++i) {
             pw[i] += vx[i] * kSimDt;
             pd[i] += vy[i] * kSimDt;
             ph[i] += vz[i] * kSimDt;
+        }
+    });
+}
+
+void Game::ReturnJets()
+{
+    PROF_SCOPE(Sim, "  return_jets (Game)");
+    SceneData* scene = objectManager->GetActiveScene();
+    if (!scene || gravity_sources.empty()) return;
+
+    // Центр и его объекты связаны ключом: объекты центра — джеты с center == его id. Отсюда и
+    // форма обхода — [центры][их объекты]: внешний цикл по центрам, внутренний выбирает объекты
+    // своего центра. Скорость не трогаем: вернувшийся куб снова летит тем же курсом.
+    constexpr float kReturn2 = kJetReturnDistance * kJetReturnDistance;
+    objectManager->ForEachArchetype<Positions, JetComponent>(scene,
+        [&](ComponentArray<Positions, void>* pos_arr, ComponentArray<JetComponent>* jet_arr)
+    {
+        Positions& P = pos_arr->data;
+        const std::vector<JetComponent>& J = jet_arr->data;
+        const size_t n = J.size();
+        for (const GravitySource& c : gravity_sources) {
+            for (size_t i = 0; i < n; ++i) {
+                if (J[i].center != c.id) continue;
+                const float dx = P.w[i] - c.x, dy = P.d[i] - c.y, dz = P.h[i] - c.z;
+                if (dx * dx + dy * dy + dz * dz <= kReturn2) continue;
+                P.w[i] = c.x;
+                P.d[i] = c.y;
+                P.h[i] = c.z;
+            }
         }
     });
 }
