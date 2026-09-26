@@ -3,7 +3,8 @@
 # Площадки для запуска подсистем движка по отдельности.
 # Каждый сценарий — свой .cpp; main решает, что именно запустить.
 set(SANDBOX_SRC
-    src/ShadercrossBuildProbe.cpp     # ЗОНД: shadercross из исходников компилирует и рефлексирует, DXC берётся из каталога exe (см. шапку файла)
+    src/CullingWaveProbe.cpp          # ЗОНД: culling_scatter с wave-свёрткой атомиков против поштучного атомика (см. шапку файла)
+    # src/ShadercrossBuildProbe.cpp   # ЗОНД: shadercross из исходников компилирует и рефлексирует, DXC берётся из каталога exe (см. шапку файла)
     # src/VulkanVersionProbe.cpp      # ЗОНД: отсечение устройств по объявленной версии Vulkan (см. шапку файла)
     # src/IndirectEmptyCmdProbe.cpp   # ЗОНД: цена пустых команд (num_instances = 0) в indirect-мультидроу (см. шапку файла)
     # src/FrustumVecProbe.cpp         # ЗОНД: фрустум-отсев 1М объектов на CPU через ECS - форма, которая векторизуется
