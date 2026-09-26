@@ -27,7 +27,7 @@ using ComputeProgramRegistry = ResourceRegistry<ComputeProgramCell, ComputeProgr
 class ShaderManager
 {
 public:
-	ShaderManager(SDL_GPUDevice* device);
+	ShaderManager(SDL_GPUDevice* device, std::string spirv_target_env);
 	// Повтор с тем же именем перезаписывает запись реестра.
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const GeometryPool* pool,
 	                        const std::vector<ShaderBase::VertexSemantic>& pull, BufferManager* bm, const ShaderDefines& defines = {}, ResourceTag tags = ResourceTag::None);
@@ -192,6 +192,9 @@ private:
 	std::shared_ptr<SDL_GPUShader> RegisterGpuShader(uint64_t key, SDL_GPUShader* raw);
 
 	std::string m_cacheBasePath;
+	std::string m_spirvTargetEnv;
+	SDL_PropertiesID m_compileProps = 0;
+	uint32_t m_dxcVersion[3] = {};
 
 	ShaderProgramRegistry  shader_programs;
 	ComputeProgramRegistry compute_shader_programs;

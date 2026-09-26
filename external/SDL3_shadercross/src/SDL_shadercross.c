@@ -333,6 +333,7 @@ static void *SDL_ShaderCross_INTERNAL_CompileUsingDXC(
     size_t includeDirLength = 0;
     wchar_t *includeDirUtf16 = NULL;
     wchar_t *nameUtf16 = NULL;
+    wchar_t *targetEnvUtf16 = NULL; /* ENGINE-FORK */
     wchar_t **defineStringsUtf16 = NULL;
     size_t numDefineStrings = 0;
     HRESULT ret;
@@ -400,7 +401,8 @@ static void *SDL_ShaderCross_INTERNAL_CompileUsingDXC(
         defineStringsUtf16[i] = (wchar_t *)SDL_iconv_string("WCHAR_T", "UTF-8", defineString, MAX_DEFINE_STRING_LENGTH);
     }
 
-    LPCWSTR *args = SDL_malloc(sizeof(LPCWSTR) * (numDefineStrings + 13));
+    /* ENGINE-FORK: +1 slot for -fspv-target-env */
+    LPCWSTR *args = SDL_malloc(sizeof(LPCWSTR) * (numDefineStrings + 14));
     Uint32 argCount = 0;
 
     for (Uint32 i = 0; i < numDefineStrings; i += 1) {
@@ -453,6 +455,20 @@ static void *SDL_ShaderCross_INTERNAL_CompileUsingDXC(
         }
 
         args[argCount++] = (LPCWSTR)L"-fspv-preserve-interface";
+
+        /* ENGINE-FORK: SPIR-V target environment; without it DXC emits SPIR-V 1.0, which
+         * rejects wave intrinsics (GroupNonUniform needs SPIR-V 1.3 / Vulkan 1.1). */
+        const char *targetEnv = SDL_GetStringProperty(info->props, SDL_SHADERCROSS_PROP_SPIRV_TARGET_ENV_STRING, NULL);
+        if (targetEnv != NULL) {
+            char *targetEnvArg = NULL;
+            if (SDL_asprintf(&targetEnvArg, "-fspv-target-env=%s", targetEnv) >= 0) {
+                targetEnvUtf16 = (wchar_t *)SDL_iconv_string("WCHAR_T", "UTF-8", targetEnvArg, SDL_strlen(targetEnvArg) + 1);
+                SDL_free(targetEnvArg);
+            }
+            if (targetEnvUtf16 != NULL) {
+                args[argCount++] = targetEnvUtf16;
+            }
+        }
     }
 
     if (SDL_GetBooleanProperty(info->props, SDL_SHADERCROSS_PROP_SHADER_DEBUG_ENABLE_BOOLEAN, false)) {
@@ -497,6 +513,9 @@ static void *SDL_ShaderCross_INTERNAL_CompileUsingDXC(
     }
     if (nameUtf16 != NULL) {
         SDL_free(nameUtf16);
+    }
+    if (targetEnvUtf16 != NULL) { /* ENGINE-FORK */
+        SDL_free(targetEnvUtf16);
     }
 
     if (ret < 0) {
@@ -568,6 +587,87 @@ static void *SDL_ShaderCross_INTERNAL_CompileUsingDXC(
 #else
     SDL_SetError("%s", "Shadercross was not built with DXC support, cannot compile using DXC!");
     return NULL;
+#endif /* SDL_SHADERCROSS_DXC */
+}
+
+/* ENGINE-FORK: DXC version query, see SDL_ShaderCross_GetDXCVersion in the header. */
+#ifdef SDL_SHADERCROSS_DXC
+static Uint8 IID_IDxcVersionInfo2[] = { /* fb6904c4-42f0-4b62-9c46-983af7da7c83 */
+    0xc4, 0x04, 0x69, 0xfb,
+    0xf0, 0x42,
+    0x62, 0x4b,
+    0x9c, 0x46, 0x98, 0x3a, 0xf7, 0xda, 0x7c, 0x83
+};
+typedef struct IDxcVersionInfo2 IDxcVersionInfo2;
+typedef struct IDxcVersionInfo2Vtbl
+{
+    HRESULT(__stdcall *QueryInterface)(IDxcVersionInfo2 *This, REFIID riid, void **ppvObject);
+    ULONG(__stdcall *AddRef)(IDxcVersionInfo2 *This);
+    ULONG(__stdcall *Release)(IDxcVersionInfo2 *This);
+    HRESULT(__stdcall *GetVersion)(IDxcVersionInfo2 *This, Uint32 *pMajor, Uint32 *pMinor);
+    HRESULT(__stdcall *GetFlags)(IDxcVersionInfo2 *This, Uint32 *pFlags);
+    HRESULT(__stdcall *GetCommitInfo)(IDxcVersionInfo2 *This, Uint32 *pCommitCount, char **pCommitHash);
+} IDxcVersionInfo2Vtbl;
+struct IDxcVersionInfo2
+{
+    const IDxcVersionInfo2Vtbl *lpVtbl;
+};
+/* The commit hash is CoTaskMemAlloc'd by DXC; off Windows DXC maps that onto malloc/free. */
+#if defined(_WIN32)
+extern void __stdcall CoTaskMemFree(void *pv);
+#define SDL_SHADERCROSS_DXC_FREE(p) CoTaskMemFree(p)
+#else
+#include <stdlib.h>
+#define SDL_SHADERCROSS_DXC_FREE(p) free(p)
+#endif
+#endif /* SDL_SHADERCROSS_DXC */
+
+bool SDL_ShaderCross_GetDXCVersion(Uint32 *major, Uint32 *minor, Uint32 *commit_count)
+{
+#ifdef SDL_SHADERCROSS_DXC
+    IDxcCompiler3 *dxcInstance = NULL;
+    IDxcVersionInfo2 *versionInfo = NULL;
+    Uint32 maj = 0, min = 0, commits = 0;
+    char *hash = NULL;
+    HRESULT ret;
+
+    DxcCreateInstance(&CLSID_DxcCompiler, IID_IDxcCompiler3, (void **)&dxcInstance);
+    if (dxcInstance == NULL) {
+        return SDL_SetError("%s", "Could not create DXC instance!");
+    }
+    ret = dxcInstance->lpVtbl->QueryInterface(dxcInstance, IID_IDxcVersionInfo2, (void **)&versionInfo);
+    dxcInstance->lpVtbl->Release(dxcInstance);
+    if (ret < 0 || versionInfo == NULL) {
+        return SDL_SetError("%s", "DXC does not expose IDxcVersionInfo2");
+    }
+
+    ret = versionInfo->lpVtbl->GetVersion(versionInfo, &maj, &min);
+    if (ret >= 0) {
+        ret = versionInfo->lpVtbl->GetCommitInfo(versionInfo, &commits, &hash);
+    }
+    if (hash != NULL) {
+        SDL_SHADERCROSS_DXC_FREE(hash);
+    }
+    versionInfo->lpVtbl->Release(versionInfo);
+    if (ret < 0) {
+        return SDL_SetError("DXC version query failed: %X", ret);
+    }
+
+    if (major) {
+        *major = maj;
+    }
+    if (minor) {
+        *minor = min;
+    }
+    if (commit_count) {
+        *commit_count = commits;
+    }
+    return true;
+#else
+    (void)major;
+    (void)minor;
+    (void)commit_count;
+    return SDL_SetError("%s", "Shadercross was not built with DXC support!");
 #endif /* SDL_SHADERCROSS_DXC */
 }
 

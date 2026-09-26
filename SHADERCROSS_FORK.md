@@ -50,6 +50,24 @@ PATH. До вендоринга рядом с exe DXC не было, и все �
    из пакета find_package. SPIRV-Cross, добавленный через `add_subdirectory`, называет цель
    `spirv-cross-c`, и без правки shadercross снова звал бы find_package и падал.
 
+3. **Свойство `SDL_SHADERCROSS_PROP_SPIRV_TARGET_ENV_STRING`** (`SDL_shadercross.h`,
+   `SDL_ShaderCross_INTERNAL_CompileUsingDXC`) — передаётся в DXC как
+   `-fspv-target-env=<значение>`. Без свойства аргументы совпадают с upstream. Массив аргументов
+   там фиксированного размера, под новый аргумент он увеличен на один слот. Свойство действует
+   и на путь в DXIL: `CompileDXILFromHLSL` идёт через SPIR-V с теми же `props`.
+4. **`SDL_ShaderCross_GetDXCVersion(major, minor, commit_count)`** — версия загруженного
+   `dxcompiler` через `IDxcVersionInfo2`. `commit_count` различает релизы с одинаковым
+   `major.minor` (1.9.2602 и 1.9.2607 оба отвечают 1.9). Добавлена и в `SDL_shadercross.sym`.
+
+Движок: версия Vulkan задаётся в `EngineConfig` (`vulkan_major`/`vulkan_minor`), из неё
+`Engine::InitPlatform` берёт и `apiVersion` девайса, и строку `vulkanX.Y` для `ShaderManager`.
+В ключ кэша шейдеров идут версия DXC и target-env — смена любого из них сама сбрасывает кэш.
+
+Проверено зондом `src/sandbox/src/ShadercrossBuildProbe.cpp`: шейдер с `WaveActiveCountBits`
+без свойства падает («Vulkan 1.1 is required for Wave Operation»), с `vulkan1.3` собирается в
+SPIR-V 1.6; все 36 вариантов шейдеров движка (включая `surface.hlsl` с дефайнами
+`DefaultShaderSet`) под `vulkan1.0` и `vulkan1.3` дают одинаковую рефлексию.
+
 Не правка, но рядом: `export(TARGETS SDL3_shadercross-static)` требует, чтобы SPIRV-Cross тоже
 был в export set. Это делает корневой `CMakeLists.txt`, как и vendored-режим самого shadercross.
 
@@ -60,9 +78,7 @@ PATH. До вендоринга рядом с exe DXC не было, и все �
    `git archive` исходников библиотеки (список путей — как в таблице выше).
 3. DXC — новый релиз с `github.com/microsoft/DirectXShaderCompiler/releases`, те же каталоги.
 4. Приложить правки по тегу `ENGINE-FORK`, обновить таблицу версий.
-5. **Кэш шейдеров.** В его ключе сейчас версия shadercross (`SDL_SHADERCROSS_*_VERSION`), а не
-   DXC. Смена одного DXC ключ не меняет — после обновления DXC кэш чистить руками, пока ключ не
-   переведён на версию DXC.
+5. Кэш шейдеров чистить не нужно: версия DXC в его ключе.
 
 Upstream запрещает контрибуции с кодом от ИИ (`CLAUDE.md`, `AGENTS.md` в каталоге), так что
 правки отсюда в upstream в таком виде не отправлять.

@@ -62,6 +62,8 @@ struct EngineConfig {
     SDL_GPUPresentMode present_mode = SDL_GPU_PRESENTMODE_MAILBOX;
     SDL_GPUSwapchainComposition composition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
     bool gpu_debug = true;
+    uint32_t vulkan_major = 1;
+    uint32_t vulkan_minor = 3;
 };
 
 class Engine

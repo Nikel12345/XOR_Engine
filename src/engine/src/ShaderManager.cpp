@@ -6,10 +6,21 @@
 #include <filesystem>
 #include <set>
 
-ShaderManager::ShaderManager(SDL_GPUDevice* device) {
+ShaderManager::ShaderManager(SDL_GPUDevice* device, std::string spirv_target_env) {
     dev = device;
+    m_spirvTargetEnv = std::move(spirv_target_env);
 
     SDL_ShaderCross_Init();
+
+    m_compileProps = SDL_CreateProperties();
+    if (!m_spirvTargetEnv.empty())
+        SDL_SetStringProperty(m_compileProps, SDL_SHADERCROSS_PROP_SPIRV_TARGET_ENV_STRING, m_spirvTargetEnv.c_str());
+
+    if (SDL_ShaderCross_GetDXCVersion(&m_dxcVersion[0], &m_dxcVersion[1], &m_dxcVersion[2]))
+        SDL_Log("[Shader] DXC %u.%u.%u, SPIR-V target env '%s'", m_dxcVersion[0], m_dxcVersion[1], m_dxcVersion[2],
+            m_spirvTargetEnv.empty() ? "(DXC default)" : m_spirvTargetEnv.c_str());
+    else
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "[Shader] DXC version query failed: %s", SDL_GetError());
 
     const char* base = SDL_GetBasePath();
 
@@ -341,6 +352,7 @@ ShaderManager::~ShaderManager()
 	// Явного SDL_ReleaseGPUShader нет: шарящийся vs словил бы double-free. Шейдеры отпускают
 	// реестры при разрушении членов — device к этому моменту ещё жив (см. ~Engine).
 	for (int32_t i = 0; i < shader_programs.Count(); ++i) shader_programs.Clear(ShaderProgramId{ i });
+	SDL_DestroyProperties(m_compileProps);
 	SDL_ShaderCross_Quit();
 }
 

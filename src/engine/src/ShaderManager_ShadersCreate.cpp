@@ -159,12 +159,9 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     hash ^= (uint64_t)supported;
     hash *= 1099511628211ULL;
 
-    // В кэше лежит SPIR-V от DXC внутри shadercross, поэтому при неизменном исходнике байткод
-    // меняет ровно обновление shadercross. Версия компилтайм: рантайм-геттера у него нет.
-    const uint32_t toolchain_ver = SDL_SHADERCROSS_MAJOR_VERSION * 1000000u
-                                 + SDL_SHADERCROSS_MINOR_VERSION * 1000u
-                                 + SDL_SHADERCROSS_MICRO_VERSION;
-    FnvMix(hash, (const uint8_t*)&toolchain_ver, sizeof(toolchain_ver));
+    FnvMix(hash, (const uint8_t*)m_dxcVersion, sizeof(m_dxcVersion));
+    FnvMix(hash, (const uint8_t*)m_spirvTargetEnv.data(), m_spirvTargetEnv.size());
+    FnvMix(hash, (const uint8_t*)"\n", 1);
 
     // На сам SPIR-V драйвер не влияет: ключ расширен консервативно, цена промаха — одна
     // перекомпиляция на старте. Строки домешиваем целиком, их формат не специфицирован.
@@ -211,7 +208,7 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
         hlsl_defines.push_back({ nullptr, nullptr });
     }
     hlsl_info.defines = hlsl_defines.empty() ? nullptr : hlsl_defines.data();
-    hlsl_info.props = 0;
+    hlsl_info.props = m_compileProps;
 
     size_t compiled_size = 0;
     void* compiled = SDL_ShaderCross_CompileSPIRVFromHLSL(&hlsl_info, &compiled_size);

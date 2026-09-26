@@ -115,7 +115,7 @@ int main(int, char**)
 
     TransferManager* trm = new TransferManager(dev);
     BufferManager*   bm  = new BufferManager(dev, trm);
-    ShaderManager*   sm  = new ShaderManager(dev);
+    ShaderManager*   sm  = new ShaderManager(dev, "");
     PassManager*     pm  = new PassManager();
     PipeManager*     pipes = new PipeManager(dev, win);
     BatchBuilder*    bb  = new BatchBuilder();
