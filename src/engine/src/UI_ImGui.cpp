@@ -17,6 +17,8 @@ void UI_ImGui::Init(SDL_Window* win, SDL_GPUDevice* dev)
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
+    static const std::string ini_path = std::string(SDL_GetBasePath()) + "imgui.ini";
+    io.IniFilename = ini_path.c_str();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 

@@ -1,11 +1,9 @@
-﻿build
+﻿/build/
 commands.txt
 src/engine/textures/assets/
 
 todo.txt
-osd
-osd/
-imgui.ini
+/osd/
 .idea/
 
 plans/
