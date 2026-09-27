@@ -218,7 +218,7 @@ graphics=0   compute=1 (dedicated)   transfer=2 (dedicated)   → 3 distinct
 - **Путь пока не исполняется.** Движок берёт все буферы с ролью `GRAPHICS`, поэтому
   `commandPool->queue` — та же графическая очередь. Правка по построению не может изменить
   поведение, пока не появится вызывающий, просящий другую роль. Первая настоящая проверка —
-  конвейер в `src/sandbox`, который возьмёт `TRANSFER`-буфер, зальёт данные и дождётся fence.
+  конвейер в `games/sandbox`, который возьмёт `TRANSFER`-буфер, зальёт данные и дождётся fence.
 
 ---
 
@@ -350,7 +350,7 @@ GPU first submit to queue family 2 (thread 6172)
 - **Публичный форк** (`gpu-queue-families`) этой правки не содержит — сверка `--stat` из раздела
   выше разойдётся на её строки. Либо перенести её туда, либо держать отдельной веткой.
 
-Проверено зондом `src/sandbox/src/VulkanVersionProbe.cpp` (GTX 1050, драйвер 560.94 отдаёт 1.3):
+Проверено зондом `games/sandbox/src/VulkanVersionProbe.cpp` (GTX 1050, драйвер 560.94 отдаёт 1.3):
 
 ```
 === Vulkan 1.3 ===
@@ -362,7 +362,7 @@ ERROR: Vulkan 1.9 required, but 'NVIDIA GeForce GTX 1050' supports only 1.3 (upd
 
 ---
 
-## Проверено в бою: `src/sandbox/src/TransferQueueProbe.cpp`
+## Проверено в бою: `games/sandbox/src/TransferQueueProbe.cpp`
 
 Первая настоящая проверка цепочки — до неё каждый шаг проверялся лишь на отсутствие регрессии,
 потому что движок берёт все буферы с ролью `GRAPHICS`.
@@ -458,7 +458,7 @@ GPU queue families: graphics=0 [gfx] compute=1 [comp] transfer=2 [xfer] (3 disti
 ```
 
 **Дискретная карта — через экспорт `AmdPowerXpressRequestHighPerformance = 1`** (как в
-`src/game/src/main.cpp`). Без него переключаемая графика отдаёт зонду встройку, и проверять
+`games/game/src/main.cpp`). Без него переключаемая графика отдаёт зонду встройку, и проверять
 пришлось бы не на той карте, где работает игра. Первый вариант зонда так и работал.
 
 **Понадобилась правка движка (не форка): `PipeManager` считал depth-таргет обязательным.**
@@ -483,7 +483,7 @@ texture format enum!». Теперь наличие выводится из фо
 
 ---
 
-## Проверено под потоками: `src/sandbox/src/QueueThreadingProbe.cpp`
+## Проверено под потоками: `games/sandbox/src/QueueThreadingProbe.cpp`
 
 Одно­поточный зонд доказал маршрутизацию, но не потокобезопасность — а форк тронул ровно то
 место, которое многопоточностью и живёт: **ключ пула команд стал `(threadID, семья)`**, то есть

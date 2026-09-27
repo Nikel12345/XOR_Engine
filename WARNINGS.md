@@ -32,7 +32,7 @@ WRITE/SIMULTANEOUS), `CreateVertexShader` (VERTEX/INDEX). Сам GPU-объек�
 - редактор — создание sp через UI.
 
 Почему до сих пор не стреляло: первая `LoadScene` идёт в `Game::MainInit`, то есть **до**
-`threadController->StartThreads()` (`src/game/src/main.cpp:100`), а значит до первого `PrepareFunc`
+`threadController->StartThreads()` (`games/game/src/main.cpp:100`), а значит до первого `PrepareFunc`
 и первого бейка. Опасна **вторая** загрузка и дальше — то есть переключение сцен. Сейчас это
 прикрыто ещё и тем, что весь движковый набор шейдеров объявляет свои usage в `InitDefaultShaders`,
 до старта; как только сцена привезёт sp/csp, называющую буфер, которого не называл никто до неё, —

@@ -1,5 +1,6 @@
 ﻿#include "PCH.h"
 #include "DefaultResourceSet.h"
+#include "EnginePaths.h"
 #include "EngineContext.h"
 #include "TextureManager.h"
 #include "TextureSamplerPresets.h"
@@ -74,7 +75,7 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 	TextureManager* tm = ctx->GetTextureManager();
 
 	ctx->CreateTextureAtlas("FallbackAtlas", TexturePresets::AlbedoAtlas(64, 1, 1), "SimpleSampler", ResourceTag::Default | ResourceTag::System);
-	ctx->CreateTextureFromFile("NoTextureDummy", "FallbackAtlas", "../engine/textures/dummy.png",
+	ctx->CreateTextureFromFile("NoTextureDummy", "FallbackAtlas", EnginePath("textures/dummy.png").c_str(),
 		ChannelConvention::AsIs, ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
 
 	ctx->GetBatchBuilder()->SetDummyTexture("NoTextureDummy", tm);

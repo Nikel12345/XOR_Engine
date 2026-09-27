@@ -4,18 +4,18 @@
 
 # ImGui — нужен только верхнему слою (Engine: UI_ImGui.cpp, Engine.cpp)
 add_library(ImGui STATIC
-    "${CMAKE_SOURCE_DIR}/external/ImGui/src/imgui.cpp"
-    "${CMAKE_SOURCE_DIR}/external/ImGui/src/imgui_draw.cpp"
-    "${CMAKE_SOURCE_DIR}/external/ImGui/src/imgui_tables.cpp"
-    "${CMAKE_SOURCE_DIR}/external/ImGui/src/imgui_widgets.cpp"
-    "${CMAKE_SOURCE_DIR}/external/ImGui/src/imgui_impl_sdl3.cpp"
-    "${CMAKE_SOURCE_DIR}/external/ImGui/src/imgui_impl_sdlgpu3.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_draw.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_tables.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_widgets.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_impl_sdl3.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_impl_sdlgpu3.cpp"
     # ImGuizmo — гизмо трансформации поверх ImGui (один cpp, тянет imgui_internal.h)
-    "${CMAKE_SOURCE_DIR}/external/ImGuizmo/ImGuizmo.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGuizmo/ImGuizmo.cpp"
 )
 target_include_directories(ImGui PUBLIC
-    "${CMAKE_SOURCE_DIR}/external/ImGui/include"
-    "${CMAKE_SOURCE_DIR}/external/ImGuizmo"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/include"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGuizmo"
 )
 target_link_libraries(ImGui PUBLIC
     SDL3::SDL3          # include-пути SDL приходят вместе с целью (см. корневой CMakeLists)
@@ -25,18 +25,18 @@ target_link_libraries(ImGui PUBLIC
 # .c/.h (external/yyjson, MIT). Линкуется только Engine (PRIVATE): json — деталь файлового IO,
 # наружу торчат лишь Save/LoadScene(папка).
 add_library(yyjson STATIC
-    "${CMAKE_SOURCE_DIR}/external/yyjson/yyjson.c"
+    "${XOR_Engine_SOURCE_DIR}/external/yyjson/yyjson.c"
 )
 target_include_directories(yyjson PUBLIC
-    "${CMAKE_SOURCE_DIR}/external/yyjson"
+    "${XOR_Engine_SOURCE_DIR}/external/yyjson"
 )
 
 # Yoga — flex-раскладка UI (Meta, MIT). Компилируем исходники напрямую (external/yoga/yoga/*.cpp),
 # include-корень external/yoga (#include <yoga/...>). Требует C++20. Линкует только Engine (PRIVATE):
 # Yoga-типы прячет UI_Yoga (pimpl), в игру не течёт — как SDL_ttf в FontManager.
-file(GLOB_RECURSE YOGA_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/external/yoga/yoga/*.cpp")
+file(GLOB_RECURSE YOGA_SRC CONFIGURE_DEPENDS "${XOR_Engine_SOURCE_DIR}/external/yoga/yoga/*.cpp")
 add_library(yoga STATIC ${YOGA_SRC})
-target_include_directories(yoga PUBLIC "${CMAKE_SOURCE_DIR}/external/yoga")
+target_include_directories(yoga PUBLIC "${XOR_Engine_SOURCE_DIR}/external/yoga")
 target_compile_features(yoga PUBLIC cxx_std_20)
 
 # ============================================================
@@ -52,9 +52,12 @@ target_compile_features(EngineCore PUBLIC cxx_std_23)
 option(ENGINE_PROFILE "Кадровый профайлер (Prof::/PROF_SCOPE)" ON)
 target_compile_definitions(EngineCore PUBLIC ENGINE_PROFILE=$<BOOL:${ENGINE_PROFILE}>)
 
+target_compile_definitions(EngineCore PRIVATE XOR_ENGINE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
 set(ENGINECORE_SRC
     src/Utils.cpp
     src/EngineProfiler.cpp
+    src/EnginePaths.cpp
 )
 set(ENGINECORE_HDR
     include/core/Aliases.h
@@ -65,6 +68,7 @@ set(ENGINECORE_HDR
     include/core/Utils.h
     include/core/config.h
     include/core/EngineProfiler.h
+    include/core/EnginePaths.h
     include/core/PCH.h
 )
 list(TRANSFORM ENGINECORE_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
@@ -76,7 +80,7 @@ source_group("Headers" FILES ${ENGINECORE_HDR})
 # glm PUBLIC: его раскрывает общий PCH.h, который лежит здесь же.
 target_include_directories(EngineCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include/core
-    "${CMAKE_SOURCE_DIR}/external/glm"
+    "${XOR_Engine_SOURCE_DIR}/external/glm"
 )
 target_link_libraries(EngineCore PUBLIC
     SDL3::SDL3          # Utils.h/config.h/PCH.h включают SDL; цель даёт и include-пути
@@ -181,10 +185,10 @@ source_group("Headers" FILES ${ENGINEGPU_HDR})
 # (раньше SDL3-инклуд протекал к игре случайно через ImGui — теперь явно отсюда).
 target_include_directories(EngineGpu PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include/gpu
-    "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/include"   # ShaderManager.h раскрывает SDL_ShaderCross_*
+    "${XOR_Engine_SOURCE_DIR}/external/SDL3_shadercross/include"   # ShaderManager.h раскрывает SDL_ShaderCross_*
 )
 target_include_directories(EngineGpu PRIVATE
-    "${CMAKE_SOURCE_DIR}/external/rectpack2D"                 # TextureManager: упаковка атласа
+    "${XOR_Engine_SOURCE_DIR}/external/rectpack2D"                 # TextureManager: упаковка атласа
 )
 
 target_link_libraries(EngineGpu PUBLIC
@@ -350,9 +354,9 @@ target_include_directories(Engine PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include/engine
 )
 target_include_directories(Engine PRIVATE
-    "${CMAKE_SOURCE_DIR}/external/SDL3_image/include"   # только TextureLoader.cpp
-    "${CMAKE_SOURCE_DIR}/external/SDL3_ttf/include"     # только FontManager.cpp (растеризация глифов)
-    "${CMAKE_SOURCE_DIR}/external/yoga"                 # только UI_Yoga.cpp (#include <yoga/...>)
+    "${XOR_Engine_SOURCE_DIR}/external/SDL3_image/include"   # только TextureLoader.cpp
+    "${XOR_Engine_SOURCE_DIR}/external/SDL3_ttf/include"     # только FontManager.cpp (растеризация глифов)
+    "${XOR_Engine_SOURCE_DIR}/external/yoga"                 # только UI_Yoga.cpp (#include <yoga/...>)
 )
 
 # Свой PCH: PCH.h + imgui.h (8 из 38 TU зовут ImGui). Отдельный он не ради скорости, а по
@@ -367,8 +371,8 @@ target_link_libraries(Engine PUBLIC
 target_link_libraries(Engine PRIVATE
     ImGui                                                            # только UI_*.cpp/Engine.cpp; игра ходит через фасад UI_ImGui
 
-    "${CMAKE_SOURCE_DIR}/external/SDL3_image/lib/x64/SDL3_image.lib"  # только TextureLoader
-    "${CMAKE_SOURCE_DIR}/external/SDL3_ttf/lib/x64/SDL3_ttf.lib"      # только FontManager (SDL_ttf)
+    "${XOR_Engine_SOURCE_DIR}/external/SDL3_image/lib/x64/SDL3_image.lib"  # только TextureLoader
+    "${XOR_Engine_SOURCE_DIR}/external/SDL3_ttf/lib/x64/SDL3_ttf.lib"      # только FontManager (SDL_ttf)
     yyjson                                                            # файлы сцены/ресурсов (Save/LoadScene)
     yoga                                                              # только UI_Yoga (flex-раскладка; pimpl прячет типы)
 )

@@ -64,5 +64,4 @@ inline float safe_sint32_f(Sint32 val) {
     return static_cast<float>(val);
 }
 
-// Метка ГОРЯЧЕГО цикла для scripts/vec_check.py. В компиляцию не попадает — она нужна не компилятору, а скрипту.
 #define VEC_HOT(name) ((void)0)

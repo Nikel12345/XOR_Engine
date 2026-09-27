@@ -36,24 +36,27 @@ There is no scripting layer. Game logic is written in plain C++ using engine sys
 
 ## Getting Started
 
-The repository already includes a test scene in the `game` class — it's the author's sandbox for development. You can use it as a reference or modify it directly to build your own scene.
-
 **Requirements:** CMake 3.x+, a C++20-capable compiler. SDL3 is fetched automatically via CMake.
 
 ### Build
 
-#### C++ step
 ```bash
 git clone https://github.com/Nikel12345/XOR_Engine.git
 cd XOR_Engine
 cmake -B build
 cmake --build build
 ```
-#### Python step
-```bash
-cd scripts/model_loader
-python -m venv venv
-pip install -r requirements.txt
+
+This builds the engine libraries (`Engine`, `Physics`). A game is a separate CMake project that
+adds the engine as a subdirectory:
+
+```cmake
+set(XOR_ENGINE_DIR "path/to/XOR_Engine" CACHE PATH "")
+add_subdirectory("${XOR_ENGINE_DIR}" xor_engine)
+
+add_executable(MyGame main.cpp)
+target_link_libraries(MyGame PRIVATE Engine Physics)
+copy_runtime_dlls(MyGame)
 ```
 ---
 

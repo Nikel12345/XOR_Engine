@@ -1,21 +1,10 @@
 ﻿build
 commands.txt
-src/engine/shaders/
 src/engine/textures/assets/
-scripts/model_loader/venv
-scripts/texture_packer/venv
-scripts/scene_gen/venv
-
-scripts/model_loader/raw/*
-!scripts/model_loader/raw/.gitkeep
-
-scripts/texture_packer/raw/*
-!scripts/texture_packer/raw/.gitkeep
 
 todo.txt
 osd
 osd/
-src/game/saved_scene/scene1M/
 imgui.ini
 .idea/
 

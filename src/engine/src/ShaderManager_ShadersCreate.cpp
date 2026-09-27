@@ -3,6 +3,8 @@
 #include "BufferManager.h"
 #include "GeometryPool.h"
 #include <string_view>
+#include <filesystem>
+#include "EnginePaths.h"
 
 using namespace ShaderBase;
 
@@ -34,8 +36,15 @@ static std::vector<ShaderDefine> NormalizeDefines(const ShaderDefines& in)
     return out;
 }
 
-static void HashIncludesRecursive(uint64_t& hash, const std::string& path,
-    const char* include_dir, std::unordered_set<std::string>& visited,
+static std::string ResolveInclude(const std::string& includer_dir, const std::string& rel, const std::string& include_dir)
+{
+    std::string local = includer_dir.empty() ? rel : includer_dir + "/" + rel;
+    if (std::filesystem::exists(local)) return local;
+    return include_dir + "/" + rel;
+}
+
+static void HashIncludesRecursive(uint64_t& hash, const std::string& path, const std::string& includer_dir,
+    const std::string& include_dir, std::unordered_set<std::string>& visited,
     std::vector<std::string>* markers = nullptr)
 {
     if (!visited.insert(path).second) return;
@@ -72,7 +81,8 @@ static void HashIncludesRecursive(uint64_t& hash, const std::string& path,
         size_t q2 = sv.find('"', q1 + 1);
         if (q2 == std::string_view::npos) break;
         std::string rel(sv.substr(q1 + 1, q2 - q1 - 1));
-        HashIncludesRecursive(hash, std::string(include_dir) + "/" + rel, include_dir, visited, markers);
+        const std::string resolved = ResolveInclude(includer_dir, rel, include_dir);
+        HashIncludesRecursive(hash, resolved, std::filesystem::path(resolved).parent_path().string(), include_dir, visited, markers);
         pos = q2 + 1;
     }
     SDL_free(data);
@@ -138,14 +148,14 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     }
 
     const SDL_GPUShaderFormat supported = SDL_GetGPUShaderFormats(dev);
-    const char* include_dir = "../engine/shaders_code";
+    const std::string include_dir = EnginePath("shaders_code");
 
     uint64_t hash = 14695981039346656037ULL;
     {
         std::unordered_set<std::string> visited;
         // Маркеры снимаются ДО возможного выхода по кэш-хиту: типы должны быть известны и когда
         // .spv взят готовым.
-        HashIncludesRecursive(hash, hlsl_path, include_dir, visited, out_push_kinds);
+        HashIncludesRecursive(hash, hlsl_path, std::string(), include_dir, visited, out_push_kinds);
     }
 
     // Разделители обязательны: иначе {"AB",""} и {"A","B"} дают один поток байт.
@@ -196,7 +206,7 @@ Uint8* ShaderManager::LoadOrCompileSPIRV(const char* hlsl_path,
     hlsl_info.source = src;
     hlsl_info.entrypoint = "main";
     hlsl_info.shader_stage = stage;
-    hlsl_info.include_dir = include_dir;
+    hlsl_info.include_dir = include_dir.c_str();
     // API требует массив, ЗАВЕРШЁННЫЙ полностью нулевой записью. Пустое значение отдаётся как
     // NULL: -D NAME даёт 1, а -D NAME= даёт пустую подстановку.
     std::vector<SDL_ShaderCross_HLSL_Define> hlsl_defines;

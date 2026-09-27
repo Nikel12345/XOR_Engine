@@ -56,7 +56,7 @@ diff -rq --strip-trailing-cr -x external -x .gitignore -x .git <клон фор�
 PATH. До вендоринга рядом с exe DXC не было, и все шейдеры молча компилировал DXC из Vulkan SDK
 (`G:\Vulkan SDK\Bin`, 1.8), а не тот, что лежал в дистрибутиве shadercross. На машине без SDK
 промах кэша шейдеров был бы ошибкой компиляции. Проверка: зонд
-`src/sandbox/src/ShadercrossBuildProbe.cpp` печатает, откуда загружен `dxcompiler.dll`.
+`games/sandbox/src/ShadercrossBuildProbe.cpp` печатает, откуда загружен `dxcompiler.dll`.
 
 ## Правки
 
@@ -79,7 +79,7 @@ PATH. До вендоринга рядом с exe DXC не было, и все �
 `Engine::InitPlatform` берёт и `apiVersion` девайса, и строку `vulkanX.Y` для `ShaderManager`.
 В ключ кэша шейдеров идут версия DXC и target-env — смена любого из них сама сбрасывает кэш.
 
-Проверено зондом `src/sandbox/src/ShadercrossBuildProbe.cpp`: шейдер с `WaveActiveCountBits`
+Проверено зондом `games/sandbox/src/ShadercrossBuildProbe.cpp`: шейдер с `WaveActiveCountBits`
 без свойства падает («Vulkan 1.1 is required for Wave Operation»), с `vulkan1.3` собирается в
 SPIR-V 1.6; все 36 вариантов шейдеров движка (включая `surface.hlsl` с дефайнами
 `DefaultShaderSet`) под `vulkan1.0` и `vulkan1.3` дают одинаковую рефлексию.

@@ -1,5 +1,6 @@
 ﻿#include "PCH.h"
 #include "DefaultShaderSet.h"
+#include "EnginePaths.h"
 #include "LightDataModule.h"
 #include "TransformDataModule.h"
 #include "DefaultRenderPassSet.h"
@@ -72,10 +73,10 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 	// Отдельная тройка, а не ссылка на main_pass_vs/untextured_surface_fs ниже: фолбэк обязан
 	// пережить удаление любого шейдера из редактора. Одинаковый байткод дедуплицируется по хэшу SPIR-V.
 	ctx->CreateVertexShader("fallback_vs",
-		"../engine/shaders_code/main_pass/main_pass.vert.hlsl",
+		EnginePath("shaders_code/main_pass/main_pass.vert.hlsl").c_str(),
 		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
 	ctx->CreateFragmentShader("fallback_fs",
-		"../engine/shaders_code/main_pass/untextured/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
+		EnginePath("shaders_code/main_pass/untextured/surface.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
 	{
 		ShaderProgramDescription spd;
 		spd.BehavesAsOpaqueGeometry()->DoesNotCull();
@@ -86,19 +87,19 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ctx->GetBatchBuilder()->SetFallbackShader(ctx->GetShaderManager()->InternShaderProgram("Fallback"));
 	}
 
-	ctx->CreateVertexShader("main_pass_vs", "../engine/shaders_code/main_pass/main_pass.vert.hlsl",
+	ctx->CreateVertexShader("main_pass_vs", EnginePath("shaders_code/main_pass/main_pass.vert.hlsl").c_str(),
 		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateVertexShader("shadow_vs", "../engine/shaders_code/shadow_pass/shadow_pass.vert.hlsl",
+	ctx->CreateVertexShader("shadow_vs", EnginePath("shaders_code/shadow_pass/shadow_pass.vert.hlsl").c_str(),
 		POS_UV_NORM_POOL, { POSITION }, ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateVertexShader("lod_quad_vs", "../engine/shaders_code/main_pass/lod_quad.vert.hlsl",
+	ctx->CreateVertexShader("lod_quad_vs", EnginePath("shaders_code/main_pass/lod_quad.vert.hlsl").c_str(),
 		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateVertexShader("lod_quad_shadow_vs", "../engine/shaders_code/shadow_pass/lod_quad_shadow.vert.hlsl",
+	ctx->CreateVertexShader("lod_quad_shadow_vs", EnginePath("shaders_code/shadow_pass/lod_quad_shadow.vert.hlsl").c_str(),
 		POS_UV_NORM_POOL, { POSITION }, ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateVertexShader("lod_splat_vs", "../engine/shaders_code/main_pass/lod_splat.vert.hlsl",
+	ctx->CreateVertexShader("lod_splat_vs", EnginePath("shaders_code/main_pass/lod_splat.vert.hlsl").c_str(),
 		POS_UV_NORM_POOL, { POSITION, UV, NORMAL, TANGENT }, ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateVertexShader("skybox_vs", "../engine/shaders_code/skybox/skybox.vert.hlsl",
+	ctx->CreateVertexShader("skybox_vs", EnginePath("shaders_code/skybox/skybox.vert.hlsl").c_str(),
 		POS_UV_NORM_POOL, { POSITION }, ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateVertexShader("debug_collider_vs", "../engine/shaders_code/debug/debug_collider.vert.hlsl",
+	ctx->CreateVertexShader("debug_collider_vs", EnginePath("shaders_code/debug/debug_collider.vert.hlsl").c_str(),
 		POS_UV_NORM_POOL, { POSITION }, ResourceTag::CodeOwned | ResourceTag::Default);
 
 	const ShaderDefines kVariantDefines = {
@@ -107,25 +108,25 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		{ "MAX_SLOTS",           std::to_string(MAX_SLOTS) },
 		{ "MAX_UVL_BLOCKS",      std::to_string(MAX_UVL_BLOCKS) },
 	};
-	ctx->CreateFragmentShader("main_surface_fs",        "../engine/shaders_code/main_pass/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
+	ctx->CreateFragmentShader("main_surface_fs",        EnginePath("shaders_code/main_pass/surface.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
 	ShaderDefines facing_defines = kVariantDefines;
 	facing_defines.push_back({ "LIGHT_IGNORES_NORMAL", "1" });
-	ctx->CreateFragmentShader("facing_surface_fs",      "../engine/shaders_code/main_pass/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default, facing_defines);
-	ctx->CreateFragmentShader("untextured_surface_fs",  "../engine/shaders_code/main_pass/untextured/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateFragmentShader("transparent_surface_fs", "../engine/shaders_code/transparent_pass/surface.hlsl", ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
-	ctx->CreateFragmentShader("shadow_fs",              "../engine/shaders_code/shadow_pass/shadow_pass.frag.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateFragmentShader("skybox_fs",              "../engine/shaders_code/skybox/skybox.frag.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateFragmentShader("debug_collider_fs",      "../engine/shaders_code/debug/debug_collider.frag.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateFragmentShader("facing_surface_fs",      EnginePath("shaders_code/main_pass/surface.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default, facing_defines);
+	ctx->CreateFragmentShader("untextured_surface_fs",  EnginePath("shaders_code/main_pass/untextured/surface.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateFragmentShader("transparent_surface_fs", EnginePath("shaders_code/transparent_pass/surface.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
+	ctx->CreateFragmentShader("shadow_fs",              EnginePath("shaders_code/shadow_pass/shadow_pass.frag.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateFragmentShader("skybox_fs",              EnginePath("shaders_code/skybox/skybox.frag.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateFragmentShader("debug_collider_fs",      EnginePath("shaders_code/debug/debug_collider.frag.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
 
-	ctx->CreateComputeShader("bloom_prefilter_cs", "../engine/shaders_code/comp/bloom_prefilter.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateComputeShader("bloom_down_cs",      "../engine/shaders_code/comp/bloom_down.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateComputeShader("bloom_up_cs",        "../engine/shaders_code/comp/bloom_up.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateComputeShader("bloom_composite_cs", "../engine/shaders_code/comp/bloom_composite.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateComputeShader("ssao_cs",            "../engine/shaders_code/comp/ssao.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateComputeShader("ssao_blur_h_cs",     "../engine/shaders_code/comp/ssao_blur_h.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateComputeShader("ssao_blur_v_cs",     "../engine/shaders_code/comp/ssao_blur_v.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateComputeShader("ao_composite_cs",    "../engine/shaders_code/comp/ao_composite.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateComputeShader("fog_cs",             "../engine/shaders_code/comp/fog.comp.hlsl", ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("bloom_prefilter_cs", EnginePath("shaders_code/comp/bloom_prefilter.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("bloom_down_cs",      EnginePath("shaders_code/comp/bloom_down.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("bloom_up_cs",        EnginePath("shaders_code/comp/bloom_up.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("bloom_composite_cs", EnginePath("shaders_code/comp/bloom_composite.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("ssao_cs",            EnginePath("shaders_code/comp/ssao.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("ssao_blur_h_cs",     EnginePath("shaders_code/comp/ssao_blur_h.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("ssao_blur_v_cs",     EnginePath("shaders_code/comp/ssao_blur_v.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("ao_composite_cs",    EnginePath("shaders_code/comp/ao_composite.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("fog_cs",             EnginePath("shaders_code/comp/fog.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
 
 	{
 		ShaderProgramDescription spd;
@@ -193,9 +194,9 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 	}
 
 	{
-		ctx->CreateVertexShader("ui_vs", "../engine/shaders_code/ui/ui.vert.hlsl",
+		ctx->CreateVertexShader("ui_vs", EnginePath("shaders_code/ui/ui.vert.hlsl").c_str(),
 			POS_UV_NORM_POOL, { POSITION, UV }, ResourceTag::CodeOwned | ResourceTag::Default);
-		ctx->CreateFragmentShader("ui_fs", "../engine/shaders_code/ui/ui.frag.hlsl", ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
+		ctx->CreateFragmentShader("ui_fs", EnginePath("shaders_code/ui/ui.frag.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
 
 		ShaderProgramDescription spd;
 		spd.BehavesAsUIOverlay();
@@ -476,9 +477,9 @@ void DefaultShaderProgramSet::SetCullingPrograms(EngineContext* ctx, CullingData
     PassManager*   pm = ctx->GetPassManager();
     const ResourceTag tags = ResourceTag::CodeOwned | ResourceTag::Default;
 
-    ctx->CreateComputeShader("culling_clear_cs",   "../engine/shaders_code/comp/culling_clear.comp.hlsl", tags);
-    ctx->CreateComputeShader("culling_scatter_cs", "../engine/shaders_code/comp/culling_scatter.comp.hlsl", tags);
-    ctx->CreateComputeShader("culling_fixup_cs",   "../engine/shaders_code/comp/culling_fixup.comp.hlsl", tags);
+    ctx->CreateComputeShader("culling_clear_cs",   EnginePath("shaders_code/comp/culling_clear.comp.hlsl").c_str(), tags);
+    ctx->CreateComputeShader("culling_scatter_cs", EnginePath("shaders_code/comp/culling_scatter.comp.hlsl").c_str(), tags);
+    ctx->CreateComputeShader("culling_fixup_cs",   EnginePath("shaders_code/comp/culling_fixup.comp.hlsl").c_str(), tags);
 
     // Порядок создания программ = порядок исполнения: clear → все scatter → все fixup.
     ctx->CreateComputeShaderProgram("csp_cull_clear", "culling_clear_cs", { DEFAULT_CULL_COUNTERS_BUFFER }, {}, {}, {}, {}, RP::CULLING_PASS, tags);

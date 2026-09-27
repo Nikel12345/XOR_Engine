@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(XOR_Engine)
 
-include("${CMAKE_SOURCE_DIR}/cmake/RuntimeDlls.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/RuntimeDlls.cmake")
 
 # /MP: параллельная компиляция TU ВНУТРИ одного таргета (MSBuild сам параллелит только
 # проекты между собой; без /MP ~25 cpp Engine собираются по одному → это и было главным
@@ -25,7 +25,7 @@ set(SDL_SHARED       ON  CACHE BOOL "" FORCE)   # нужен именно SDL3.d
 set(SDL_STATIC       OFF CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)   # SDL3_test не нужен; заодно гасит SDL_TESTS
 set(SDL_EXAMPLES     OFF CACHE BOOL "" FORCE)
-set(SDL_INSTALL      OFF CACHE BOOL "" FORCE)   # install() у нас свой, в src/game и src/mygame
+set(SDL_INSTALL      OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/SDL3)
 
 # Проекты SDL — в отдельную папку решения, чтобы не мешались с таргетами движка.
@@ -70,8 +70,6 @@ set(SDLSHADERCROSS_INSTALL           OFF CACHE BOOL "" FORCE)
 set(SDLSHADERCROSS_TESTS             OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/SDL3_shadercross EXCLUDE_FROM_ALL)
 
-set(SHADERCROSS_DXC_BIN "${CMAKE_SOURCE_DIR}/external/SDL3_shadercross/external/DirectXShaderCompiler-binaries/bin/x64")
-
 foreach(_sc_target SDL3_shadercross-static spirv-cross-c spirv-cross-core spirv-cross-glsl
                    spirv-cross-hlsl spirv-cross-msl spirv-cross-cpp spirv-cross-reflect spirv-cross-util)
     if(TARGET ${_sc_target})
@@ -81,8 +79,3 @@ endforeach()
 
 add_subdirectory(src/engine)
 add_subdirectory(src/physics)
-add_subdirectory(src/game)
-add_subdirectory(src/mygame)
-add_subdirectory(src/sandbox)
-
-set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT Game)
