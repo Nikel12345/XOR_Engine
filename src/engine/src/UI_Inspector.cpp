@@ -1192,6 +1192,30 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         float dx, dy, dz; yg->GetOffset(n, dx, dy, dz);
         ImGui::Text("Offset: X=%.0f  Y=%.0f px", dx, dy);
         ImGui::Separator();
+        float local[16];
+        if (yg->GetNodeTransform(n, local)) {
+            static constexpr int kLine[16] = { 0, 1, 2, 12,  4, 5, 6, 13,  8, 9, 10, 14,  3, 7, 11, 15 };
+            float lines[16];
+            for (int k = 0; k < 16; ++k) lines[k] = local[kLine[k]];
+            bool changed = false;
+            ImGui::PushID("ui_local");
+            static const char* kLabel[4] = { "x y z w", "a b c d", "e f g h", "i j k l" };
+            for (int r = 0; r < 4; ++r)
+                changed |= ImGui::DragFloat4(kLabel[r], lines + r * 4, 0.01f, 0.0f, 0.0f, "%.3f");
+            ImGui::PopID();
+            if (ImGui::SmallButton("Identity")) {
+                const glm::mat4 id(1.0f);
+                UINodeTransformCmd payload{ n };
+                std::memcpy(payload.matrix, glm::value_ptr(id), sizeof(payload.matrix));
+                cmd::Push<CommandId::SetUINodeTransform>(ctx->GetInputManager(), payload);
+            }
+            else if (changed) {
+                UINodeTransformCmd payload{ n };
+                for (int k = 0; k < 16; ++k) payload.matrix[kLine[k]] = lines[k];
+                cmd::Push<CommandId::SetUINodeTransform>(ctx->GetInputManager(), payload);
+            }
+        }
+        ImGui::Separator();
         auto nudge_z = [&](float ddz) {
             cmd::Push<CommandId::NudgeUINode>(ctx->GetInputManager(), n, 0.0f, 0.0f, ddz);
         };

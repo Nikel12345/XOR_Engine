@@ -1,8 +1,3 @@
-// UI-вершинник: NDC-квад. Трансформ (Positions 4x4) = ЭКРАННАЯ матрица, дающая clip напрямую —
-// view/proj НЕТ (UI не зависит от камеры мира). row из Rows индексирует трансформ и инстанс-
-// данные (как main_pass.vert), и передаётся во фрагментник для разреженного текст-канала.
-// Модель — юнит-квад [0,1]²; матрица раскладывает его в нужный NDC-прямоугольник.
-
 struct VSInput
 {
     float3 a_pos     : POSITION;
@@ -23,6 +18,8 @@ StructuredBuffer<int>      Rows           : register(t1, space0);   // -1 = не
 struct InstanceData { float alpha; uint flags; };
 StructuredBuffer<InstanceData> InstanceDataBlock : register(t2, space0);
 
+cbuffer UICamera : register(b0, space1) { float4 ui_camera; };
+
 VSOutput main(VSInput input)
 {
     VSOutput o;
@@ -35,7 +32,9 @@ VSOutput main(VSInput input)
     }
 
     float4x4 m = ModelMatrixBlock[row];
-    o.position = mul(m, float4(input.a_pos, 1.0));   // матрица даёт clip НАПРЯМУЮ (NDC), без view/proj
+    float3 p = mul((float3x3)m, input.a_pos);
+    float  w = 1.0 - p.z * tan(0.5 * ui_camera.x);
+    o.position = float4(p.xy + float2(m[0][3], m[1][3]) * w, m[2][3] * w, w);
     // Квад теперь в КАНОНЕ развёртки (v-down, top-left origin — как glyph-атлас и albedo). UV идёт
     // напрямую, без флипа: раньше квад был v-up и здесь стоял `1.0 - a_uv.y`; после канона это стало
     // двойным флипом → текст/текстуры вверх ногами. См. канон в main_pass.vert (cross(T,N)).

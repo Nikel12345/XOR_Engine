@@ -84,6 +84,8 @@ namespace DefaultRenderPassNamespace
     // UI-оверлей: рендер UI-энтити (NDC-квады) в scene_hdr ПОСЛЕ bloom, ДО present (не блумится).
     // Своя глубина (main_depth с CLEAR — z-пространство UI отдельное), TextAtlas как глобалка.
     void SetUIPass(EngineContext* ctx);
+    struct alignas(16) UICameraPushData { float fov = 0.7853982f; float pad[3] = { 0.0f, 0.0f, 0.0f }; };
+    inline const std::string UI_CAMERA_STATE = "UICamera";
 
     // Финальный проход: blit HDR-сцены (scene_hdr) в свопчейн с конвертацией формата.
     // Регистрируется последним (приоритет 30). Тонмаппинг появится на этапе bloom-composite.

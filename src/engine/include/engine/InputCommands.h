@@ -180,3 +180,9 @@ struct UINodeNudgeCmd {
     float    ddx, ddy, ddz;   // XY в пикселях раскладки (не NDC), Z — bias слоя
 };
 template<> struct CommandPayload<CommandId::NudgeUINode> { using type = UINodeNudgeCmd; };
+
+struct UINodeTransformCmd {
+    uint32_t node;
+    float    matrix[16];
+};
+template<> struct CommandPayload<CommandId::SetUINodeTransform> { using type = UINodeTransformCmd; };

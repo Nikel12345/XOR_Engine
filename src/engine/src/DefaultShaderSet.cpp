@@ -57,6 +57,8 @@ void DefaultShaderProgramSet::SetDefaultPushes(EngineContext* ctx)
         [](const PushConstantBinder& b, RP::ShadowPushData data) { b.Push(data); });
     sm->CreatePushInstruction<RP::DebugColliderPushData>("Wireframe", PushStage::Fragment,
         [](const PushConstantBinder& b, RP::DebugColliderPushData data) { b.Push(data); });
+    sm->CreatePushInstruction<RP::UICameraPushData>("UI", PushStage::Vertex,
+        [](const PushConstantBinder& b, RP::UICameraPushData data) { b.Push(data); });
 }
 
 void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)

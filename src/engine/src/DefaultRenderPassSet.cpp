@@ -462,13 +462,18 @@ void DefaultRenderPassNamespace::SetUIPass(EngineContext* ctx)
     {
         rp.renderPassTexsData.ResolveTargets();
         if (rp.renderPassTexsData.color_targets.empty() || !rp.renderPassTexsData.color_targets[0].info.texture) return;
-        pm->RenderPassStandardBody(cb, &rp, bm, 0, nullptr);
+        pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
     },
         std::move(ui_rptd),
         28   // после bloom (composite ~26), до present (30) — UI не блумится, но попадает в present
     );
 
     // Глобалка прохода: единый текстовый атлас (слот 0, t0/s0). Сеттер декларирует ему SAMPLER.
+    ParamsSpecRegistry::Passes().Register(MakeParamsSpec<UICameraPushData>(UI_CAMERA_STATE, {
+        ParamsFieldSpec::Num(PARAMS_FIELD(UICameraPushData, fov), ParamsFieldKind::Angle, 1.0f, 170.0f).Label("FOV"),
+    }));
+    SetPassState(uiPass, UI_CAMERA_STATE, UICameraPushData{});
+
     uiPass->SetGlobalTextures({ tm->GetTextureAtlas(DefaultAtlasNames::TEXT_ATLAS) });
     uiPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr, 0);
     uiPass->renderPassTexsData.SetDepthTexture(g_pass_system.main_depth);

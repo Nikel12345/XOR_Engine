@@ -56,6 +56,8 @@ public:
     void NudgeNode(Node n, float ddx, float ddy, float ddz);
     bool GetNodeNdc(Node n, float& ndc_x, float& ndc_y, float& z) const;
     void GetOffset(Node n, float& dx, float& dy, float& dz) const;
+    void SetNodeTransform(Node n, const float m[16]);
+    bool GetNodeTransform(Node n, float m[16]) const;
 
     struct Impl;
 

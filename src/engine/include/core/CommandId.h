@@ -34,6 +34,7 @@ enum class CommandId : uint32_t {
     DeleteComputeShader,
     CreateEntity,
     NudgeUINode,
+    SetUINodeTransform,
 
     COUNT
 };

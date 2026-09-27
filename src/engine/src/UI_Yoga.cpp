@@ -19,6 +19,7 @@ struct NodeRec {
     std::vector<uint32_t> children;              // индексы в Impl::nodes
     // Правка из редактора: смещение поверх посчитанной раскладки (offset px XY + z-bias слоя).
     float                 off_x = 0.0f, off_y = 0.0f, z_off = 0.0f;
+    glm::mat4             local{ 1.0f };
     // Слепок последнего Emit (центр в NDC + z) — для постановки гизмо. Пишет sim, читает UI (benign).
     float                 ndc_cx = 0.0f, ndc_cy = 0.0f, ndc_z = 0.5f;
     bool                  emitted = false;
@@ -130,6 +131,20 @@ void UI_Yoga::GetOffset(Node n, float& dx, float& dy, float& dz) const
     dx = r.off_x;  dy = r.off_y;  dz = r.z_off;
 }
 
+void UI_Yoga::SetNodeTransform(Node n, const float m[16])
+{
+    if (n >= impl_->nodes.size()) return;
+    impl_->nodes[n].local = glm::make_mat4(m);
+    dirty = true;
+}
+
+bool UI_Yoga::GetNodeTransform(Node n, float m[16]) const
+{
+    if (n >= impl_->nodes.size()) return false;
+    std::memcpy(m, glm::value_ptr(impl_->nodes[n].local), 16 * sizeof(float));
+    return true;
+}
+
 static UI_Yoga::Node MakeNode(UI_Yoga::Impl* impl, const UIStyle& s)
 {
     YGNodeRef yg = YGNodeNewWithConfig(impl->cfg);
@@ -221,13 +236,12 @@ static void WritePositions(ObjectManager* om, SceneData* scene, Entity e, const 
 // Рекурсивный обход: аккумулируем абсолютный px-офсет, считаем rect → NDC-матрицу узла. create=true —
 // СОЗДАЁМ энтити (структурный проход); create=false — МУТИРУЕМ Positions существующей энтити на месте
 // (layout-правки: драг/ресайз — без recreate, иначе структурная мутация ECS каждый кадр роняет
-// редактор, см. CLAUDE.md). depth: глубже = МЕНЬШЕ z (ближе) → потомок рисуется поверх предка
-// независимо от порядка батчей (иначе z-конфликт «мигает»). UI-проход чистит depth, compare = LESS.
+// редактор, см. CLAUDE.md).
 static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om, SceneData* scene_ptr,
                      const SceneName& scene_name, UI_Yoga::Node id, float ox, float oy,
-                     float W, float H, int depth, bool create)
+                     float W, float H, int& order, bool create)
 {
-    constexpr float kZStep = 0.001f;   // шаг z на уровень (24 уровня = 0.024 — с запасом)
+    constexpr float kZStep = 0.00001f;
 
     NodeRec& r = impl->nodes[id];
     const float x = ox + YGNodeLayoutGetLeft(r.yg) + r.off_x;
@@ -235,20 +249,29 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
     const float w = YGNodeLayoutGetWidth(r.yg);
     const float h = YGNodeLayoutGetHeight(r.yg);
 
-    const float sx = (w / W) * 2.0f;          // масштаб X в NDC
-    const float sy = (h / H) * 2.0f;          // масштаб Y
-    const float L  = (x / W) * 2.0f - 1.0f;   // левый край в NDC
-    const float T  = 1.0f - (y / H) * 2.0f;   // верхний край (флип: y вниз → NDC вверх)
-    const float z  = 0.5f - static_cast<float>(depth) * kZStep + r.z_off;   // глубже = ближе, +bias слоя
-    r.ndc_cx = L + sx * 0.5f;
-    r.ndc_cy = T - sy * 0.5f;
+    const float z = 0.5f - safe_sint32_f(order++) * kZStep + r.z_off;
+
+    const glm::mat3 to_ndc(glm::vec3(2.0f / W, 0.0f, 0.0f),
+                           glm::vec3(0.0f, 2.0f / H, 0.0f),
+                           glm::vec3(0.0f, 0.0f, 2.0f / H));
+    const glm::mat3 size(glm::vec3(w, 0.0f, 0.0f), glm::vec3(0.0f, h, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    const glm::mat3 basis = to_ndc * glm::mat3(r.local) * size;
+
+    const float tx = ((x + 0.5f * w) / W) * 2.0f - 1.0f + r.local[3][0] * 2.0f / W;
+    const float ty = 1.0f - ((y + 0.5f * h) / H) * 2.0f + r.local[3][1] * 2.0f / H;
+
+    glm::mat4 M(basis);
+    M[3] = glm::vec4(tx, ty, z, 1.0f);
+    r.ndc_cx = tx;
+    r.ndc_cy = ty;
     r.ndc_z  = z;
     r.emitted = true;
 
     if (r.draws && !r.quad.empty()) {
-        // Юнит-квад [0,1] раскладывается матрицей Positions: диагональ = масштаб, 4-й столбец
-        // (w,d,h) = сдвиг (row-major, как scene.json).
-        PositionProxy16 m{ sx,0,0,L,   0,sy,0,(T - sy),   0,0,1,z,   0,0,0,1 };
+        PositionProxy16 m{ M[0][0], M[0][1], M[0][2], M[3][0],
+                           M[1][0], M[1][1], M[1][2], M[3][1],
+                           M[2][0], M[2][1], M[2][2], M[3][2],
+                           M[0][3], M[1][3], M[2][3], M[3][3] };
 
         if (create) {
             Entity e;
@@ -276,8 +299,8 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
         }
     }
 
-    for (UI_Yoga::Node c : r.children)
-        EmitNode(impl, ctx, om, scene_ptr, scene_name, c, x, y, W, H, depth + 1, create);
+    for (UI_Yoga::Node ch : r.children)
+        EmitNode(impl, ctx, om, scene_ptr, scene_name, ch, x, y, W, H, order, create);
 }
 
 void UI_Yoga::Emit(EngineContext* ctx, float screen_w, float screen_h)
@@ -306,19 +329,20 @@ void UI_Yoga::Emit(EngineContext* ctx, float screen_w, float screen_h)
 
     YGNodeCalculateLayout(impl_->nodes[impl_->root].yg, screen_w, screen_h, YGDirectionLTR);
 
+    int order = 0;
     if (structural_) {
         // Структурное изменение дерева (сборка/добавление узлов, редко) → полный recreate.
         for (Entity e : impl_->created) ctx->DeleteEntity(scene_name, e);
         impl_->created.clear();
         for (NodeRec& n : impl_->nodes) { n.has_entity = false; n.entity = static_cast<Entity>(-1); }
-        EmitNode(impl_, ctx, om, scene, scene_name, impl_->root, 0.0f, 0.0f, screen_w, screen_h, 0, /*create*/true);
+        EmitNode(impl_, ctx, om, scene, scene_name, impl_->root, 0.0f, 0.0f, screen_w, screen_h, order, /*create*/true);
         structural_ = false;
     }
     else {
         // Только раскладка/смещение (драг гизмо, ресайз) → мутируем Positions существующих энтити на
         // месте, БЕЗ create/delete: иначе структурная мутация ECS каждый кадр против ForEach редактора
         // = краш (см. CLAUDE.md). Бонус: ресайз больше не тасует порядок батчей.
-        EmitNode(impl_, ctx, om, scene, scene_name, impl_->root, 0.0f, 0.0f, screen_w, screen_h, 0, /*create*/false);
+        EmitNode(impl_, ctx, om, scene, scene_name, impl_->root, 0.0f, 0.0f, screen_w, screen_h, order, /*create*/false);
     }
     dirty = false;
 }

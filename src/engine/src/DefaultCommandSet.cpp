@@ -82,6 +82,13 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 				yg->NudgeNode(c.node, c.ddx, c.ddy, c.ddz);
 		});
 
+	cmd::Register<CommandId::SetUINodeTransform>(im,
+		[](EngineContext* ctx, const UINodeTransformCmd& c)
+		{
+			if (UI_Yoga* yg = ctx->GetUIYoga())
+				yg->SetNodeTransform(c.node, c.matrix);
+		});
+
 	// Дельту ставим руками: SetDirtyBatches дал бы тот же результат обходом ВСЕЙ сцены — на 1М
 	// энтити это фриз ради одной новой сущности.
 	cmd::Register<CommandId::CreateEntity>(im,

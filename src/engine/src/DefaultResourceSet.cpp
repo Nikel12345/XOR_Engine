@@ -101,6 +101,16 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 		i = { 0, 1, 2, 0, 2, 3 };
 	}, AnchorShift::Keep, ResourceTag::CodeOwned | ResourceTag::Default);
 
+	ctx->CreateModel<PosUVNormal>("ui_quad", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
+		v = {
+			{ 0,0,0,  0,1,  0,0,1,  1,0,0 },
+			{ 1,0,0,  1,1,  0,0,1,  1,0,0 },
+			{ 1,1,0,  1,0,  0,0,1,  1,0,0 },
+			{ 0,1,0,  0,0,  0,0,1,  1,0,0 },
+		};
+		i = { 0, 1, 2, 0, 2, 3 };
+	}, AnchorShift::Center, ResourceTag::CodeOwned | ResourceTag::Default);
+
 	ctx->CreateModel<PosUVNormal>("point", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
 		v = { { 0,0,0,  0.5f,0.5f,  0,0,1,  1,0,0 } };
 		i = { 0 };

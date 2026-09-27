@@ -232,7 +232,7 @@ SDL_AppResult Game::MainInit()
         FontManager*  fm    = ctx->GetFontManager();
         // Ассеты узла — по имени (как в Renderable); резолвит их сборка батчей.
         const std::string uimat = "ui_mat";
-        const std::string quad  = "quad";
+        const std::string quad  = "ui_quad";
 
         // Экран: колонка, дети прижаты к низу и по центру по горизонтали.
         UIStyle screen; screen.dir = UIDir::Column; screen.justify = UIJustify::End; screen.align = UIAlign::Center;
@@ -241,12 +241,12 @@ SDL_AppResult Game::MainInit()
         // Панель у нижнего края: колонка, внутренний отступ + зазор между строками, по центру.
         UIStyle panelS; panelS.dir = UIDir::Column; panelS.align = UIAlign::Center;
         panelS.padding = 1.0f; panelS.gap = 8.0f; panelS.margin = 160.0f;
-        //UI_Yoga::Node panel = ui->Box(root, panelS, uimat, quad);
+        UI_Yoga::Node panel = ui->Box(root, panelS, uimat, quad);
 
         // Две текстовые строки (intrinsic-размер из метрик шрифта).
-        //UIStyle textS;
-        //ui->Text(panel, textS, "Hello U Hello U Hello U Hello\n U Hello U Hello U Hello UI",    uimat, quad, uifont, fm);
-        //ui->Text(panel, textS, "Yoga layout", uimat, quad, uifont, fm);
+        UIStyle textS;
+        ui->Text(panel, textS, "Hello U Hello U Hello U Hello\n U Hello U Hello U Hello UI",    uimat, quad, uifont, fm);
+        ui->Text(panel, textS, "Yoga layout", uimat, quad, uifont, fm);
 
         // Кнопка на материале с ДВУМЯ albedo-вариантами (m_hover из манифеста сцены).
         // Переключения пока нет: узел показывает дефолт (вариант 0). Смысл узла — проверка,
@@ -255,7 +255,7 @@ SDL_AppResult Game::MainInit()
         UIStyle btnS;
         btnS.wmode = UISize::Points; btnS.w = 256.0f;
         btnS.hmode = UISize::Points; btnS.h = 74.0f;
-        //ui->Box(panel, btnS, "m_hover", quad);
+        ui->Box(panel, btnS, "m_hover", quad);
     }
 
     {
@@ -267,8 +267,8 @@ SDL_AppResult Game::MainInit()
 }
 
 // Наведение на UI. Дерево Yoga раскладывает узлы в NDC и кладёт рект прямо в Positions
-// (юнит-квад [0,1]² разложен матрицей: диагональ = масштаб, 4-й столбец = сдвиг, см. UI_Yoga::Emit),
-// поэтому проверка попадания — это сравнение курсора с [w, w+x] x [d, d+b], без обратной
+// (центрированный юнит-квад разложен матрицей: диагональ = масштаб, 4-й столбец = центр, см. UI_Yoga::Emit),
+// поэтому проверка попадания — это сравнение курсора с [w - x/2, w + x/2] x [d - b/2, d + b/2], без обратной
 // математики и без обращения к раскладке.
 //
 // Курсор нормируем ОКНОМ, а не render-разрешением: рект узла уже в NDC (Emit поделил на своё),
@@ -295,8 +295,8 @@ void Game::UpdateUIHover()
         const std::vector<MaterialSlot>& parts = rend.container().materials[rend.i()];
         Positions& P = pos.container();
         const size_t i = pos.i();
-        const float x0 = P.w[i], x1 = x0 + P.x[i];
-        const float y0 = P.d[i], y1 = y0 + P.b[i];
+        const float x0 = P.w[i] - 0.5f * P.x[i], x1 = P.w[i] + 0.5f * P.x[i];
+        const float y0 = P.d[i] - 0.5f * P.b[i], y1 = P.d[i] + 0.5f * P.b[i];
         const bool hit = (nx >= x0 && nx <= x1 && ny >= y0 && ny <= y1);
 
         for (uint32_t k = 0; k < parts.size(); ++k) {
