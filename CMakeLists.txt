@@ -37,7 +37,7 @@ foreach(_sdl_target SDL3-shared SDL_uclibc SDL3-collect-sources)
 endforeach()
 
 # ============================================================
-#  SDL3_shadercross — тоже из исходников (external/SDL3_shadercross, см. SHADERCROSS_FORK.md).
+#  SDL3_shadercross — тоже из исходников (external/SDL3_shadercross).
 #  Статическая библиотека внутри EngineGpu. SPIRV-Cross собирается из исходников рядом;
 #  DXC — готовые бинарники релиза Microsoft (сборка DXC из исходников = LLVM, не окупается).
 #  dxcompiler.dll/dxil.dll кладёт рядом с exe copy_runtime_dlls — иначе Windows найдёт

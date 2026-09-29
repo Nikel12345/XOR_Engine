@@ -103,17 +103,17 @@ t.dx = safe_i_u32(s.cell % safe_u32t_i(PER_ROW)) * CELL;
 
 ---
 
-## SDL здесь форкнут — читай `SDL_FORK.md` перед правкой `external/SDL3`
+## SDL и shadercross здесь форкнуты
 
-`external/SDL3` — вендоренные исходники, а не дистрибутив, и в них есть **наши** правки
-(цель: развести заливку и рендер по двум GPU-очередям). Все помечены тегом `ENGINE-FORK`.
+`external/SDL3` и `external/SDL3_shadercross` — вендоренные копии наших публичных форков:
+`Nikel12345/SDL` (ветка `base-3.4.14`) и `Nikel12345/SDL_shadercross` (ветка `main`). Наши правки
+помечены тегом `ENGINE-FORK`, комментарии к ним по-английски.
 
-**`SDL_FORK.md` в корне репо** — что изменено, ПОЧЕМУ, что уже выяснено и не требует правки,
-и рецепт обновления апстрима. Не трогай `external/SDL3` и не расследуй поведение SDL, не
-заглянув туда: половина файла — именно про грабли, на которые уже наступили.
+Что изменено и зачем — в доке самих форков: `external/SDL3/docs/README-gpu-queue-families.md`,
+`external/SDL3/docs/README-vulkan-version-requirement.md`, `external/SDL3_shadercross/README-fork.md`.
+Прочитай их перед правкой `external/` или расследованием поведения SDL.
 
-Так же вендорен `external/SDL3_shadercross` (исходники + SPIRV-Cross, DXC бинарниками) —
-его устройство и правки в **`SHADERCROSS_FORK.md`**.
+Копия и форк обязаны совпадать: правка в `external/` уходит тем же коммитом и в форк.
 
 ---
 

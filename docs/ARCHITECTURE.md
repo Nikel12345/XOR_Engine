@@ -168,13 +168,19 @@ id раньше, чем появится сам ресурс. Имя при эт
 
 | что | как подключено | кто линкует |
 |---|---|---|
-| **SDL3** | **форк**, собирается из исходников `external/SDL3` (правки помечены `ENGINE-FORK`; цель — развести заливку и рендер по разным очередям). Наружу торчит цель `SDL3::SDL3` — она несёт и include-пути, и линк, руками пути прописывать нельзя | PUBLIC у `EngineEcs` / `EngineGpu`, дальше транзитивно |
-| **SDL3_image / SDL3_ttf / SDL3_shadercross** | бинарные дистрибутивы; грузят `SDL3.dll` динамически, **ABI привязан к версии форка** — бампаешь SDL, обновляй и их | PRIVATE: image — только `TextureLoader`, ttf — только `FontManager`, shadercross — только `ShaderManager` |
+| **SDL3** | **форк** `Nikel12345/SDL`, ветка `base-3.4.14`: релиз 3.4.14 и правки для раздельных очередей заливки, вычислений и рендера. Собирается из исходников `external/SDL3`. Наружу торчит цель `SDL3::SDL3` — она несёт и include-пути, и линк, руками пути прописывать нельзя | PUBLIC у `EngineEcs` / `EngineGpu`, дальше транзитивно |
+| **SDL3_shadercross** | **форк** `Nikel12345/SDL_shadercross`, ветка `main`, собирается статически из исходников `external/SDL3_shadercross` вместе с SPIRV-Cross. DXC — готовые бинарники; `copy_runtime_dlls` кладёт их рядом с exe, иначе Windows подхватит `dxcompiler.dll` другой версии из PATH | `EngineGpu`, использует только `ShaderManager` |
+| **SDL3_image / SDL3_ttf** | бинарные дистрибутивы; грузят `SDL3.dll` динамически, **ABI привязан к версии форка** — бампаешь SDL, обновляй и их | PRIVATE: image — только `TextureLoader`, ttf — только `FontManager` |
 | **ImGui + ImGuizmo** | исходники, свой таргет `ImGui` | PRIVATE к `Engine`; наружу торчит фасад `UI_ImGui` |
 | **yoga** | исходники, требует C++20 | PRIVATE к `Engine`; типы спрятаны за pimpl в `UI_Yoga` |
 | **yyjson** | один `.c`, вендорный | `EngineEcs` (сцена) и `Engine` |
 | **glm** | header-only | PUBLIC — публичные заголовки его раскрывают |
 | **rectpack2D** | header-only | PRIVATE, только упаковка атласа в `TextureManager` |
+
+Вендоренные копии форков совпадают с их ветками. Правки в них помечены `ENGINE-FORK`
+(`grep -rn ENGINE-FORK external/`), а что изменено и зачем, описано в доке самих форков:
+`external/SDL3/docs/README-gpu-queue-families.md`, `external/SDL3/docs/README-vulkan-version-requirement.md`,
+`external/SDL3_shadercross/README-fork.md`.
 
 ---
 
@@ -210,7 +216,7 @@ id раньше, чем появится сам ресурс. Имя при эт
 | вопрос | файл |
 |---|---|
 | Механики, ломающиеся не там, где сделана ошибка | `WARNINGS.md` |
-| Что и зачем изменено в SDL | `SDL_FORK.md` |
+| Что и зачем изменено в SDL и shadercross | `external/SDL3/docs/README-*.md`, `external/SDL3_shadercross/README-fork.md` |
 | Как устроен кадр: слоты, слепки, гейты | `docs/render-pipeline/frame.md` |
 | Дерево батчей: группировка, слепок раскладки, вызовы отрисовки | `docs/render-pipeline/batches.md` |
 | Индирект, регионы проходов, GPU-каллинг | `docs/render-pipeline/culling.md` |
