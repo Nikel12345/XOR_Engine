@@ -180,6 +180,7 @@ id раньше, чем появится сам ресурс. Имя при эт
 Вендоренные копии форков совпадают с их ветками. Правки в них помечены `ENGINE-FORK`
 (`grep -rn ENGINE-FORK external/`), а что изменено и зачем, описано в доке самих форков:
 `external/SDL3/docs/README-gpu-queue-families.md`, `external/SDL3/docs/README-vulkan-version-requirement.md`,
+`external/SDL3/docs/README-minimized-window-claim.md`,
 `external/SDL3_shadercross/README-fork.md`.
 
 ---

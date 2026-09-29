@@ -184,10 +184,7 @@ bool Engine::InitPlatform(const EngineConfig& cfg)
 		return false;
 	}
 
-	auto make_window = [&cfg] {
-		return SDL_CreateWindow(cfg.title, safe_u32t_i(cfg.width), safe_u32t_i(cfg.height), cfg.window_flags);
-	};
-	win = make_window();
+	win = SDL_CreateWindow(cfg.title, safe_u32t_i(cfg.width), safe_u32t_i(cfg.height), cfg.window_flags);
 	if (!win) {
 		SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
 		return false;
@@ -212,24 +209,9 @@ bool Engine::InitPlatform(const EngineConfig& cfg)
 		return false;
 	}
 	SDL_Log("GPU backend: %s", SDL_GetGPUDeviceDriver(dev));
-	SDL_ClaimWindowForGPUDevice(dev, win);
-
-	// БАГ SDL 3.4.14: ПЕРВОЕ созданное в процессе окно Vulkan-девайс не заклеймливает —
-	// ClaimWindowForGPUDevice возвращает true, но окно не регистрируется, и дальше весь свопчейн
-	// отвечает «Must claim window before…». Второе окно клеймится штатно. Воспроизведено голым
-	// SDL, без движка: sandbox/src/ClaimWindowProbe.cpp (там же отсеяны ложные версии — способ
-	// выбора бэкенда, debug_mode, SDL_WINDOW_VULKAN, порядок создания девайсов: ни при чём).
-	// Поэтому проверяем ФАКТ (формат свопчейна), а не возврат claim, и один раз пересоздаём окно.
-	// Условная ветка: когда баг починят, она просто перестанет срабатывать.
-	if (SDL_GetGPUSwapchainTextureFormat(dev, win) == SDL_GPU_TEXTUREFORMAT_INVALID) {
-		SDL_Log("Claim didn't take (SDL 3.4 first-window bug) - recreating window");
-		SDL_ReleaseWindowFromGPUDevice(dev, win);
-		SDL_DestroyWindow(win);
-		win = make_window();
-		if (!win || !SDL_ClaimWindowForGPUDevice(dev, win)) {
-			SDL_Log("Window re-claim failed: %s", SDL_GetError());
-			return false;
-		}
+	if (!SDL_ClaimWindowForGPUDevice(dev, win)) {
+		SDL_Log("SDL_ClaimWindowForGPUDevice failed: %s", SDL_GetError());
+		return false;
 	}
 	SDL_SetGPUAllowedFramesInFlight(dev, BUFFERING_LEVEL);
 

@@ -110,7 +110,8 @@ t.dx = safe_i_u32(s.cell % safe_u32t_i(PER_ROW)) * CELL;
 помечены тегом `ENGINE-FORK`, комментарии к ним по-английски.
 
 Что изменено и зачем — в доке самих форков: `external/SDL3/docs/README-gpu-queue-families.md`,
-`external/SDL3/docs/README-vulkan-version-requirement.md`, `external/SDL3_shadercross/README-fork.md`.
+`external/SDL3/docs/README-vulkan-version-requirement.md`, `external/SDL3/docs/README-minimized-window-claim.md`,
+`external/SDL3_shadercross/README-fork.md`.
 Прочитай их перед правкой `external/` или расследованием поведения SDL.
 
 Копия и форк обязаны совпадать: правка в `external/` уходит тем же коммитом и в форк.
