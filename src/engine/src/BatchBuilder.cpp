@@ -691,19 +691,17 @@ void BatchBuilder::StampLayoutSnapshot(uint8_t slot)
     slot_layouts[slot] = current_layout;
 }
 
+void BatchBuilder::StampComputeSnapshot(uint8_t slot)
+{
+    slot_compute_layouts[slot] = current_compute_layout;
+}
+
 void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm,
     BufferManager* bm, TextureManager* tm) {
-    // Батчи ПЕРСИСТЕНТНЫ: пересобираются только на создание compute-программ. Замка нет, потому
-    // что все программы создаются на инициализации, до старта потоков; появится создание в
-    // рантайме — список придётся отдавать версией через shared_ptr, как BatchLayout.
     if (!sm || !sm->IsDirtyComputeBatches()) return;
 
-    for (auto& rp : pass_manager->GetOrderedComputePasses()) {
-        rp->shader_batches.clear();
-    }
-    for (auto& rp : pass_manager->GetOrderedComputePrepasses()) {
-        rp->shader_batches.clear();
-    }
+    auto layout = std::make_shared<RenderSnap::ComputeLayout>();
+    layout->passes.resize(pass_manager->GetOrderedComputePrepasses().size() + pass_manager->GetOrderedComputePasses().size());
 
     for (int32_t ci = 0; ci < sm->ComputePrograms().Count(); ++ci) {
         const ComputeProgramCell& slot = sm->ComputePrograms().At(ci);
@@ -716,7 +714,7 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         // Пассы и препассы делят пространство имён (см. PassManager::CreateComputePass), поэтому
         // перебор «сначала пасс, потом препасс» однозначен.
         if (!cmp) cmp = pass_manager->GetComputePrepassStep(sp->compute_pass_name);
-        if (!cmp) continue;
+        if (!cmp || cmp->ordinal >= layout->passes.size()) continue;
 
         auto resolve_buffers = [&](const std::vector<BufferDataName>& names, const char* kind) {
             std::vector<BufferData*> out;
@@ -739,31 +737,32 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
             return out;
         };
 
-        ComputeShaderBatchData new_batch{};
-        new_batch.pipeline = pipe;
-        new_batch.rw_storage_buffers = resolve_buffers(sp->rw_storage_buffer_names, "rw");
-        new_batch.ro_storage_buffers = resolve_buffers(sp->ro_storage_buffer_names, "ro");
+        RenderSnap::ComputeDispatch dispatch{};
+        dispatch.pipeline = pipe;
+        dispatch.rw_storage_buffers = resolve_buffers(sp->rw_storage_buffer_names, "rw");
+        dispatch.ro_storage_buffers = resolve_buffers(sp->ro_storage_buffer_names, "ro");
 
-        new_batch.rw_storage_textures.reserve(sp->rw_storage_textures.size());
+        dispatch.rw_storage_textures.reserve(sp->rw_storage_textures.size());
         for (const auto& d : sp->rw_storage_textures) {
             TextureAtlas* a = tm ? tm->GetTextureAtlas(d.texture_atlas) : nullptr;
             if (!a) { SDL_Log("BuildComputeBatches '%s': rw atlas '%s' not found - binding slots will shift", slot.name.c_str(), tm ? tm->AtlasNameOf(d.texture_atlas).c_str() : "?"); continue; }
-            new_batch.rw_storage_textures.push_back({ a, d.mip_level, d.layer });
+            dispatch.rw_storage_textures.push_back({ a, d.mip_level, d.layer });
         }
-        new_batch.ro_storage_textures = resolve_atlases(sp->ro_storage_texture_ids, "ro");
-        new_batch.texture_binding     = resolve_atlases(sp->texture_sampler_ids, "sampler");
-        new_batch.push_instructions = sm->CollectComputePushInstructions(slot.name);
-        new_batch.dispatch_func = sm->GetDispatchInstruction(slot.name);
+        dispatch.ro_storage_textures = resolve_atlases(sp->ro_storage_texture_ids, "ro");
+        dispatch.texture_binding     = resolve_atlases(sp->texture_sampler_ids, "sampler");
+        dispatch.push_instructions = sm->CollectComputePushInstructions(slot.name);
+        dispatch.dispatch_func = sm->GetDispatchInstruction(slot.name);
 
         ComputeShaderData* csd = sm->GetComputeShader(sp->cs_id);
         if (!csd)
             SDL_Log("BuildComputeBatches '%s': compute shader '%s' not found in registry - dispatch falls back to 1x1x1",
                 slot.name.c_str(), sm->ComputeShaders().NameOf(sp->cs_id).c_str());
-        new_batch.threadcount_x = csd ? csd->threadcount_x : 1u;
-        new_batch.threadcount_y = csd ? csd->threadcount_y : 1u;
-        new_batch.threadcount_z = csd ? csd->threadcount_z : 1u;
+        dispatch.threadcount_x = csd ? csd->threadcount_x : 1u;
+        dispatch.threadcount_y = csd ? csd->threadcount_y : 1u;
+        dispatch.threadcount_z = csd ? csd->threadcount_z : 1u;
 
-        cmp->shader_batches.push_back(std::move(new_batch));
+        layout->passes[cmp->ordinal].push_back(std::move(dispatch));
     }
+    current_compute_layout = std::move(layout);
     sm->SetDirtyComputeBatches(false);
 }

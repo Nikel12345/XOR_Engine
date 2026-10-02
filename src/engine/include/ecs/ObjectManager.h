@@ -90,9 +90,6 @@ public:
     Entity CreateEntityFromSpecs(SceneData* scene, const std::vector<const ComponentSpec*>& specs);
 
 	void SetSceneState(const SceneName& scene_name, bool is_active);
-    // ИСКЛЮЧИТЕЛЬНАЯ активация: названная сцена зажигается, все прочие гасятся. Переключение сцен
-    // ходит сюда, а не в SetSceneState(name, true): у SceneData is_active=true по умолчанию, то
-    // есть новая сцена рождается активной, и две активные превращают GetActiveScene в лотерею.
     void SetActiveScene(const SceneName& scene_name);
     SceneData* GetActiveScene();
     SceneName GetActiveSceneName();

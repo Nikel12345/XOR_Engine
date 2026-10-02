@@ -7,6 +7,9 @@
 #include <unordered_map>
 #include "ComponentStorage.h"
 
+using SceneGenerator  = std::function<void()>;
+using SceneDestructor = std::function<void()>;
+
 struct SceneData {
     std::unordered_map<Entity, Archetype*> entity_to_archetype;
     std::unordered_map<Entity, size_t> entity_to_index;
@@ -15,12 +18,10 @@ struct SceneData {
     // DeleteEntity; без него каскадное удаление сканировало бы сцену в поисках совпавшего parent.
     std::unordered_map<Entity, std::vector<Entity>> children;
     Entity next_entity_id = 0;
-    bool is_active = true;
+    bool is_active = false;
 
-    // Восстанавливают ПРОИЗВОДНЫЕ сущности сцены (те, что с GeneratedComponent и потому не
-    // сохранены) — запускаются после загрузки. Регистрируются один раз на живую сцену и
-    // переживают clear, иначе перезагрузка осталась бы без них.
-    std::vector<std::function<void()>> generators;
+    std::vector<SceneGenerator>  generators;
+    std::vector<SceneDestructor> destructors;
 
     void clear() {
         archetypes.clear();

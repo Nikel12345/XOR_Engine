@@ -694,10 +694,6 @@ void DefaultRenderPassNamespace::SetDefaultCullingPass(EngineContext* ctx)
     PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
-    // GPU-каллинг (scatter) — PREPASS: Engine::RenderFunc гоняет его в ОТДЕЛЬНОМ cb + fence
-    // ПЕРЕД рендером. Так out_pib и per-camera indirect гарантированно дописаны до чтения их
-    // draw'ами (SDL_GPU не барьерит compute-write -> indirect-read в одном cb; на 1М scatter
-    // медленный от atomic-контеншена, и draw читал недозаполненный индирект → мерцание).
     ComputePassStep* culling = pm->CreateComputePrepass(
         CULLING_PASS,
         [bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)

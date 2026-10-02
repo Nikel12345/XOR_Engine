@@ -183,4 +183,45 @@ void DefaultResourceSet::SetDefaultResources(EngineContext* ctx)
 			idx.push_back(vbase + 0); idx.push_back(vbase + 2); idx.push_back(vbase + 3);
 		}
 	}, AnchorShift::Keep, ResourceTag::CodeOwned | ResourceTag::Default);
+
+	ctx->CreateModel<PosUVNormal>("debug_box", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& i) {
+		auto P = [](float x, float y, float z) {
+			PosUVNormal vert{}; vert.x = x; vert.y = y; vert.z = z; return vert;
+		};
+		v = {
+			P(-1,-1,-1), P(1,-1,-1), P(1, 1,-1), P(-1, 1,-1),
+			P(-1,-1, 1), P(1,-1, 1), P(1, 1, 1), P(-1, 1, 1),
+		};
+		i = {
+			0,1, 1,2, 2,3, 3,0,
+			4,5, 5,6, 6,7, 7,4,
+			0,4, 1,5, 2,6, 3,7,
+		};
+	}, AnchorShift::Keep, ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
+
+	ctx->CreateModel<PosUVNormal>("debug_sphere", [](std::vector<PosUVNormal>& v, std::vector<Uint32>& idx) {
+		const uint32_t stacks = 8, slices = 12;
+		const float PI = 3.14159265358979323846f;
+		for (uint32_t i = 0; i <= stacks; ++i) {
+			float phi = PI * (float)i / (float)stacks;
+			float cp = std::cos(phi), sp = std::sin(phi);
+			for (uint32_t j = 0; j <= slices; ++j) {
+				float theta = 2.0f * PI * (float)j / (float)slices;
+				PosUVNormal vert{};
+				vert.x = sp * std::cos(theta); vert.y = cp; vert.z = sp * std::sin(theta);
+				v.push_back(vert);
+			}
+		}
+		const uint32_t row = slices + 1;
+		for (uint32_t i = 0; i <= stacks; ++i)
+			for (uint32_t j = 0; j < slices; ++j) {
+				uint32_t a = i * row + j;
+				idx.push_back(a); idx.push_back(a + 1);
+			}
+		for (uint32_t i = 0; i < stacks; ++i)
+			for (uint32_t j = 0; j <= slices; ++j) {
+				uint32_t a = i * row + j;
+				idx.push_back(a); idx.push_back(a + row);
+			}
+	}, AnchorShift::Keep, ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System);
 }

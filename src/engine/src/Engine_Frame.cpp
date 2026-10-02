@@ -78,18 +78,20 @@ void Engine::PrepareFunc(uint8_t slot)
 	}
 
 	{
-		PROF_SCOPE(Sim, " stamps (epoch/layout/shadow/regions)");
-		slot_controller->StampSlotEpoch(slot, batch_builder->RebuildEpoch());
-
-		batch_builder->StampLayoutSnapshot(slot);
-		light_data_module->StampShadowCameras(object_manager, object_manager->GetActiveScene(), slot);
-
-		pass_manager->StampRegions(slot, batch_builder->AskLayout(slot));
+		PROF_SCOPE(Sim, " build_compute_batches");
+		batch_builder->BuildComputeBatches(pass_manager, pipe_manager, shader_manager, buffer_manager, texture_manager);
 	}
 
 	{
-		PROF_SCOPE(Sim, " build_compute_batches");
-		batch_builder->BuildComputeBatches(pass_manager, pipe_manager, shader_manager, buffer_manager, texture_manager);
+		PROF_SCOPE(Sim, " stamps (epoch/layout/compute/shadow/regions)");
+		slot_controller->StampSlotEpoch(slot, batch_builder->RebuildEpoch());
+
+		batch_builder->StampLayoutSnapshot(slot);
+		batch_builder->StampComputeSnapshot(slot);
+		light_data_module->StampShadowCameras(object_manager, object_manager->GetActiveScene(), slot);
+
+		pass_manager->StampRegions(slot, batch_builder->AskLayout(slot));
+		pass_manager->StampComputeLayout(slot, batch_builder->AskComputeLayout(slot));
 	}
 
 	{

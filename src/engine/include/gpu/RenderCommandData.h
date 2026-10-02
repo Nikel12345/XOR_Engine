@@ -179,23 +179,7 @@ struct ComputeRWStorageTextureRef {
     uint32_t layer = 0;
 };
 
-struct ComputeShaderBatchData {
-    PushInstructions push_instructions;
-    std::function<void(DispatchSizeBinder&, const void*)> dispatch_func = {};
-    std::vector<BufferData*> ro_storage_buffers;
-    std::vector<BufferData*> rw_storage_buffers;
-    std::vector<TextureAtlas*> ro_storage_textures;
-    std::vector<ComputeRWStorageTextureRef> rw_storage_textures;
-    std::vector<TextureAtlas*> texture_binding;
-    // Задаётся диспатч функцией если требуется не дефолтное значение
-    uint32_t threadcount_x = 1;
-    uint32_t threadcount_y = 1;
-    uint32_t threadcount_z = 1;
-    std::shared_ptr<SDL_GPUComputePipeline> pipeline;
-};
-
 struct ComputePassStep {
-    std::vector<ComputeShaderBatchData> shader_batches;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function;
     std::vector<uint8_t> state;
     std::string          state_type;
@@ -204,4 +188,5 @@ struct ComputePassStep {
     }
     std::string debug_name;
     int pass_index = -1;
+    uint32_t ordinal = UINT32_MAX;
 };

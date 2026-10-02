@@ -60,7 +60,8 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
             if (!m) return pv;
             auto tit = m->textures.find(TextureSlotRole::Albedo);
             if (tit == m->textures.end() || tit->second.empty()) return pv;
-            pv = texture_preview(tit->second[0]);
+            const TextureId albedo = tit->second[0];
+            pv = texture_preview(albedo);
             if (pv.tex) {
                 for (const SpBinding& b : m->shader_programs) {
                     if (!b.params || b.params->empty()) continue;
@@ -79,7 +80,8 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
                     if (tinted) break;
                 }
             }
-            else pv = texture_preview(tm->TextureIdOf("NoTextureDummy"));
+            else if (const TextureHandle* h = tm->GetTextureHandle(albedo); !h || !h->atlas)
+                pv = texture_preview(tm->TextureIdOf("NoTextureDummy"));
             return pv;
         };
 

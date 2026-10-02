@@ -188,7 +188,7 @@ TextureHandle* TextureManager::CreateTexture(const std::string& name, TextureAtl
     handle->texture_data.layer_span = layer_span;
     handles_data.Put(id, std::move(owned_handle));
 	atlas->textures.push_back(&handle->texture_data);
-
+	preview.Reserve(id);
 
 	CreateUploadTask(id, handle, w, h, std::move(pixels), name, layer_span);
 
@@ -651,9 +651,9 @@ bool TextureManager::RenameTexture(TextureId id, const std::string& new_name)
 size_t TextureManager::ClearSceneTextures()
 {
     std::vector<TextureId> doomed;
-    for (int32_t i = 0; i < handles_data.Count(); ++i) {
+    for (int32_t i = handles_data.Count() - 1; i >= 0; --i) {
         const TextureHandle* h = handles_data.At(i).object.get();
-        if (h && !HasTag(h->tags, ResourceTag::CodeOwned) && !h->source_path.empty())
+        if (h && !HasTag(h->tags, ResourceTag::CodeOwned))
             doomed.push_back(TextureId{ i });
     }
     for (TextureId id : doomed) { DeleteTextureHandle(id, NameSlot::Release); ReleasePreview(id); }

@@ -6,7 +6,7 @@
 #include <cstdint>
 #include "ResourceId.h"
 
-struct TextureAtlas; 
+struct TextureAtlas;
 
 class PreviewPacker {
 public:
@@ -20,14 +20,14 @@ public:
     void Create(SDL_GPUDevice* dev);
     void Destroy(SDL_GPUDevice* dev);
 
+    void Reserve(TextureId id);
+
     void Request(TextureId id, TextureAtlas* src,
                  uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t layer);
 
-    void Publish();
-
     void Blit(SDL_GPUCommandBuffer* cb);
 
-    bool HasPendingBlits() const { return !blits.empty(); }
+    bool HasPendingBlits() const;
 
     UV              GetUV(TextureId id) const;
     SDL_GPUTexture* Texture() const { return atlas; }
@@ -35,22 +35,16 @@ public:
     void Release(TextureId id);
 
 private:
-    struct Slot {
-        int32_t       cell = -1;      // индекс ячейки в сетке (row-major)
-        TextureAtlas* src = nullptr;
-        uint32_t x = 0, y = 0, w = 0, h = 0, layer = 0;   // регион источника в пикселях
-    };
     struct BlitTask {
-        SDL_GPUTexture* src = nullptr;
-        uint32_t sx = 0, sy = 0, sw = 0, sh = 0, layer = 0;
-        uint32_t dx = 0, dy = 0;                          // угол ячейки в превью-атласе
+        TextureId     id;
+        TextureAtlas* src = nullptr;
+        uint32_t x = 0, y = 0, w = 0, h = 0, layer = 0;
     };
     int32_t Alloc();
 
     SDL_GPUTexture* atlas = nullptr;
 
-    std::unordered_map<TextureId, Slot>    slots;
-    std::vector<TextureId>                 dirty;
+    std::unordered_map<TextureId, int32_t> slots;
     std::vector<int32_t>                   free_cells;
     int32_t                                next_cell = 0;
 

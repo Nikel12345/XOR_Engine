@@ -100,7 +100,7 @@ public:
 
 	TransferBufferData* ExecuteUploadTasks(SDL_GPUCopyPass* copy_pass);
 
-	void PackAtlases() { _ReleasePendingRegions(); _BuildUploadTasks(); preview.Publish(); }
+	void PackAtlases() { _ReleasePendingRegions(); _BuildUploadTasks(); }
 
 	SDL_GPUSampler* CreateSampler(const std::string& name, SDL_GPUSamplerCreateInfo sci);
 	SDL_GPUSampler* GetSampler(const std::string& name);

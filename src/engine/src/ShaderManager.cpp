@@ -287,7 +287,7 @@ size_t ShaderManager::ClearSceneShaders()
         std::vector<decltype(registry.Find(""))> out;
         for (int32_t i = 0; i < registry.Count(); ++i) {
             const auto* data = registry.At(i).object.get();
-            if (data && !HasTag(data->tags, ResourceTag::CodeOwned) && !data->source_path.empty())
+            if (data && !HasTag(data->tags, ResourceTag::CodeOwned))
                 out.push_back({ i });
         }
         return out;

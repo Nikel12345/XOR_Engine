@@ -12,7 +12,7 @@
 #include "config.h"
 
 struct Material;
-namespace RenderSnap { struct BatchLayout; }
+namespace RenderSnap { struct BatchLayout; struct ComputeLayout; }
 
 struct PassRegion {
     uint32_t command_blocks_count = 0;
@@ -63,6 +63,7 @@ public:
 
 	void StampRegions(uint8_t slot, const RenderSnap::BatchLayout* layout);
 	const PassRegions& AskRegions(uint8_t slot) const { return regions[slot]; }
+	void StampComputeLayout(uint8_t slot, const RenderSnap::ComputeLayout* layout) { compute_layouts[slot] = layout; }
 	RenderPassStep* GetRenderPassStep(const RenderPassName& name);
 	ComputePassStep* GetComputePassStep(const ComputePassName& name);
 	ComputePassStep* GetComputePrepassStep(const ComputePrepassName& name);
@@ -104,6 +105,7 @@ private:
 
 	std::unordered_map<RenderPassName, std::function<uint32_t(uint8_t)>> region_count_instructions;
 	PassRegions regions[BUFFERING_LEVEL];
+	const RenderSnap::ComputeLayout* compute_layouts[BUFFERING_LEVEL] = {};
 
 	bool passes_filled = false;
 };

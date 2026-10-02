@@ -60,4 +60,22 @@ namespace RenderSnap {
         std::vector<PassDrawList> passes;
         BufferData* indirectBuffer = nullptr;
     };
+
+    struct ComputeDispatch {
+        std::shared_ptr<SDL_GPUComputePipeline> pipeline;
+        PushInstructions push_instructions;
+        std::function<void(DispatchSizeBinder&, const void*)> dispatch_func;
+        std::vector<BufferData*> ro_storage_buffers;
+        std::vector<BufferData*> rw_storage_buffers;
+        std::vector<TextureAtlas*> ro_storage_textures;
+        std::vector<ComputeRWStorageTextureRef> rw_storage_textures;
+        std::vector<TextureAtlas*> texture_binding;
+        uint32_t threadcount_x = 1;
+        uint32_t threadcount_y = 1;
+        uint32_t threadcount_z = 1;
+    };
+
+    struct ComputeLayout {
+        std::vector<std::vector<ComputeDispatch>> passes;
+    };
 }

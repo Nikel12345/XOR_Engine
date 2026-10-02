@@ -336,11 +336,18 @@ void EngineContext::SetActiveScene(const SceneName& name)
 	batch_builder->SetDirtyBatches(true);
 }
 
-void EngineContext::RegisterGenerator(const SceneName& scene_name, std::function<void()> generator)
+void EngineContext::RegisterSceneGenerator(const SceneName& scene_name, SceneGenerator generator)
 {
 	SceneData* scene = object_manager->GetScene(scene_name);
-	if (!scene) { SDL_Log("RegisterGenerator: scene '%s' not found (CreateScene first)", scene_name.c_str()); return; }
+	if (!scene) { SDL_Log("RegisterSceneGenerator: scene '%s' not found (CreateScene first)", scene_name.c_str()); return; }
 	scene->generators.push_back(std::move(generator));
+}
+
+void EngineContext::RegisterSceneDestructor(const SceneName& scene_name, SceneDestructor destructor)
+{
+	SceneData* scene = object_manager->GetScene(scene_name);
+	if (!scene) { SDL_Log("RegisterSceneDestructor: scene '%s' not found (CreateScene first)", scene_name.c_str()); return; }
+	scene->destructors.push_back(std::move(destructor));
 }
 
 void EngineContext::ClearScene(const SceneName& scene_name)
@@ -367,12 +374,22 @@ void EngineContext::LoadScene(const SceneName& scene_name, const std::string& sc
 	else SDL_Log("LoadScene: engine back-pointer not set");
 }
 
-void EngineContext::ExecuteGenerators()
+void EngineContext::ExecuteSceneGenerators()
 {
 	auto scene = object_manager->GetActiveScene();
 	if (!scene) return;
 	for (auto& g : scene->generators)
 		if (g) g();
+
+	batch_builder->SetDirtyBatches(true);
+}
+
+void EngineContext::ExecuteSceneDestructors()
+{
+	auto scene = object_manager->GetActiveScene();
+	if (!scene) return;
+	for (auto d = scene->destructors.rbegin(); d != scene->destructors.rend(); ++d)
+		if (*d) (*d)();
 
 	batch_builder->SetDirtyBatches(true);
 }

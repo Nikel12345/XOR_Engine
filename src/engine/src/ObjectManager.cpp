@@ -11,8 +11,7 @@
 
 SceneData* ObjectManager::CreateScene(const SceneName& name) {
     // Пустое имя — не сцена, а СЛЕД её отсутствия: так GetActiveSceneName сообщает «активной нет»,
-    // и это значение доезжает сюда через UI-команды. Заведённая по нему сцена "" была бы активной
-    // (is_active=true по умолчанию) и подменяла бы собой настоящую.
+    // и это значение доезжает сюда через UI-команды.
     if (name.empty()) {
         SDL_Log("CreateScene: empty scene name rejected (no active scene?)");
         return nullptr;

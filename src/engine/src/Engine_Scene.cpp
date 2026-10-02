@@ -738,6 +738,8 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 		}
 	}
 
+	engine_context->ExecuteSceneDestructors();
+
 	{ PhaseTimer t(wipe_ms); engine_context->ClearScene(scene_name); }
 
 	{ PhaseTimer t(tex_ms); LoadTextures (dir, texture_manager, engine_context); }
@@ -763,6 +765,8 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 			object_manager->SetActiveScene(scene_name);
 
 			if (ui_yoga) ui_yoga->Reset();
+
+			engine_context->ExecuteSceneGenerators();
 		}
 	}
 

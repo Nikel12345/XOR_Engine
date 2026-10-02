@@ -11,7 +11,7 @@
 #include "ResourceId.h"
 #include "RenderCommandData.h"
 
-namespace RenderSnap { struct BatchLayout; }
+namespace RenderSnap { struct BatchLayout; struct ComputeLayout; }
 
 class ObjectManager;
 class PipeManager;
@@ -61,6 +61,9 @@ public:
 	// считаются ПО ПРОХОДАМ (PassManager::StampRegions), а сумма по всем проходам ни для одного из
 	// них не ответ.
 	const RenderSnap::BatchLayout* AskLayout(uint8_t slot) const { return slot_layouts[slot].get(); }
+
+	void StampComputeSnapshot(uint8_t slot);
+	const RenderSnap::ComputeLayout* AskComputeLayout(uint8_t slot) const { return slot_compute_layouts[slot].get(); }
 
 	void SetDummyTexture(const std::string& name, TextureManager* tm);
 	void SetFallbackShader(ShaderProgramId id) { fallback_sp = id; };
@@ -122,6 +125,9 @@ private:
 
 	std::shared_ptr<const RenderSnap::BatchLayout> current_layout;
 	std::shared_ptr<const RenderSnap::BatchLayout> slot_layouts[BUFFERING_LEVEL];
+
+	std::shared_ptr<const RenderSnap::ComputeLayout> current_compute_layout;
+	std::shared_ptr<const RenderSnap::ComputeLayout> slot_compute_layouts[BUFFERING_LEVEL];
 
 	uint64_t batches_revision = 0;
 	uint64_t rebuild_epoch = 0;

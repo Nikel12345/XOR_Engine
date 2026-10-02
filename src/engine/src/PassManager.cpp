@@ -185,6 +185,10 @@ void PassManager::FillRenderPasses()
 	for (size_t i = 0; i < ordered_passes.size(); ++i)
 		ordered_passes[i]->ordinal = safe_u32(i);
 
+	uint32_t compute_ordinal = 0;
+	for (ComputePassStep* cs : ordered_compute_prepass_steps) cs->ordinal = compute_ordinal++;
+	for (ComputePassStep* cs : ordered_compute_steps)         cs->ordinal = compute_ordinal++;
+
 	ordered_execution.clear();
 	ordered_execution.reserve(ordered_passes.size() + ordered_compute_steps.size() + ordered_blit_steps.size());
 	for (RenderPassStep* rp : ordered_passes)         ordered_execution.push_back({ rp->pass_index, rp });
@@ -274,12 +278,15 @@ void PassManager::RenderPassStandardBody(SDL_GPUCommandBuffer* cb, RenderPassSte
 void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassStep* compute_step,
 	BufferManager* bm, const void* push_data_raw, const void* dispatch_data_raw, uint8_t pass_frame)
 {
-	for (const auto& shader_batch : compute_step->shader_batches) {
+	const RenderSnap::ComputeLayout* layout = compute_layouts[pass_frame];
+	if (!layout || compute_step->ordinal >= layout->passes.size()) return;
+
+	for (const RenderSnap::ComputeDispatch& dispatch : layout->passes[compute_step->ordinal]) {
 		glm::uvec3 elements{ 1, 1, 1 };
-		if (shader_batch.dispatch_func) {
+		if (dispatch.dispatch_func) {
 			DispatchSizeBinder dispatch_binder{};
 			dispatch_binder.frame = pass_frame;
-			shader_batch.dispatch_func(dispatch_binder, dispatch_data_raw);
+			dispatch.dispatch_func(dispatch_binder, dispatch_data_raw);
 			elements = dispatch_binder.element_count;
 		}
 
@@ -287,44 +294,44 @@ void PassManager::ComputePassStandardBody(SDL_GPUCommandBuffer* cb, ComputePassS
 
 		{
 			const PushInput push_in{ push_data_raw, nullptr };
-			for (const PushInstruction& pi : shader_batch.push_instructions)
+			for (const PushInstruction& pi : dispatch.push_instructions)
 				pi.fn(PushConstantBinder{ cb, pi.stage, pi.uniform_slot, pass_frame }, push_in);
 		}
 
 		std::vector<SDL_GPUStorageBufferReadWriteBinding> storage_buffer_bindings =
-			bm->BuildBindGPUComputeRWBuffers(shader_batch.rw_storage_buffers, pass_frame);
+			bm->BuildBindGPUComputeRWBuffers(dispatch.rw_storage_buffers, pass_frame);
 
 		std::vector<SDL_GPUStorageTextureReadWriteBinding> rw_textures;
-		rw_textures.reserve(shader_batch.rw_storage_textures.size());
-		for (const auto& r : shader_batch.rw_storage_textures)
+		rw_textures.reserve(dispatch.rw_storage_textures.size());
+		for (const auto& r : dispatch.rw_storage_textures)
 			rw_textures.push_back({ r.atlas->texture_binding.texture, r.mip_level, r.layer, false });
 
 		SDL_GPUComputePass* cmp = SDL_BeginGPUComputePass(cb,
 			rw_textures.data(), safe_u32(rw_textures.size()),
 			storage_buffer_bindings.data(), safe_u32(storage_buffer_bindings.size()));
 
-		SDL_BindGPUComputePipeline(cmp, shader_batch.pipeline.get());
-		if (!shader_batch.texture_binding.empty()) {
+		SDL_BindGPUComputePipeline(cmp, dispatch.pipeline.get());
+		if (!dispatch.texture_binding.empty()) {
 			std::vector<SDL_GPUTextureSamplerBinding> samplers;
-			samplers.reserve(shader_batch.texture_binding.size());
-			for (TextureAtlas* a : shader_batch.texture_binding)
+			samplers.reserve(dispatch.texture_binding.size());
+			for (TextureAtlas* a : dispatch.texture_binding)
 				samplers.push_back(a->texture_binding);
 			SDL_BindGPUComputeSamplers(cmp, 0, samplers.data(), safe_u32(samplers.size()));
 		}
-		if (!shader_batch.ro_storage_textures.empty()) {
+		if (!dispatch.ro_storage_textures.empty()) {
 			std::vector<SDL_GPUTexture*> ro_textures;
-			ro_textures.reserve(shader_batch.ro_storage_textures.size());
-			for (TextureAtlas* a : shader_batch.ro_storage_textures)
+			ro_textures.reserve(dispatch.ro_storage_textures.size());
+			for (TextureAtlas* a : dispatch.ro_storage_textures)
 				ro_textures.push_back(a->texture_binding.texture);
 			SDL_BindGPUComputeStorageTextures(cmp, 0, ro_textures.data(), safe_u32(ro_textures.size()));
 		}
-		if (!shader_batch.ro_storage_buffers.empty()) {
-			bm->BindGPUComputeRO_Buffers(cmp, 0, shader_batch.ro_storage_buffers, pass_frame);
+		if (!dispatch.ro_storage_buffers.empty()) {
+			bm->BindGPUComputeRO_Buffers(cmp, 0, dispatch.ro_storage_buffers, pass_frame);
 		}
 
-		const uint32_t gx = (elements.x + shader_batch.threadcount_x - 1) / shader_batch.threadcount_x;
-		const uint32_t gy = (elements.y + shader_batch.threadcount_y - 1) / shader_batch.threadcount_y;
-		const uint32_t gz = (elements.z + shader_batch.threadcount_z - 1) / shader_batch.threadcount_z;
+		const uint32_t gx = (elements.x + dispatch.threadcount_x - 1) / dispatch.threadcount_x;
+		const uint32_t gy = (elements.y + dispatch.threadcount_y - 1) / dispatch.threadcount_y;
+		const uint32_t gz = (elements.z + dispatch.threadcount_z - 1) / dispatch.threadcount_z;
 		SDL_DispatchGPUCompute(cmp, gx, gy, gz);
 
 		SDL_EndGPUComputePass(cmp);

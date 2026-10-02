@@ -22,10 +22,6 @@ namespace DefaultShaderProgramSet
     // готовыми пул геометрии, буферы и проходы.
     void SetDefaultShaders(EngineContext* ctx);
 
-    // Compute-программы: они держат УКАЗАТЕЛИ на буферы и атласы, поэтому не сериализуются.
-    // Зовёт их игра из MainInit — ординал своего прохода каждая программа снимает на создании,
-    // то есть проходы к этому моменту обязаны существовать.
-
     // Отсев и выбор уровня: clear → scatter на проход → fixup на проход, все в CULLING_PASS.
     void SetCullingPrograms(EngineContext* ctx, CullingDataModule* cdm);
     void SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm);

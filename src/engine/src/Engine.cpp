@@ -281,7 +281,7 @@ Engine::Engine(const EngineConfig& cfg)
 	RegisterBuiltinComponentSpecs();
 	RegisterResourceComponentSpecs(material_manager, model_manager);
 	RegisterBuiltinMaterialParamsSpecs();
-	object_manager->CreateScene("staging")->is_active = false;
+	object_manager->CreateScene("staging");
 	pass_manager->FillRenderPasses();
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});
@@ -298,6 +298,9 @@ Engine::Engine(const EngineConfig& cfg)
 	DefaultResourceSet::SetDefaultResources(engine_context);
 	DefaultShaderProgramSet::SetDefaultShaders(engine_context);
 	DefaultShaderProgramSet::SetCullingPrograms(engine_context, culling_data_module);
+	DefaultShaderProgramSet::SetBloomPrograms(engine_context);
+	DefaultShaderProgramSet::SetAOPrograms(engine_context);
+	DefaultShaderProgramSet::SetFogProgram(engine_context);
 	init_ok = true;
 }
 

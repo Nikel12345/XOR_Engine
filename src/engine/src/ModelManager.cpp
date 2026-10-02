@@ -361,7 +361,7 @@ size_t ModelManager::ClearSceneModels()
     size_t removed = 0;
     for (int32_t i = 0; i < models_data.Count(); ++i) {
         const ModelData* m = models_data.At(i).object.get();
-        if (m && !HasTag(m->tags, ResourceTag::CodeOwned) && !m->model_path.empty())
+        if (m && !HasTag(m->tags, ResourceTag::CodeOwned))
             removed += DeleteModel(ModelId{ i }, NameSlot::Release) ? 1 : 0;
     }
     return removed;
