@@ -168,15 +168,9 @@ void UI_ImGui::DrawAssetBrowser(EngineContext* ctx)
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Passes")) {
-            PassManager* pmgr = ctx->GetPassManager();
-            std::vector<std::pair<int, const std::string*>> ordered;
-            for (const auto& [n, st] : pmgr->GetComputePrepasses()) ordered.push_back({ st->pass_index, &n });
-            for (const auto& [n, st] : pmgr->GetRenderPasses())     ordered.push_back({ st->pass_index, &n });
-            for (const auto& [n, st] : pmgr->GetComputePasses())    ordered.push_back({ st->pass_index, &n });
-            std::sort(ordered.begin(), ordered.end(),
-                [](const auto& a, const auto& b) { return a.first < b.first; });
+            const std::vector<std::string> ordered_names = ctx->GetPassManager()->OrderedPassNames();
             tiles(SelKind::Pass, false, []{},
-                [&](auto&& emit) { for (const auto& [idx, name] : ordered) emit(*name); },
+                [&](auto&& emit) { for (const std::string& name : ordered_names) emit(name); },
                 {});
             ImGui::EndTabItem();
         }

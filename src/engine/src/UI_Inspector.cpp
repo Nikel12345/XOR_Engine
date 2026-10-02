@@ -661,18 +661,22 @@ namespace {
         ImGui::Text("Pass: %s", name.c_str());
 
         if (auto it = pmgr->GetRenderPasses().find(name); it != pmgr->GetRenderPasses().end()) {
-            ImGui::TextDisabled("render pass, index %d", it->second->pass_index);
+            ImGui::TextDisabled("render pass");
             DrawPassState(it->second->state, it->second->state_type);
             return;
         }
         if (auto it = pmgr->GetComputePasses().find(name); it != pmgr->GetComputePasses().end()) {
-            ImGui::TextDisabled("compute pass, index %d", it->second->pass_index);
+            ImGui::TextDisabled("compute pass");
             DrawPassState(it->second->state, it->second->state_type);
             return;
         }
         if (auto it = pmgr->GetComputePrepasses().find(name); it != pmgr->GetComputePrepasses().end()) {
-            ImGui::TextDisabled("compute prepass, index %d", it->second->pass_index);
+            ImGui::TextDisabled("compute prepass");
             DrawPassState(it->second->state, it->second->state_type);
+            return;
+        }
+        if (pmgr->GetBlitPassStep(name)) {
+            ImGui::TextDisabled("blit pass");
             return;
         }
         ImGui::TextDisabled("(pass not found)");

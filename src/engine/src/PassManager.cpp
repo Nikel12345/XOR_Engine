@@ -5,93 +5,128 @@
 
 PassManager::PassManager() {}
 
-RenderPassStep* PassManager::CreateRenderPass(const ComputePassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function, RenderPassTexturesInfo&& rptd, int pass_index)
+// Пассы всех видов и препассы делят ОДНО пространство имён. Якорь называет проход одним именем,
+// без вида. Compute-программа тоже называет свой проход одним именем (compute_pass_name), а
+// BatchBuilder на сборке ищет его сначала среди пассов, потом среди препассов. Одноимённые увели бы
+// якорь или программу в чужой проход — молча, потому что оба варианта валидны.
+bool PassManager::IsPassNameTaken(const std::string& name) const
 {
-	if (pass_index == -1) {
-		SDL_Log("PassManager::CreateRenderPass: Invalid RenderPassStep order index.");
-		return nullptr;
+	return render_steps.count(name) || compute_steps.count(name)
+		|| compute_prepass_steps.count(name) || blit_steps.count(name);
+}
+
+bool PassManager::CanCreatePass(const std::string& name, const char* caller) const
+{
+	if (passes_filled) {
+		SDL_Log("%s: pass '%s' is not created - passes are already filled.", caller, name.c_str());
+		return false;
 	}
+	if (IsPassNameTaken(name)) {
+		SDL_Log("%s: name '%s' is already taken by a pass of another kind.", caller, name.c_str());
+		return false;
+	}
+	return true;
+}
+
+std::optional<FrameStep> PassManager::FindFrameStep(const std::string& name) const
+{
+	if (auto it = render_steps.find(name); it != render_steps.end())   return FrameStep{ it->second.get() };
+	if (auto it = compute_steps.find(name); it != compute_steps.end()) return FrameStep{ it->second.get() };
+	if (auto it = blit_steps.find(name); it != blit_steps.end())       return FrameStep{ it->second.get() };
+	return std::nullopt;
+}
+
+std::optional<std::list<FrameStep>::iterator> PassManager::FrameInsertPosition(const PassAnchor& anchor, const std::string& name, const char* caller)
+{
+	if (!anchor.after_pass) return ordered_execution.begin();
+	const std::optional<FrameStep> anchor_step = FindFrameStep(*anchor.after_pass);
+	if (!anchor_step) {
+		SDL_Log("%s: pass '%s' is not created - anchor pass '%s' is not in the frame chain.",
+			caller, name.c_str(), anchor.after_pass->c_str());
+		return std::nullopt;
+	}
+	return std::next(std::find(ordered_execution.begin(), ordered_execution.end(), *anchor_step));
+}
+
+std::optional<std::list<ComputePassStep*>::iterator> PassManager::PrepassInsertPosition(const PassAnchor& anchor, const std::string& name, const char* caller)
+{
+	if (!anchor.after_pass) return ordered_compute_prepass_steps.begin();
+	auto anchor_prepass = compute_prepass_steps.find(*anchor.after_pass);
+	if (anchor_prepass == compute_prepass_steps.end()) {
+		SDL_Log("%s: prepass '%s' is not created - anchor prepass '%s' is not in the prepass chain.",
+			caller, name.c_str(), anchor.after_pass->c_str());
+		return std::nullopt;
+	}
+	return std::next(std::find(ordered_compute_prepass_steps.begin(), ordered_compute_prepass_steps.end(), anchor_prepass->second.get()));
+}
+
+RenderPassStep* PassManager::CreateRenderPass(const RenderPassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function, RenderPassTexturesInfo&& rptd, const PassAnchor& anchor)
+{
 	auto it_pass = render_steps.find(name);
 	if (it_pass != render_steps.end()) {
 		SDL_Log("PassManager::CreateRenderPass: Render pass with name '%s' already exists.", name.c_str());
 		return it_pass->second.get();
 	}
+	if (!CanCreatePass(name, "PassManager::CreateRenderPass")) return nullptr;
+	const auto insert_position = FrameInsertPosition(anchor, name, "PassManager::CreateRenderPass");
+	if (!insert_position) return nullptr;
+
 	auto data = std::make_unique<RenderPassStep>();
 	data->renderPassTexsData = std::move(rptd);
 	data->render_function = render_function;
 	data->debug_name = name;
-	data->pass_index = pass_index;
 
 	RenderPassStep* ptr = data.get();
 	render_steps[name] = std::move(data);
-
+	ordered_execution.insert(*insert_position, ptr);
 	return ptr;
 }
 
-ComputePassStep* PassManager::CreateComputePass(const ComputePassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function, int pass_index)
- {
-	if (pass_index == -1) {
-		SDL_Log("PassManager::CreateComputePass: Invalid ComputePassStep order index.");
-		return nullptr;
-	}
+ComputePassStep* PassManager::CreateComputePass(const ComputePassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function, const PassAnchor& anchor)
+{
 	auto it_pass = compute_steps.find(name);
 	if (it_pass != compute_steps.end()) {
 		SDL_Log("PassManager::CreateComputePass: Compute pass with name '%s' already exists.", name.c_str());
 		return it_pass->second.get();
 	}
-	// Пассы и препассы лежат в разных реестрах, но делят ОДНО пространство имён: программа
-	// называет свой проход одним именем (ComputeShaderProgram::compute_pass_name, приходит
-	// параметром EngineContext::CreateComputeShaderProgram), а BatchBuilder на сборке ищет его
-	// сначала среди пассов, потом среди препассов. Одноимённые увели бы программу в чужой вид
-	// прохода — молча, потому что оба вида валидны.
-	auto it_prepass = compute_prepass_steps.find(name);
-	if (it_prepass != compute_prepass_steps.end()) {
-		SDL_Log("PassManager::CreateComputePass: A compute prepass with name '%s' already exists. Cannot create a pass with the same name.", name.c_str());
-		return nullptr;
-	}
+	if (!CanCreatePass(name, "PassManager::CreateComputePass")) return nullptr;
+	const auto insert_position = FrameInsertPosition(anchor, name, "PassManager::CreateComputePass");
+	if (!insert_position) return nullptr;
+
 	auto data = std::make_unique<ComputePassStep>();
 	data->compute_function = compute_function;
-	data->pass_index = pass_index;
 	data->debug_name = name;
 
 	ComputePassStep* ptr = data.get();
 	compute_steps[name] = std::move(data);
+	ordered_execution.insert(*insert_position, ptr);
 	return ptr;
 }
 
-ComputePassStep* PassManager::CreateComputePrepass(const ComputePrepassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function, int pass_index)
+ComputePassStep* PassManager::CreateComputePrepass(const ComputePrepassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function, const PassAnchor& anchor)
 {
-	if (pass_index == -1) {
-		SDL_Log("PassManager::CreateComputePrepass: Invalid ComputePrepassStep order index.");
-		return nullptr;
-	}
 	auto it_prepass = compute_prepass_steps.find(name);
 	if (it_prepass != compute_prepass_steps.end()) {
 		SDL_Log("PassManager::CreateComputePrepass: Compute prepass with name '%s' already exists.", name.c_str());
 		return it_prepass->second.get();
 	}
-	auto it_pass = compute_steps.find(name);
-	if (it_pass != compute_steps.end()) {
-		SDL_Log("PassManager::CreateComputePrepass: A compute pass with name '%s' already exists. Cannot create a prepass with the same name.", name.c_str());
-		return nullptr;
-	}
+	if (!CanCreatePass(name, "PassManager::CreateComputePrepass")) return nullptr;
+	const auto insert_position = PrepassInsertPosition(anchor, name, "PassManager::CreateComputePrepass");
+	if (!insert_position) return nullptr;
+
 	auto data = std::make_unique<ComputePassStep>();
 	data->compute_function = compute_function;
-	data->pass_index = pass_index;
 	data->debug_name = name;
 
 	ComputePassStep* ptr = data.get();
 	compute_prepass_steps[name] = std::move(data);
+	ordered_compute_prepass_steps.insert(*insert_position, ptr);
 	return ptr;
 }
 
-BlitPassStep* PassManager::CreateBlitPass(const BlitPassName& name, TextureAtlas* src, TextureAtlas* dst, int pass_index,
+BlitPassStep* PassManager::CreateBlitPass(const BlitPassName& name, TextureAtlas* src, TextureAtlas* dst, const PassAnchor& anchor,
 	SDL_GPUFilter filter, SDL_GPULoadOp load_op)
 {
-	if (pass_index == -1) {
-		SDL_Log("PassManager::CreateBlitPass: Invalid BlitPassStep order index.");
-		return nullptr;
-	}
 	if (!src || !dst) {
 		SDL_Log("PassManager::CreateBlitPass: '%s' - src/dst atlas is null.", name.c_str());
 		return nullptr;
@@ -101,10 +136,9 @@ BlitPassStep* PassManager::CreateBlitPass(const BlitPassName& name, TextureAtlas
 		SDL_Log("PassManager::CreateBlitPass: Blit pass with name '%s' already exists.", name.c_str());
 		return it_blit->second.get();
 	}
-	if (render_steps.count(name) || compute_steps.count(name) || compute_prepass_steps.count(name)) {
-		SDL_Log("PassManager::CreateBlitPass: A pass with name '%s' already exists (render/compute). Cannot create a blit pass with the same name.", name.c_str());
-		return nullptr;
-	}
+	if (!CanCreatePass(name, "PassManager::CreateBlitPass")) return nullptr;
+	const auto insert_position = FrameInsertPosition(anchor, name, "PassManager::CreateBlitPass");
+	if (!insert_position) return nullptr;
 
 	src->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 	dst->tci.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
@@ -115,10 +149,10 @@ BlitPassStep* PassManager::CreateBlitPass(const BlitPassName& name, TextureAtlas
 	data->filter = filter;
 	data->load_op = load_op;
 	data->debug_name = name;
-	data->pass_index = pass_index;
 
 	BlitPassStep* ptr = data.get();
 	blit_steps[name] = std::move(data);
+	ordered_execution.insert(*insert_position, ptr);
 	return ptr;
 }
 
@@ -143,44 +177,13 @@ void PassManager::FillRenderPasses()
 		return;
 	}
 	ordered_passes.clear();
-	ordered_passes.reserve(render_steps.size());
-	for (auto& [_, rp] : render_steps)
-		ordered_passes.push_back(rp.get());
-
 	ordered_compute_steps.clear();
-	ordered_compute_steps.reserve(compute_steps.size());
-	for (auto& [_, cs] : compute_steps)
-		ordered_compute_steps.push_back(cs.get());
-
-	ordered_compute_prepass_steps.clear();
-	ordered_compute_prepass_steps.reserve(compute_prepass_steps.size());
-	for (auto& [_, pcs] : compute_prepass_steps)
-		ordered_compute_prepass_steps.push_back(pcs.get());
-
-	ordered_blit_steps.clear();
-	ordered_blit_steps.reserve(blit_steps.size());
-	for (auto& [_, bs] : blit_steps)
-		ordered_blit_steps.push_back(bs.get());
-
-	std::sort(ordered_passes.begin(), ordered_passes.end(),
-		[](const RenderPassStep* a, const RenderPassStep* b) {
-		return a->pass_index < b->pass_index;
-	});
-
-	std::sort(ordered_blit_steps.begin(), ordered_blit_steps.end(),
-		[](const BlitPassStep* a, const BlitPassStep* b) {
-		return a->pass_index < b->pass_index;
-	});
-
-	std::sort(ordered_compute_steps.begin(), ordered_compute_steps.end(),
-		[](const ComputePassStep* a, const ComputePassStep* b) {
-		return a->pass_index < b->pass_index;
-	});
-
-	std::sort(ordered_compute_prepass_steps.begin(), ordered_compute_prepass_steps.end(),
-		[](const ComputePassStep* a, const ComputePassStep* b) {
-		return a->pass_index < b->pass_index;
-	});
+	for (const FrameStep& step : ordered_execution) {
+		if (RenderPassStep* const* render_step = std::get_if<RenderPassStep*>(&step))
+			ordered_passes.push_back(*render_step);
+		else if (ComputePassStep* const* compute_step = std::get_if<ComputePassStep*>(&step))
+			ordered_compute_steps.push_back(*compute_step);
+	}
 
 	for (size_t i = 0; i < ordered_passes.size(); ++i)
 		ordered_passes[i]->ordinal = safe_u32(i);
@@ -189,28 +192,40 @@ void PassManager::FillRenderPasses()
 	for (ComputePassStep* cs : ordered_compute_prepass_steps) cs->ordinal = compute_ordinal++;
 	for (ComputePassStep* cs : ordered_compute_steps)         cs->ordinal = compute_ordinal++;
 
-	ordered_execution.clear();
-	ordered_execution.reserve(ordered_passes.size() + ordered_compute_steps.size() + ordered_blit_steps.size());
-	for (RenderPassStep* rp : ordered_passes)         ordered_execution.push_back({ rp->pass_index, rp });
-	for (ComputePassStep* cs : ordered_compute_steps) ordered_execution.push_back({ cs->pass_index, cs });
-	for (BlitPassStep* bs : ordered_blit_steps)       ordered_execution.push_back({ bs->pass_index, bs });
-	std::stable_sort(ordered_execution.begin(), ordered_execution.end(),
-		[](const OrderedStep& a, const OrderedStep& b) {
-		return a.pass_index < b.pass_index;
-	});
-
 	passes_filled = true;
+}
+
+std::vector<std::string> PassManager::OrderedPassNames() const
+{
+	std::vector<std::string> names;
+	auto name_of = [](const auto& registry, const auto* step) -> const std::string* {
+		for (const auto& [name, owned_step] : registry)
+			if (owned_step.get() == step) return &name;
+		return nullptr;
+	};
+	for (const ComputePassStep* prepass : ordered_compute_prepass_steps)
+		if (const std::string* name = name_of(compute_prepass_steps, prepass)) names.push_back(*name);
+	for (const FrameStep& step : ordered_execution) {
+		const std::string* name = std::visit([&](const auto* pass) -> const std::string* {
+			using T = std::remove_cv_t<std::remove_pointer_t<decltype(pass)>>;
+			if constexpr (std::is_same_v<T, RenderPassStep>)       return name_of(render_steps, pass);
+			else if constexpr (std::is_same_v<T, ComputePassStep>) return name_of(compute_steps, pass);
+			else                                                   return name_of(blit_steps, pass);
+		}, step);
+		if (name) names.push_back(*name);
+	}
+	return names;
 }
 
 void PassManager::ExecutePassesSteps(SDL_GPUCommandBuffer* cb, uint8_t pass_frame)
 {
-	for (const OrderedStep& step : ordered_execution) {
+	for (const FrameStep& step : ordered_execution) {
 		std::visit([&](auto* pass) {
 			using T = std::remove_pointer_t<decltype(pass)>;
 			if constexpr (std::is_same_v<T, RenderPassStep>)       pass->render_function(cb, this, *pass);
 			else if constexpr (std::is_same_v<T, ComputePassStep>) pass->compute_function(cb, this, *pass, pass_frame);
 			else if constexpr (std::is_same_v<T, BlitPassStep>)    BlitPassStandardBody(cb, *pass);
-		}, step.step);
+		}, step);
 	}
 }
 

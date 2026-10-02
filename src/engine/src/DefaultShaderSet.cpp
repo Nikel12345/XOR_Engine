@@ -469,89 +469,87 @@ namespace {
     };
 }
 
-void DefaultShaderProgramSet::SetCullingPrograms(EngineContext* ctx, CullingDataModule* cdm)
+void DefaultShaderProgramSet::SetCullingPrograms(EngineContext* ctx, CullingDataModule* culling_module)
 {
     namespace RP = DefaultRenderPassNamespace;
     using namespace DefaultBuffersNames;
-    ShaderManager* sm = ctx->GetShaderManager();
-    PassManager*   pm = ctx->GetPassManager();
+    ShaderManager* shader_manager = ctx->GetShaderManager();
     const ResourceTag tags = ResourceTag::CodeOwned | ResourceTag::Default;
 
     ctx->CreateComputeShader("culling_clear_cs",   EnginePath("shaders_code/comp/culling_clear.comp.hlsl").c_str(), tags);
     ctx->CreateComputeShader("culling_scatter_cs", EnginePath("shaders_code/comp/culling_scatter.comp.hlsl").c_str(), tags);
     ctx->CreateComputeShader("culling_fixup_cs",   EnginePath("shaders_code/comp/culling_fixup.comp.hlsl").c_str(), tags);
 
-    // Порядок создания программ = порядок исполнения: clear → все scatter → все fixup.
     ctx->CreateComputeShaderProgram("csp_cull_clear", "culling_clear_cs", { DEFAULT_CULL_COUNTERS_BUFFER }, {}, {}, {}, {}, RP::CULLING_PASS, tags);
-    sm->CreateComputePushInstruction<RP::CullingState>("csp_cull_clear",
-        [cdm](const PushConstantBinder& b, RP::CullingState) { b.Push(CullClearPush{ cdm->TotalCounters(b.frame), {} }); });
-    sm->CreateDispatchInstruction<RP::DummyDispatchData>("csp_cull_clear",
-        [cdm](DispatchSizeBinder& b, RP::DummyDispatchData) { b.Dispatch(cdm->TotalCounters(b.frame)); });
+    shader_manager->CreateComputePushInstruction<RP::CullingState>("csp_cull_clear",
+        [culling_module](const PushConstantBinder& binder, RP::CullingState) {
+            binder.Push(CullClearPush{ culling_module->TotalCounters(binder.frame), {} });
+        });
+    shader_manager->CreateDispatchInstruction<RP::DummyDispatchData>("csp_cull_clear",
+        [culling_module](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+            binder.Dispatch(culling_module->TotalCounters(binder.frame));
+        });
 
-    struct Culled { const char* pass; BufferDataName cameras; bool player_view; };
-    const Culled culled[] = {
-        { RP::SHADOW_PASS,      DEFAULT_LIGHT_CAMERA_BUFFER, false },
-        { RP::MAIN_PASS,        DEFAULT_CAMERA_BUFFER,       true  },
-        { RP::TRANSPARENT_PASS, DEFAULT_CAMERA_BUFFER,       false },
-        { RP::DEBUG_PASS,       DEFAULT_CAMERA_BUFFER,       false },
-        { RP::UI_PASS,          DEFAULT_CAMERA_BUFFER,       false },
-    };
+    AddPassCulling(ctx, culling_module, RP::SHADOW_PASS,      DEFAULT_LIGHT_CAMERA_BUFFER, false);
+    AddPassCulling(ctx, culling_module, RP::MAIN_PASS,        DEFAULT_CAMERA_BUFFER,       true);
+    AddPassCulling(ctx, culling_module, RP::TRANSPARENT_PASS, DEFAULT_CAMERA_BUFFER,       false);
+    AddPassCulling(ctx, culling_module, RP::DEBUG_PASS,       DEFAULT_CAMERA_BUFFER,       false);
+    AddPassCulling(ctx, culling_module, RP::UI_PASS,          DEFAULT_CAMERA_BUFFER,       false);
+}
+
+void DefaultShaderProgramSet::AddPassCulling(EngineContext* ctx, CullingDataModule* culling_module,
+                                             const RenderPassName& pass_name, BufferDataName camera_buffer, bool player_view)
+{
+    namespace RP = DefaultRenderPassNamespace;
+    using namespace DefaultBuffersNames;
+    ShaderManager* shader_manager = ctx->GetShaderManager();
+    const ResourceTag tags = ResourceTag::CodeOwned | ResourceTag::Default;
+
+    RenderPassStep* render_pass = ctx->GetPassManager()->GetRenderPassStep(pass_name);
+    if (!render_pass) return;
     TextureAtlas* lod_target = ctx->GetTextureAtlas(std::string("scene_hdr"));
 
-    for (const Culled& c : culled) {
-        RenderPassStep* rp = pm->GetRenderPassStep(c.pass);
-        if (!rp) continue;
-        const uint32_t ordinal = rp->ordinal;
-        const std::string name = std::string("csp_cull_scatter_") + c.pass;
+    const std::string scatter_program = "csp_cull_scatter_" + pass_name;
+    ctx->CreateComputeShaderProgram(scatter_program, "culling_scatter_cs",
+        { DEFAULT_OUT_PIB_BUFFER, DEFAULT_CULL_COUNTERS_BUFFER },
+        { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_RECORD_GROUP_BUFFER, DEFAULT_GROUP_TABLE_BUFFER,
+          DEFAULT_BOUND_SPHERE_BUFFER, DEFAULT_TRANSFORM_BUFFER, camera_buffer, DEFAULT_CAMERA_BUFFER },
+        {}, {}, {}, RP::CULLING_PASS, tags);
+    shader_manager->CreateComputePushInstruction<RP::CullingState>(scatter_program,
+        [culling_module, render_pass, lod_target, player_view](const PushConstantBinder& binder, RP::CullingState culling_state) {
+            const CullPassLayout& pass_layout = culling_module->Pass(binder.frame, render_pass->ordinal);
+            CullScatterPush push{};
+            push.range_start = pass_layout.first_pib;
+            push.range_count = pass_layout.records;
+            push.num_blocks = pass_layout.blocks;
+            push.out_base = pass_layout.out_base;
+            push.out_cap = pass_layout.out_cap;
+            push.cnt_base = pass_layout.cnt_base;
+            push.gl_count = pass_layout.gl;
+            push.target_height = lod_target ? lod_target->height : 0u;
+            push.min_screen_radius_px = player_view ? culling_state.min_screen_radius_px : 0.0f;
+            binder.Push(push);
+        });
+    shader_manager->CreateDispatchInstruction<RP::DummyDispatchData>(scatter_program,
+        [culling_module, render_pass](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+            const CullPassLayout& pass_layout = culling_module->Pass(binder.frame, render_pass->ordinal);
+            binder.Dispatch(pass_layout.blocks ? pass_layout.records : 0u);
+        });
 
-        ctx->CreateComputeShaderProgram(name, "culling_scatter_cs",
-            { DEFAULT_OUT_PIB_BUFFER, DEFAULT_CULL_COUNTERS_BUFFER },
-            { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_RECORD_GROUP_BUFFER, DEFAULT_GROUP_TABLE_BUFFER,
-              DEFAULT_BOUND_SPHERE_BUFFER, DEFAULT_TRANSFORM_BUFFER, c.cameras, DEFAULT_CAMERA_BUFFER },
-            {}, {}, {}, RP::CULLING_PASS, tags);
-        sm->CreateComputePushInstruction<RP::CullingState>(name,
-            [cdm, ordinal, lod_target, player_view = c.player_view](const PushConstantBinder& b, RP::CullingState st) {
-                const CullPassLayout& p = cdm->Pass(b.frame, ordinal);
-                CullScatterPush push{};
-                push.range_start = p.first_pib;
-                push.range_count = p.records;
-                push.num_blocks = p.blocks;
-                push.out_base = p.out_base;
-                push.out_cap = p.out_cap;
-                push.cnt_base = p.cnt_base;
-                push.gl_count = p.gl;
-                push.target_height = lod_target ? lod_target->height : 0u;
-                // Мелочь отсекается только в проходе камеры игрока: у теней своё разрешение.
-                push.min_screen_radius_px = player_view ? st.min_screen_radius_px : 0.0f;
-                b.Push(push);
-            });
-        sm->CreateDispatchInstruction<RP::DummyDispatchData>(name,
-            [cdm, ordinal](DispatchSizeBinder& b, RP::DummyDispatchData) {
-                const CullPassLayout& p = cdm->Pass(b.frame, ordinal);
-                b.Dispatch(p.blocks ? p.records : 0u);
-            });
-    }
-
-    for (const Culled& c : culled) {
-        RenderPassStep* rp = pm->GetRenderPassStep(c.pass);
-        if (!rp) continue;
-        const uint32_t ordinal = rp->ordinal;
-        const std::string name = std::string("csp_cull_fixup_") + c.pass;
-
-        ctx->CreateComputeShaderProgram(name, "culling_fixup_cs",
-            { DEFAULT_INDIRECT_BUFFER },
-            { DEFAULT_CMD_GROUP_LEVEL_BUFFER, DEFAULT_GROUP_TABLE_BUFFER, DEFAULT_CULL_COUNTERS_BUFFER },
-            {}, {}, {}, RP::CULLING_PASS, tags);
-        sm->CreateComputePushInstruction<RP::CullingState>(name,
-            [cdm, ordinal](const PushConstantBinder& b, RP::CullingState) {
-                const CullPassLayout& p = cdm->Pass(b.frame, ordinal);
-                b.Push(CullFixupPush{ p.blocks, p.cmd_base, p.commands, p.first_cmd,
-                                      p.out_base, p.out_cap, p.cnt_base, p.gl });
-            });
-        sm->CreateDispatchInstruction<RP::DummyDispatchData>(name,
-            [cdm, ordinal](DispatchSizeBinder& b, RP::DummyDispatchData) {
-                const CullPassLayout& p = cdm->Pass(b.frame, ordinal);
-                b.Dispatch(p.blocks * p.commands);
-            });
-    }
+    const std::string fixup_program = "csp_cull_fixup_" + pass_name;
+    ctx->CreateComputeShaderProgram(fixup_program, "culling_fixup_cs",
+        { DEFAULT_INDIRECT_BUFFER },
+        { DEFAULT_CMD_GROUP_LEVEL_BUFFER, DEFAULT_GROUP_TABLE_BUFFER, DEFAULT_CULL_COUNTERS_BUFFER },
+        {}, {}, {}, RP::CULLING_PASS, tags);
+    shader_manager->CreateComputePushInstruction<RP::CullingState>(fixup_program,
+        [culling_module, render_pass](const PushConstantBinder& binder, RP::CullingState) {
+            const CullPassLayout& pass_layout = culling_module->Pass(binder.frame, render_pass->ordinal);
+            binder.Push(CullFixupPush{ pass_layout.blocks, pass_layout.cmd_base, pass_layout.commands, pass_layout.first_cmd,
+                                       pass_layout.out_base, pass_layout.out_cap, pass_layout.cnt_base, pass_layout.gl });
+        });
+    shader_manager->CreateDispatchInstruction<RP::DummyDispatchData>(fixup_program,
+        [culling_module, render_pass](DispatchSizeBinder& binder, RP::DummyDispatchData) {
+            const CullPassLayout& pass_layout = culling_module->Pass(binder.frame, render_pass->ordinal);
+            binder.Dispatch(pass_layout.blocks * pass_layout.commands);
+        });
 }

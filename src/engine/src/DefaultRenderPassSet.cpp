@@ -164,7 +164,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
         }
     },
         std::move(shadow_rptd),
-        10
+        PassAnchor::ChainStart()
     );
     shadowPass->renderPassTexsData.SetDepthTexture(shadow_temp);
     // Своя копия команд на каждую световую камеру: у каждой свой результат отсева.
@@ -323,7 +323,7 @@ void DefaultRenderPassNamespace::SetDefaultMainRenderPass(EngineContext* ctx, Li
         pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
     },
         std::move(main_rptd),
-        20
+        PassAnchor::After(SHADOW_PASS)
     );
 
 
@@ -378,7 +378,7 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
         pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
     },
         std::move(debug_rptd),
-        25
+        PassAnchor::After(TRANSPARENT_PASS)
     );
     // Единственное поле — цвет рамок, и тело его НЕ переписывает: значит это настройка, и у
     // прохода есть схема.
@@ -408,7 +408,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx, LightDat
     RenderPassTexturesInfo transparent_rptd{};
     transparent_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
     // Глубину СОХРАНЯЕМ, хотя сам проход её больше не читает: после него по ней считает туман
-    // (FOG_PASS, 27). DONT_CARE делает содержимое неопределённым — драйвер вправе сбросить
+    // (FOG_PASS). DONT_CARE делает содержимое неопределённым — драйвер вправе сбросить
     // метаданные тайлового сжатия, и следующий сэмпл вернёт мусор ПОБЛОЧНО (видно как квадраты
     // «есть эффект / нет»). См. WARNINGS.md.
     transparent_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, g_pass_system.main_depth_format);
@@ -430,7 +430,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx, LightDat
         pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
     },
         std::move(transparent_rptd),
-        24   // между AO (21) и DEBUG (25)
+        PassAnchor::After(AO_PASS)
     );
 
     transparentPass->renderPassTexsData.SetColorTexture(g_pass_system.scene_hdr, 0);
@@ -465,7 +465,7 @@ void DefaultRenderPassNamespace::SetUIPass(EngineContext* ctx)
         pm->RenderPassStandardBody(cb, &rp, bm, 0, rp.state.data());
     },
         std::move(ui_rptd),
-        28   // после bloom (composite ~26), до present (30) — UI не блумится, но попадает в present
+        PassAnchor::After(BLOOM_PASS)
     );
 
     // Глобалка прохода: единый текстовый атлас (слот 0, t0/s0). Сеттер декларирует ему SAMPLER.
@@ -507,7 +507,7 @@ void DefaultRenderPassNamespace::SetPresentPass(EngineContext* ctx)
         PRESENT_PASS,
         g_pass_system.scene_hdr,     // src: SAMPLER у него есть (его сэмплит bloom-prefilter)
         pm->GetSwapchainAtlas(),     // dst: COLOR_TARGET у свопчейна есть по определению
-        30,                          // последним, после MAIN(20)/TRANSPARENT(24)/DEBUG(25)
+        PassAnchor::After(UI_PASS),
         SDL_GPU_FILTER_LINEAR
     );
 }
@@ -545,7 +545,7 @@ void DefaultRenderPassNamespace::SetDefaultBloomPass(EngineContext* ctx)
         // пересчитывает покадрово, а редактор правит те же байты (см. ComputePassStep::state).
         pm->ComputePassStandardBody(cb, &cp, bm, cp.state.data(), &dd, pass_frame);
     },
-        26
+        PassAnchor::After(DEBUG_PASS)
     );
     SetPassState(bloom, BLOOM_STATE, BloomState{});
 }
@@ -578,7 +578,7 @@ void DefaultRenderPassNamespace::SetDefaultAOPass(EngineContext* ctx)
         DummyDispatchData dd{};
         pm->ComputePassStandardBody(cb, &cp, bm, cp.state.data(), &dd, pass_frame);
     },
-        21   // между MAIN (20) и прозрачными (24): глубина и ambient готовы, bloom (26) увидит затенённое
+        PassAnchor::After(MAIN_PASS)
     );
     SetPassState(ao, AO_STATE, AOState{});
 }
@@ -610,7 +610,7 @@ void DefaultRenderPassNamespace::SetDefaultFogPass(EngineContext* ctx)
         DummyDispatchData dd{};
         pm->ComputePassStandardBody(cb, &cp, bm, cp.state.data(), &dd, pass_frame);
     },
-        27   // после bloom (26), до UI (28) — обоснование у объявления в заголовке
+        PassAnchor::After(BLOOM_PASS)
     );
     SetPassState(fog, FOG_STATE, FogState{});
 }
@@ -661,7 +661,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ct
         }
     },
         std::move(shadow_rptd),
-        10
+        PassAnchor::ChainStart()
     );
     shadowPass->renderPassTexsData.SetColorTexture(shadow_moments_array);
     shadowPass->renderPassTexsData.SetDepthTexture(shadow_depth_tex);
@@ -682,7 +682,7 @@ void DefaultRenderPassNamespace::SetDefaultShadowBlurPass(EngineContext* ctx)
         DummyDispatchData dispatch_data = {};
         pm->ComputePassStandardBody(cb, &cp, bm, cp.state.data(), &dispatch_data, pass_frame);
     },
-        11
+        PassAnchor::After(SHADOW_PASS)
     );
     // Хранилище без схемы: слой блюра задаёт не проход, а сама программа (по программе на слой,
     // номер захвачен в её push-функции) — настраивать здесь нечего.
@@ -701,7 +701,7 @@ void DefaultRenderPassNamespace::SetDefaultCullingPass(EngineContext* ctx)
         DummyDispatchData dd{};
         pm->ComputePassStandardBody(cb, &cp, bm, cp.state.data(), &dd, pass_frame);
     },
-        5
+        PassAnchor::ChainStart()
     );
     // Диапазоны и страйды каждая программа каллинга считает у себя из слепка раскладки
     // (bb->AskLayout(slot)) — покадровые величины, в схему им нельзя. Настройка ровно одна:

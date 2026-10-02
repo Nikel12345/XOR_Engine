@@ -282,7 +282,6 @@ Engine::Engine(const EngineConfig& cfg)
 	RegisterResourceComponentSpecs(material_manager, model_manager);
 	RegisterBuiltinMaterialParamsSpecs();
 	object_manager->CreateScene("staging");
-	pass_manager->FillRenderPasses();
 
 	thread_controller->SetPrepareCallback([this](uint8_t slot){this->PrepareFunc(slot);});
 	thread_controller->SetUploadCallback([this](uint8_t slot) {this->UploadFunc(slot); });
@@ -333,10 +332,10 @@ void Engine::InitPasses()
 		SetDefaultShadowPCFRenderPass(engine_context, light_data_module);
 		SetDefaultMainRenderPass(engine_context, light_data_module);
 		SetDefaultAOPass(engine_context);
-		//SetDefaultFogPass(engine_context);          // атмосфера по глубине main'а: ПОСЛЕ AO, до прозрачных
 		SetTransparentPass(engine_context, light_data_module);
 		SetDebugColliderPass(engine_context);
 		SetDefaultBloomPass(engine_context);
+		//SetDefaultFogPass(engine_context);
 		SetUIPass(engine_context);
 		SetPresentPass(engine_context);
 	}
@@ -353,6 +352,7 @@ int Engine::Run()
 		SDL_Log("Engine::Run on an invalid engine (platform init failed)");
 		return 1;
 	}
+	pass_manager->FillRenderPasses();
 	thread_controller->StartThreads();
 
 	running.store(true, std::memory_order_relaxed);

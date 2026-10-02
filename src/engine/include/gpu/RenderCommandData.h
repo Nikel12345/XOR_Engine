@@ -158,7 +158,6 @@ struct RenderPassStep {
         return state.size() >= sizeof(T) ? reinterpret_cast<T*>(state.data()) : nullptr;
     }
     std::string debug_name;
-    int pass_index = -1;
     uint32_t ordinal = 0;
 };
 
@@ -170,7 +169,6 @@ struct BlitPassStep {
     SDL_GPUFilter filter = SDL_GPU_FILTER_NEAREST;
     SDL_GPULoadOp load_op = SDL_GPU_LOADOP_DONT_CARE;
     std::string debug_name;
-    int pass_index = -1;
 };
 
 struct ComputeRWStorageTextureRef {
@@ -187,6 +185,5 @@ struct ComputePassStep {
         return state.size() >= sizeof(T) ? reinterpret_cast<T*>(state.data()) : nullptr;
     }
     std::string debug_name;
-    int pass_index = -1;
     uint32_t ordinal = UINT32_MAX;
 };

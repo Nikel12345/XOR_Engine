@@ -114,7 +114,8 @@ XOR Engine — набор статических библиотек. Прило�
 | пуш/диспатч шейдера | `ShaderManager::CreatePushInstruction<T>` | что положить в push-константы программы с этим именем |
 | ресайз таргета | `TextureManager` → `ExecuteResizeInstructions` | как пересоздать атлас под новое разрешение |
 | число блоков прохода | `PassManager::CreateRegionCountInstruction` | сколько дроу проход даст за кадр |
-| проходы | `PassManager::CreateRenderPass` / `CreateComputePass` / `CreateComputePrepass` / `CreateBlitPass` | тело прохода и его место в порядке |
+| отсев прохода | `DefaultShaderProgramSet::AddPassCulling` | камерный буфер прохода и признак прохода камеры игрока |
+| проходы | `PassManager::CreateRenderPass` / `CreateComputePass` / `CreateComputePrepass` / `CreateBlitPass` | тело прохода и якорь — шаг, за которым он встаёт |
 | команды ввода | `InputManager::RegisterCommand` / `PushCommand` | единственный законный способ мутировать ECS не из sim-потока |
 
 Второй сквозной приём — **реестр ячеек**. Каждый менеджер держит свои ресурсы в
@@ -227,6 +228,7 @@ id раньше, чем появится сам ресурс. Имя при эт
 | Механики, ломающиеся не там, где сделана ошибка | `WARNINGS.md` |
 | Что и зачем изменено в SDL и shadercross | `external/SDL3/docs/README-*.md`, `external/SDL3_shadercross/README-fork.md` |
 | Как устроен кадр: слоты, слепки, гейты | `docs/render-pipeline/frame.md` |
+| Проходы: виды шагов, цепочки, место по якорю, дефолтный порядок | `docs/render-pipeline/passes.md` |
 | Дерево батчей: группировка, слепок раскладки, вызовы отрисовки | `docs/render-pipeline/batches.md` |
 | Индирект, регионы проходов, GPU-каллинг | `docs/render-pipeline/culling.md` |
 | Уровни детализации: цепочка модели, материалы уровней, выбор уровня | `docs/render-pipeline/lod.md` |

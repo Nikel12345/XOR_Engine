@@ -3,6 +3,8 @@
 #include <SDL3/SDL.h>
 #include <string_view>
 #include <vector>
+#include <list>
+#include <optional>
 #include <unordered_map>
 #include <functional>
 #include <variant>
@@ -29,6 +31,14 @@ struct PassRegions {
     uint32_t total_pib = 0;
 };
 
+struct PassAnchor {
+    static PassAnchor ChainStart() { return {}; }
+    static PassAnchor After(std::string pass_name) { return PassAnchor{ std::move(pass_name) }; }
+    std::optional<std::string> after_pass;
+};
+
+using FrameStep = std::variant<RenderPassStep*, ComputePassStep*, BlitPassStep*>;
+
 class MaterialManager;
 class PipeManager;
 class ObjectManager;
@@ -38,11 +48,11 @@ class PassManager
 {
 public:
     PassManager();
-	RenderPassStep* CreateRenderPass(const ComputePassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function, RenderPassTexturesInfo&& rptd, int pass_index);
-	ComputePassStep* CreateComputePass(const ComputePassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function, int pass_index);
-	ComputePassStep* CreateComputePrepass(const ComputePrepassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function, int pass_index);
+	RenderPassStep* CreateRenderPass(const RenderPassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function, RenderPassTexturesInfo&& rptd, const PassAnchor& anchor);
+	ComputePassStep* CreateComputePass(const ComputePassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function, const PassAnchor& anchor);
+	ComputePassStep* CreateComputePrepass(const ComputePrepassName& name, std::function<void(SDL_GPUCommandBuffer*, PassManager*, ComputePassStep&, uint8_t)> compute_function, const PassAnchor& anchor);
 
-	BlitPassStep* CreateBlitPass(const BlitPassName& name, TextureAtlas* src, TextureAtlas* dst, int pass_index,
+	BlitPassStep* CreateBlitPass(const BlitPassName& name, TextureAtlas* src, TextureAtlas* dst, const PassAnchor& anchor,
 		SDL_GPUFilter filter = SDL_GPU_FILTER_NEAREST, SDL_GPULoadOp load_op = SDL_GPU_LOADOP_DONT_CARE);
 
 	void SetSwapchain(SDL_GPUTexture* tex, uint32_t w, uint32_t h);
@@ -75,12 +85,18 @@ public:
 
 	const std::vector<RenderPassStep*>& GetOrderedRenderPasses() { return ordered_passes; }
 	const std::vector<ComputePassStep*>& GetOrderedComputePasses() { return ordered_compute_steps; }
-	const std::vector<ComputePassStep*>& GetOrderedComputePrepasses() { return ordered_compute_prepass_steps; }
-	const std::vector<BlitPassStep*>& GetOrderedBlitPasses() { return ordered_blit_steps; }
+	const std::list<ComputePassStep*>& GetOrderedComputePrepasses() { return ordered_compute_prepass_steps; }
+	std::vector<std::string> OrderedPassNames() const;
 
 	~PassManager();
 
 private:
+	bool IsPassNameTaken(const std::string& name) const;
+	bool CanCreatePass(const std::string& name, const char* caller) const;
+	std::optional<FrameStep> FindFrameStep(const std::string& name) const;
+	std::optional<std::list<FrameStep>::iterator> FrameInsertPosition(const PassAnchor& anchor, const std::string& name, const char* caller);
+	std::optional<std::list<ComputePassStep*>::iterator> PrepassInsertPosition(const PassAnchor& anchor, const std::string& name, const char* caller);
+
 	void ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPURenderPass* SDL_rp, const RenderPassStep& rp, BufferManager* bm, uint32_t additional_offset, const void* push_data_raw);
 	std::unordered_map<RenderPassName, std::unique_ptr<RenderPassStep>> render_steps;
 	std::unordered_map<ComputePassName, std::unique_ptr<ComputePassStep>> compute_steps;
@@ -89,14 +105,8 @@ private:
 
 	std::vector<RenderPassStep*> ordered_passes;
 	std::vector<ComputePassStep*> ordered_compute_steps;
-	std::vector<ComputePassStep*> ordered_compute_prepass_steps;
-	std::vector<BlitPassStep*> ordered_blit_steps;
-
-	struct OrderedStep {
-		int pass_index = -1;
-		std::variant<RenderPassStep*, ComputePassStep*, BlitPassStep*> step;
-	};
-	std::vector<OrderedStep> ordered_execution;
+	std::list<ComputePassStep*> ordered_compute_prepass_steps;
+	std::list<FrameStep> ordered_execution;
 
 	TextureAtlas swapchain_atlas{};
 

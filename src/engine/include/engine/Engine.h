@@ -93,6 +93,7 @@ public:
     PIB_DataModule* GetPIBDataModule() const { return pib_data_module; }
     TransformDataModule* GetTransformDataModule() const { return transform_data_module; }
     LightDataModule* GetLightDataModule() const { return light_data_module; }
+    CullingDataModule* GetCullingDataModule() const { return culling_data_module; }
     UI_DataModule* GetUIDataModule() const { return ui_data_module; }
     UI_Yoga* GetUIYoga() const { return ui_yoga; }
 

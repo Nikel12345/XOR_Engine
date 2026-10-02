@@ -711,7 +711,7 @@ void BatchBuilder::BuildComputeBatches(PassManager* pass_manager, PipeManager* p
         if (!pipe) continue;
 
         ComputePassStep* cmp = pass_manager->GetComputePassStep(sp->compute_pass_name);
-        // Пассы и препассы делят пространство имён (см. PassManager::CreateComputePass), поэтому
+        // Пассы и препассы делят пространство имён (см. PassManager::IsPassNameTaken), поэтому
         // перебор «сначала пасс, потом препасс» однозначен.
         if (!cmp) cmp = pass_manager->GetComputePrepassStep(sp->compute_pass_name);
         if (!cmp || cmp->ordinal >= layout->passes.size()) continue;

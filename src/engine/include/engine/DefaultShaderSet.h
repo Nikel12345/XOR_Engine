@@ -1,4 +1,5 @@
 #pragma once
+#include "Aliases.h"
 
 class ShaderManager;
 class PassManager;
@@ -22,8 +23,9 @@ namespace DefaultShaderProgramSet
     // готовыми пул геометрии, буферы и проходы.
     void SetDefaultShaders(EngineContext* ctx);
 
-    // Отсев и выбор уровня: clear → scatter на проход → fixup на проход, все в CULLING_PASS.
-    void SetCullingPrograms(EngineContext* ctx, CullingDataModule* cdm);
+    void SetCullingPrograms(EngineContext* ctx, CullingDataModule* culling_module);
+    void AddPassCulling(EngineContext* ctx, CullingDataModule* culling_module,
+                        const RenderPassName& pass_name, BufferDataName camera_buffer, bool player_view);
     void SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm);
     void SetBloomPrograms(EngineContext* ctx);
     void SetAOPrograms(EngineContext* ctx);
