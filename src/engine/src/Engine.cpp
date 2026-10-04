@@ -388,6 +388,16 @@ Engine::~Engine()
 	}
 	thread_controller->Shutdown();
 
+	// Фенсы последних кадров отпускают UploadFunc/FenceFunc, а их потоки уже остановлены.
+	SlotData* slots = slot_controller->GetSlotsData();
+	for (uint8_t i = 0; i < BUFFERING_LEVEL; ++i) {
+		for (StageFences* stage : { &slots[i].upload, &slots[i].render }) {
+			for (uint8_t f = 0; f < stage->count; ++f)
+				SDL_ReleaseGPUFence(dev, stage->items[f]);
+			stage->Clear();
+		}
+	}
+
 	UI_ImGui::Shutdown();
 
 	delete engine_context;

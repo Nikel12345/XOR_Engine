@@ -698,5 +698,16 @@ TextureManager::~TextureManager()
         if (pending.tex) SDL_ReleaseGPUTexture(dev, pending.tex);
     }
     texture_trash.clear();
+
+    // Текстурой владеет только атлас без shares_with: разделяющий держит копию указателя
+    // владельца, после RecreateAtlasTexture она может быть уже отпущена через texture_trash.
+    for (int32_t i = 0; i < atlases_data.Count(); ++i) {
+        const TextureAtlas* atlas = atlases_data.At(i).object.get();
+        if (atlas && !atlas->shares_with && atlas->texture_binding.texture)
+            SDL_ReleaseGPUTexture(dev, atlas->texture_binding.texture);
+    }
+    for (auto& [name, sampler] : samplers_data)
+        if (sampler) SDL_ReleaseGPUSampler(dev, sampler);
+    samplers_data.clear();
 }
 
