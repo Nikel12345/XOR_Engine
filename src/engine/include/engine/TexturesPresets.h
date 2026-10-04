@@ -451,6 +451,20 @@ namespace TexturePresets {
         return info;
     }
 
+    inline SDL_GPUTextureCreateInfo FroxelVolume(uint32_t width, uint32_t height, uint32_t depth) {
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_3D;
+        info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        info.usage = 0;
+        info.width = width;
+        info.height = height;
+        info.layer_count_or_depth = depth;
+        info.num_levels = 1;
+        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        info.props = 0;
+        return info;
+    }
+
     inline SDL_GPUTextureCreateInfo AmbientHDR(uint32_t width, uint32_t height) {
         SDL_GPUTextureCreateInfo info = {};
         info.type = SDL_GPU_TEXTURETYPE_2D;

@@ -46,7 +46,7 @@ namespace DefaultRenderPassNamespace
         // за это). Применяется ко всей четвёрке РАЗОМ и только к ней: это вложения одного прохода,
         // разойтись по размеру им нельзя (см. инструкции ресайза).
         // Живёт у набора, а не в состоянии прохода, потому что у сценового фреймбуфера нет
-        // владельца-прохода: пишут в него MAIN/TRANSPARENT/SPLAT/DEBUG/UI, читают AO/BLOOM/FOG/PRESENT.
+        // владельца-прохода: пишут в него MAIN/TRANSPARENT/SPLAT/DEBUG/UI, читают AO/FROXEL_FOG/BLOOM/PRESENT.
         float                ssaa = 1.0f;
         bool                 common_inited = false;
     };
@@ -227,6 +227,14 @@ void DefaultRenderPassNamespace::_SetDefaultCommonResources(EngineContext* ctx, 
             TexturePresets::BloomLevel(lw, lh), env_sampler, ResourceTag::Default | ResourceTag::System);
     }
 
+    {
+        SDL_GPUSampler* linear_clamp_sampler = tm->GetSampler(DefaultSamplersNames::DEFAULT_SAMPLER);
+        const SDL_GPUTextureCreateInfo froxel_tci =
+            TexturePresets::FroxelVolume(FROXEL_GRID_WIDTH, FROXEL_GRID_HEIGHT, FROXEL_GRID_DEPTH);
+        tm->CreateTextureAtlas(FROXEL_VOLUME,             froxel_tci, linear_clamp_sampler, ResourceTag::Default | ResourceTag::System);
+        tm->CreateTextureAtlas(FROXEL_VOLUME_ACCUMULATED, froxel_tci, linear_clamp_sampler, ResourceTag::Default | ResourceTag::System);
+    }
+
     // Инструкции ресайза экранных таргетов: спец-логика вывода размера (в т.ч. i уровня bloom)
     // захватывается в ЗАМЫКАНИЕ; исполняет их render-поток (Engine::RenderFunc). struct TextureAtlas
     // остаётся чистым — ресайз живёт в инструкции, а не в методе таргета.
@@ -361,7 +369,7 @@ void DefaultRenderPassNamespace::SetDebugColliderPass(EngineContext* ctx)
     // геометрией сцены. depth_write выключен → рамки не портят буфер.
     RenderPassTexturesInfo debug_rptd{};
     debug_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
-    // STORE по той же причине, что у прозрачных: следом за этим проходом глубину сэмплит туман (27).
+    // STORE по той же причине, что у прозрачных: следом за этим проходом глубину сэмплит FROXEL_FOG_PASS.
     debug_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, g_pass_system.main_depth_format);
 
     auto debugPass = pm->CreateRenderPass(
@@ -408,7 +416,7 @@ void DefaultRenderPassNamespace::SetTransparentPass(EngineContext* ctx, LightDat
     RenderPassTexturesInfo transparent_rptd{};
     transparent_rptd.CreateColorTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, { 0,0,0,1 }, g_pass_system.scene_hdr->format);
     // Глубину СОХРАНЯЕМ, хотя сам проход её больше не читает: после него по ней считает туман
-    // (FOG_PASS). DONT_CARE делает содержимое неопределённым — драйвер вправе сбросить
+    // (FROXEL_FOG_PASS). DONT_CARE делает содержимое неопределённым — драйвер вправе сбросить
     // метаданные тайлового сжатия, и следующий сэмпл вернёт мусор ПОБЛОЧНО (видно как квадраты
     // «есть эффект / нет»). См. WARNINGS.md.
     transparent_rptd.CreateDepthTextureInfo(SDL_GPU_LOADOP_LOAD, SDL_GPU_STOREOP_STORE, g_pass_system.main_depth_format);
@@ -583,36 +591,41 @@ void DefaultRenderPassNamespace::SetDefaultAOPass(EngineContext* ctx)
     SetPassState(ao, AO_STATE, AOState{});
 }
 
-void DefaultRenderPassNamespace::SetDefaultFogPass(EngineContext* ctx)
+void DefaultRenderPassNamespace::SetDefaultFroxelFogPass(EngineContext* ctx, LightDataModule* ldm)
 {
     if (!g_pass_system.common_inited) {
-        SDL_Log("SetDefaultFogPass: common resources must be initialized first.");
+        SDL_Log("SetDefaultFroxelFogPass: common resources must be initialized first.");
         return;
     }
-    // Схема состояния — рядом с проходом, которому состояние принадлежит (как у bloom и AO).
     {
         using K = ParamsFieldKind;
-        ParamsSpecRegistry::Passes().Register(MakeParamsSpec<FogState>(FOG_STATE, {
-            ParamsFieldSpec::Num(PARAMS_FIELD(FogState, color),           K::Color3).Label("Fog color"),
-            ParamsFieldSpec::Num(PARAMS_FIELD(FogState, start_distance),  K::F32, 0.0f, 2000.0f, 0.25f).Label("Start distance"),
-            ParamsFieldSpec::Num(PARAMS_FIELD(FogState, full_distance),   K::F32, 0.0f, 5000.0f, 1.0f).Label("Full distance"),
-            ParamsFieldSpec::Num(PARAMS_FIELD(FogState, max_opacity),     K::F32, 0.0f, 1.0f, 0.01f).Label("Max opacity"),
+        ParamsSpecRegistry::Passes().Register(MakeParamsSpec<FroxelFogState>(FROXEL_FOG_STATE, {
+            ParamsFieldSpec::Num(PARAMS_FIELD(FroxelFogState, fog_far),        K::F32, 0.0f, 100.0f, 0.1f).Label("Far"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(FroxelFogState, fog_density),    K::F32, 0.0f, 1.0f, 0.001f).Label("Density"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(FroxelFogState, fog_scattering), K::F32, 0.0f, 1.0f, 0.001f).Label("Scattering"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(FroxelFogState, fog_absorption), K::F32, 0.0f, 1.0f, 0.001f).Label("Absorption"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(FroxelFogState, fog_anisotropy), K::F32, 0.0f, 1.0f, 0.001f).Label("Anisotropy"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(FroxelFogState, fog_intensity),  K::F32, 0.0f, 1000.0f, 0.1f).Label("Intensity"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(FroxelFogState, fog_samples),    K::U32, 1.0f, 16.0f, 1.0f).Label("Samples"),
+            ParamsFieldSpec::Num(PARAMS_FIELD(FroxelFogState, fog_albedo),     K::Color3).Label("Albedo"),
         }));
     }
 
     PassManager* pm = ctx->GetPassManager();
     BufferManager* bm = ctx->GetBufferManager();
 
-    ComputePassStep* fog = pm->CreateComputePass(
-        FOG_PASS,
-        [bm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)
+    ComputePassStep* froxel_fog = pm->CreateComputePass(
+        FROXEL_FOG_PASS,
+        [bm, ldm](SDL_GPUCommandBuffer* cb, PassManager* pm, ComputePassStep& cp, uint8_t pass_frame)
     {
+        if (FroxelFogState* state = cp.State<FroxelFogState>())
+            state->light_count = ldm->AskNumLights(pass_frame);
         DummyDispatchData dd{};
         pm->ComputePassStandardBody(cb, &cp, bm, cp.state.data(), &dd, pass_frame);
     },
-        PassAnchor::After(BLOOM_PASS)
+        PassAnchor::After(DEBUG_PASS)
     );
-    SetPassState(fog, FOG_STATE, FogState{});
+    SetPassState(froxel_fog, FROXEL_FOG_STATE, FroxelFogState{});
 }
 
 void DefaultRenderPassNamespace::SetDefaultShadowVSMRenderPass(EngineContext* ctx, LightDataModule* ldm)

@@ -29,5 +29,5 @@ namespace DefaultShaderProgramSet
     void SetShadowBlurPrograms(EngineContext* ctx, LightDataModule* ldm);
     void SetBloomPrograms(EngineContext* ctx);
     void SetAOPrograms(EngineContext* ctx);
-    void SetFogProgram(EngineContext* ctx);
+    void SetFroxelFogPrograms(EngineContext* ctx);
 }

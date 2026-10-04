@@ -126,7 +126,9 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 	ctx->CreateComputeShader("ssao_blur_h_cs",     EnginePath("shaders_code/comp/ssao_blur_h.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
 	ctx->CreateComputeShader("ssao_blur_v_cs",     EnginePath("shaders_code/comp/ssao_blur_v.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
 	ctx->CreateComputeShader("ao_composite_cs",    EnginePath("shaders_code/comp/ao_composite.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
-	ctx->CreateComputeShader("fog_cs",             EnginePath("shaders_code/comp/fog.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("froxel_inject_cs",     EnginePath("shaders_code/comp/froxel_inject.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("froxel_accumulate_cs", EnginePath("shaders_code/comp/froxel_accumulate.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
+	ctx->CreateComputeShader("froxel_apply_cs",      EnginePath("shaders_code/comp/froxel_apply.comp.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default);
 
 	{
 		ShaderProgramDescription spd;
@@ -331,29 +333,55 @@ void DefaultShaderProgramSet::SetAOPrograms(EngineContext* ctx)
     inited = true;
 }
 
-void DefaultShaderProgramSet::SetFogProgram(EngineContext* ctx)
+void DefaultShaderProgramSet::SetFroxelFogPrograms(EngineContext* ctx)
 {
     ShaderManager* sm = ctx->GetShaderManager();
     using namespace DefaultRenderPassNamespace;
     using namespace DefaultBuffersNames;
     static bool inited = false;
-    if (inited) { SDL_Log("Fog shader program already initialized."); return; }
+    if (inited) { SDL_Log("Froxel fog shader programs already initialized."); return; }
 
-    ctx->CreateComputeShaderProgram("fog", "fog_cs",
+    const ResourceTag tags = ResourceTag::CodeOwned | ResourceTag::Default;
+
+    ctx->CreateComputeShaderProgram("froxel_inject", "froxel_inject_cs",
+        {}, { DEFAULT_CAMERA_BUFFER, DEFAULT_LIGHT_BUFFER, DEFAULT_LIGHT_CAMERA_BUFFER },
+        { { FROXEL_VOLUME, 0, 0 } },
+        {},
+        { SHADOW_DEPTH_FLAT_ARRAY },
+        FROXEL_FOG_PASS, tags);
+
+    ctx->CreateComputeShaderProgram("froxel_accumulate", "froxel_accumulate_cs",
+        {}, {},
+        { { FROXEL_VOLUME_ACCUMULATED, 0, 0 } },
+        {},
+        { FROXEL_VOLUME },
+        FROXEL_FOG_PASS, tags);
+
+    ctx->CreateComputeShaderProgram("froxel_apply", "froxel_apply_cs",
         {}, { DEFAULT_CAMERA_BUFFER },
         { { std::string("scene_hdr"), 0, 0 } },
         {},
-        { std::string("main_depth") },
-        FOG_PASS, ResourceTag::CodeOwned | ResourceTag::Default);
+        { std::string("main_depth"), FROXEL_VOLUME_ACCUMULATED },
+        FROXEL_FOG_PASS, tags);
 
-    sm->CreateComputePushInstruction<FogState>("fog", [](const PushConstantBinder& b, FogState st) {
-        b.Push(st);
-    });
+    for (const char* program_name : { "froxel_inject", "froxel_apply" }) {
+        sm->CreateComputePushInstruction<FroxelFogState>(program_name, [](const PushConstantBinder& binder, FroxelFogState state) {
+            binder.Push(state);
+        });
+    }
 
     {
-        TextureAtlas* hdr = ctx->GetTextureAtlas(std::string("scene_hdr"));
-        sm->CreateDispatchInstruction<DummyDispatchData>("fog", [hdr](DispatchSizeBinder& b, DummyDispatchData) {
-            b.element_count = { hdr->width, hdr->height, 1 };
+        TextureAtlas* froxel_volume = ctx->GetTextureAtlas(FROXEL_VOLUME);
+        TextureAtlas* hdr           = ctx->GetTextureAtlas(std::string("scene_hdr"));
+
+        sm->CreateDispatchInstruction<DummyDispatchData>("froxel_inject", [froxel_volume](DispatchSizeBinder& binder, DummyDispatchData) {
+            binder.element_count = { froxel_volume->width, froxel_volume->height, froxel_volume->layers };
+        });
+        sm->CreateDispatchInstruction<DummyDispatchData>("froxel_accumulate", [froxel_volume](DispatchSizeBinder& binder, DummyDispatchData) {
+            binder.element_count = { froxel_volume->width, froxel_volume->height, 1 };
+        });
+        sm->CreateDispatchInstruction<DummyDispatchData>("froxel_apply", [hdr](DispatchSizeBinder& binder, DummyDispatchData) {
+            binder.element_count = { hdr->width, hdr->height, 1 };
         });
     }
 

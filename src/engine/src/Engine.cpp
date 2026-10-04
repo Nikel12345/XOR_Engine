@@ -299,7 +299,7 @@ Engine::Engine(const EngineConfig& cfg)
 	DefaultShaderProgramSet::SetCullingPrograms(engine_context, culling_data_module);
 	DefaultShaderProgramSet::SetBloomPrograms(engine_context);
 	DefaultShaderProgramSet::SetAOPrograms(engine_context);
-	DefaultShaderProgramSet::SetFogProgram(engine_context);
+	DefaultShaderProgramSet::SetFroxelFogPrograms(engine_context);
 	init_ok = true;
 }
 
@@ -335,7 +335,8 @@ void Engine::InitPasses()
 		SetTransparentPass(engine_context, light_data_module);
 		SetDebugColliderPass(engine_context);
 		SetDefaultBloomPass(engine_context);
-		//SetDefaultFogPass(engine_context);
+		// Якорь у тумана тот же, что у bloom (DEBUG_PASS): созданный позже встаёт раньше, то есть до bloom.
+		SetDefaultFroxelFogPass(engine_context, light_data_module);
 		SetUIPass(engine_context);
 		SetPresentPass(engine_context);
 	}

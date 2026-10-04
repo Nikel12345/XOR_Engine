@@ -13,7 +13,7 @@ namespace DefaultRenderPassNamespace
     inline constexpr const char* PRESENT_PASS = "DefaultPresentPass";
     inline constexpr const char* BLOOM_PASS = "DefaultBloomPass";
     inline constexpr const char* AO_PASS = "DefaultAOPass";
-    inline constexpr const char* FOG_PASS = "DefaultFogPass";
+    inline constexpr const char* FROXEL_FOG_PASS = "DefaultFroxelFogPass";
     inline constexpr const char* UI_PASS = "DefaultUIPass";
 
     // Число уровней bloom-пирамиды (bloom_0 = ½ окна, каждый следующий ещё вдвое меньше).
@@ -169,23 +169,27 @@ namespace DefaultRenderPassNamespace
 
     void SetDefaultAOPass(EngineContext* ctx);
 
-    // Атмосфера кадра: линейный туман по ДИСТАНЦИИ от камеры. Ничего ближе start_distance, полный
-    // цвет тумана дальше full_distance, равномерный подъём между ними. Высоты в модели нет — стена
-    // встаёт одинаково во все стороны, а не стелется по низинам.
-    //
-    // Небо туманится наравне с геометрией (его глубина = дальняя плоскость), поэтому при включённом
-    // тумане скайбокса не видно — это принятая цена за отсутствие разрыва по горизонту.
-    //
-    // max_opacity = 0 = эффект выключен, проход становится тождеством (шаг при этом остаётся).
-    struct alignas(16) FogState {
-        float color[3]        = { 0.05f, 0.05f, 0.05f };   // цвет тумана, как есть
-        float start_distance  = 550.0f;    // ближе — тумана нет вовсе, юниты
-        float full_distance   = 1450.0f;   // дальше — только цвет тумана
-        float max_opacity     = 0.9f;    // потолок: 1 — даль исчезает полностью
-    };
-    inline const std::string FOG_STATE = "FogState";
+    inline const std::string FROXEL_VOLUME             = "froxel_volume";
+    inline const std::string FROXEL_VOLUME_ACCUMULATED = "froxel_volume_accumulated";
+    inline constexpr uint32_t FROXEL_GRID_WIDTH  = 190;
+    inline constexpr uint32_t FROXEL_GRID_HEIGHT = 90;
+    inline constexpr uint32_t FROXEL_GRID_DEPTH  = 128;
 
-    void SetDefaultFogPass(EngineContext* ctx);
+    // Раскладка = cbuffer FroxelFogParams в comp/froxel_common.hlsli.
+    struct alignas(16) FroxelFogState {
+        float    fog_albedo[3]  = { 1.0f, 1.0f, 1.0f };
+        float    fog_far        = 50.0f;
+        float    fog_density    = 0.5f;
+        float    fog_scattering = 0.1f;
+        float    fog_absorption = 0.1f;
+        float    fog_anisotropy = 0.25f;
+        float    fog_intensity  = 65.0f;
+        uint32_t fog_samples    = 16;
+        uint32_t light_count    = 0;
+    };
+    inline const std::string FROXEL_FOG_STATE = "FroxelFogState";
+
+    void SetDefaultFroxelFogPass(EngineContext* ctx, LightDataModule* ldm);
 
     // Настройка прохода отсева. Покадровые величины программы (SetCullingPrograms) считают сами.
     struct alignas(16) CullingState {
