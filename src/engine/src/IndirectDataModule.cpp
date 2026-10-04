@@ -50,8 +50,8 @@ void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, Uploa
 
 		for (uint32_t b = 0; b < reg.command_blocks_count; ++b) {
 			for (const auto& [_, shader_batch] : rp->shader_batches) {
-				for (const auto& [_, atlas_batch] : shader_batch.atlases_batches) {
-					for (const auto& [_, texture_batch] : atlas_batch.texture_batches) {
+				for (const auto& [_, res_batch] : shader_batch.resource_batches) {
+					for (const auto& [_, texture_batch] : res_batch.texture_batches) {
 						for (const auto& [_, model_batch] : texture_batch.model_batches) {
 							SDL_GPUIndexedIndirectDrawCommand data;
 							data.num_indices = model_batch.submesh.index_count;

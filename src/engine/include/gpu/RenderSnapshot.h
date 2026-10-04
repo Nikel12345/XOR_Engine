@@ -29,23 +29,23 @@ namespace RenderSnap {
         // Тот же блоб, что у материала, а не копия: правку слайдером в инспекторе видно сразу.
         // Ссылка ВЛАДЕЮЩАЯ, поэтому материал вправе умереть раньше слепка (см. SpBinding::params).
         std::shared_ptr<std::vector<uint8_t>> params;
+        std::shared_ptr<const PushInstructions> push_instructions;
         uint32_t indirect_command_index = 0;
         uint32_t draw_count = 0;
     };
 
-    struct AtlasGroup {
+    struct GpuResourceGroup {
+        std::vector<BufferData*> vertexStorageBuffers;
+        std::vector<BufferData*> fragmentStorageBuffers;
         std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
         std::vector<TextureDraw> draws;
     };
 
     struct ShaderGroup {
         std::shared_ptr<SDL_GPUGraphicsPipeline> pipeline;
-        PushInstructions push_instructions;
         std::vector<BufferData*> vertexBuffers;
         BufferData* indexBuffer = nullptr;
-        std::vector<BufferData*> vertexStorageBuffers;
-        std::vector<BufferData*> fragmentStorageBuffers;
-        std::vector<AtlasGroup> atlases;
+        std::vector<GpuResourceGroup> resources;
     };
 
     struct PassDrawList {

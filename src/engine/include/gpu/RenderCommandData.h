@@ -87,30 +87,31 @@ struct TextureBatchData {
     VariantLayout variant_layout;
     uint32_t indirect_command_index = 0;
     std::shared_ptr<std::vector<uint8_t>> params;
+    std::shared_ptr<const PushInstructions> push_instructions;
 };
 
 struct MatSpLayout {
+    std::shared_ptr<SDL_GPUGraphicsPipeline>  pipeline;
     std::vector<UVL_Block>                    uvl;
     std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
     SlotWord                slot[MAX_SLOTS] = {};
     BatchKeys::MatSpKey     res_key = 0;
-    BatchKeys::AtlasBatchKey atlas_key = 0;
+    BatchKeys::GpuResourceBatchKey gpu_resource_key = 0;
     bool                    bindable = false;
     bool                    variative = false;
 };
 
-struct AtlasBatchData {
+struct GpuResourceBatchData {
     std::unordered_map<BatchKeys::TextureBatchKey, TextureBatchData> texture_batches;
+    std::vector<BufferData*> vertexStorageBuffers;
+    std::vector<BufferData*> fragmentStorageBuffers;
     std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
 };
 
 struct ShaderBatchData {
-    PushInstructions push_instructions;
-    std::unordered_map<BatchKeys::AtlasBatchKey, AtlasBatchData> atlases_batches;
+    std::unordered_map<BatchKeys::GpuResourceBatchKey, GpuResourceBatchData> resource_batches;
 	std::vector<BufferData*> vertexBuffers;
 	BufferData* indexBuffer = nullptr;
-    std::vector<BufferData*> vertexStorageBuffers;
-    std::vector<BufferData*> fragmentStorageBuffers;
     std::shared_ptr<SDL_GPUGraphicsPipeline> pipeline;
 };
 

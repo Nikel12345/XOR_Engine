@@ -91,10 +91,10 @@ private:
 	};
 	std::vector<ResolvedGroup> group_scratch;
 
-	void BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
+	void BuildRenderBatches(PassManager* pass_manager, ObjectManager* om,
 		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
 		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
-	bool ApplyIncremental(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
+	bool ApplyIncremental(PassManager* pass_manager, ObjectManager* om,
 		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
 		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
 	void FinalizeOffsets(PassManager* pass_manager, BufferManager* bm);
@@ -102,16 +102,17 @@ private:
 	// Памятка живёт до конца текущего UpdateRenderBatches и между вызовами НЕ валидна: протухнуть
 	// она может от правки списка вариантов, переименования текстуры, правки sp у материала и репака
 	// атласа. Точка инвалидации в движке одна — пересборка дерева; вторая рядом с ней разойдётся.
-	void BuildMaterialLayouts(TextureManager* tm, ShaderManager* sm, MaterialManager* mtm);
+	void BuildMaterialLayouts(PipeManager* pm, PassManager* pass_manager, TextureManager* tm,
+		ShaderManager* sm, MaterialManager* mtm);
 	std::unordered_map<BatchKeys::MatSpKey, MatSpLayout> mat_sp_layouts;
 
-	void ResolveEntity(PipeManager* pm, PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
+	void ResolveEntity(PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
 		ModelManager* mdm, MaterialManager* mtm, const Renderable& rend, size_t row);
 	bool StaysInSameGroups(Entity entity) const;
 	void InsertResolvedEntity(Entity entity);
 	TextureBatchData* ResolveTextureBatch(RenderPassStep* rp, ShaderProgram* sp, const ShaderName& sp_name,
 		const std::shared_ptr<std::vector<uint8_t>>& sp_params, const MatSpLayout& lay, uint32_t section,
-		PipeManager* pm, ShaderManager* sm, BufferManager* bm, uint64_t& path_key);
+		ShaderManager* sm, BufferManager* bm, uint64_t& path_key);
 	void RemoveEntityFromBatches(Entity entity);
 
 	TextureId dummy_texture;

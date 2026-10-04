@@ -76,8 +76,6 @@ struct ShaderProgram {
     std::vector<TextureSlotRole> required_slots;
 
 	ShaderProgramDescription spd;
-    // Ссылку держат ещё и слепки раскладки, поэтому пайплайн переживает удаление своей sp.
-    std::shared_ptr<SDL_GPUGraphicsPipeline> pipeline;
     RenderPassName render_pass_name;
 
     std::string debug_name;

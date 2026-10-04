@@ -577,14 +577,6 @@ static bool CodeOwnedLive(const T* res, const char* what, const std::string& nam
 
 static void LoadShaderData(yyjson_val* root, ShaderManager* sm, ModelManager* mm, BufferManager* bm)
 {
-	auto invalidate = [sm](const std::string& name, bool vertex) {
-		const VertexShaderId   vs_id = sm->VertexShaders().Find(name);
-		const FragmentShaderId fs_id = sm->FragmentShaders().Find(name);
-		for (int32_t i = 0; i < sm->ShaderPrograms().Count(); ++i)
-			if (ShaderProgram* sp = sm->ShaderPrograms().At(i).object.get())
-				if (vertex ? (sp->vs_id == vs_id) : (sp->fs_id == fs_id)) sp->pipeline.reset();
-	};
-
 	ForEachIn(root, "vertex_shaders", [&](yyjson_val* e) {
 		const std::string name = JsonStr(e, "name"), path = JsonStr(e, "path");
 		if (name.empty() || path.empty()) return;
@@ -592,7 +584,6 @@ static void LoadShaderData(yyjson_val* root, ShaderManager* sm, ModelManager* mm
 		std::vector<VertexSemantic> pull;
 		ForEachIn(e, "pull", [&](yyjson_val* s) { pull.push_back(SemFromStr(yyjson_get_str(s))); });
 		sm->CreateVertexShader(name, path.c_str(), mm->GetPool(JsonStr(e, "pool")), pull, bm, ReadDefines(e));
-		invalidate(name, /*vertex=*/true);
 	});
 
 	ForEachIn(root, "fragment_shaders", [&](yyjson_val* e) {
@@ -600,7 +591,6 @@ static void LoadShaderData(yyjson_val* root, ShaderManager* sm, ModelManager* mm
 		if (name.empty() || path.empty()) return;
 		if (CodeOwnedLive(sm->GetFragmentShader(sm->FragmentShaders().Find(name)), "fragment shader", name)) return;
 		sm->CreateFragmentShader(name, path.c_str(), ReadDefines(e));
-		invalidate(name, /*vertex=*/false);
 	});
 
 	ForEachIn(root, "compute_shaders", [&](yyjson_val* e) {

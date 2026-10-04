@@ -17,7 +17,7 @@ using BufferDataName = const char*;
 namespace BatchKeys {
 	using ModelBatchKey = uint64_t;
 	using TextureBatchKey = uint64_t;
-	using AtlasBatchKey = uint64_t;
+	using GpuResourceBatchKey = uint64_t;
 	using ShaderBatchKey = uint64_t;
 	using MatSpKey = uint64_t;
 	using GroupKey = uint64_t;

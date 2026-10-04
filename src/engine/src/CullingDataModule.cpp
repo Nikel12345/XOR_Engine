@@ -91,8 +91,8 @@ void CullingDataModule::Rebuild(PassManager* pm, uint64_t revision)
             p.records += e.size;
         }
         for (const auto& [_, sb] : rp->shader_batches)
-            for (const auto& [_, ab] : sb.atlases_batches)
-                for (const auto& [_, tb] : ab.texture_batches)
+            for (const auto& [_, rb] : sb.resource_batches)
+                for (const auto& [_, tb] : rb.texture_batches)
                     for (const auto& [_, mb] : tb.model_batches)
                         cmd_group_level.push_back((group_index[mb.group] << 2) | mb.level);
         p.commands = safe_u32(cmd_group_level.size()) - p.first_cmd;

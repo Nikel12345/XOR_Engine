@@ -98,6 +98,8 @@ struct RasterizerStateBiasParams {
     float depth_bias_slope_factor = 0.0f;
     float depth_bias_clamp = 0.0f;
     bool enable_depth_bias = false;
+
+    bool operator==(const RasterizerStateBiasParams&) const = default;
 };
 
 struct ShaderProgramDescription
@@ -134,6 +136,8 @@ struct ShaderProgramDescription
     ShaderProgramDescription* Solid() { fill_mode = SDL_GPU_FILLMODE_FILL; return this; }
     ShaderProgramDescription* AsLineList() { primitive_type = SDL_GPU_PRIMITIVETYPE_LINELIST; return this; }
     ShaderProgramDescription* AsPointList() { primitive_type = SDL_GPU_PRIMITIVETYPE_POINTLIST; return this; }
+
+    bool operator==(const ShaderProgramDescription&) const = default;
 };
 
 enum class TextureSlotRole {

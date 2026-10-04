@@ -407,6 +407,12 @@ RenderPassStep* PassManager::GetRenderPassStep(const RenderPassName& name)
 	return nullptr;
 }
 
+const RenderPassStep* PassManager::FindRenderPassStep(const RenderPassName& name) const
+{
+	auto it = render_steps.find(name);
+	return (it != render_steps.end()) ? it->second.get() : nullptr;
+}
+
 ComputePassStep* PassManager::GetComputePassStep(const ComputePassName& name)
 {
 	auto it = compute_steps.find(name);
@@ -459,20 +465,19 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 			continue;
 		}
 
-		if (!shader_batch.vertexStorageBuffers.empty()) {
-			bm->BindGPUVertexStorageBuffers(rp, 0, shader_batch.vertexStorageBuffers, render_frame);
-		}
-		if (!shader_batch.fragmentStorageBuffers.empty()) {
-			bm->BindGPUFragmentStorageBuffers(rp, 0, shader_batch.fragmentStorageBuffers, render_frame);
-		}
-
-		for (const RenderSnap::AtlasGroup& atlas_batch : shader_batch.atlases) {
-			if (!atlas_batch.texture_binding.empty()) {
-				SDL_BindGPUFragmentSamplers(rp, global_sampler_count, atlas_batch.texture_binding.data(), safe_u32(atlas_batch.texture_binding.size()));
+		for (const RenderSnap::GpuResourceGroup& res_batch : shader_batch.resources) {
+			if (!res_batch.vertexStorageBuffers.empty()) {
+				bm->BindGPUVertexStorageBuffers(rp, 0, res_batch.vertexStorageBuffers, render_frame);
 			}
-			for (const RenderSnap::TextureDraw& texture_batch : atlas_batch.draws) {
+			if (!res_batch.fragmentStorageBuffers.empty()) {
+				bm->BindGPUFragmentStorageBuffers(rp, 0, res_batch.fragmentStorageBuffers, render_frame);
+			}
+			if (!res_batch.texture_binding.empty()) {
+				SDL_BindGPUFragmentSamplers(rp, global_sampler_count, res_batch.texture_binding.data(), safe_u32(res_batch.texture_binding.size()));
+			}
+			for (const RenderSnap::TextureDraw& texture_batch : res_batch.draws) {
 				const PushInput push_in{ push_data_raw, &texture_batch };
-				for (const PushInstruction& pi : shader_batch.push_instructions)
+				for (const PushInstruction& pi : *texture_batch.push_instructions)
 					pi.fn(PushConstantBinder{ cb, pi.stage, pi.uniform_slot, render_frame }, push_in);
 
 				SDL_DrawGPUIndexedPrimitivesIndirect(rp,

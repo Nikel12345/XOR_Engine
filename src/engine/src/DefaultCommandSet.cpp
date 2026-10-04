@@ -361,10 +361,6 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 				const ResourceTag keep = prev ? prev->tags : ResourceTag::None;
 				sm->CreateVertexShader(c.name, c.path.c_str(), ctx->GetModelManager()->GetPool(c.pool),
 					c.pull, ctx->GetBufferManager(), c.defines, keep);
-				const VertexShaderId vs_id = sm->VertexShaders().Find(c.name);
-				for (int32_t i = 0; i < sm->ShaderPrograms().Count(); ++i)
-					if (ShaderProgram* spp = sm->ShaderPrograms().At(i).object.get(); spp && spp->vs_id == vs_id)
-						spp->pipeline.reset();
 				sm->SetDirtyGraphicsPipelines(true);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
@@ -384,10 +380,6 @@ void DefaultCommandSet::SetShaderCommands(InputManager& im)
 				const FragmentShaderData* prev = sm->GetFragmentShader(sm->FragmentShaders().Find(c.name));
 				const ResourceTag keep = prev ? prev->tags : ResourceTag::None;
 				sm->CreateFragmentShader(c.name, c.path.c_str(), c.defines, keep);
-				const FragmentShaderId fs_id = sm->FragmentShaders().Find(c.name);
-				for (int32_t i = 0; i < sm->ShaderPrograms().Count(); ++i)
-					if (ShaderProgram* spp = sm->ShaderPrograms().At(i).object.get(); spp && spp->fs_id == fs_id)
-						spp->pipeline.reset();
 				sm->SetDirtyGraphicsPipelines(true);
 				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}

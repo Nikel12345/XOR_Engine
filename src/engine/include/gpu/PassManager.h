@@ -75,6 +75,7 @@ public:
 	const PassRegions& AskRegions(uint8_t slot) const { return regions[slot]; }
 	void StampComputeLayout(uint8_t slot, const RenderSnap::ComputeLayout* layout) { compute_layouts[slot] = layout; }
 	RenderPassStep* GetRenderPassStep(const RenderPassName& name);
+	const RenderPassStep* FindRenderPassStep(const RenderPassName& name) const;
 	ComputePassStep* GetComputePassStep(const ComputePassName& name);
 	ComputePassStep* GetComputePrepassStep(const ComputePrepassName& name);
 	BlitPassStep* GetBlitPassStep(const BlitPassName& name);
