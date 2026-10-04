@@ -116,7 +116,7 @@ typedef struct SDL_ShaderCross_SPIRV_Info
 #define SDL_SHADERCROSS_PROP_HLSL_SKIP_SPIRV_ROUNDTRIP_BOOLEAN "SDL_shadercross.hlsl.skip_spirv_roundtrip"
 
 /* ENGINE-FORK: passed to DXC as -fspv-target-env=<value> when compiling HLSL to SPIR-V
- * (e.g. "vulkan1.3"). Absent = DXC's default (vulkan1.0), i.e. the upstream behaviour. */
+ * (e.g. "vulkan1.2"). Absent = DXC's default (vulkan1.0), i.e. the upstream behaviour. */
 #define SDL_SHADERCROSS_PROP_SPIRV_TARGET_ENV_STRING "SDL_shadercross.spirv.target_env"
 
 typedef struct SDL_ShaderCross_HLSL_Define

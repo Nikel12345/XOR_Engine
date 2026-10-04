@@ -18,7 +18,7 @@ Vulkan 1.0. Wave intrinsics such as `WaveActiveCountBits` are then rejected with
 required for Wave Operation".
 
 The new property on the `props` of `SDL_ShaderCross_HLSL_Info` is passed to DXC as
-`-fspv-target-env=<value>`, for example `vulkan1.3`. Without it the arguments are exactly
+`-fspv-target-env=<value>`, for example `vulkan1.2`. Without it the arguments are exactly
 upstream's. It also affects the DXIL path: unless `SDL_SHADERCROSS_PROP_HLSL_SKIP_SPIRV_ROUNDTRIP_BOOLEAN`
 is set, `SDL_ShaderCross_CompileDXILFromHLSL` goes through SPIR-V with the same `props`.
 

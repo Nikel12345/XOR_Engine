@@ -63,7 +63,7 @@ struct EngineConfig {
     SDL_GPUSwapchainComposition composition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
     bool gpu_debug = true;
     uint32_t vulkan_major = 1;
-    uint32_t vulkan_minor = 3;
+    uint32_t vulkan_minor = 2;
 };
 
 class Engine
