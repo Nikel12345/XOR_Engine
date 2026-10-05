@@ -2,7 +2,7 @@
 #  Внешние под-библиотеки
 # ============================================================
 
-# yyjson — вендорный JSON (файлы сцены/ресурсов: Engine::Save/LoadScene). C-либа из одного
+# yyjson — вендорный JSON (манифесты ресурсов сцены: Engine::Save/LoadScene). C-либа из одного
 # .c/.h (external/yyjson, MIT). Линкуется только Engine (PRIVATE): json — деталь файлового IO,
 # наружу торчат лишь Save/LoadScene(папка).
 add_library(yyjson STATIC
@@ -100,7 +100,6 @@ target_include_directories(EngineEcs PUBLIC
 target_link_libraries(EngineEcs PUBLIC
     EngineCore                                              # словарь и утилиты + общий PCH
     SDL3::SDL3                                              # BaseComponents.h включает SDL; цель даёт и include-пути
-    yyjson                                                  # scene.json: колоночная сериализация ECS (ComponentSerializer.h раскрывает yyjson-типы)
     Sheaf                                                   # scene.sheaf: ComponentSerializer.h раскрывает sheaf-типы
 )
 target_precompile_headers(EngineEcs PRIVATE [["PCH.h"]])
@@ -355,7 +354,7 @@ target_link_libraries(Engine PRIVATE
 
     "${XOR_Engine_SOURCE_DIR}/external/SDL3_image/lib/x64/SDL3_image.lib"  # только TextureLoader
     "${XOR_Engine_SOURCE_DIR}/external/SDL3_ttf/lib/x64/SDL3_ttf.lib"      # только FontManager (SDL_ttf)
-    yyjson                                                            # файлы сцены/ресурсов (Save/LoadScene)
+    yyjson                                                            # манифесты ресурсов сцены (Save/LoadScene)
     yoga                                                              # только UI_Yoga (flex-раскладка; pimpl прячет типы)
 )
 

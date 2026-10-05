@@ -1,6 +1,8 @@
 ﻿#pragma once
 #include <map>
+#include <expected>
 #include <set>
+#include <span>
 #include <string>
 #include <memory>
 #include <type_traits>
@@ -76,14 +78,14 @@ public:
 
     SceneData* CreateScene(const SceneName& name);
 
-    // Сериализация сцены; формат и реестр компонентов — ComponentSerializer. Прохода-фиксапа
+    // Сериализация сцены в Sheaf (docs/sheaf.md); реестр компонентов — ComponentSerializer. Прохода-фиксапа
     // после загрузки нет: ассеты и в файле, и в рантайме — имена, резолв живёт в BatchBuilder.
-    std::string SaveScene(SceneData* scene);
-    std::vector<uint8_t> SaveSceneSheaf(SceneData* scene);
+    std::vector<uint8_t> SaveScene(SceneData* scene);
     // Возвращает сущности, созданные ЭТОЙ загрузкой (в порядке появления в файле) — по ним
     // вызывающий и работает, не задевая то, что уже было в сцене: LoadScene ДОБАВЛЯЕТ к сцене,
-    // а не заменяет её (сносит содержимое, если нужно, слой выше).
-    std::vector<Entity> LoadScene(const SceneName& scene_name, const std::string& text);
+    // а не заменяет её (сносит содержимое, если нужно, слой выше). Ошибка разбора очищает сцену
+    // целиком — с тем, что в ней было до загрузки.
+    std::expected<std::vector<Entity>, std::string> LoadScene(const SceneName& scene_name, std::span<const uint8_t> bytes);
 
     // Сущность по набору спецификаций, известному только в рантайме (форма создания в UI): тот же
     // путь, что проход 1 LoadScene, с дефолтным рядом каждого компонента. EntityRevision НЕ

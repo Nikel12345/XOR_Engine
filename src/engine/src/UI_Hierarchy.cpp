@@ -122,8 +122,8 @@ namespace {
         const SceneName target = om->GetActiveSceneName();
         ImGui::BeginDisabled(g_ce_entity == kNoEntity || target.empty());
         if (ImGui::Button("Create")) {
-            std::string json = om->SaveScene(stg);
-            cmd::Push<CommandId::CreateEntity>(ctx->GetInputManager(), target, std::move(json));
+            std::vector<uint8_t> bytes = om->SaveScene(stg);
+            cmd::Push<CommandId::CreateEntity>(ctx->GetInputManager(), target, std::move(bytes));
             om->DeleteEntity(stg, g_ce_entity);
             g_ce_entity = kNoEntity;
             g_ce_open = false;

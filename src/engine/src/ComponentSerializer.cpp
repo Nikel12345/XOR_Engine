@@ -1,6 +1,8 @@
 ﻿#include "PCH.h"
 #include "ComponentSerializer.h"
 #include "BaseComponents.h"
+#include <algorithm>
+#include <bit>
 #include <cfloat>
 #include <string>
 #include <vector>
@@ -34,11 +36,12 @@ const ComponentSpec* ComponentSpecRegistry::ByType(std::type_index t) const
 
 FieldSpec FieldSpec::Num(const char* key, FieldKind kind,
                          double (*get)(Archetype&, size_t), void (*set)(Archetype&, size_t, double),
+                         FieldColumn (*column)(Archetype&),
                          float lo, float hi, float speed)
 {
     FieldSpec f;
     f.key = key; f.kind = kind;
-    f.get_num = get; f.set_num = set;
+    f.get_num = get; f.set_num = set; f.column = column;
     f.lo = lo; f.hi = hi; f.speed = speed;
     return f;
 }
@@ -54,140 +57,9 @@ FieldSpec FieldSpec::Str(const char* key,
     return f;
 }
 
-namespace {
-
-bool TryGetNum(yyjson_val* v, double& out)
+void ComponentSpec::Save(Archetype& arch, size_t count, sheaf::Writer& w, std::vector<sheaf::Column>& out) const
 {
-    if (yyjson_is_real(v)) { out = yyjson_get_real(v); return true; }
-    if (yyjson_is_sint(v)) { out = (double)yyjson_get_sint(v); return true; }
-    if (yyjson_is_uint(v)) { out = (double)yyjson_get_uint(v); return true; }
-    if (yyjson_is_bool(v)) { out = yyjson_get_bool(v) ? 1.0 : 0.0; return true; }
-    return false;
-}
-
-} // namespace
-
-uint32_t ScenePool::List::Intern(const std::string& name)
-{
-    auto [it, inserted] = index.emplace(name, (uint32_t)names.size());
-    if (inserted) names.push_back(name);
-    return it->second;
-}
-
-ScenePool::List* ScenePool::Find(const std::string& list_name)
-{
-    auto it = lists_.find(list_name);
-    return it != lists_.end() ? &it->second : nullptr;
-}
-
-const char* ScenePool::Cell(const List* list, yyjson_val* v)
-{
-    // Разводит их тип json: модель, названная "42", приезжает именем даже когда в словаре есть
-    // запись под индексом 42.
-    if (const char* s = yyjson_get_str(v)) return s;
-    if (yyjson_is_uint(v)) {
-        const uint64_t i = yyjson_get_uint(v);
-        if (list && i < list->names.size()) return list->names[(size_t)i].c_str();
-    }
-    ++misses_;
-    return nullptr;
-}
-
-void ScenePool::Write(yyjson_mut_doc* doc, yyjson_mut_val* root) const
-{
-    for (const auto& [list_name, list] : lists_) {
-        if (list.names.empty()) continue;
-        yyjson_mut_val* arr = yyjson_mut_arr(doc);
-        yyjson_mut_obj_add(root, yyjson_mut_strcpy(doc, list_name.c_str()), arr);
-        for (const std::string& n : list.names) yyjson_mut_arr_add_strcpy(doc, arr, n.c_str());
-    }
-}
-
-void ScenePool::Read(yyjson_val* root)
-{
-    // В корне словарь от архетипов отличает тип: списки — массивы, архетипы — объекты.
-    size_t k, m; yyjson_val *key, *val;
-    yyjson_obj_foreach(root, k, m, key, val) {
-        if (!yyjson_is_arr(val)) continue;
-        const char* list_name = yyjson_get_str(key);
-        if (!list_name) continue;
-        List& list = lists_[list_name];
-        size_t i, n; yyjson_val* s;
-        yyjson_arr_foreach(val, i, n, s) {
-            // Пустышка, а не пропуск: пропуск сдвинул бы все последующие индексы, и колонка
-            // уехала бы на соседний ассет.
-            const char* str = yyjson_get_str(s);
-            if (!str) { ++misses_; str = ""; }
-            list.names.emplace_back(str);
-        }
-    }
-}
-
-void ComponentSpec::Save(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp, ScenePool* pool) const
-{
-    if (custom_save) { custom_save(arch, count, doc, comp, pool); return; }
-    for (const FieldSpec& f : fields) {
-        if (!f.set_num && !f.set_str) continue;   // вычисляемое поле
-        yyjson_mut_val* col = yyjson_mut_obj_add_arr(doc, comp, f.key);
-        switch (f.kind) {
-        case FieldKind::F32:
-        case FieldKind::Angle:   // в файле радианы, градусы живут только в слайдере
-            for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_real(doc, col, f.get_num(arch, i));
-            break;
-        case FieldKind::U32:
-            for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_uint(doc, col, (uint64_t)f.get_num(arch, i));
-            break;
-        case FieldKind::Bool:
-            for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_bool(doc, col, f.get_num(arch, i) != 0.0);
-            break;
-        default: {
-            const char* list_name = FieldPoolName(f.kind);
-            ScenePool::List* list = (pool && list_name) ? &(*pool)[list_name] : nullptr;
-            if (list)
-                for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_uint(doc, col, list->Intern(f.get_str(arch, i)));
-            else
-                for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_strcpy(doc, col, f.get_str(arch, i).c_str());
-            break;
-        }
-        }
-    }
-}
-
-void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count, ScenePool* pool) const
-{
-    if (custom_load) { custom_load(arch, comp, count, pool); return; }
-    for (size_t i = 0; i < count; ++i) add_default(arch);
-    if (!comp) return;                                        // тег без данных или форма создания
-    const size_t base = arch.entities.size() - count;         // строки дописаны в хвост (см. .h)
-    for (const FieldSpec& f : fields) {
-        if (!f.set_num && !f.set_str) continue;
-        yyjson_val* col = yyjson_obj_get(comp, f.key);
-        if (!col) continue;                                   // нет колонки → остаётся дефолт
-        size_t idx, max; yyjson_val* v;
-        if (f.set_str) {
-            const char* list_name = FieldPoolName(f.kind);
-            ScenePool::List* list = (pool && list_name) ? pool->Find(list_name) : nullptr;
-            yyjson_arr_foreach(col, idx, max, v) {
-                if (idx >= count) break;                      // колонка длиннее count → усечь
-                if (const char* s = pool ? pool->Cell(list, v) : yyjson_get_str(v))
-                    f.set_str(arch, base + idx, s);
-            }
-        }
-        else {
-            yyjson_arr_foreach(col, idx, max, v) {
-                if (idx >= count) break;
-                double d;
-                if (!TryGetNum(v, d)) continue;
-                if (f.clamp_on_load) d = d < f.lo ? f.lo : (d > f.hi ? f.hi : d);
-                f.set_num(arch, base + idx, d);
-            }
-        }
-    }
-}
-
-void ComponentSpec::SaveSheaf(Archetype& arch, size_t count, sheaf::Writer& w, std::vector<sheaf::Column>& out) const
-{
-    if (custom_save_sheaf) { custom_save_sheaf(arch, count, w, out); return; }
+    if (custom_save) { custom_save(arch, count, w, out); return; }
     if (fields.empty()) return;
 
     // Дефолт поля уходит в файл, и берётся он из того же T{}/прокси, что и у рантайм-создания.
@@ -221,6 +93,90 @@ void ComponentSpec::SaveSheaf(Archetype& arch, size_t count, sheaf::Writer& w, s
             c.def  = w.Intern(f.get_str(def_row, 0));
             for (size_t i = 0; i < count; ++i) c.values.push_back(w.Intern(f.get_str(arch, i)));
             break;
+        }
+    }
+}
+
+namespace {
+
+const sheaf::Column* FindColumn(const sheaf::Component& comp, const char* key)
+{
+    for (const sheaf::Column& c : comp.fields)
+        if (c.name == key) return &c;
+    return nullptr;
+}
+
+// Тип колонки в файле мог разойтись с полем после правки компонента: число читается из любого
+// числового типа.
+bool CellNum(const sheaf::Column& c, size_t i, double& out)
+{
+    if ((c.flags & sheaf::Nullable) && !c.present[i]) return false;
+    const uint32_t v = c.values[i];
+    switch (c.type) {
+    case sheaf::Type::F32: out = std::bit_cast<float>(v);   return true;
+    case sheaf::Type::I32: out = std::bit_cast<int32_t>(v); return true;
+    case sheaf::Type::Str: return false;
+    default:               out = v;                         return true;
+    }
+}
+
+// Колонку файла можно положить в поле побитно: оба 4-байтные, и смысл битов один.
+bool SameBits(sheaf::Type file, FieldColumn::Type field)
+{
+    switch (field) {
+    case FieldColumn::Type::F32: return file == sheaf::Type::F32;
+    case FieldColumn::Type::U32: return file == sheaf::Type::U32 || file == sheaf::Type::Ref;
+    case FieldColumn::Type::I32: return file == sheaf::Type::I32;
+    default:                     return false;
+    }
+}
+
+} // namespace
+
+void ComponentSpec::LoadDefaults(Archetype& arch, size_t count) const
+{
+    if (custom_load) { custom_load(arch, nullptr, count, {}); return; }
+    if (count == 0) return;
+    add_default(arch);                                        // заводит массив компонента
+    arch.components.at(sig_type)->repeat_last(count - 1);
+}
+
+void ComponentSpec::BeginLoad(Archetype& arch, const sheaf::Component& header, size_t count, std::span<sheaf::Destination> dests) const
+{
+    if (custom_load || count == 0) return;
+    LoadDefaults(arch, count);
+    const size_t base = arch.entities.size() - count;
+    for (size_t i = 0; i < header.fields.size(); ++i) {
+        const sheaf::Column& c = header.fields[i];
+        const auto f = std::find_if(fields.begin(), fields.end(), [&](const FieldSpec& x) { return c.name == x.key; });
+        if (f == fields.end() || !f->column || f->clamp_on_load) continue;
+        const FieldColumn col = f->column(arch);
+        if (SameBits(c.type, col.type)) dests[i] = { col.first + base * col.stride, col.stride };
+    }
+}
+
+void ComponentSpec::FinishLoad(Archetype& arch, const sheaf::Component& comp, size_t count, std::span<const std::string> strings) const
+{
+    if (custom_load) { custom_load(arch, &comp, count, strings); return; }
+    const size_t base = arch.entities.size() - count;
+    for (const FieldSpec& f : fields) {
+        if (!f.set_num && !f.set_str) continue;
+        const sheaf::Column* c = FindColumn(comp, f.key);
+        if (!c || c->direct) continue;                        // нет колонки → остаётся дефолт
+        if ((c->flags & sheaf::List) || (c->type == sheaf::Type::Str) != static_cast<bool>(f.set_str)) {
+            SDL_Log("LoadScene: %s.%s in file does not fit the field type - defaults kept", name.c_str(), f.key);
+            continue;
+        }
+        if (f.set_str) {
+            for (size_t i = 0; i < count; ++i)
+                if (!(c->flags & sheaf::Nullable) || c->present[i]) f.set_str(arch, base + i, strings[c->values[i]]);
+            continue;
+        }
+        for (size_t i = 0; i < count; ++i) {
+            double d;
+            if (!CellNum(*c, i, d)) continue;
+            if (f.clamp_on_load) d = d < f.lo ? f.lo : (d > f.hi ? f.hi : d);
+            f.set_num(arch, base + i, d);
         }
     }
 }
@@ -285,7 +241,7 @@ void RegisterBuiltinComponentSpecs()
             FieldSpec::Num("m14", F32, SOA_NUM(LocalMatrices, m14)), FieldSpec::Num("m15", F32, SOA_NUM(LocalMatrices, m15)),
         } });
 
-    // В файле лежит файл-локальный id, настоящим его делает проход 2 ObjectManager::LoadScene.
+    // В файле лежит сквозной номер объекта (ref), настоящим id его делает проход 2 ObjectManager::LoadScene.
     reg.Register({ .name = "Parent", .sig_type = typeid(ParentComponent),
         .add_default = AddDefaultAoS<ParentComponent>,
         .fields = { FieldSpec::Num("parent", U32, AOS_NUM(ParentComponent, parent)).ReadOnly() } });

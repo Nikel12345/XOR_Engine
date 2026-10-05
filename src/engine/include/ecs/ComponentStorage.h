@@ -4,6 +4,7 @@
 // и правка поля компонента иначе пересобирала бы всё, а не только знающие о нём TU.
 //
 // Инклуды самодостаточны намеренно: заголовок включают и PCH-free либы (Physics).
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
 #include <vector>
@@ -45,12 +46,33 @@ struct has_related_soa : std::false_type {};
 template<typename T>
 struct has_related_soa<T, std::void_t<typename T::related_soa>> : std::true_type {};
 
+// Ёмкость под n строк, но не меньше удвоенной: точный reserve(size + 1) при добавлении по одной
+// строке (форма создания идёт тем же LoadScene) перевыделял бы вектор на каждой.
+template<typename V>
+void ReserveRows(V& v, size_t n)
+{
+    if (n > v.capacity()) v.reserve(std::max(n, v.capacity() * 2));
+}
+
 template<typename Derived>
 struct SoAProxyAddable {
     template<typename Proxy>
     auto add(const Proxy& proxy)
         -> decltype(proxy.emplace_to(static_cast<Derived&>(*this)), void()) {
         proxy.emplace_to(static_cast<Derived&>(*this));
+    }
+
+    void reserve(size_t n) {
+        std::apply([&](auto&... col) { (ReserveRows(col, n), ...); }, static_cast<Derived&>(*this).columns());
+    }
+
+    void repeat_last(size_t n) {
+        std::apply([&](auto&... col) {
+            (..., ([&] {
+                const auto last = col.back();
+                col.insert(col.end(), n, last);
+                }()));
+            }, static_cast<Derived&>(*this).columns());
     }
 
     void swap_remove(size_t i) {
@@ -67,6 +89,9 @@ struct SoAProxyAddable {
 struct IComponentArray {
     virtual ~IComponentArray() = default;
     virtual void swap_remove(size_t i) = 0;
+    virtual void reserve(size_t rows) = 0;
+    // Дописывает n копий последней строки: так одна дефолтная строка становится n + 1.
+    virtual void repeat_last(size_t n) = 0;
 };
 
 template<typename T, typename = void>
@@ -76,6 +101,12 @@ struct ComponentArray : IComponentArray {
     void add(const T& v) { data.push_back(v); }
     T& operator[](size_t i) { return data[i]; }
     size_t size() const { return data.size(); }
+    void reserve(size_t rows) override { ReserveRows(data, rows); }
+    void repeat_last(size_t n) override
+    {
+        const T last = data.back();
+        data.insert(data.end(), n, last);
+    }
 
     void swap_remove(size_t i) override {
         const size_t last = data.size() - 1;
@@ -90,6 +121,8 @@ struct ComponentArray<T, std::enable_if_t<is_soa<T>::value>> : IComponentArray {
     template<typename Proxy>
     auto add(const Proxy& proxy) -> decltype(data.add(proxy), void()) { data.add(proxy); }
     size_t size() const { return data.size(); }
+    void reserve(size_t rows) override { data.reserve(rows); }
+    void repeat_last(size_t n) override { data.repeat_last(n); }
 
     void swap_remove(size_t i) override { data.swap_remove(i); }
 };
@@ -122,6 +155,12 @@ struct Archetype {
     void swap_remove(size_t i) {
         for (auto& [type, arr] : components)
             arr->swap_remove(i);
+    }
+    // Только entities и уже заведённые колонки: массив компонента появляется на первом add.
+    void reserve(size_t rows) {
+        ReserveRows(entities, rows);
+        for (auto& [type, arr] : components)
+            arr->reserve(rows);
     }
 };
 

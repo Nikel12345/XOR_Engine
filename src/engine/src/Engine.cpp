@@ -1,4 +1,4 @@
-#include "PCH.h"
+﻿#include "PCH.h"
 #include "Engine.h"
 #include "QueueManager.h"
 #include "TransferManager.h"
@@ -38,117 +38,13 @@
 #include "PositionStructure.h"
 #include "DefaultCommandSet.h"
 #include "UI_ImGui.h"
+#include <bit>
 
 namespace {
 
-// states: роль числом — её строковые имена ECS не знает.
-auto MakeSaveRenderable(MaterialManager* mtm, ModelManager* mdm) {
-return [mtm, mdm](Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp, ScenePool* pool)
-{
-    const Renderable& r = arch.get_array<Renderable>()->data;
-    ScenePool::List* mat_list = pool ? &(*pool)["materials"] : nullptr;
-    ScenePool::List* mdl_list = pool ? &(*pool)["models"] : nullptr;
-    auto add_name = [doc](yyjson_mut_val* arr, ScenePool::List* list, const std::string& name) {
-        if (list) yyjson_mut_arr_add_uint(doc, arr, list->Intern(name));
-        else      yyjson_mut_arr_add_strcpy(doc, arr, name.c_str());
-    };
-
-    yyjson_mut_val* vis = yyjson_mut_obj_add_arr(doc, comp, "visible");
-    yyjson_mut_val* alp = yyjson_mut_obj_add_arr(doc, comp, "alpha");
-    yyjson_mut_val* flg = yyjson_mut_obj_add_arr(doc, comp, "flags");
-    yyjson_mut_val* mdl = yyjson_mut_obj_add_arr(doc, comp, "model");
-    yyjson_mut_val* mat = yyjson_mut_obj_add_arr(doc, comp, "materials");
-    bool any_state = false;
-    for (size_t i = 0; i < count; ++i) {
-        const uint32_t n = std::min(mdm->LevelCount(r.model[i]), MAX_LOD);
-        yyjson_mut_arr_add_bool(doc, vis, r.visible[i] != 0);
-        yyjson_mut_arr_add_real(doc, alp, r.alpha[i]);
-        yyjson_mut_arr_add_uint(doc, flg, r.flags[i]);
-        add_name(mdl, mdl_list, mdm->ModelNameOf(r.model[i]));
-
-        yyjson_mut_val* row = yyjson_mut_arr_add_arr(doc, mat);
-        for (const MaterialSlot& part : r.materials[i]) {
-            yyjson_mut_val* lv = yyjson_mut_arr_add_arr(doc, row);
-            for (uint32_t L = 0; L < n; ++L) {
-                if (part.per_lod[L]) add_name(lv, mat_list, mtm->MaterialNameOf(part.per_lod[L]));
-                else                 yyjson_mut_arr_add_null(doc, lv);
-            }
-            any_state = any_state || !part.states.empty();
-        }
-    }
-    if (!any_state) return;
-    yyjson_mut_val* scol = yyjson_mut_obj_add_arr(doc, comp, "states");
-    for (size_t i = 0; i < count; ++i) {
-        yyjson_mut_val* row = yyjson_mut_arr_add_arr(doc, scol);
-        for (const MaterialSlot& part : r.materials[i]) {
-            yyjson_mut_val* pairs = yyjson_mut_arr_add_arr(doc, row);
-            for (const auto& [role, v] : part.states) {
-                yyjson_mut_arr_add_int(doc, pairs, static_cast<int>(role));
-                yyjson_mut_arr_add_uint(doc, pairs, v);
-            }
-        }
-    }
-}
-;}
-
-auto MakeLoadRenderable(MaterialManager* mtm, ModelManager* mdm) {
-return [mtm, mdm](Archetype& arch, yyjson_val* comp, size_t count, ScenePool* pool)
-{
-    arch.ensure_component<Renderable>();
-    std::vector<RenderableProxy> rows(count);
-    ScenePool::List* mat_list = pool ? pool->Find("materials") : nullptr;
-    ScenePool::List* mdl_list = pool ? pool->Find("models") : nullptr;
-    auto name_of = [pool](ScenePool::List* list, yyjson_val* v) -> const char* {
-        return pool ? pool->Cell(list, v) : yyjson_get_str(v);
-    };
-    auto rows_of = [&](const char* key, auto&& fn) {
-        yyjson_val* col = comp ? yyjson_obj_get(comp, key) : nullptr;
-        if (!col) return;
-        size_t idx, max; yyjson_val* v;
-        yyjson_arr_foreach(col, idx, max, v) { if (idx >= count) break; fn(rows[idx], v); }
-    };
-
-    rows_of("visible", [](RenderableProxy& p, yyjson_val* v) { p.visible = yyjson_get_bool(v); });
-    rows_of("alpha",   [](RenderableProxy& p, yyjson_val* v) { p.alpha = static_cast<float>(yyjson_get_num(v)); });
-    rows_of("flags",   [](RenderableProxy& p, yyjson_val* v) { p.flags = safe_u32(yyjson_get_uint(v)); });
-    rows_of("model", [&](RenderableProxy& p, yyjson_val* v) {
-        if (const char* s = name_of(mdl_list, v)) p.model = mdm->InternModel(s);
-    });
-    rows_of("materials", [&](RenderableProxy& p, yyjson_val* row) {
-        size_t k, km; yyjson_val* lv;
-        yyjson_arr_foreach(row, k, km, lv) {
-            MaterialSlot& part = p.materials.emplace_back();
-            size_t L, lm; yyjson_val* v;
-            yyjson_arr_foreach(lv, L, lm, v) {
-                if (L >= MAX_LOD) break;
-                if (yyjson_is_null(v)) continue;
-                if (const char* s = name_of(mat_list, v)) part.per_lod[L] = mtm->InternMaterial(s);
-            }
-        }
-    });
-    rows_of("states", [](RenderableProxy& p, yyjson_val* row) {
-        size_t j, jm; yyjson_val* pairs;
-        yyjson_arr_foreach(row, j, jm, pairs) {
-            if (j >= p.materials.size()) break;   // колонки разъехались — лишнее молча отбрасываем
-            auto& st = p.materials[j].states;
-            // Плоские пары: нечётный хвост (файл правили руками) отбрасываем целиком.
-            const size_t n = yyjson_arr_size(pairs) & ~size_t(1);
-            std::vector<int64_t> flat; flat.reserve(n);
-            size_t k, km; yyjson_val* v;
-            yyjson_arr_foreach(pairs, k, km, v) { if (flat.size() >= n) break; flat.push_back(yyjson_get_sint(v)); }
-            for (size_t q = 0; q + 1 < flat.size(); q += 2)
-                st.emplace_back(static_cast<TextureSlotRole>(flat[q]),
-                                static_cast<uint32_t>(flat[q + 1] < 0 ? 0 : flat[q + 1]));
-        }
-    });
-
-    auto* a = arch.get_array<Renderable>();
-    for (size_t i = 0; i < count; ++i) a->add(rows[i]);
-};}
-
 // Вложенных списков формат не знает: mat_lodL — список по части на элемент, а состояния — плоские
 // списки, где к какой части относится состояние, говорит state_part.
-auto MakeSaveRenderableSheaf(MaterialManager* mtm, ModelManager* mdm) {
+auto MakeSaveRenderable(MaterialManager* mtm, ModelManager* mdm) {
 return [mtm, mdm](Archetype& arch, size_t count, sheaf::Writer& w, std::vector<sheaf::Column>& out)
 {
     const Renderable& r = arch.get_array<Renderable>()->data;
@@ -187,7 +83,7 @@ return [mtm, mdm](Archetype& arch, size_t count, sheaf::Writer& w, std::vector<s
                 any = any || static_cast<bool>(m);
             }
         }
-        if (any) out.push_back(std::move(lod));    // нет колонки — у всех пусто
+        if (any || L == 0) out.push_back(std::move(lod));   // по длинам mat_lod0 загрузка узнаёт число частей
     }
 
     sheaf::Column st_part  = column("state_part",  sheaf::Type::U32, sheaf::List, 0);
@@ -214,6 +110,82 @@ return [mtm, mdm](Archetype& arch, size_t count, sheaf::Writer& w, std::vector<s
     out.push_back(std::move(st_value));
 };}
 
+auto MakeLoadRenderable(MaterialManager* mtm, ModelManager* mdm) {
+return [mtm, mdm](Archetype& arch, const sheaf::Component* comp, size_t count, std::span<const std::string> strings)
+{
+    arch.ensure_component<Renderable>();
+    arch.get_array<Renderable>()->reserve(arch.entities.size());
+    std::vector<RenderableProxy> rows(count);
+    auto column = [comp](const std::string& name, sheaf::Type type, uint8_t flags) -> const sheaf::Column* {
+        if (!comp) return nullptr;
+        for (const sheaf::Column& c : comp->fields) {
+            if (c.name != name) continue;
+            if (c.type == type && c.flags == flags) return &c;
+            SDL_Log("LoadScene: Renderable.%s in file has unexpected type - defaults kept", name.c_str());
+            return nullptr;
+        }
+        return nullptr;
+    };
+    // Номер строки файла → id: одно имя повторяется у тысяч объектов, интернируется оно один раз.
+    std::vector<ModelId>    model_of(strings.size());
+    std::vector<MaterialId> material_of(strings.size());
+    std::vector<uint8_t>    model_done(strings.size()), material_done(strings.size());
+    auto model = [&](uint32_t s) {
+        if (!model_done[s]) { model_of[s] = mdm->InternModel(strings[s]); model_done[s] = 1; }
+        return model_of[s];
+    };
+    auto material = [&](uint32_t s) {
+        if (!material_done[s]) { material_of[s] = mtm->InternMaterial(strings[s]); material_done[s] = 1; }
+        return material_of[s];
+    };
+
+    if (const sheaf::Column* c = column("visible", sheaf::Type::Bool, 0))
+        for (size_t i = 0; i < count; ++i) rows[i].visible = c->values[i] != 0;
+    if (const sheaf::Column* c = column("alpha", sheaf::Type::F32, 0))
+        for (size_t i = 0; i < count; ++i) rows[i].alpha = std::bit_cast<float>(c->values[i]);
+    if (const sheaf::Column* c = column("flags", sheaf::Type::U32, 0))
+        for (size_t i = 0; i < count; ++i) rows[i].flags = c->values[i];
+    if (const sheaf::Column* c = column("model", sheaf::Type::Str, 0))
+        for (size_t i = 0; i < count; ++i) rows[i].model = model(c->values[i]);
+
+    for (uint32_t L = 0; L < MAX_LOD; ++L) {
+        const sheaf::Column* c = column("mat_lod" + std::to_string(L), sheaf::Type::Str, sheaf::List | sheaf::Nullable);
+        if (!c) continue;
+        size_t k = 0;
+        for (size_t i = 0; i < count; ++i) {
+            std::vector<MaterialSlot>& parts = rows[i].materials;
+            const uint32_t n = c->lengths[i];
+            if (parts.size() < n) parts.resize(n);
+            for (uint32_t p = 0; p < n; ++p, ++k)
+                if (c->present[k]) parts[p].per_lod[L] = material(c->values[k]);
+        }
+    }
+
+    const sheaf::Column* st_part  = column("state_part",  sheaf::Type::U32, sheaf::List);
+    const sheaf::Column* st_role  = column("state_role",  sheaf::Type::U32, sheaf::List);
+    const sheaf::Column* st_value = column("state_value", sheaf::Type::U32, sheaf::List);
+    if (st_part && st_role && st_value) {
+        size_t kp = 0, kr = 0, kv = 0;
+        for (size_t i = 0; i < count; ++i) {
+            // Колонки разъехались (файл собран не движком) — лишнее молча отбрасываем.
+            const uint32_t n = std::min({ st_part->lengths[i], st_role->lengths[i], st_value->lengths[i] });
+            std::vector<MaterialSlot>& parts = rows[i].materials;
+            for (uint32_t q = 0; q < n; ++q) {
+                const uint32_t p = st_part->values[kp + q];
+                if (p >= parts.size()) continue;
+                parts[p].states.emplace_back(static_cast<TextureSlotRole>(safe_u32t_i(st_role->values[kr + q])),
+                                             st_value->values[kv + q]);
+            }
+            kp += st_part->lengths[i];
+            kr += st_role->lengths[i];
+            kv += st_value->lengths[i];
+        }
+    }
+
+    auto* a = arch.get_array<Renderable>();
+    for (size_t i = 0; i < count; ++i) a->add(rows[i]);
+};}
+
 } // namespace
 
 
@@ -226,18 +198,19 @@ static void RegisterResourceComponentSpecs(MaterialManager* mtm, ModelManager* m
 			// Прямая запись флага не поставит дельту в батчи, поэтому правка уходит командой.
 			FieldSpec::Num("visible", Bool,
 				[](Archetype& a, size_t i) -> double { return a.get_array<Renderable>()->data.visible[i]; },
-				[](Archetype& a, size_t i, double v) { a.get_array<Renderable>()->data.visible[i] = v != 0.0 ? 1 : 0; })
+				[](Archetype& a, size_t i, double v) { a.get_array<Renderable>()->data.visible[i] = v != 0.0 ? 1 : 0; },
+				nullptr)
 				.Cmd(CommandId::HideEntity),
 			FieldSpec::Num("alpha", F32,
 				[](Archetype& a, size_t i) -> double { return a.get_array<Renderable>()->data.alpha[i]; },
 				[](Archetype& a, size_t i, double v) { a.get_array<Renderable>()->data.alpha[i] = static_cast<float>(v); },
-				0, 1, 0.01f),
+				nullptr, 0, 1, 0.01f),
 			FieldSpec::Num("flags", U32,
 				[](Archetype& a, size_t i) -> double { return a.get_array<Renderable>()->data.flags[i]; },
-				[](Archetype& a, size_t i, double v) { a.get_array<Renderable>()->data.flags[i] = static_cast<uint32_t>(v); }),
+				[](Archetype& a, size_t i, double v) { a.get_array<Renderable>()->data.flags[i] = static_cast<uint32_t>(v); },
+				nullptr),
 		},
-		.custom_save = MakeSaveRenderable(mtm, mdm), .custom_load = MakeLoadRenderable(mtm, mdm),
-		.custom_save_sheaf = MakeSaveRenderableSheaf(mtm, mdm) });
+		.custom_save = MakeSaveRenderable(mtm, mdm), .custom_load = MakeLoadRenderable(mtm, mdm) });
 }
 
 void Engine::OnWindowResized(Sint32 window_w, Sint32 window_h)

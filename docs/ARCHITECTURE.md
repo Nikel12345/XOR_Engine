@@ -40,11 +40,11 @@ XOR Engine — набор статических библиотек. Прило�
 | цель | что внутри | почему отдельно |
 |---|---|---|
 | **EngineCore** | `Aliases.h`, `ResourceId.h`, `ResourceRegistry.h`, `ResourceTags.h`, `CommandId.h`, `Utils.h`, `config.h`, `EngineProfiler`, общий `PCH.h` | Словарь и утилиты, не знающие ни про ECS, ни про GPU. Правило приёма: сюда попадает только то, что переживёт замену ЛЮБОЙ из целей выше — иначе второй оркестратор, которому рендер не нужен, линковал бы `EngineGpu` ради `safe_u32` |
-| **EngineEcs** | `ObjectManager` (+`.inl`), `BaseComponents`, `ComponentStorage`, `ComponentSerializer`, `SceneData` | ECS обязан оставаться листом: его линкует и `Engine`, и `Physics`. Тянет только SDL3, `yyjson` и `Sheaf` (сериализация сцены) |
+| **EngineEcs** | `ObjectManager` (+`.inl`), `BaseComponents`, `ComponentStorage`, `ComponentSerializer`, `SceneData` | ECS обязан оставаться листом: его линкует и `Engine`, и `Physics`. Тянет только SDL3 и `Sheaf` (файл объектов сцены) |
 | **EngineGpu** | `QueueManager`, `TransferManager`, `BufferManager` (+`_Binds`/`_Update`/`_Utils`), `ShaderManager` (+`_ShadersCreate`/`_SPVLoad`), `TextureManager`, `PreviewPacker`, `PassManager`, `PipeManager`, `GeometryPool`, `RenderCommandData`, `RenderSnapshot.h`, `GpuContext`, `SparseRankChannel` | Всё, чем кадр исполняется: буферы, шейдеры, пайплайны, текстуры, проходы, пулы геометрии — без единого знания о сцене и рендер-логике |
 | **Engine** | менеджеры, data-модули, `BatchBuilder`, `EngineContext`, дефолт-сеты, UI, цикл кадра | Линкует `EngineGpu` и `EngineEcs` как PUBLIC и склеивает их |
 | **Physics** | `PhysicsBufferSet`, `PhysicsComputeSet`, `CollisionShapes`, `ContactSystem`, `DebugColliderSystem` | Линкует **только** `EngineGpu` + `EngineEcs`, без `Engine`, рендера и ImGui. Своего PCH не имеет намеренно — это работающая проверка, что слоение не протекло |
-| **Sheaf** | `src/sheaf/`: `Sheaf.h`, писатель `Sheaf.cpp` и читатель `SheafReader.cpp` формата сцены ([`sheaf.md`](sheaf.md)), писатель для генераторов сцен `sheaf.py`; рядом `viewer/` — `SheafView.exe` и `dump/` — `SheafDump.exe` для `git diff` | Вне решётки: не зависит ни от одной цели движка и даже от SDL, только от стандартной библиотеки. Так с файлом сцены может работать программа, которой движок не нужен (вьювер), а `EngineEcs` линкует формат, как `yyjson` |
+| **Sheaf** | `src/sheaf/`: `Sheaf.h`, писатель `Sheaf.cpp` и читатель `SheafReader.cpp` формата сцены ([`sheaf.md`](sheaf.md)), писатель для генераторов сцен `sheaf.py`; рядом `viewer/` — `SheafView.exe` и `dump/` — `SheafDump.exe` для `git diff` | Вне решётки: не зависит ни от одной цели движка и даже от SDL, только от стандартной библиотеки. Так с файлом сцены может работать программа, которой движок не нужен (вьювер), а `EngineEcs` линкует формат как обычную библиотеку |
 
 Граница слоёв держится одним требованием: **физике нужны буферы и compute, но не нужен рендер.**
 Всё, что ломает возможность собрать `Physics` без `Engine`, ломает слоение.
@@ -175,7 +175,7 @@ id раньше, чем появится сам ресурс. Имя при эт
 | **SDL3_image / SDL3_ttf** | бинарные дистрибутивы; грузят `SDL3.dll` динамически, **ABI привязан к версии форка** — бампаешь SDL, обновляй и их | PRIVATE: image — только `TextureLoader`, ttf — только `FontManager` |
 | **ImGui + ImGuizmo** | исходники, свой таргет `ImGui` | PRIVATE к `Engine`; наружу торчит фасад `UI_ImGui` |
 | **yoga** | исходники, требует C++20 | PRIVATE к `Engine`; типы спрятаны за pimpl в `UI_Yoga` |
-| **yyjson** | один `.c`, вендорный | `EngineEcs` (сцена) и `Engine` |
+| **yyjson** | один `.c`, вендорный | PRIVATE к `Engine`: манифесты ресурсов сцены |
 | **glm** | header-only | PUBLIC — публичные заголовки его раскрывают |
 | **rectpack2D** | header-only | PRIVATE, только упаковка атласа в `TextureManager` |
 
@@ -202,11 +202,11 @@ id раньше, чем появится сам ресурс. Имя при эт
 - **Кэш SPIR-V** — `shaders/shader_cache` рядом с исполняемым файлом (`SDL_GetBasePath`).
   Ключ кэша включает исходник вместе со всей цепочкой `#include`, поэтому правка `.hlsli`
   инвалидирует зависимые шейдеры сама — чистить руками не нужно.
-- **Сцена — это папка**, а не файл: `scene.json` (ECS, колоночно) плюс манифесты ресурсов рядом.
-  Те же объекты пишутся и в `scene.sheaf` ([`sheaf.md`](sheaf.md)); грузится сцена из `scene.json`.
+- **Сцена — это папка**, а не файл: `scene.sheaf` с объектами ECS ([`sheaf.md`](sheaf.md)) плюс
+  json-манифесты ресурсов рядом.
   Точка входа — `Engine::SaveScene` / `LoadScene(имя, папка)`. Порядок загрузки: деструкторы
   уходящей сцены → ресурсы (merge-upsert) → ECS (replace) → генераторы загруженной сцены →
-  пересборка батчей. Имена из манифестов и `scene.json` становятся id на чтении.
+  пересборка батчей. Имена из манифестов и `scene.sheaf` становятся id на чтении.
 - **Генераторы и деструкторы сцены** — колбэки кода, привязанные к имени сцены
   (`EngineContext::RegisterSceneGenerator` / `RegisterSceneDestructor`). Генераторы создают то,
   чего нет в файлах сцены: процедурные ресурсы, производные сущности, дерево UI. Деструкторы

@@ -4,8 +4,7 @@
 #include "ComponentSerializer.h"
 #include "EngineProfiler.h"
 #include <algorithm>
-#include <cstring>
-#include <cstdlib>
+#include <new>
 #include <set>
 #include <unordered_map>
 
@@ -149,136 +148,7 @@ SceneData* ObjectManager::GetScene(const SceneName& name)
 	}
 }
 
-// Пост-обработка pretty-вывода yyjson: массив БЕЗ объектов внутри схлопывается в одну строку.
-// Своего флага у yyjson для этого нет, а колонка поля — ровно такой массив: в столбик scene.json
-// раздувается до строки на КАЖДОЕ значение (архетип из N сущностей x M полей). Меняется только
-// раскладка, не структура. Проход строкоосознанный: скобка внутри json-строки — литерал.
-static std::string InlineScalarArrays(const std::string& s)
-{
-    std::string out;
-    out.reserve(s.size());
-    bool in_str = false;
-    for (size_t i = 0; i < s.size(); ++i) {
-        const char c = s[i];
-        if (in_str) {
-            out += c;
-            if (c == '\\') { if (i + 1 < s.size()) out += s[++i]; }
-            else if (c == '"') in_str = false;
-            continue;
-        }
-        if (c == '"') { in_str = true; out += c; continue; }
-        if (c != '[')  { out += c; continue; }
-
-        // Ищем парную ']', попутно отвергая объекты внутри и вложенность глубже ОДНОГО уровня.
-        // Один уровень пускаем ради зубчатой колонки Material: иначе на каждую сущность уходит
-        // отдельная строка "[0]," с полным отступом.
-        size_t j = i + 1;
-        int  depth = 1;
-        bool bad = false, closed = false, str = false;
-        for (; j < s.size(); ++j) {
-            const char d = s[j];
-            if (str) {
-                if (d == '\\') ++j;
-                else if (d == '"') str = false;
-                continue;
-            }
-            if (d == '"') { str = true; continue; }
-            if (d == '{') { bad = true; break; }       // объект — это структура, ей pretty нужен
-            if (d == '[') { if (++depth > 2) { bad = true; break; } continue; }
-            if (d == ']') { if (--depth == 0) { closed = true; break; } }
-        }
-        if (bad || !closed) { out += c; continue; }
-
-        str = false;
-        for (size_t k = i; k <= j; ++k) {
-            const char d = s[k];
-            if (str) {
-                out += d;
-                if (d == '\\') { if (k + 1 <= j) out += s[++k]; }
-                else if (d == '"') str = false;
-                continue;
-            }
-            if (d == '"') { str = true; out += d; continue; }
-            if (d == ' ' || d == '\t' || d == '\n' || d == '\r') continue;
-            out += d;
-            if (d == ',') out += ' ';
-        }
-        i = j;
-    }
-    return out;
-}
-
-std::string ObjectManager::SaveScene(SceneData* scene)
-{
-    if (!scene) return {};
-    auto& reg = ComponentSpecRegistry::Get();
-
-    // Ключ верхнего объекта — сам архетип: имена его компонентов через запятую, отсортированные,
-    // поэтому от порядка не зависит. Внутри — count, колонка entities и компоненты колонками.
-    yyjson_mut_doc* doc = yyjson_mut_doc_new(nullptr);
-    yyjson_mut_val* root = yyjson_mut_obj(doc);
-    yyjson_mut_doc_set_root(doc, root);
-
-    // Блоки архетипов копим и кладём в корень ПОСЛЕ словаря: словарь заполняется по ходу их
-    // записи, а в файле обязан стоять первым — иначе его не прочесть, не разобрав всю сцену.
-    ScenePool pool;
-    std::vector<std::pair<std::string, yyjson_mut_val*>> blocks;
-
-    for (auto& [sig, arch] : scene->archetypes) {
-        // Производные сущности в файл не идут — их пересоздаст генератор сцены.
-        if (arch.components.count(std::type_index(typeid(GeneratedComponent)))) continue;
-        const size_t count = arch.entities.size();
-        if (count == 0) continue;
-
-        std::vector<const ComponentSpec*> hs;
-        for (auto& [tindex, arr] : arch.components)
-            if (const ComponentSpec* h = reg.ByType(tindex)) hs.push_back(h);
-        if (hs.empty()) continue;
-
-        // Сортировка нужна не только ключу: в ЭТОМ же порядке пишутся блоки компонентов, а
-        // arch.components — unordered_map, и без сортировки пересохранение той же сцены тасовало
-        // бы файл.
-        std::sort(hs.begin(), hs.end(),
-                  [](const ComponentSpec* a, const ComponentSpec* b) { return a->name < b->name; });
-        std::string key;
-        for (size_t i = 0; i < hs.size(); ++i) { if (i) key += ','; key += hs[i]->name; }
-
-        yyjson_mut_val* block = yyjson_mut_obj(doc);
-        blocks.emplace_back(key, block);
-        yyjson_mut_obj_add_uint(doc, block, "count", count);
-
-        // entities пишем всегда: по этим файл-локальным id загрузка ремапит Parent.
-        yyjson_mut_val* ents = yyjson_mut_obj_add_arr(doc, block, "entities");
-        for (size_t i = 0; i < count; ++i) yyjson_mut_arr_add_uint(doc, ents, arch.entities[i]);
-
-        for (const ComponentSpec* h : hs) {
-            yyjson_mut_val* comp = yyjson_mut_obj(doc);
-            yyjson_mut_obj_add(block, yyjson_mut_strcpy(doc, h->name.c_str()), comp);
-            h->Save(arch, count, doc, comp, &pool);
-        }
-    }
-
-    pool.Write(doc, root);
-
-    // Порядок обхода scene->archetypes — порядок std::type_index в ключе, стандартом он не
-    // определён. Сортировка по ключу-архетипу делает файл детерминированным, а вместе с ним и
-    // файл-локальные id: их раздаёт загрузка ПО ПОРЯДКУ блоков.
-    std::sort(blocks.begin(), blocks.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
-    for (auto& [key, block] : blocks)
-        yyjson_mut_obj_add(root, yyjson_mut_strcpy(doc, key.c_str()), block);   // ключ динамический → strcpy
-
-    // FP_TO_FLOAT: числовые поля схемы объявлены F32, а double в аксессорах — лишь общий канал
-    // доступа к ним. Двойная точность на письме — это ~7 лишних байт на КАЖДОЕ число (на 1M
-    // сущностей треть файла), и на чтении они всё равно сужаются обратно. Потери нет.
-    char* js = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY | YYJSON_WRITE_FP_TO_FLOAT, nullptr);
-    std::string out = js ? InlineScalarArrays(js) : std::string{};
-    if (js) free(js);
-    yyjson_mut_doc_free(doc);
-    return out;
-}
-
-std::vector<uint8_t> ObjectManager::SaveSceneSheaf(SceneData* scene)
+std::vector<uint8_t> ObjectManager::SaveScene(SceneData* scene)
 {
     if (!scene) return {};
     auto& reg = ComponentSpecRegistry::Get();
@@ -290,6 +160,7 @@ std::vector<uint8_t> ObjectManager::SaveSceneSheaf(SceneData* scene)
     };
     std::vector<Block> blocks;
     for (auto& [sig, arch] : scene->archetypes) {
+        // Производные сущности в файл не идут — их пересоздаст генератор сцены.
         if (arch.components.count(std::type_index(typeid(GeneratedComponent)))) continue;
         if (arch.entities.empty()) continue;
         Block b{ {}, &arch, {} };
@@ -301,6 +172,8 @@ std::vector<uint8_t> ObjectManager::SaveSceneSheaf(SceneData* scene)
         for (size_t i = 0; i < b.specs.size(); ++i) { if (i) b.key += ','; b.key += b.specs[i]->name; }
         blocks.push_back(std::move(b));
     }
+    // Порядок обхода scene->archetypes — порядок std::type_index, стандартом он не определён:
+    // без сортировки пересохранение той же сцены тасовало бы таблицы.
     std::sort(blocks.begin(), blocks.end(), [](const Block& x, const Block& y) { return x.key < y.key; });
 
     // Parent в файле — сквозной номер строки, а его задаёт ровно этот порядок блоков.
@@ -320,7 +193,7 @@ std::vector<uint8_t> ObjectManager::SaveSceneSheaf(SceneData* scene)
         for (const ComponentSpec* h : b.specs) {
             sheaf::Component& comp = t.components.emplace_back();
             comp.name = h->name;
-            h->SaveSheaf(*b.arch, t.rows, w, comp.fields);
+            h->Save(*b.arch, t.rows, w, comp.fields);
             if (h->sig_type != std::type_index(typeid(ParentComponent))) continue;
             for (sheaf::Column& col : comp.fields) {
                 if (col.name != "parent") continue;
@@ -337,123 +210,151 @@ std::vector<uint8_t> ObjectManager::SaveSceneSheaf(SceneData* scene)
         w.Add(std::move(t));
     }
     if (unresolved)
-        SDL_Log("SaveSceneSheaf: %u parent links point outside the saved entities - written as self", unresolved);
+        SDL_Log("SaveScene: %u parent links point outside the saved entities - written as self", unresolved);
     return w.Finish();
 }
 
-std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const std::string& text)
-{
-    std::vector<Entity> created;
+namespace {
 
+constexpr Entity kNoEntity = static_cast<Entity>(-1);
+
+// Таблицы приходят из разбора по одной: строки компонентов заводятся до данных таблицы, и числовые
+// поля читатель кладёт прямо в колонки ECS.
+class SceneLoader final : public sheaf::TableVisitor {
+public:
+    explicit SceneLoader(SceneData* scene) : scene_(scene) {}
+
+    std::vector<Entity>   created;
+    std::vector<Entity>   by_row;     // сквозной номер строки файла → новый Entity
+    std::set<std::string> unknown;
+    // Куски created из таблиц, где у известного компонента есть поле ref: ссылки переводятся
+    // только в них.
+    std::vector<std::pair<size_t, size_t>> with_refs;
+
+    void Begin(const sheaf::Table& t, std::span<const std::string>, std::span<sheaf::Destination> dests) override
+    {
+        const size_t base = by_row.size();
+        // Строки таблиц без единого известного компонента остаются kNoEntity: ссылка на них не резолвится.
+        by_row.resize(base + t.rows, kNoEntity);
+        specs_.clear();
+        arch_ = nullptr;
+
+        std::set<std::type_index> sig;
+        size_t first = 0;
+        for (const sheaf::Component& c : t.components) {
+            if (const ComponentSpec* h = ComponentSpecRegistry::Get().ByName(c.name)) {
+                specs_.push_back({ h, &c, first });
+                sig.insert(h->sig_type);
+            } else {
+                unknown.insert(c.name);
+            }
+            first += c.fields.size();
+        }
+        if (t.rows == 0 || specs_.empty()) return;
+
+        arch_ = &scene_->archetypes[sig];
+        arch_->reserve(arch_->entities.size() + t.rows);
+        ReserveRows(created, created.size() + t.rows);
+        scene_->entity_to_archetype.reserve(scene_->entity_to_archetype.size() + t.rows);
+        scene_->entity_to_index.reserve(scene_->entity_to_index.size() + t.rows);
+
+        // Сущности создаём ДО строк компонентов: BeginLoad дописывает строки в хвост и считает
+        // базу от entities.size() — порядок add обязан совпасть с arch.entities.
+        for (size_t i = 0; i < t.rows; ++i) {
+            const Entity e = scene_->next_entity_id++;
+            arch_->entities.push_back(e);
+            scene_->entity_to_archetype[e] = arch_;
+            scene_->entity_to_index[e] = arch_->entities.size() - 1;
+            by_row[base + i] = e;
+            created.push_back(e);
+        }
+        const bool refs = std::ranges::any_of(specs_, [](const Spec& s) {
+            return std::ranges::any_of(s.header->fields, [](const sheaf::Column& c) { return c.type == sheaf::Type::Ref; });
+        });
+        if (refs) with_refs.emplace_back(created.size() - t.rows, t.rows);
+        for (const Spec& s : specs_)
+            s.spec->BeginLoad(*arch_, *s.header, t.rows, dests.subspan(s.first_field, s.header->fields.size()));
+    }
+
+    void End(const sheaf::Table& t, std::span<const std::string> strings) override
+    {
+        if (!arch_) return;
+        // header — компонент Begin, в той же таблице: адрес у него тот же.
+        for (const Spec& s : specs_) s.spec->FinishLoad(*arch_, *s.header, t.rows, strings);
+    }
+
+private:
+    struct Spec {
+        const ComponentSpec*    spec;
+        const sheaf::Component* header;
+        size_t                  first_field;   // номер первого поля компонента в dests
+    };
+
+    SceneData*        scene_;
+    Archetype*        arch_ = nullptr;
+    std::vector<Spec> specs_;
+};
+
+} // namespace
+
+std::expected<std::vector<Entity>, std::string> ObjectManager::LoadScene(const SceneName& scene_name, std::span<const uint8_t> bytes)
+{
     auto sit = scenes_data.find(scene_name);
     // Автосоздание по имени — штатный путь первой загрузки, отдельный CreateScene игре не нужен.
     // Пустое имя при этом отвергает сам CreateScene (см. там) — отсюда проверка на null ниже.
     SceneData* scene = (sit != scenes_data.end()) ? sit->second.get()
                                                   : CreateScene(scene_name);
-    if (!scene) {
-        SDL_Log("ObjectManager::LoadScene: no scene for name '%s' - nothing loaded", scene_name.c_str());
-        return created;
-    }
-    auto& reg = ComponentSpecRegistry::Get();
-
-    std::unordered_map<uint32_t, Entity> old_to_new;     // файл-локальный id → новый Entity
+    if (!scene) return std::unexpected("no scene for name '" + scene_name + "'");
 
     const auto t_pass1 = Prof::Clock::now();
-    yyjson_doc* doc = yyjson_read(text.data(), text.size(), 0);
-    if (!doc) { SDL_Log("LoadScene: scene.json parse failed"); return created; }
-    yyjson_val* root = yyjson_doc_get_root(doc);
-    if (!root || !yyjson_is_obj(root)) { SDL_Log("LoadScene: scene.json root is not object"); yyjson_doc_free(doc); return created; }
-
-    // Словарь имён — ДО архетипов: их колонки ассетов ссылаются в него индексами.
-    ScenePool pool;
-    pool.Read(root);
-
-    size_t est = 0;
-    {
-        size_t ak, am; yyjson_val *an, *ab;
-        yyjson_obj_foreach(root, ak, am, an, ab) est += (size_t)yyjson_get_uint(yyjson_obj_get(ab, "count"));
+    SceneLoader loader(scene);
+    std::expected<void, std::string> read;
+    try {
+        read = sheaf::Read(bytes, loader);
+    } catch (const std::bad_alloc&) {
+        read = std::unexpected(std::string("out of memory - object count in the file is corrupted?"));
     }
-    created.reserve(est);
-    old_to_new.reserve(est * 2);
-    scene->entity_to_archetype.reserve(scene->entity_to_archetype.size() + est);
-    scene->entity_to_index.reserve(scene->entity_to_index.size() + est);
-
-    // Проход 1: на каждый архетип — создать count сущностей и залить колонки компонентов.
-    {
-        size_t ak, am; yyjson_val *aname, *block;
-        yyjson_obj_foreach(root, ak, am, aname, block) {
-            if (!yyjson_is_obj(block)) continue;
-
-            // Компоненты архетипа = ключи блока, кроме служебных count/entities.
-            std::vector<const ComponentSpec*> hs;
-            std::set<std::type_index> sig;
-            {
-                size_t ck, cm; yyjson_val *cname, *cval;
-                yyjson_obj_foreach(block, ck, cm, cname, cval) {
-                    const char* nm = yyjson_get_str(cname);
-                    if (!nm || !std::strcmp(nm, "count") || !std::strcmp(nm, "entities")) continue;
-                    const ComponentSpec* h = reg.ByName(nm);
-                    if (h) { hs.push_back(h); sig.insert(h->sig_type); }
-                }
-            }
-            yyjson_val* ents  = yyjson_obj_get(block, "entities");
-            yyjson_val* cnt_v = yyjson_obj_get(block, "count");
-            size_t count = cnt_v ? (size_t)yyjson_get_uint(cnt_v) : (ents ? yyjson_arr_size(ents) : 0);
-            if (count == 0 || hs.empty()) continue;
-
-            Archetype& arch = scene->archetypes[sig];
-
-            // Сущности создаём ДО заливки колонок: ComponentSpec::Load дописывает строки в хвост
-            // и считает базу от entities.size() — порядок add обязан совпасть с arch.entities.
-            std::vector<uint32_t> ids(count, 0);
-            if (ents) { size_t i, m; yyjson_val* v; yyjson_arr_foreach(ents, i, m, v) { if (i >= count) break; ids[i] = (uint32_t)yyjson_get_uint(v); } }
-            for (size_t i = 0; i < count; ++i) {
-                Entity e = scene->next_entity_id++;
-                arch.entities.push_back(e);
-                scene->entity_to_archetype[e] = &arch;
-                scene->entity_to_index[e] = arch.entities.size() - 1;
-                old_to_new[ids[i]] = e;
-                created.push_back(e);
-            }
-
-            for (const ComponentSpec* h : hs) {
-                yyjson_val* comp = yyjson_obj_get(block, h->name.c_str());
-                h->Load(arch, comp, count, &pool);
-            }
-        }
+    if (!read) {
+        // Таблицы до ошибки уже залиты: наполовину загруженной сцена не остаётся.
+        scene->clear();
+        ++entity_revision;
+        return std::unexpected("scene.sheaf: " + read.error() + " - scene cleared");
     }
     const double pass1_ms = Prof::MsSince(t_pass1);
+    const std::vector<Entity>& by_row = loader.by_row;
 
-    // Проход 2: в ParentComponent лежит файл-локальный id — меняем его на настоящий Entity и
+    // Проход 2: в ParentComponent лежит сквозной номер строки — меняем его на настоящий Entity и
     // заполняем scene->children. Отдельным проходом, потому что родитель мог приехать позже
     // ребёнка; после прохода 1 все сущности уже есть, так что ни глубина, ни циклы не важны.
     const auto t_pass2 = Prof::Clock::now();
-    for (Entity e : created) {
+    uint32_t unresolved = 0;
+    for (const auto& [first, count] : loader.with_refs)
+    for (size_t i = first; i < first + count; ++i) {
+        const Entity e = loader.created[i];
         if (!Has<ParentComponent>(scene, e)) continue;
         ParentComponent& pc = GetComponent<ParentComponent>(scene, e);
-        auto it = old_to_new.find(pc.parent);
-        if (it == old_to_new.end()) {
-            // Родитель не сохранён (был производным). Самоссылка — существующий id, без падения.
-            SDL_Log("LoadScene: parent id %u unresolved for entity %u - hierarchy dropped", pc.parent, e);
+        const Entity parent = pc.parent < by_row.size() ? by_row[pc.parent] : kNoEntity;
+        // Самоссылку пишет SaveScene, когда родитель не сохранялся. В children её класть нельзя:
+        // объект стал бы своим ребёнком.
+        if (parent == kNoEntity || parent == e) {
+            if (parent == kNoEntity) ++unresolved;
             pc.parent = e;
             continue;
         }
-        pc.parent = it->second;
-        scene->children[pc.parent].push_back(e);
+        pc.parent = parent;
+        scene->children[parent].push_back(e);
     }
     const double pass2_ms = Prof::MsSince(t_pass2);
 
-    yyjson_doc_free(doc);
-
     SDL_Log("  ObjectManager::LoadScene: pass1(parse+build)=%.1f  pass2(parent remap)=%.1f ms  [%zu ent, %zu archetypes]",
-        pass1_ms, pass2_ms, created.size(), scene->archetypes.size());
-    // Индексы, которым нет имени в шапке: словарь правили мимо колонок. Счётчик, а не лог на
-    // месте — иначе на миллионе сущностей это миллион строк.
-    if (pool.Misses())
-        SDL_Log("LoadScene: %u asset cells reference a missing dictionary entry - names dropped", pool.Misses());
+        pass1_ms, pass2_ms, loader.created.size(), scene->archetypes.size());
+    for (const std::string& n : loader.unknown)
+        SDL_Log("LoadScene: component '%s' is not registered - its columns dropped", n.c_str());
+    if (unresolved)
+        SDL_Log("LoadScene: %u parent links point to objects that were not loaded - hierarchy dropped", unresolved);
 
     ++entity_revision;
-    return created;
+    return std::move(loader.created);
 }
 
 Entity ObjectManager::CreateEntityFromSpecs(SceneData* scene, const std::vector<const ComponentSpec*>& specs)
@@ -470,7 +371,7 @@ Entity ObjectManager::CreateEntityFromSpecs(SceneData* scene, const std::vector<
     scene->entity_to_archetype[e] = &arch;
     scene->entity_to_index[e] = arch.entities.size() - 1;
 
-    for (const ComponentSpec* s : specs) s->Load(arch, nullptr, 1, nullptr);   // comp==nullptr = дефолтный ряд
+    for (const ComponentSpec* s : specs) s->LoadDefaults(arch, 1);
 
     return e;
 }

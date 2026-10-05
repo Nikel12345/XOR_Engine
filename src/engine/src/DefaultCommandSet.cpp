@@ -99,8 +99,13 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 			if (scene) {
 				// Батч-дерево кормит только активная сцена: id чужой совпал бы с чужим объектом.
 				const bool feeds_batches = (scene == om->GetActiveScene());
-				const std::vector<Entity> created = om->LoadScene(c.scene, c.json);
-				for (Entity e : created)
+				const auto created = om->LoadScene(c.scene, c.sheaf);
+				if (!created) {
+					SDL_Log("CreateEntity: %s", created.error().c_str());
+					ctx->GetBatchBuilder()->SetDirtyBatches(true);
+					return;
+				}
+				for (Entity e : *created)
 					if (feeds_batches) ctx->GetBatchBuilder()->QueueCreate(e);
 			}
 		});

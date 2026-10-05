@@ -513,29 +513,14 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& scenes_ro
 	std::filesystem::create_directories(dir, ec);
 	if (ec) { SDL_Log("SaveScene: cannot create dir '%s' (%s)", dir.c_str(), ec.message().c_str()); return; }
 
-	size_t json_bytes = 0;
 	{
 		const Uint64 t0 = SDL_GetTicksNS();
-		const std::string text = object_manager->SaveScene(scene);
-		const std::string path = dir + "/scene.json";
-		std::ofstream f(path, std::ios::binary);
-		if (!f) { SDL_Log("SaveScene: cannot open '%s' for write", path.c_str()); return; }
-		f << text;
-		json_bytes = text.size();
-		SDL_Log("SaveScene: scene.json %zu bytes, %.1f ms", json_bytes, (SDL_GetTicksNS() - t0) / 1e6);
-	}
-	{
-		const Uint64 t0 = SDL_GetTicksNS();
-		const std::vector<uint8_t> bytes = object_manager->SaveSceneSheaf(scene);
+		const std::vector<uint8_t> bytes = object_manager->SaveScene(scene);
 		const std::string path = dir + "/scene.sheaf";
 		std::ofstream f(path, std::ios::binary);
-		if (!f) SDL_Log("SaveScene: cannot open '%s' for write", path.c_str());
-		else {
-			f.write(reinterpret_cast<const char*>(bytes.data()), safe_size_ss(bytes.size()));
-			SDL_Log("SaveScene: scene.sheaf %zu bytes (%.1f%% of scene.json), %.1f ms", bytes.size(),
-			        json_bytes ? 100.0 * static_cast<double>(bytes.size()) / static_cast<double>(json_bytes) : 0.0,
-			        (SDL_GetTicksNS() - t0) / 1e6);
-		}
+		if (!f) { SDL_Log("SaveScene: cannot open '%s' for write", path.c_str()); return; }
+		f.write(reinterpret_cast<const char*>(bytes.data()), safe_size_ss(bytes.size()));
+		SDL_Log("SaveScene: scene.sheaf %zu bytes, %.1f ms", bytes.size(), (SDL_GetTicksNS() - t0) / 1e6);
 	}
 
 	SaveTextures (dir, texture_manager);
@@ -730,18 +715,18 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 
 	double read_ms = 0, wipe_ms = 0, tex_ms = 0, mdl_ms = 0, shd_ms = 0, mat_ms = 0, clear_ms = 0, ecs_ms = 0;
 
-	std::string text;
+	std::vector<uint8_t> bytes;
 	{
 		PhaseTimer t(read_ms);
-		const std::string scene_path = dir + "/scene.json";
+		const std::string scene_path = dir + "/scene.sheaf";
 		std::ifstream f(scene_path, std::ios::binary | std::ios::ate);
 		if (!f) { SDL_Log("LoadScene: cannot open '%s'", scene_path.c_str()); return; }
 		const std::streamoff sz = f.tellg();
 		if (sz > 0) {
-			text.resize(static_cast<size_t>(sz));
+			bytes.resize(static_cast<size_t>(sz));
 			f.seekg(0);
-			f.read(text.data(), sz);
-			text.resize(static_cast<size_t>(f.gcount()));
+			f.read(reinterpret_cast<char*>(bytes.data()), sz);
+			bytes.resize(static_cast<size_t>(f.gcount()));
 		}
 	}
 
@@ -765,7 +750,13 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 
 		{
 			PhaseTimer t(ecs_ms);
-			loaded_count = object_manager->LoadScene(scene_name, text).size();
+			const auto loaded = object_manager->LoadScene(scene_name, bytes);
+			if (!loaded) {
+				SDL_Log("LoadScene: %s", loaded.error().c_str());
+				engine_context->ClearScene(scene_name);
+				return;
+			}
+			loaded_count = loaded->size();
 		}
 
 		if (SceneData* scene = object_manager->GetScene(scene_name)) {
@@ -782,7 +773,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 	batch_builder->SetDirtyBatches(true);
 	SDL_Log("LoadScene: loaded scene '%s' from '%s'", scene_name.c_str(), dir.c_str());
 	SDL_Log("LoadScene TIMING [%zu ent, %.1f MB]: read=%.1f  wipe=%.1f  tex=%.1f  mdl=%.1f  shd=%.1f  mat=%.1f  clear=%.1f  ecs=%.1f  | total=%.1f ms",
-		loaded_count, text.size() / (1024.0 * 1024.0),
+		loaded_count, bytes.size() / (1024.0 * 1024.0),
 		read_ms, wipe_ms, tex_ms, mdl_ms, shd_ms, mat_ms, clear_ms, ecs_ms,
 		read_ms + wipe_ms + tex_ms + mdl_ms + shd_ms + mat_ms + clear_ms + ecs_ms);
 }

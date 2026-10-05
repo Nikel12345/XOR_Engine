@@ -1,14 +1,14 @@
 ﻿#pragma once
 #include <string>
 #include <vector>
-#include <map>
 #include <typeindex>
+#include <cstddef>
 #include <functional>
+#include <span>
 #include <unordered_map>
 #include "ComponentStorage.h"
 #include "CommandId.h"
 #include "Sheaf.h"
-#include "yyjson.h"
 
 // Angle держит радианы и в данных, и в файле, градусы живут только в слайдере, поэтому lo/hi
 // у него задают в ГРАДУСАХ.
@@ -28,12 +28,35 @@ constexpr size_t FieldGroupSize(FieldGroup g)
     }
 }
 
+// Числовое поле в хранилище архетипа целиком: ячейка строки r лежит по адресу first + r * stride.
+// У SoA-колонки stride — размер значения, у поля AoS-компонента — размер всей структуры.
+struct FieldColumn {
+    enum class Type : uint8_t { F32, U32, I32, Other };
+
+    std::byte* first  = nullptr;
+    size_t     stride = 0;
+    Type       type   = Type::Other;
+
+    template<typename T>
+    static FieldColumn Of(T* first, size_t stride)
+    {
+        Type t = Type::Other;
+        if constexpr (std::is_same_v<T, float>)         t = Type::F32;
+        else if constexpr (std::is_same_v<T, uint32_t>) t = Type::U32;
+        else if constexpr (std::is_same_v<T, int32_t>)  t = Type::I32;
+        return { reinterpret_cast<std::byte*>(first), stride, t };
+    }
+};
+
 struct FieldSpec {
     const char* key = nullptr;
     FieldKind   kind = FieldKind::F32;
 
     double (*get_num)(Archetype&, size_t) = nullptr;
     void   (*set_num)(Archetype&, size_t, double) = nullptr;
+    // Сюда читатель кладёт колонку файла сам, а не через set_num по ячейке. Звать, только когда в
+    // архетипе есть строки: у пустого first не на что указывать.
+    FieldColumn (*column)(Archetype&) = nullptr;
     std::function<const std::string&(Archetype&, size_t)> get_str;
     std::function<void(Archetype&, size_t, std::string)>  set_str;
 
@@ -49,6 +72,7 @@ struct FieldSpec {
 
     static FieldSpec Num(const char* key, FieldKind kind,
                          double (*get)(Archetype&, size_t), void (*set)(Archetype&, size_t, double),
+                         FieldColumn (*column)(Archetype&),
                          float lo = 0, float hi = 0, float speed = 0.05f);
     static FieldSpec Str(const char* key,
                          std::function<const std::string&(Archetype&, size_t)> get,
@@ -70,40 +94,14 @@ template<typename SoA, typename Proxy>
 void AddDefaultSoA(Archetype& arch) { arch.ensure_component<SoA>(); arch.get_array<SoA>()->add(Proxy{}); }
 
 
-class ScenePool {
-public:
-    struct List {
-        std::vector<std::string>                  names;
-        std::unordered_map<std::string, uint32_t> index;
-        uint32_t Intern(const std::string& name);
-    };
-
-    List& operator[](const std::string& list_name) { return lists_[list_name]; }
-    List* Find(const std::string& list_name);
-
-    const char* Cell(const List* list, yyjson_val* v);
-
-    void Write(yyjson_mut_doc* doc, yyjson_mut_val* root) const;
-    void Read(yyjson_val* root);
-
-    uint32_t Misses() const { return misses_; }
-
-private:
-    std::map<std::string, List> lists_;
-    uint32_t misses_ = 0;
-};
-
-constexpr const char* FieldPoolName(FieldKind k)
-{
-    return k == FieldKind::AssetModel ? "models" : nullptr;
-}
-
 #define AOS_NUM(T, path) \
     [](Archetype& a, size_t i) -> double { return (double)(*a.get_array<T>())[i].path; }, \
-    [](Archetype& a, size_t i, double v) { auto& r = (*a.get_array<T>())[i].path; r = (std::decay_t<decltype(r)>)v; }
+    [](Archetype& a, size_t i, double v) { auto& r = (*a.get_array<T>())[i].path; r = (std::decay_t<decltype(r)>)v; }, \
+    [](Archetype& a) { auto& d = a.get_array<T>()->data; return FieldColumn::Of(&d.data()->path, sizeof(T)); }
 #define SOA_NUM(S, col) \
     [](Archetype& a, size_t i) -> double { return (double)a.get_array<S>()->data.col[i]; }, \
-    [](Archetype& a, size_t i, double v) { auto& r = a.get_array<S>()->data.col[i]; r = (std::decay_t<decltype(r)>)v; }
+    [](Archetype& a, size_t i, double v) { auto& r = a.get_array<S>()->data.col[i]; r = (std::decay_t<decltype(r)>)v; }, \
+    [](Archetype& a) { auto& v = a.get_array<S>()->data.col; return FieldColumn::Of(v.data(), sizeof(v[0])); }
 #define AOS_STR(T, path) \
     [](Archetype& a, size_t i) -> const std::string& { return (*a.get_array<T>())[i].path; }, \
     [](Archetype& a, size_t i, std::string v) { (*a.get_array<T>())[i].path = std::move(v); }
@@ -112,10 +110,10 @@ constexpr const char* FieldPoolName(FieldKind k)
 //  UI рисует меткой. Выражение видит ряд компонента как `c` (у SoA — хранилище `c` и индекс `i`).
 #define AOS_CALC(T, expr) \
     [](Archetype& a, size_t i) -> double { auto& c = (*a.get_array<T>())[i]; return (double)(expr); }, \
-    nullptr
+    nullptr, nullptr
 #define SOA_CALC(S, expr) \
     [](Archetype& a, size_t i) -> double { auto& c = a.get_array<S>()->data; return (double)(expr); }, \
-    nullptr
+    nullptr, nullptr
 //  Он же единственный способ показать то, чьё КОЛИЧЕСТВО лежит в данных: схема описывает тип,
 //  переменного числа полей она не выражает.
 #define AOS_CALC_STR(T, expr) \
@@ -133,14 +131,18 @@ struct ComponentSpec {
     std::vector<FieldSpec> fields;
     void (*after_edit)(Archetype&, size_t) = nullptr;
 
-    // Заданы — генераторы по fields не работают вовсе.
-    std::function<void(Archetype&, size_t, yyjson_mut_doc*, yyjson_mut_val*, ScenePool*)> custom_save;
-    std::function<void(Archetype&, yyjson_val*, size_t, ScenePool*)>                       custom_load;
-    std::function<void(Archetype&, size_t, sheaf::Writer&, std::vector<sheaf::Column>&)>   custom_save_sheaf;
+    // Заданы — генераторы по fields не работают вовсе. Значения str в колонках — номера в strings.
+    std::function<void(Archetype&, size_t, sheaf::Writer&, std::vector<sheaf::Column>&)>             custom_save;
+    std::function<void(Archetype&, const sheaf::Component*, size_t, std::span<const std::string>)> custom_load;
 
-    void Save(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp, ScenePool* pool) const;
-    void Load(Archetype& arch, yyjson_val* comp, size_t count, ScenePool* pool) const;
-    void SaveSheaf(Archetype& arch, size_t count, sheaf::Writer& w, std::vector<sheaf::Column>& out) const;
+    void Save(Archetype& arch, size_t count, sheaf::Writer& w, std::vector<sheaf::Column>& out) const;
+    // Загрузка таблицы в два шага вокруг разбора её данных (sheaf::TableVisitor). BeginLoad — до
+    // данных: дописывает count дефолтных строк в хвост arch и ставит в dests (по полю header) ячейки,
+    // куда читатель положит колонку сам. FinishLoad — после: остальные колонки, у custom_load — всё.
+    void BeginLoad(Archetype& arch, const sheaf::Component& header, size_t count, std::span<sheaf::Destination> dests) const;
+    void FinishLoad(Archetype& arch, const sheaf::Component& comp, size_t count, std::span<const std::string> strings) const;
+    // count дефолтных строк в хвост arch: тег или форма создания.
+    void LoadDefaults(Archetype& arch, size_t count) const;
 };
 
 class ComponentSpecRegistry {

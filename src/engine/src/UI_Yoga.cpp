@@ -275,7 +275,7 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
 
         if (create) {
             Entity e;
-            // GeneratedComponent → SaveScene не пишет их в scene.json: узлы UI пересоздаёт
+            // GeneratedComponent → SaveScene не пишет их в scene.sheaf: узлы UI пересоздаёт
             // UI_Yoga::Emit из дерева каждую сессию, копия в файле = дубли/баги при загрузке.
             // TextureStateComponent — БЕЗУСЛОВНО: тег ставится только при создании (миграции
             // архетипов нет), а материал узлу можно сменить на вариативный позже. Узлов UI
