@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <iterator>
+#include <new>
 #include <numeric>
 
 using sheaf::Column;
@@ -115,7 +116,12 @@ bool Model::Open(const std::string& path, std::string& error)
     std::ifstream in(path, std::ios::binary);
     if (!in) { error = "не открыть файл " + path; return false; }
     const std::vector<uint8_t> bytes{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
-    auto read = sheaf::Read(bytes);
+    std::expected<sheaf::File, std::string> read;
+    try {
+        read = sheaf::Read(bytes);
+    } catch (const std::bad_alloc&) {
+        read = std::unexpected(std::string("не хватило памяти: число объектов в файле, видимо, испорчено"));
+    }
     if (!read) { error = path + ": " + read.error(); return false; }
 
     file_  = std::move(*read);
