@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <new>
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
@@ -129,7 +130,12 @@ int main(int argc, char** argv)
     std::ifstream in(argv[1], std::ios::binary);
     if (!in) { std::fprintf(stderr, "SheafDump: не открыть %s\n", argv[1]); return 1; }
     const std::vector<uint8_t> bytes{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
-    const auto file = sheaf::Read(bytes);
+    std::expected<sheaf::File, std::string> file;
+    try {
+        file = sheaf::Read(bytes);
+    } catch (const std::bad_alloc&) {
+        file = std::unexpected(std::string("не хватило памяти: число объектов в файле, видимо, испорчено"));
+    }
     if (!file) { std::fprintf(stderr, "SheafDump: %s: %s\n", argv[1], file.error().c_str()); return 1; }
 
     Dumper d{ *file };

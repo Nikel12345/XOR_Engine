@@ -138,6 +138,7 @@ void EncodeByUniques(const Rows& rs, uint32_t rows, size_t limit, KeyOf key_of, 
     out.push_back(std::move(e));
 }
 
+// Тот же выбор повторяет sheaf.py (писатель генераторов): правило правится в обоих.
 Encoded EncodeColumn(const Column& c, uint32_t rows)
 {
     const bool list = c.flags & List;

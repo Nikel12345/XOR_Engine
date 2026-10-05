@@ -7,3 +7,4 @@ todo.txt
 .idea/
 
 plans/
+__pycache__/

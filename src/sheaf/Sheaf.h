@@ -2,6 +2,7 @@
 // Формат Sheaf (docs/sheaf.md). Ни ECS, ни движка не знает: писатель принимает таблицы колонками и
 // сам выбирает способ записи каждого поля, читатель возвращает их в том же виде.
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -42,6 +43,7 @@ struct Column {
     // Как поле лежало в файле: заполняет Read, Writer не читает.
     Encoding              encoding      = Encoding::Raw;
     size_t                encoded_bytes = 0;
+    bool                  direct        = false;   // Read с TableVisitor: данные ушли в Destination, values пусты
 };
 
 struct Component {
@@ -82,5 +84,27 @@ struct File {
 // Ошибка — текст с номером таблицы и именем поля. Колонки раскрыты: по значению (списку) на строку,
 // отсутствующая ячейка nullable хранит 0.
 std::expected<File, std::string> Read(std::span<const uint8_t> bytes);
+
+// Память, куда Read кладёт поле в обход Column: 4 байта значения строки r — по адресу
+// first + r * stride, в порядке байт машины.
+struct Destination {
+    std::byte* first  = nullptr;
+    size_t     stride = 0;
+};
+
+// Чтение для загрузчика, которому промежуточные колонки не нужны: таблицы приходят по одной.
+class TableVisitor {
+public:
+    virtual ~TableVisitor() = default;
+    // Заголовок таблицы прочитан, данных у колонок ещё нет. dests — по элементу на поле в порядке
+    // компонентов и полей. Поле без флагов с 4-байтным числом (f32, u32, i32, ref), которому Begin
+    // поставил first, Read раскрывает туда; остальные — в Column, как без посетителя.
+    virtual void Begin(const Table& header, std::span<const std::string> strings, std::span<Destination> dests) = 0;
+    virtual void End(const Table& table, std::span<const std::string> strings) = 0;
+};
+
+// Строки файла, затем Begin и End на каждую таблицу; данные таблицы живут до конца её End. Ошибка
+// может прийти после того, как часть таблиц уже отдана посетителю.
+std::expected<void, std::string> Read(std::span<const uint8_t> bytes, TableVisitor& visitor);
 
 } // namespace sheaf
