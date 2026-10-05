@@ -743,8 +743,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 	{
 		{
 			PhaseTimer t(clear_ms);
-			SceneData* target = object_manager->GetScene(scene_name);
-			if (SceneData* prev_active = object_manager->GetActiveScene(); prev_active && prev_active != target)
+			if (SceneData* prev_active = object_manager->GetActiveScene())
 				prev_active->clear();
 		}
 
