@@ -77,6 +77,29 @@ foreach(_sc_target SDL3_shadercross-static spirv-cross-c spirv-cross-core spirv-
     endif()
 endforeach()
 
+# ============================================================
+#  ImGui (+ ImGuizmo) — здесь, а не в src/engine: его линкует и верхний слой движка (Engine:
+#  UI_*.cpp, Engine.cpp), и вьювер Sheaf, которому движок не нужен. Бэкенды — SDL3 и SDL_GPU,
+#  оба из самого SDL.
+# ============================================================
+add_library(ImGui STATIC
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_draw.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_tables.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_widgets.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_impl_sdl3.cpp"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_impl_sdlgpu3.cpp"
+    # ImGuizmo — гизмо трансформации поверх ImGui (один cpp, тянет imgui_internal.h)
+    "${XOR_Engine_SOURCE_DIR}/external/ImGuizmo/ImGuizmo.cpp"
+)
+target_include_directories(ImGui PUBLIC
+    "${XOR_Engine_SOURCE_DIR}/external/ImGui/include"
+    "${XOR_Engine_SOURCE_DIR}/external/ImGuizmo"
+)
+target_link_libraries(ImGui PUBLIC
+    SDL3::SDL3          # include-пути SDL приходят вместе с целью (см. раздел SDL3 выше)
+)
+
 add_subdirectory(src/sheaf)
 add_subdirectory(src/engine)
 add_subdirectory(src/physics)

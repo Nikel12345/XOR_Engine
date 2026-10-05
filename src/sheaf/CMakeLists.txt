@@ -1,6 +1,6 @@
 # ============================================================
 #  Sheaf — формат сцены (docs/sheaf.md). Самостоятельный лист: ни движка, ни SDL, только
-#  стандартная библиотека. Его линкуют EngineEcs (сохранение сцены) и SheafDump, которому
+#  стандартная библиотека. Его линкуют EngineEcs (сохранение сцены), вьювер и SheafDump, которым
 #  движок не нужен.
 # ============================================================
 add_library(Sheaf STATIC
@@ -12,4 +12,5 @@ target_compile_features(Sheaf PUBLIC cxx_std_23)
 target_include_directories(Sheaf PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 set_target_properties(Sheaf PROPERTIES FOLDER "sheaf")
 
+add_subdirectory(viewer)
 add_subdirectory(dump)

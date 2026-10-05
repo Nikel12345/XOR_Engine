@@ -2,25 +2,6 @@
 #  Внешние под-библиотеки
 # ============================================================
 
-# ImGui — нужен только верхнему слою (Engine: UI_ImGui.cpp, Engine.cpp)
-add_library(ImGui STATIC
-    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui.cpp"
-    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_draw.cpp"
-    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_tables.cpp"
-    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_widgets.cpp"
-    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_impl_sdl3.cpp"
-    "${XOR_Engine_SOURCE_DIR}/external/ImGui/src/imgui_impl_sdlgpu3.cpp"
-    # ImGuizmo — гизмо трансформации поверх ImGui (один cpp, тянет imgui_internal.h)
-    "${XOR_Engine_SOURCE_DIR}/external/ImGuizmo/ImGuizmo.cpp"
-)
-target_include_directories(ImGui PUBLIC
-    "${XOR_Engine_SOURCE_DIR}/external/ImGui/include"
-    "${XOR_Engine_SOURCE_DIR}/external/ImGuizmo"
-)
-target_link_libraries(ImGui PUBLIC
-    SDL3::SDL3          # include-пути SDL приходят вместе с целью (см. корневой CMakeLists)
-)
-
 # yyjson — вендорный JSON (файлы сцены/ресурсов: Engine::Save/LoadScene). C-либа из одного
 # .c/.h (external/yyjson, MIT). Линкуется только Engine (PRIVATE): json — деталь файлового IO,
 # наружу торчат лишь Save/LoadScene(папка).
