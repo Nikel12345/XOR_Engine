@@ -278,6 +278,69 @@ std::string ObjectManager::SaveScene(SceneData* scene)
     return out;
 }
 
+std::vector<uint8_t> ObjectManager::SaveSceneSheaf(SceneData* scene)
+{
+    if (!scene) return {};
+    auto& reg = ComponentSpecRegistry::Get();
+
+    struct Block {
+        std::string                       key;
+        Archetype*                        arch;
+        std::vector<const ComponentSpec*> specs;
+    };
+    std::vector<Block> blocks;
+    for (auto& [sig, arch] : scene->archetypes) {
+        if (arch.components.count(std::type_index(typeid(GeneratedComponent)))) continue;
+        if (arch.entities.empty()) continue;
+        Block b{ {}, &arch, {} };
+        for (auto& [tindex, arr] : arch.components)
+            if (const ComponentSpec* h = reg.ByType(tindex)) b.specs.push_back(h);
+        if (b.specs.empty()) continue;
+        std::sort(b.specs.begin(), b.specs.end(),
+                  [](const ComponentSpec* x, const ComponentSpec* y) { return x->name < y->name; });
+        for (size_t i = 0; i < b.specs.size(); ++i) { if (i) b.key += ','; b.key += b.specs[i]->name; }
+        blocks.push_back(std::move(b));
+    }
+    std::sort(blocks.begin(), blocks.end(), [](const Block& x, const Block& y) { return x.key < y.key; });
+
+    // Parent в файле — сквозной номер строки, а его задаёт ровно этот порядок блоков.
+    std::unordered_map<Entity, uint32_t> row_of;
+    uint32_t base = 0;
+    for (const Block& b : blocks) {
+        for (size_t i = 0; i < b.arch->entities.size(); ++i) row_of[b.arch->entities[i]] = base + safe_u32(i);
+        base += safe_u32(b.arch->entities.size());
+    }
+
+    sheaf::Writer w;
+    uint32_t unresolved = 0;
+    base = 0;
+    for (const Block& b : blocks) {
+        sheaf::Table t;
+        t.rows = safe_u32(b.arch->entities.size());
+        for (const ComponentSpec* h : b.specs) {
+            sheaf::Component& comp = t.components.emplace_back();
+            comp.name = h->name;
+            h->SaveSheaf(*b.arch, t.rows, w, comp.fields);
+            if (h->sig_type != std::type_index(typeid(ParentComponent))) continue;
+            for (sheaf::Column& col : comp.fields) {
+                if (col.name != "parent") continue;
+                col.type = sheaf::Type::Ref;
+                for (uint32_t i = 0; i < t.rows; ++i) {
+                    auto it = row_of.find(col.values[i]);
+                    if (it != row_of.end()) { col.values[i] = it->second; continue; }
+                    col.values[i] = base + i;      // родитель не сохраняется — как и в LoadScene, самоссылка
+                    ++unresolved;
+                }
+            }
+        }
+        base += t.rows;
+        w.Add(std::move(t));
+    }
+    if (unresolved)
+        SDL_Log("SaveSceneSheaf: %u parent links point outside the saved entities - written as self", unresolved);
+    return w.Finish();
+}
+
 std::vector<Entity> ObjectManager::LoadScene(const SceneName& scene_name, const std::string& text)
 {
     std::vector<Entity> created;

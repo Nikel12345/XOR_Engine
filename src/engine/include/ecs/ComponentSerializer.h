@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include "ComponentStorage.h"
 #include "CommandId.h"
+#include "Sheaf.h"
 #include "yyjson.h"
 
 // Angle держит радианы и в данных, и в файле, градусы живут только в слайдере, поэтому lo/hi
@@ -135,9 +136,11 @@ struct ComponentSpec {
     // Заданы — генераторы по fields не работают вовсе.
     std::function<void(Archetype&, size_t, yyjson_mut_doc*, yyjson_mut_val*, ScenePool*)> custom_save;
     std::function<void(Archetype&, yyjson_val*, size_t, ScenePool*)>                       custom_load;
+    std::function<void(Archetype&, size_t, sheaf::Writer&, std::vector<sheaf::Column>&)>   custom_save_sheaf;
 
     void Save(Archetype& arch, size_t count, yyjson_mut_doc* doc, yyjson_mut_val* comp, ScenePool* pool) const;
     void Load(Archetype& arch, yyjson_val* comp, size_t count, ScenePool* pool) const;
+    void SaveSheaf(Archetype& arch, size_t count, sheaf::Writer& w, std::vector<sheaf::Column>& out) const;
 };
 
 class ComponentSpecRegistry {

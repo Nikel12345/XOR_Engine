@@ -120,6 +120,7 @@ target_link_libraries(EngineEcs PUBLIC
     EngineCore                                              # словарь и утилиты + общий PCH
     SDL3::SDL3                                              # BaseComponents.h включает SDL; цель даёт и include-пути
     yyjson                                                  # scene.json: колоночная сериализация ECS (ComponentSerializer.h раскрывает yyjson-типы)
+    Sheaf                                                   # scene.sheaf: ComponentSerializer.h раскрывает sheaf-типы
 )
 target_precompile_headers(EngineEcs PRIVATE [["PCH.h"]])
 

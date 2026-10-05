@@ -64,4 +64,22 @@ inline float safe_sint32_f(Sint32 val) {
     return static_cast<float>(val);
 }
 
+inline uint32_t safe_d_u32(double val) {
+    assert(std::isfinite(val));
+    assert(val >= 0.0);
+    assert(val <= static_cast<double>(std::numeric_limits<uint32_t>::max()));
+    assert(std::floor(val) == val);
+    return static_cast<uint32_t>(val);
+}
+
+inline std::streamsize safe_size_ss(size_t val) {
+    assert(val <= static_cast<size_t>(std::numeric_limits<std::streamsize>::max()));
+    return static_cast<std::streamsize>(val);
+}
+
+inline float safe_d_f(double val) {
+    assert(!std::isfinite(val) || std::fabs(val) <= static_cast<double>(std::numeric_limits<float>::max()));
+    return static_cast<float>(val);
+}
+
 #define VEC_HOT(name) ((void)0)

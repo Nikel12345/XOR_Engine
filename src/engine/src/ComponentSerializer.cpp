@@ -185,6 +185,46 @@ void ComponentSpec::Load(Archetype& arch, yyjson_val* comp, size_t count, SceneP
     }
 }
 
+void ComponentSpec::SaveSheaf(Archetype& arch, size_t count, sheaf::Writer& w, std::vector<sheaf::Column>& out) const
+{
+    if (custom_save_sheaf) { custom_save_sheaf(arch, count, w, out); return; }
+    if (fields.empty()) return;
+
+    // Дефолт поля уходит в файл, и берётся он из того же T{}/прокси, что и у рантайм-создания.
+    Archetype def_row;
+    add_default(def_row);
+
+    for (const FieldSpec& f : fields) {
+        if (!f.set_num && !f.set_str) continue;
+        sheaf::Column& c = out.emplace_back();
+        c.name = f.key;
+        c.values.reserve(count);
+        switch (f.kind) {
+        case FieldKind::F32:
+        case FieldKind::Angle:
+            c.type = sheaf::Type::F32;
+            c.def  = sheaf::Bits(safe_d_f(f.get_num(def_row, 0)));
+            for (size_t i = 0; i < count; ++i) c.values.push_back(sheaf::Bits(safe_d_f(f.get_num(arch, i))));
+            break;
+        case FieldKind::U32:
+            c.type = sheaf::Type::U32;
+            c.def  = safe_d_u32(f.get_num(def_row, 0));
+            for (size_t i = 0; i < count; ++i) c.values.push_back(safe_d_u32(f.get_num(arch, i)));
+            break;
+        case FieldKind::Bool:
+            c.type = sheaf::Type::Bool;
+            c.def  = f.get_num(def_row, 0) != 0.0;
+            for (size_t i = 0; i < count; ++i) c.values.push_back(f.get_num(arch, i) != 0.0);
+            break;
+        default:
+            c.type = sheaf::Type::Str;
+            c.def  = w.Intern(f.get_str(def_row, 0));
+            for (size_t i = 0; i < count; ++i) c.values.push_back(w.Intern(f.get_str(arch, i)));
+            break;
+        }
+    }
+}
+
 // Список имён НА СУЩНОСТЬ — зубчатый массив, а не колонка одного поля: схемой не выражается.
 namespace {
 

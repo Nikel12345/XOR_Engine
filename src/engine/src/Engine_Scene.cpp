@@ -513,12 +513,29 @@ void Engine::SaveScene(const SceneName& scene_name, const std::string& scenes_ro
 	std::filesystem::create_directories(dir, ec);
 	if (ec) { SDL_Log("SaveScene: cannot create dir '%s' (%s)", dir.c_str(), ec.message().c_str()); return; }
 
+	size_t json_bytes = 0;
 	{
+		const Uint64 t0 = SDL_GetTicksNS();
 		const std::string text = object_manager->SaveScene(scene);
 		const std::string path = dir + "/scene.json";
 		std::ofstream f(path, std::ios::binary);
 		if (!f) { SDL_Log("SaveScene: cannot open '%s' for write", path.c_str()); return; }
 		f << text;
+		json_bytes = text.size();
+		SDL_Log("SaveScene: scene.json %zu bytes, %.1f ms", json_bytes, (SDL_GetTicksNS() - t0) / 1e6);
+	}
+	{
+		const Uint64 t0 = SDL_GetTicksNS();
+		const std::vector<uint8_t> bytes = object_manager->SaveSceneSheaf(scene);
+		const std::string path = dir + "/scene.sheaf";
+		std::ofstream f(path, std::ios::binary);
+		if (!f) SDL_Log("SaveScene: cannot open '%s' for write", path.c_str());
+		else {
+			f.write(reinterpret_cast<const char*>(bytes.data()), safe_size_ss(bytes.size()));
+			SDL_Log("SaveScene: scene.sheaf %zu bytes (%.1f%% of scene.json), %.1f ms", bytes.size(),
+			        json_bytes ? 100.0 * static_cast<double>(bytes.size()) / static_cast<double>(json_bytes) : 0.0,
+			        (SDL_GetTicksNS() - t0) / 1e6);
+		}
 	}
 
 	SaveTextures (dir, texture_manager);

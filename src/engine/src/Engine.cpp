@@ -146,6 +146,74 @@ return [mtm, mdm](Archetype& arch, yyjson_val* comp, size_t count, ScenePool* po
     for (size_t i = 0; i < count; ++i) a->add(rows[i]);
 };}
 
+// Вложенных списков формат не знает: mat_lodL — список по части на элемент, а состояния — плоские
+// списки, где к какой части относится состояние, говорит state_part.
+auto MakeSaveRenderableSheaf(MaterialManager* mtm, ModelManager* mdm) {
+return [mtm, mdm](Archetype& arch, size_t count, sheaf::Writer& w, std::vector<sheaf::Column>& out)
+{
+    const Renderable& r = arch.get_array<Renderable>()->data;
+    const RenderableProxy def;
+    auto column = [](std::string name, sheaf::Type type, uint8_t flags, uint32_t def_value) {
+        sheaf::Column c;
+        c.name = std::move(name); c.type = type; c.flags = flags; c.def = def_value;
+        return c;
+    };
+
+    sheaf::Column vis = column("visible", sheaf::Type::Bool, 0, def.visible);
+    sheaf::Column alp = column("alpha",   sheaf::Type::F32,  0, sheaf::Bits(def.alpha));
+    sheaf::Column flg = column("flags",   sheaf::Type::U32,  0, def.flags);
+    sheaf::Column mdl = column("model",   sheaf::Type::Str,  0, w.Intern(mdm->ModelNameOf(def.model)));
+    for (size_t i = 0; i < count; ++i) {
+        vis.values.push_back(r.visible[i] != 0);
+        alp.values.push_back(sheaf::Bits(r.alpha[i]));
+        flg.values.push_back(r.flags[i]);
+        mdl.values.push_back(w.Intern(mdm->ModelNameOf(r.model[i])));
+    }
+    out.push_back(std::move(vis));
+    out.push_back(std::move(alp));
+    out.push_back(std::move(flg));
+    out.push_back(std::move(mdl));
+
+    for (uint32_t L = 0; L < MAX_LOD; ++L) {
+        sheaf::Column lod = column("mat_lod" + std::to_string(L), sheaf::Type::Str, sheaf::List | sheaf::Nullable, 0);
+        bool any = false;
+        for (size_t i = 0; i < count; ++i) {
+            const uint32_t n = std::min(mdm->LevelCount(r.model[i]), MAX_LOD);
+            lod.lengths.push_back(safe_u32(r.materials[i].size()));
+            for (const MaterialSlot& part : r.materials[i]) {
+                const MaterialId m = L < n ? part.per_lod[L] : MaterialId{};
+                lod.values.push_back(m ? w.Intern(mtm->MaterialNameOf(m)) : 0);
+                lod.present.push_back(static_cast<bool>(m));
+                any = any || static_cast<bool>(m);
+            }
+        }
+        if (any) out.push_back(std::move(lod));    // нет колонки — у всех пусто
+    }
+
+    sheaf::Column st_part  = column("state_part",  sheaf::Type::U32, sheaf::List, 0);
+    sheaf::Column st_role  = column("state_role",  sheaf::Type::U32, sheaf::List, 0);
+    sheaf::Column st_value = column("state_value", sheaf::Type::U32, sheaf::List, 0);
+    bool any_state = false;
+    for (size_t i = 0; i < count; ++i) {
+        uint32_t n = 0;
+        for (size_t p = 0; p < r.materials[i].size(); ++p)
+            for (const auto& [role, v] : r.materials[i][p].states) {
+                st_part.values.push_back(safe_u32(p));
+                st_role.values.push_back(safe_i_u32(static_cast<int>(role)));
+                st_value.values.push_back(v);
+                ++n;
+            }
+        st_part.lengths.push_back(n);
+        st_role.lengths.push_back(n);
+        st_value.lengths.push_back(n);
+        any_state = any_state || n > 0;
+    }
+    if (!any_state) return;
+    out.push_back(std::move(st_part));
+    out.push_back(std::move(st_role));
+    out.push_back(std::move(st_value));
+};}
+
 } // namespace
 
 
@@ -168,7 +236,8 @@ static void RegisterResourceComponentSpecs(MaterialManager* mtm, ModelManager* m
 				[](Archetype& a, size_t i) -> double { return a.get_array<Renderable>()->data.flags[i]; },
 				[](Archetype& a, size_t i, double v) { a.get_array<Renderable>()->data.flags[i] = static_cast<uint32_t>(v); }),
 		},
-		.custom_save = MakeSaveRenderable(mtm, mdm), .custom_load = MakeLoadRenderable(mtm, mdm) });
+		.custom_save = MakeSaveRenderable(mtm, mdm), .custom_load = MakeLoadRenderable(mtm, mdm),
+		.custom_save_sheaf = MakeSaveRenderableSheaf(mtm, mdm) });
 }
 
 void Engine::OnWindowResized(Sint32 window_w, Sint32 window_h)

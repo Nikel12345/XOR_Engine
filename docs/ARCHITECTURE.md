@@ -40,7 +40,7 @@ XOR Engine — набор статических библиотек. Прило�
 | цель | что внутри | почему отдельно |
 |---|---|---|
 | **EngineCore** | `Aliases.h`, `ResourceId.h`, `ResourceRegistry.h`, `ResourceTags.h`, `CommandId.h`, `Utils.h`, `config.h`, `EngineProfiler`, общий `PCH.h` | Словарь и утилиты, не знающие ни про ECS, ни про GPU. Правило приёма: сюда попадает только то, что переживёт замену ЛЮБОЙ из целей выше — иначе второй оркестратор, которому рендер не нужен, линковал бы `EngineGpu` ради `safe_u32` |
-| **EngineEcs** | `ObjectManager` (+`.inl`), `BaseComponents`, `ComponentStorage`, `ComponentSerializer`, `SceneData` | ECS обязан оставаться листом: его линкует и `Engine`, и `Physics`. Тянет только SDL3 и `yyjson` (колоночная сериализация сцены) |
+| **EngineEcs** | `ObjectManager` (+`.inl`), `BaseComponents`, `ComponentStorage`, `ComponentSerializer`, `SceneData` | ECS обязан оставаться листом: его линкует и `Engine`, и `Physics`. Тянет только SDL3, `yyjson` и `Sheaf` (сериализация сцены) |
 | **EngineGpu** | `QueueManager`, `TransferManager`, `BufferManager` (+`_Binds`/`_Update`/`_Utils`), `ShaderManager` (+`_ShadersCreate`/`_SPVLoad`), `TextureManager`, `PreviewPacker`, `PassManager`, `PipeManager`, `GeometryPool`, `RenderCommandData`, `RenderSnapshot.h`, `GpuContext`, `SparseRankChannel` | Всё, чем кадр исполняется: буферы, шейдеры, пайплайны, текстуры, проходы, пулы геометрии — без единого знания о сцене и рендер-логике |
 | **Engine** | менеджеры, data-модули, `BatchBuilder`, `EngineContext`, дефолт-сеты, UI, цикл кадра | Линкует `EngineGpu` и `EngineEcs` как PUBLIC и склеивает их |
 | **Physics** | `PhysicsBufferSet`, `PhysicsComputeSet`, `CollisionShapes`, `ContactSystem`, `DebugColliderSystem` | Линкует **только** `EngineGpu` + `EngineEcs`, без `Engine`, рендера и ImGui. Своего PCH не имеет намеренно — это работающая проверка, что слоение не протекло |
@@ -203,6 +203,7 @@ id раньше, чем появится сам ресурс. Имя при эт
   Ключ кэша включает исходник вместе со всей цепочкой `#include`, поэтому правка `.hlsli`
   инвалидирует зависимые шейдеры сама — чистить руками не нужно.
 - **Сцена — это папка**, а не файл: `scene.json` (ECS, колоночно) плюс манифесты ресурсов рядом.
+  Те же объекты пишутся и в `scene.sheaf` ([`sheaf.md`](sheaf.md)); грузится сцена из `scene.json`.
   Точка входа — `Engine::SaveScene` / `LoadScene(имя, папка)`. Порядок загрузки: деструкторы
   уходящей сцены → ресурсы (merge-upsert) → ECS (replace) → генераторы загруженной сцены →
   пересборка батчей. Имена из манифестов и `scene.json` становятся id на чтении.
