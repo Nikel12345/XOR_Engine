@@ -77,5 +77,6 @@ foreach(_sc_target SDL3_shadercross-static spirv-cross-c spirv-cross-core spirv-
     endif()
 endforeach()
 
+add_subdirectory(src/sheaf)
 add_subdirectory(src/engine)
 add_subdirectory(src/physics)
