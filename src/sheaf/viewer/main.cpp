@@ -28,6 +28,14 @@ void SDLCALL OnFileChosen(void*, const char* const* files, int)
     SDL_PushEvent(&e);
 }
 
+int FailStartup(const char* stage)
+{
+    const std::string message = std::string(stage) + ": " + SDL_GetError();
+    SDL_Log("SheafView: %s", message.c_str());
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "SheafView", message.c_str(), nullptr);
+    return 1;
+}
+
 void LoadFonts()
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -65,11 +73,11 @@ void RenderFrame(SDL_GPUDevice* dev, SDL_Window* win)
 
 int main(int argc, char** argv)
 {
-    if (!SDL_Init(SDL_INIT_VIDEO)) { SDL_Log("SDL_Init: %s", SDL_GetError()); return 1; }
+    if (!SDL_Init(SDL_INIT_VIDEO)) return FailStartup("SDL_Init");
     SDL_Window* win = SDL_CreateWindow("SheafView", 1400, 900, SDL_WINDOW_RESIZABLE);
     SDL_GPUDevice* dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXBC
                                              | SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_METALLIB, false, nullptr);
-    if (!win || !dev || !SDL_ClaimWindowForGPUDevice(dev, win)) { SDL_Log("SheafView: %s", SDL_GetError()); return 1; }
+    if (!win || !dev || !SDL_ClaimWindowForGPUDevice(dev, win)) return FailStartup("окно с GPU");
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
