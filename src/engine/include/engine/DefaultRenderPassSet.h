@@ -184,7 +184,7 @@ namespace DefaultRenderPassNamespace
         float    fog_absorption = 0.1f;
         float    fog_anisotropy = 0.25f;
         float    fog_intensity  = 65.0f;
-        uint32_t fog_samples    = 16;
+        uint32_t fog_samples    = 4;
         uint32_t light_count    = 0;
     };
     inline const std::string FROXEL_FOG_STATE = "FroxelFogState";
