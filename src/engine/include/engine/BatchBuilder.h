@@ -55,6 +55,7 @@ public:
 	uint64_t BatchesRevision() const { return batches_revision; }
 	uint64_t RebuildEpoch() const { return rebuild_epoch; }
 	void SetDirtyBatches(bool state) { dirty_batches = state; };
+	void SetDirtyResolve(bool state) { dirty_resolve = state; };
 
 	void StampLayoutSnapshot(uint8_t slot);
 	// Счётчиков по всей раскладке здесь нет намеренно: размеры буферов, диспатчи и смещения дроу
@@ -78,6 +79,8 @@ private:
 		RenderPassStep*    pass = nullptr;
 		TextureBatchData*  texture = nullptr;
 		const SubMeshData* submesh = nullptr;
+		ModelId            model;
+		uint32_t           submesh_index = 0;
 		uint64_t           key = 0;
 		uint8_t            level = 0;
 	};
@@ -98,6 +101,7 @@ private:
 		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
 		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
 	void FinalizeOffsets(PassManager* pass_manager, BufferManager* bm);
+	void ResolveResources(PassManager* pass_manager, ModelManager* mdm);
 
 	// Памятка живёт до конца текущего UpdateRenderBatches и между вызовами НЕ валидна: протухнуть
 	// она может от правки списка вариантов, переименования текстуры, правки sp у материала и репака
@@ -133,4 +137,5 @@ private:
 	uint64_t batches_revision = 0;
 	uint64_t rebuild_epoch = 0;
 	std::atomic<bool> dirty_batches{ true };
+	std::atomic<bool> dirty_resolve{ false };
 };

@@ -45,6 +45,8 @@ struct ModelBatchData {
     uint32_t    firstInstance = 0;
     uint32_t    instanceCount = 0;
     SubMeshDraw submesh;
+    ModelId     model;
+    uint32_t    submesh_index = 0;
 };
 
 // Должно совпадать с material_api.hlsl: шейдер читает блок как uint4 и распаковывает

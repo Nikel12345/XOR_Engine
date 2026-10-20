@@ -296,7 +296,7 @@ void DefaultCommandSet::SetModelCommands(InputManager& im)
 						if (arr->data.model[i] == id) ctx->FitRenderableParts(arr->data, i);
 				});
 				om->BumpEntityRevision();
-				ctx->GetBatchBuilder()->SetDirtyBatches(true);
+				ctx->GetBatchBuilder()->SetDirtyResolve(true);
 			}
 		});
 }

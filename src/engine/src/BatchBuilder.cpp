@@ -354,7 +354,7 @@ void BatchBuilder::ResolveEntity(PassManager* pass_manager, ShaderManager* sm, B
                 if (!tb) continue;
 
                 const uint64_t cmd_key = MixKey(MixKey(HashModelBatchKey(model_id, si) + lod) ^ path_key);
-                resolved_scratch.push_back({ rp, tb, &submesh, cmd_key, static_cast<uint8_t>(lod) });
+                resolved_scratch.push_back({ rp, tb, &submesh, model_id, si, cmd_key, static_cast<uint8_t>(lod) });
             }
         }
     }
@@ -408,6 +408,8 @@ void BatchBuilder::InsertResolvedEntity(Entity entity)
                     leaf.group = &group;
                     leaf.level = c.level;
                     leaf.submesh = { c.submesh->indexCount, c.submesh->indexOffset, c.submesh->vertexOffset };
+                    leaf.model = c.model;
+                    leaf.submesh_index = c.submesh_index;
                 }
             }
         }
@@ -458,6 +460,12 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
     }
     else if (ApplyIncremental(pass_manager, om, tm, sm, bm, mdm, mtm, scene)) {
         FinalizeOffsets(pass_manager, bm);
+        changed = true;
+    }
+
+    if (dirty_resolve.exchange(false)) {
+        ResolveResources(pass_manager, mdm);
+        ++rebuild_epoch;
         changed = true;
     }
 
@@ -645,6 +653,23 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
         layout->passes.push_back(std::move(pass_list));
     }
     current_layout = std::move(layout);
+}
+
+void BatchBuilder::ResolveResources(PassManager* pass_manager, ModelManager* mdm)
+{
+    for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses())
+        for (auto& [_, shader_batch] : rp->shader_batches)
+            for (auto& [_, res_batch] : shader_batch.resource_batches)
+                for (auto& [_, texture_batch] : res_batch.texture_batches)
+                    for (auto& [_, leaf] : texture_batch.model_batches) {
+                        const ModelData* model = mdm ? mdm->FindModel(leaf.model) : nullptr;
+                        if (!model || leaf.submesh_index >= model->submeshes.size()) {
+                            leaf.submesh = {};
+                            continue;
+                        }
+                        const SubMeshData& submesh = model->submeshes[leaf.submesh_index];
+                        leaf.submesh = { submesh.indexCount, submesh.indexOffset, submesh.vertexOffset };
+                    }
 }
 
 void BatchBuilder::StampLayoutSnapshot(uint8_t slot)
