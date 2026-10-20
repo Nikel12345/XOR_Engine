@@ -17,6 +17,7 @@
 #include "FontManager.h"
 #include "TextureLoader.h"
 #include "BatchBuilder.h"
+#include "DrawPopulation.h"
 #include "PIB_DataModule.h"
 #include "BoundSphereDataModule.h"
 #include "CullingDataModule.h"
@@ -195,7 +196,7 @@ static void RegisterResourceComponentSpecs(MaterialManager* mtm, ModelManager* m
 	ComponentSpecRegistry::Get().Register({ .name = "Renderable", .sig_type = typeid(Renderable),
 		.add_default = AddDefaultSoA<Renderable, RenderableProxy>,
 		.fields = {
-			// Прямая запись флага не поставит дельту в батчи, поэтому правка уходит командой.
+			// Прямая запись флага не пометит население батчей, поэтому правка уходит командой.
 			FieldSpec::Num("visible", Bool,
 				[](Archetype& a, size_t i) -> double { return a.get_array<Renderable>()->data.visible[i]; },
 				[](Archetype& a, size_t i, double v) { a.get_array<Renderable>()->data.visible[i] = v != 0.0 ? 1 : 0; },
@@ -299,6 +300,7 @@ Engine::Engine(const EngineConfig& cfg)
 	font_manager = new FontManager();
 
 	batch_builder = new BatchBuilder();
+	draw_population = new DrawPopulation();
 
 	pib_data_module = new PIB_DataModule();
 	bound_sphere_data_module = new BoundSphereDataModule();
@@ -313,6 +315,7 @@ Engine::Engine(const EngineConfig& cfg)
 
 	engine_context = new EngineContext(buffer_manager, texture_manager, pass_manager, material_manager, object_manager, shader_manager, model_manager, camera_manager, pipe_manager, batch_builder, texture_loader);
 	engine_context->SetInputManager(input_manager);
+	engine_context->SetDrawPopulation(draw_population);
 	engine_context->SetFontManager(font_manager);
 	engine_context->SetUIYoga(ui_yoga);
 	engine_context->SetEngine(this);
@@ -461,6 +464,7 @@ Engine::~Engine()
 	delete texture_loader;
 	delete font_manager;
 	delete batch_builder;
+	delete draw_population;
 	delete pib_data_module;
 	delete bound_sphere_data_module;
 	delete culling_data_module;

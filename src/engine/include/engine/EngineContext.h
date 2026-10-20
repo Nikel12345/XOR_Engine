@@ -36,6 +36,7 @@ class FontManager;
 struct FontData;
 class UI_Yoga;
 class Engine;
+class DrawPopulation;
 
 inline constexpr const char* kScenesRoot = "saved_scene";
 
@@ -103,19 +104,7 @@ public:
 
 	template<typename... Components>
 	Entity CreateEntity(const std::string& scene_name, Components&&... comps) {
-		constexpr bool needs_pib = contains_type_v<RenderableProxy, Components...>;
-
-		Entity entity = object_manager->CreateEntity(scene_name, std::forward<Components>(comps)...);
-
-		if constexpr (needs_pib) {
-			SceneData* active_scene = object_manager->GetActiveScene();
-			SceneData* target_scene = object_manager->GetScene(scene_name);
-			if (target_scene != nullptr && active_scene == target_scene) {
-				batch_builder->QueueCreate(entity);
-			}
-		}
-
-		return entity;
+		return object_manager->CreateEntity(scene_name, std::forward<Components>(comps)...);
 	}
 	void DeleteEntity(const SceneName& scene_name, Entity e);
 	// Строка трансформа остаётся на месте, индексы соседей не сдвигаются.
@@ -161,6 +150,9 @@ public:
 
 	BatchBuilder* GetBatchBuilder() const { return batch_builder; }
 
+	void SetDrawPopulation(DrawPopulation* population) { draw_population = population; }
+	DrawPopulation* GetDrawPopulation() const { return draw_population; }
+
 	void SetInputManager(InputManager* im) { input_manager = im; }
 	InputManager* GetInputManager() const { return input_manager; }
 
@@ -181,6 +173,7 @@ private:
 	CameraManager* camera_manager = nullptr;
 
 	BatchBuilder* batch_builder = nullptr;
+	DrawPopulation* draw_population = nullptr;
 
 	InputManager* input_manager = nullptr;
 	TextureLoader* texture_loader = nullptr;

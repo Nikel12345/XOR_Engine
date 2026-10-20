@@ -27,6 +27,7 @@ class InputManager;
 class TextureLoader;
 class FontManager;
 class BatchBuilder;
+class DrawPopulation;
 class PIB_DataModule;
 class BoundSphereDataModule;
 class CullingDataModule;
@@ -169,6 +170,7 @@ private:
     FontManager* font_manager = nullptr;
 
     BatchBuilder* batch_builder = nullptr;
+    DrawPopulation* draw_population = nullptr;
 
     PIB_DataModule* pib_data_module = nullptr;
     BoundSphereDataModule* bound_sphere_data_module = nullptr;

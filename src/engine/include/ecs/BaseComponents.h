@@ -165,7 +165,8 @@ struct MaterialSlot {
 // секцию одинаково — только через эту функцию.
 inline uint32_t StateSection(uint32_t material_index, uint32_t /*L*/) { return material_index; }
 
-// model и materials[i].per_lod скопированы в дерево батчей: прямая запись его не обновит, правка идёт
+// recipe — кэш пары model + materials[i].per_lod, пустой пересчитывает DrawPopulation. Прямая запись
+// model или per_lod кэш не сбросит, и сущность продолжит рисоваться старым сочетанием: правка идёт
 // через EngineContext::ChangeModel/ChangeMaterial.
 struct Renderable : SoAProxyAddable<Renderable> {
     using soa_tag = void;
@@ -174,8 +175,9 @@ struct Renderable : SoAProxyAddable<Renderable> {
     std::vector<uint32_t>                  flags;
     std::vector<ModelId>                   model;
     std::vector<std::vector<MaterialSlot>> materials;
+    std::vector<RecipeId>                  recipe;
     size_t size() const { return visible.size(); }
-    auto columns() { return std::tie(visible, alpha, flags, model, materials); }
+    auto columns() { return std::tie(visible, alpha, flags, model, materials, recipe); }
 };
 
 struct RenderableProxy {
@@ -200,6 +202,7 @@ struct RenderableProxy {
     void emplace_to(SoA& soa) const {
         soa.visible.push_back(visible ? 1 : 0);  soa.alpha.push_back(alpha);  soa.flags.push_back(flags);
         soa.model.push_back(model);              soa.materials.push_back(materials);
+        soa.recipe.push_back(RecipeId{});
     }
 };
 

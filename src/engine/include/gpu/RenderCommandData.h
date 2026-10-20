@@ -25,28 +25,21 @@ struct SubMeshDraw {
     uint32_t vertex_offset = 0;
 };
 
-struct PibRecord {
-    uint32_t entity = 0;
-    uint32_t row = kPibNoRow;
-};
-
 // Сущности, которые в проходе рисуются одинаковым набором команд. Все листы группы делят её
 // записи PIB: first_instance/num_instances у них общие.
 struct DrawGroup {
-    std::vector<PibRecord> records;
     uint32_t pib_first = 0;
+    uint32_t size = 0;
     uint8_t  lod_count = 1;
     float    switches[3] = {};
 };
 
 struct ModelBatchData {
-    DrawGroup*  group = nullptr;
+    uint32_t    group_index = 0;
     uint8_t     level = 0;
     uint32_t    firstInstance = 0;
     uint32_t    instanceCount = 0;
     SubMeshDraw submesh;
-    ModelId     model;
-    uint32_t    submesh_index = 0;
 };
 
 // Должно совпадать с material_api.hlsl: шейдер читает блок как uint4 и распаковывает
@@ -148,7 +141,7 @@ private:
 struct RenderPassStep {
     RenderPassTexturesInfo renderPassTexsData;
     std::unordered_map<BatchKeys::ShaderBatchKey, ShaderBatchData> shader_batches;
-    std::unordered_map<BatchKeys::GroupKey, DrawGroup> draw_groups;
+    std::vector<DrawGroup> draw_groups;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function;
 
     std::vector<TextureAtlas*> global_texture_bindings;

@@ -255,10 +255,12 @@ set(ENGINE_PRESETS_HDR
 )
 set(ENGINE_UTILS_SRC
     src/BatchBuilder.cpp
+    src/DrawPopulation.cpp
     src/FPSCounter.cpp
 )
 set(ENGINE_UTILS_HDR
     include/engine/BatchBuilder.h
+    include/engine/DrawPopulation.h
     include/engine/FPSCounter.h
 )
 set(ENGINE_CORE_SRC

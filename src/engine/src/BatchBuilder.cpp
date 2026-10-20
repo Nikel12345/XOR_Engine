@@ -3,7 +3,6 @@
 #include "BaseComponents.h"
 #include "RenderCommandData.h"
 #include "RenderSnapshot.h"
-#include "ObjectManager.h"
 #include "PipeManager.h"
 #include "PassManager.h"
 #include "ShaderManager.h"
@@ -11,11 +10,9 @@
 #include "BufferManager.h"
 #include "ModelManager.h"
 #include "MaterialManager.h"
-#include "PositionStructure.h"
 #include "ModelData.h"
 #include "TextureData.h"
 #include <bit>
-#include <unordered_set>
 
 using namespace BatchKeys;
 using namespace ShaderBase;
@@ -137,24 +134,6 @@ void BatchBuilder::SetDummyTexture(const std::string& name, TextureManager* tm)
 
     // Своего материала у dummy нет, поэтому SAMPLER его атласу объявляем здесь.
     atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
-}
-
-void BatchBuilder::QueueCreate(Entity entity)
-{
-    std::lock_guard<std::mutex> lock(delta_mutex);
-    entities_to_create.push_back(entity);
-}
-
-void BatchBuilder::QueueDelete(Entity entity)
-{
-    std::lock_guard<std::mutex> lock(delta_mutex);
-    entities_to_delete.push_back(entity);
-}
-
-void BatchBuilder::QueueUpdate(Entity entity)
-{
-    std::lock_guard<std::mutex> lock(delta_mutex);
-    entities_to_update.push_back(entity);
 }
 
 void BatchBuilder::BuildMaterialLayouts(PipeManager* pm, PassManager* pass_manager, TextureManager* tm,
@@ -303,29 +282,27 @@ TextureBatchData* BatchBuilder::ResolveTextureBatch(RenderPassStep* rp, ShaderPr
     return &tex_it->second;
 }
 
-void BatchBuilder::ResolveEntity(PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
-    ModelManager* mdm, MaterialManager* mtm, const Renderable& rend, size_t row) {
+void BatchBuilder::ResolveRecipe(PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
+    ModelManager* mdm, MaterialManager* mtm, const Recipe& recipe) {
 
     resolved_scratch.clear();
     group_scratch.clear();
-    const ModelId root = rend.model[row];
+    const std::vector<RenderPassStep*>& passes = pass_manager->GetOrderedRenderPasses();
+    const ModelId root = recipe.model;
     const uint32_t lod_count = mdm ? std::min(mdm->LevelCount(root), MAX_LOD) : 1u;
     const ModelData* root_model = mdm ? mdm->FindModel(root) : nullptr;
-    const std::vector<MaterialSlot>& materials = rend.materials[row];
 
     for (uint32_t lod = 0; lod < lod_count; ++lod) {
         const ModelId model_id = mdm ? mdm->LevelModel(root, lod) : root;
-        // Резолв ТИХИЙ (FindModel, а не логирующий operator[]): он идёт на КАЖДУЮ сущность, и одно
-        // битое имя в сцене на миллион объектов дало бы миллион строк лога.
         const ModelData* model = mdm ? mdm->FindModel(model_id) : nullptr;
         if (!model) continue;
 
         for (uint32_t si = 0; si < model->submeshes.size(); ++si) {
             const SubMeshData& submesh = model->submeshes[si];
             if (submesh.indexCount == 0) continue;
-            if (submesh.material_index >= materials.size()) continue;
+            if (submesh.material_index >= recipe.parts.size()) continue;
 
-            Material* material = mtm ? mtm->GetMaterial(materials[submesh.material_index].per_lod[lod]) : nullptr;
+            Material* material = mtm ? mtm->GetMaterial(recipe.parts[submesh.material_index][lod]) : nullptr;
             if (!material) continue;
 
             for (const SpBinding& binding : material->shader_programs) {
@@ -341,7 +318,7 @@ void BatchBuilder::ResolveEntity(PassManager* pass_manager, ShaderManager* sm, B
                     resolved_id = fallback_sp;
                 }
                 RenderPassStep* rp = pass_manager->GetRenderPassStep(sp->render_pass_name);
-                if (!rp) continue;
+                if (!rp || rp->ordinal >= passes.size() || passes[rp->ordinal] != rp) continue;
 
                 auto lay_it = mat_sp_layouts.find(HashMatSpMemo(material, sp, sp_params.get()));
                 if (lay_it == mat_sp_layouts.end() || !lay_it->second.bindable) continue;
@@ -354,7 +331,7 @@ void BatchBuilder::ResolveEntity(PassManager* pass_manager, ShaderManager* sm, B
                 if (!tb) continue;
 
                 const uint64_t cmd_key = MixKey(MixKey(HashModelBatchKey(model_id, si) + lod) ^ path_key);
-                resolved_scratch.push_back({ rp, tb, &submesh, model_id, si, cmd_key, static_cast<uint8_t>(lod) });
+                resolved_scratch.push_back({ rp, tb, &submesh, cmd_key, static_cast<uint8_t>(lod) });
             }
         }
     }
@@ -376,28 +353,14 @@ void BatchBuilder::ResolveEntity(PassManager* pass_manager, ShaderManager* sm, B
     }
 }
 
-bool BatchBuilder::StaysInSameGroups(Entity entity) const
-{
-    auto it = entity_slots.find(entity);
-    const size_t held = it == entity_slots.end() ? 0 : it->second.size();
-    if (held != group_scratch.size()) return false;
-
-    for (const ResolvedGroup& g : group_scratch) {
-        auto git = g.pass->draw_groups.find(g.key);
-        if (git == g.pass->draw_groups.end()) return false;
-        const DrawGroup* group = &git->second;
-        if (std::none_of(it->second.begin(), it->second.end(), [group](const PibSlot& s) { return s.group == group; }))
-            return false;
-    }
-    return true;
-}
-
-void BatchBuilder::InsertResolvedEntity(Entity entity)
+void BatchBuilder::InsertResolvedRecipe(uint32_t recipe_index)
 {
     for (const ResolvedGroup& g : group_scratch) {
-        auto [git, created] = g.pass->draw_groups.try_emplace(g.key);
-        DrawGroup& group = git->second;
+        std::vector<DrawGroup>& pass_groups = g.pass->draw_groups;
+        auto [index_it, created] = group_index_by_key[g.pass->ordinal].try_emplace(g.key, safe_u32(pass_groups.size()));
+        const uint32_t group_index = index_it->second;
         if (created) {
+            DrawGroup& group = pass_groups.emplace_back();
             group.lod_count = g.lod_count;
             for (uint32_t L = 0; L + 1u < g.lod_count; ++L) group.switches[L] = g.root_model->lods[L].switch_px;
             for (const ResolvedCmd& c : resolved_scratch) {
@@ -405,180 +368,77 @@ void BatchBuilder::InsertResolvedEntity(Entity entity)
                 auto [lit, leaf_created] = c.texture->model_batches.try_emplace(MixKey(g.key ^ c.key));
                 if (leaf_created) {
                     ModelBatchData& leaf = lit->second;
-                    leaf.group = &group;
+                    leaf.group_index = group_index;
                     leaf.level = c.level;
                     leaf.submesh = { c.submesh->indexCount, c.submesh->indexOffset, c.submesh->vertexOffset };
-                    leaf.model = c.model;
-                    leaf.submesh_index = c.submesh_index;
                 }
             }
         }
-
-        entity_slots[entity].push_back({ &group, safe_u32(group.records.size()) });
-        group.records.push_back({ entity, kPibNoRow });
+        group_table.group_of[size_t(recipe_index) * group_table.pass_count + g.pass->ordinal] = group_index;
     }
-}
-
-void BatchBuilder::RemoveEntityFromBatches(Entity entity)
-{
-    auto it = entity_slots.find(entity);
-    if (it == entity_slots.end()) return;
-
-    for (const PibSlot& slot : it->second) {
-        std::vector<PibRecord>& records = slot.group->records;
-        const uint32_t last_index = safe_u32(records.size()) - 1;
-
-        if (slot.slot_index != last_index) {
-            const Entity moved_entity = records[last_index].entity;
-            records[slot.slot_index] = records[last_index];
-            for (PibSlot& moved_slot : entity_slots[moved_entity]) {
-                if (moved_slot.group == slot.group && moved_slot.slot_index == last_index) {
-                    moved_slot.slot_index = slot.slot_index;
-                    break;
-                }
-            }
-        }
-        records.pop_back();
-    }
-    entity_slots.erase(it);
 }
 
 void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
     TextureManager* tm, ShaderManager* sm, BufferManager* bm,
-    ModelManager* mdm, MaterialManager* mtm, SceneData* scene)
+    ModelManager* mdm, MaterialManager* mtm, DrawPopulation* population, SceneData* scene)
 {
-    if (!scene) return;
+    if (!scene || !population) return;
 
-    BuildMaterialLayouts(pm, pass_manager, tm, sm, mtm);
+    const bool resources_changed = dirty_batches.exchange(false);
+    const bool population_changed = population->TakeChanged(om);
+    if (!resources_changed && !population_changed) return;
 
-    bool changed = false;
-    if (dirty_batches.exchange(false)) {
-        BuildRenderBatches(pass_manager, om, tm, sm, bm, mdm, mtm, scene);
-        FinalizeOffsets(pass_manager, bm);
-        ++rebuild_epoch;
-        changed = true;
+    const bool live_recipes_changed = population->Sweep(scene);
+    if (resources_changed || live_recipes_changed) {
+        BuildMaterialLayouts(pm, pass_manager, tm, sm, mtm);
+        BuildRenderBatches(pass_manager, sm, bm, mdm, mtm, *population);
     }
-    else if (ApplyIncremental(pass_manager, om, tm, sm, bm, mdm, mtm, scene)) {
-        FinalizeOffsets(pass_manager, bm);
-        changed = true;
-    }
+    population->Scatter(scene, group_table);
+    FinalizeOffsets(pass_manager, bm, population->Ranges());
 
-    if (dirty_resolve.exchange(false)) {
-        ResolveResources(pass_manager, mdm);
-        ++rebuild_epoch;
-        changed = true;
-    }
-
-    if (changed) {
-        ++batches_revision;
-    }
+    if (resources_changed) ++rebuild_epoch;
+    ++batches_revision;
 }
 
-// Отбор архетипов и их порядок обязаны совпадать с TransformDataModule: строка трансформа =
-// база архетипа + индекс сущности в нём.
-inline void RecalculateInstanceOffsets(SceneData* scene)
+void BatchBuilder::BuildRenderBatches(PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
+    ModelManager* mdm, MaterialManager* mtm, const DrawPopulation& population)
 {
-    uint32_t base = 0;
-    for (auto& [sig, arch] : scene->archetypes) {
-        if (arch.get_array<Renderable>() &&
-            arch.get_array<Positions>()) {
-            arch.render_instance_base = base;
-            base += safe_u32(arch.entities.size());
-        }
-    }
-}
-
-void BatchBuilder::BuildRenderBatches(PassManager* pass_manager, ObjectManager* om,
-    TextureManager* tm, ShaderManager* sm, BufferManager* bm,
-    ModelManager* mdm, MaterialManager* mtm, SceneData* scene)
-{
-    for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses()) {
+    const std::vector<RenderPassStep*>& passes = pass_manager->GetOrderedRenderPasses();
+    for (RenderPassStep* rp : passes) {
         rp->shader_batches.clear();
         rp->draw_groups.clear();
     }
-    entity_slots.clear();
 
-    {
-        std::lock_guard<std::mutex> lock(delta_mutex);
+    const RecipeRegistry& recipes = population.Recipes();
+    const std::vector<uint32_t>& recipe_counts = population.RecipeCounts();
+    group_table.pass_count = safe_u32(passes.size());
+    group_table.group_of.assign(size_t(recipes.Count()) * group_table.pass_count, kNoGroup);
+    group_index_by_key.assign(passes.size(), {});
 
-        entities_to_create.clear();
-        entities_to_delete.clear();
-        entities_to_update.clear();
+    for (uint32_t r = 0; r < recipes.Count(); ++r) {
+        if (r >= recipe_counts.size() || recipe_counts[r] == 0) continue;
+        ResolveRecipe(pass_manager, sm, bm, mdm, mtm, recipes.At(RecipeId{ safe_u32t_i(r) }));
+        InsertResolvedRecipe(r);
     }
 
-    // Отбор по Renderable, Positions НЕ требуется: transformless-дровабл (скайбокс строит позицию
-    // из камеры) батчится как все, просто строки у него нет.
-    om->ForEachArchetype<Renderable>(scene,
-        [&](ComponentArray<Renderable>* arr, const std::vector<Entity>& ents)
-    {
-        const Renderable& r = arr->data;
-        for (size_t i = 0; i < ents.size(); ++i) {
-            if (!r.visible[i]) continue;
-            ResolveEntity(pass_manager, sm, bm, mdm, mtm, r, i);
-            InsertResolvedEntity(ents[i]);
-        }
-    });
-
-    RecalculateInstanceOffsets(scene);
+    std::vector<uint32_t> pass_group_base(passes.size());
+    uint32_t group_count = 0;
+    for (size_t p = 0; p < passes.size(); ++p) {
+        pass_group_base[p] = group_count;
+        group_count += safe_u32(passes[p]->draw_groups.size());
+    }
+    group_table.group_count = group_count;
+    for (size_t cell = 0; cell < group_table.group_of.size(); ++cell) {
+        uint32_t& group = group_table.group_of[cell];
+        if (group != kNoGroup) group += pass_group_base[cell % group_table.pass_count];
+    }
 }
 
-bool BatchBuilder::ApplyIncremental(PassManager* pass_manager, ObjectManager* om,
-    TextureManager* tm, ShaderManager* sm, BufferManager* bm,
-    ModelManager* mdm, MaterialManager* mtm, SceneData* scene)
+void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm, const std::vector<GroupRange>& ranges)
 {
-    std::vector<Entity> creates, deletes, updates;
-    {
-        std::lock_guard<std::mutex> lock(delta_mutex);
-        creates.swap(entities_to_create);
-        deletes.swap(entities_to_delete);
-        updates.swap(entities_to_update);
-    }
-    if (creates.empty() && deletes.empty() && updates.empty()) return false;
-
-    auto resolve_if_drawable = [&](Entity entity) {
-        if (!om->Has<Renderable>(scene, entity)) return false;
-        SoAElement<Renderable> el = om->GetComponent<Renderable>(scene, entity);
-        const Renderable& r = el.container();
-        const size_t i = el.i();
-        if (!r.visible[i]) return false;
-        ResolveEntity(pass_manager, sm, bm, mdm, mtm, r, i);
-        return true;
-    };
-
-    bool changed = !creates.empty() || !deletes.empty();
-
-    // «Перевесить» — первыми: после этого энтити уже в дереве, поэтому парный QueueCreate погасит
-    // гард идемпотентности, а парный QueueDelete отработает ниже и уберёт её целиком.
-    for (Entity entity : updates) {
-        const bool drawable = resolve_if_drawable(entity);
-        if (!drawable) group_scratch.clear();
-        if (StaysInSameGroups(entity)) continue;
-        RemoveEntityFromBatches(entity);
-        if (drawable) InsertResolvedEntity(entity);
-        changed = true;
-    }
-
-    // Созданная И удалённая в одном кадре с add-стороны выпадает: её компонентов в ECS уже нет.
-    std::unordered_set<Entity> deleted_set(deletes.begin(), deletes.end());
-
-    for (Entity entity : creates) {
-        if (deleted_set.count(entity)) continue;
-        // Видимость тыкают повторно, и повторный Add наплодил бы дубликаты слотов в PIB.
-        if (entity_slots.count(entity)) continue;
-        if (resolve_if_drawable(entity)) InsertResolvedEntity(entity);
-    }
-    for (Entity entity : deletes) {
-        RemoveEntityFromBatches(entity);
-    }
-
-    if (!changed) return false;
-    RecalculateInstanceOffsets(scene);
-    return true;
-}
-
-void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
-{
+    assert(ranges.size() == group_table.group_count && "FinalizeOffsets: population scattered against another group table");
     uint32_t offset = 0;
+    uint32_t group_index = 0;
 
     auto layout = std::make_shared<RenderSnap::BatchLayout>();
     layout->passes.reserve(pass_manager->GetOrderedRenderPasses().size());
@@ -588,9 +448,12 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
     {
         RenderSnap::PassDrawList pass_list;
         pass_list.first_instance = offset;
-        for (auto& [_, group] : rp->draw_groups) {
-            group.pib_first = offset;
-            offset += safe_u32(group.records.size());
+        for (DrawGroup& group : rp->draw_groups) {
+            const GroupRange& range = ranges[group_index++];
+            assert(range.first == offset && "FinalizeOffsets: PIB order of DrawPopulation differs from the pass walk");
+            group.pib_first = range.first;
+            group.size = range.size;
+            offset += range.size;
         }
         pass_list.num_instances = offset - pass_list.first_instance;
         pass_list.shaders.reserve(rp->shader_batches.size());
@@ -638,8 +501,9 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
 
                     for (auto& [model_key, model_batch] : texture_batch.model_batches)
                     {
-                        model_batch.firstInstance = model_batch.group->pib_first;
-                        model_batch.instanceCount = model_batch.level == 0 ? safe_u32(model_batch.group->records.size()) : 0u;
+                        const DrawGroup& group = rp->draw_groups[model_batch.group_index];
+                        model_batch.firstInstance = group.pib_first;
+                        model_batch.instanceCount = model_batch.level == 0 ? group.size : 0u;
                         pass_cmd_index++;
                     }
                     pass_cmds += td.draw_count;
@@ -653,23 +517,6 @@ void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm)
         layout->passes.push_back(std::move(pass_list));
     }
     current_layout = std::move(layout);
-}
-
-void BatchBuilder::ResolveResources(PassManager* pass_manager, ModelManager* mdm)
-{
-    for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses())
-        for (auto& [_, shader_batch] : rp->shader_batches)
-            for (auto& [_, res_batch] : shader_batch.resource_batches)
-                for (auto& [_, texture_batch] : res_batch.texture_batches)
-                    for (auto& [_, leaf] : texture_batch.model_batches) {
-                        const ModelData* model = mdm ? mdm->FindModel(leaf.model) : nullptr;
-                        if (!model || leaf.submesh_index >= model->submeshes.size()) {
-                            leaf.submesh = {};
-                            continue;
-                        }
-                        const SubMeshData& submesh = model->submeshes[leaf.submesh_index];
-                        leaf.submesh = { submesh.indexCount, submesh.indexOffset, submesh.vertexOffset };
-                    }
 }
 
 void BatchBuilder::StampLayoutSnapshot(uint8_t slot)

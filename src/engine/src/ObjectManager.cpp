@@ -42,9 +42,7 @@ void ObjectManager::DeleteEntity(SceneData* scene, Entity e) {
         return;
     }
 
-    // КАСКАДА на детей здесь НЕТ — он в EngineContext::DeleteEntity, который снимает и рендер-
-    // инстанс каждого ребёнка (QueueDelete); иначе их трансформ-строки остались бы в батче и
-    // «переехали» бы на чужие объекты. Тут — бухгалтерия одного e.
+    // КАСКАДА на детей здесь НЕТ — он в EngineContext::DeleteEntity. Тут — бухгалтерия одного e.
     if (Has<ParentComponent>(scene, e)) {
         Entity parent = GetComponent<ParentComponent>(scene, e).parent;
         if (auto pit = scene->children.find(parent); pit != scene->children.end()) {
@@ -75,8 +73,6 @@ void ObjectManager::DeleteEntity(SceneData* scene, Entity e) {
     scene->entity_to_index.erase(e);
     scene->entity_to_archetype.erase(e);
 
-    // Пересборку батчей НЕ взводим: удаление доезжает до дерева инкрементально, дельтой от
-    // EngineContext::DeleteEntity (BatchBuilder::QueueDelete).
     ++entity_revision;
 }
 

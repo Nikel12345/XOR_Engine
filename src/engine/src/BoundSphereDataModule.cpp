@@ -70,7 +70,7 @@ void BoundSphereDataModule::StoreSpheres(BufferManager* bm, UploadTask* task, Ob
 		return memo_sphere;
 	};
 
-	// Отбор и порядок обязаны совпадать с RecalculateInstanceOffsets и TransformDataModule.
+	// Отбор и порядок обязаны совпадать с DrawPopulation::Sweep и TransformDataModule.
 	for (auto& [sig, arch] : scene->archetypes) {
 		if (!arch.get_array<Renderable>() || !arch.get_array<Positions>()) continue;
 

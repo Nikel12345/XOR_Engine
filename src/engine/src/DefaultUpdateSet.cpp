@@ -83,13 +83,12 @@ void DefaultUpdateSet::SetDefaultPositionIndexUpdater(EngineContext& ctx, PIB_Da
     inited = true;
 
     auto* bm = ctx.GetBufferManager();
-    auto* om = ctx.GetObjectManager();
-    auto* pm = ctx.GetPassManager();
     auto* bb = ctx.GetBatchBuilder();
+    const DrawPopulation* population = ctx.GetDrawPopulation();
 
     bm->CreateUpdateInstruction(DEFAULT_POSITION_INDEX_BUFFER,
-        [om, pm, pib_dm, bb](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { pib_dm->StorePIB(bm, pm, &task, om, bb->BatchesRevision(), bm->logic_index.load()); },
-        [pm, pib_dm, bb, bm]() -> uint32_t { return pib_dm->CalculatePIBSizes(pm, bb->BatchesRevision(), bm->logic_index.load()); });
+        [population, pib_dm, bb](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { pib_dm->StorePIB(bm, &task, population, bb->BatchesRevision(), bm->logic_index.load()); },
+        [population, pib_dm, bb, bm]() -> uint32_t { return pib_dm->CalculatePIBSizes(population, bb->BatchesRevision(), bm->logic_index.load()); });
 }
 
 void DefaultUpdateSet::SetDefaultLightCamerasUpdater(EngineContext& ctx, LightDataModule* ldm)

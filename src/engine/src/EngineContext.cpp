@@ -229,7 +229,7 @@ void EngineContext::ChangeModel(Entity e, const ModelName& model_name)
 
 	// Буфер bound-сфер гейтится ревизией сущностей, а не деревом батчей.
 	object_manager->BumpEntityRevision();
-	batch_builder->QueueUpdate(e);
+	draw_population->MarkDirty();
 }
 
 void EngineContext::ChangeMaterial(Entity e, const MaterialName& material_name, uint32_t mat_index, uint32_t lod)
@@ -242,8 +242,9 @@ void EngineContext::ChangeMaterial(Entity e, const MaterialName& material_name, 
 
 	mats[mat_index].per_lod[lod] = material_manager->InternMaterial(material_name);
 	if (lod == 0) mats[mat_index].states.clear();
+	r.container().recipe[r.i()] = RecipeId{};
 
-	batch_builder->QueueUpdate(e);
+	draw_population->MarkDirty();
 }
 
 void EngineContext::FitRenderableParts(Renderable& r, size_t row) const
@@ -265,6 +266,7 @@ void EngineContext::FitRenderableParts(Renderable& r, size_t row) const
 	for (size_t k = 0; k < count; ++k)
 		for (uint32_t L = 0; L < MAX_LOD; ++L)
 			if (k >= used[L].size() || !used[L][k]) parts[k].per_lod[L] = MaterialId{};
+	r.recipe[row] = RecipeId{};
 }
 
 static_assert(MAX_LOD == MAX_MODEL_LODS);
@@ -296,16 +298,11 @@ void EngineContext::DeleteEntity(const SceneName& scene_name, Entity e)
 	SceneData* target_scene = object_manager->GetScene(scene_name);
 	if (!target_scene) return;
 
-	// Детей сносим через ЭТОТ же метод, иначе их рендер-инстансы останутся в батче и их
-	// трансформ-строки переедут на чужие объекты. Список копируем — рекурсия мутирует children.
+	// Список копируем — рекурсия мутирует children.
 	if (auto it = target_scene->children.find(e); it != target_scene->children.end()) {
 		std::vector<Entity> kids = std::move(it->second);
 		target_scene->children.erase(it);
 		for (Entity c : kids) DeleteEntity(scene_name, c);
-	}
-
-	if (object_manager->Has<Renderable>(target_scene, e) && target_scene == object_manager->GetActiveScene()) {
-		batch_builder->QueueDelete(e);
 	}
 
 	object_manager->DeleteEntity(target_scene, e);
@@ -316,7 +313,6 @@ void EngineContext::HideEntity(const SceneName& scene_name, Entity e, bool visib
 	SceneData* target_scene = object_manager->GetScene(scene_name);
 	if (!target_scene) return;
 
-	// visible живёт в компоненте, потому что полная пересборка перечитывает флаг оттуда.
 	if (!object_manager->Has<Renderable>(target_scene, e)) return;
 	SoAElement<Renderable> r = object_manager->GetComponent<Renderable>(target_scene, e);
 	uint8_t& flag = r.container().visible[r.i()];
@@ -324,10 +320,7 @@ void EngineContext::HideEntity(const SceneName& scene_name, Entity e, bool visib
 
 	flag = visible ? 1 : 0;
 
-	if (target_scene != object_manager->GetActiveScene()) return;
-
-	if (visible) batch_builder->QueueCreate(e);
-	else         batch_builder->QueueDelete(e);
+	if (target_scene == object_manager->GetActiveScene()) draw_population->MarkDirty();
 }
 
 void EngineContext::SetActiveScene(const SceneName& name)

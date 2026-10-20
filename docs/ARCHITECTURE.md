@@ -42,7 +42,7 @@ XOR Engine — набор статических библиотек. Прило�
 | **EngineCore** | `Aliases.h`, `ResourceId.h`, `ResourceRegistry.h`, `ResourceTags.h`, `CommandId.h`, `Utils.h`, `config.h`, `EngineProfiler`, общий `PCH.h` | Словарь и утилиты, не знающие ни про ECS, ни про GPU. Правило приёма: сюда попадает только то, что переживёт замену ЛЮБОЙ из целей выше — иначе второй оркестратор, которому рендер не нужен, линковал бы `EngineGpu` ради `safe_u32` |
 | **EngineEcs** | `ObjectManager` (+`.inl`), `BaseComponents`, `ComponentStorage`, `ComponentSerializer`, `SceneData` | ECS обязан оставаться листом: его линкует и `Engine`, и `Physics`. Тянет только SDL3 и `Sheaf` (файл объектов сцены) |
 | **EngineGpu** | `QueueManager`, `TransferManager`, `BufferManager` (+`_Binds`/`_Update`/`_Utils`), `ShaderManager` (+`_ShadersCreate`/`_SPVLoad`), `TextureManager`, `PreviewPacker`, `PassManager`, `PipeManager`, `GeometryPool`, `RenderCommandData`, `RenderSnapshot.h`, `GpuContext`, `SparseRankChannel` | Всё, чем кадр исполняется: буферы, шейдеры, пайплайны, текстуры, проходы, пулы геометрии — без единого знания о сцене и рендер-логике |
-| **Engine** | менеджеры, data-модули, `BatchBuilder`, `EngineContext`, дефолт-сеты, UI, цикл кадра | Линкует `EngineGpu` и `EngineEcs` как PUBLIC и склеивает их |
+| **Engine** | менеджеры, data-модули, `BatchBuilder`, `DrawPopulation`, `EngineContext`, дефолт-сеты, UI, цикл кадра | Линкует `EngineGpu` и `EngineEcs` как PUBLIC и склеивает их |
 | **Physics** | `PhysicsBufferSet`, `PhysicsComputeSet`, `CollisionShapes`, `ContactSystem`, `DebugColliderSystem` | Линкует **только** `EngineGpu` + `EngineEcs`, без `Engine`, рендера и ImGui. Своего PCH не имеет намеренно — это работающая проверка, что слоение не протекло |
 | **Sheaf** | `src/sheaf/`: `Sheaf.h`, писатель `Sheaf.cpp` и читатель `SheafReader.cpp` формата сцены ([`sheaf.md`](sheaf.md)), писатель для генераторов сцен `sheaf.py`; рядом `viewer/` — `SheafView.exe` и `dump/` — `SheafDump.exe` для `git diff` | Вне решётки: не зависит ни от одной цели движка и даже от SDL, только от стандартной библиотеки. Так с файлом сцены может работать программа, которой движок не нужен (вьювер), а `EngineEcs` линкует формат как обычную библиотеку |
 
@@ -96,8 +96,8 @@ XOR Engine — набор статических библиотек. Прило�
   `UI_AssetBrowser` / `UI_ComponentEditor` — редактор на ImGui; `UI_Yoga` + `UI_DataModule` —
   UI приложения как ECS-энтити с flex-раскладкой Yoga.
 
-Дальше — `BatchBuilder` (дерево батчей из ECS) и ядро цикла: `Engine.cpp`, `Engine_Frame.cpp`,
-`Engine_Scene.cpp`.
+Дальше — `BatchBuilder` (дерево батчей по рецептам), `DrawPopulation` (рецепты сущностей и
+раскладка PIB) и ядро цикла: `Engine.cpp`, `Engine_Frame.cpp`, `Engine_Scene.cpp`.
 
 Одно место, где имя не совпадает с файлом: живая камера — `class Camera` в
 `CameraStruct.h`/`.cpp`, рядом с `CameraManager`.

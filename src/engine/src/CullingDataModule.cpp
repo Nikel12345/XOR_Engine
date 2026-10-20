@@ -59,8 +59,8 @@ void CullingDataModule::StoreTable(BufferManager* bm, UploadTask* task, Table ta
     }
 }
 
-// Обходы групп и дерева обязаны совпадать с FinalizeOffsets/StorePIB (порядок записей) и
-// StoreIndirect (порядок команд).
+// Обходы групп и дерева обязаны совпадать с FinalizeOffsets/DrawPopulation::Scatter (порядок
+// записей) и StoreIndirect (порядок команд).
 void CullingDataModule::Rebuild(PassManager* pm, uint64_t revision)
 {
     built_revision = revision;
@@ -69,17 +69,16 @@ void CullingDataModule::Rebuild(PassManager* pm, uint64_t revision)
     cmd_group_level.clear();
     tree_layout.clear();
 
-    std::unordered_map<const DrawGroup*, uint32_t> group_index;
     uint32_t records = 0;
     for (RenderPassStep* rp : pm->GetOrderedRenderPasses()) {
         CullPassLayout p;
         p.first_pib = records;
         p.first_cmd = safe_u32(cmd_group_level.size());
-        for (const auto& [_, group] : rp->draw_groups) {
+        const uint32_t pass_group_base = safe_u32(groups.size());
+        for (const DrawGroup& group : rp->draw_groups) {
             const uint32_t index = safe_u32(groups.size());
-            group_index[&group] = index;
             CullGroupEntry e;
-            e.size = safe_u32(group.records.size());
+            e.size = group.size;
             e.out_offset = p.out_cap;
             e.gl_base = p.gl;
             e.lod_count = group.lod_count;
@@ -94,7 +93,7 @@ void CullingDataModule::Rebuild(PassManager* pm, uint64_t revision)
             for (const auto& [_, rb] : sb.resource_batches)
                 for (const auto& [_, tb] : rb.texture_batches)
                     for (const auto& [_, mb] : tb.model_batches)
-                        cmd_group_level.push_back((group_index[mb.group] << 2) | mb.level);
+                        cmd_group_level.push_back(((pass_group_base + mb.group_index) << 2) | mb.level);
         p.commands = safe_u32(cmd_group_level.size()) - p.first_cmd;
         records += p.records;
         tree_layout.push_back(p);

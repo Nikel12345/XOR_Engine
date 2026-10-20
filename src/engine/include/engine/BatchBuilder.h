@@ -3,13 +3,13 @@
 #include <unordered_map>
 #include <memory>
 #include <atomic>
-#include <mutex>
 #include <string>
 #include <cstdint>
 #include "config.h"
 #include "Aliases.h"
 #include "ResourceId.h"
 #include "RenderCommandData.h"
+#include "DrawPopulation.h"
 
 namespace RenderSnap { struct BatchLayout; struct ComputeLayout; }
 
@@ -22,10 +22,6 @@ class BufferManager;
 class ModelManager;
 class MaterialManager;
 struct SceneData;
-struct ModelBatchData;
-struct MaterialSlot;
-struct Renderable;
-struct DrawGroup;
 struct TextureBatchData;
 struct MatSpLayout;
 struct RenderPassStep;
@@ -34,28 +30,18 @@ struct TextureHandle;
 struct ShaderProgram;
 struct ModelData;
 
-using Entity = uint32_t;
-
 class BatchBuilder {
 public:
 	BatchBuilder();
 	void UpdateRenderBatches(PipeManager* pm, PassManager* pass_manager, ObjectManager* om,
 		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
-		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
+		ModelManager* mdm, MaterialManager* mtm, DrawPopulation* population, SceneData* scene);
 	void BuildComputeBatches(PassManager* pass_manager, PipeManager* pm, ShaderManager* sm,
 		BufferManager* bm, TextureManager* tm);
-
-	void QueueCreate(Entity entity);
-	void QueueDelete(Entity entity);
-	// «Перевесить»: энтити жива, но её место в дереве изменилось (сменили модель или материал).
-	// Отдельный путь, а не пара Delete+Create: у пары add-сторона гасится дважды — как «создана и
-	// удалена в одном кадре» и гардом идемпотентности.
-	void QueueUpdate(Entity entity);
 
 	uint64_t BatchesRevision() const { return batches_revision; }
 	uint64_t RebuildEpoch() const { return rebuild_epoch; }
 	void SetDirtyBatches(bool state) { dirty_batches = state; };
-	void SetDirtyResolve(bool state) { dirty_resolve = state; };
 
 	void StampLayoutSnapshot(uint8_t slot);
 	// Счётчиков по всей раскладке здесь нет намеренно: размеры буферов, диспатчи и смещения дроу
@@ -70,17 +56,10 @@ public:
 	void SetFallbackShader(ShaderProgramId id) { fallback_sp = id; };
 
 private:
-	struct PibSlot {
-		DrawGroup* group = nullptr;
-		uint32_t   slot_index = 0;
-	};
-
 	struct ResolvedCmd {
 		RenderPassStep*    pass = nullptr;
 		TextureBatchData*  texture = nullptr;
 		const SubMeshData* submesh = nullptr;
-		ModelId            model;
-		uint32_t           submesh_index = 0;
 		uint64_t           key = 0;
 		uint8_t            level = 0;
 	};
@@ -94,14 +73,9 @@ private:
 	};
 	std::vector<ResolvedGroup> group_scratch;
 
-	void BuildRenderBatches(PassManager* pass_manager, ObjectManager* om,
-		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
-		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
-	bool ApplyIncremental(PassManager* pass_manager, ObjectManager* om,
-		TextureManager* tm, ShaderManager* sm, BufferManager* bm,
-		ModelManager* mdm, MaterialManager* mtm, SceneData* scene);
-	void FinalizeOffsets(PassManager* pass_manager, BufferManager* bm);
-	void ResolveResources(PassManager* pass_manager, ModelManager* mdm);
+	void BuildRenderBatches(PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
+		ModelManager* mdm, MaterialManager* mtm, const DrawPopulation& population);
+	void FinalizeOffsets(PassManager* pass_manager, BufferManager* bm, const std::vector<GroupRange>& ranges);
 
 	// Памятка живёт до конца текущего UpdateRenderBatches и между вызовами НЕ валидна: протухнуть
 	// она может от правки списка вариантов, переименования текстуры, правки sp у материала и репака
@@ -110,23 +84,18 @@ private:
 		ShaderManager* sm, MaterialManager* mtm);
 	std::unordered_map<BatchKeys::MatSpKey, MatSpLayout> mat_sp_layouts;
 
-	void ResolveEntity(PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
-		ModelManager* mdm, MaterialManager* mtm, const Renderable& rend, size_t row);
-	bool StaysInSameGroups(Entity entity) const;
-	void InsertResolvedEntity(Entity entity);
+	void ResolveRecipe(PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
+		ModelManager* mdm, MaterialManager* mtm, const Recipe& recipe);
+	void InsertResolvedRecipe(uint32_t recipe_index);
 	TextureBatchData* ResolveTextureBatch(RenderPassStep* rp, ShaderProgram* sp, const ShaderName& sp_name,
 		const std::shared_ptr<std::vector<uint8_t>>& sp_params, const MatSpLayout& lay, uint32_t section,
 		ShaderManager* sm, BufferManager* bm, uint64_t& path_key);
-	void RemoveEntityFromBatches(Entity entity);
 
 	TextureId dummy_texture;
 	ShaderProgramId fallback_sp;
-	std::unordered_map<Entity, std::vector<PibSlot>> entity_slots;
 
-	std::mutex          delta_mutex;
-	std::vector<Entity> entities_to_create;
-	std::vector<Entity> entities_to_delete;
-	std::vector<Entity> entities_to_update;
+	DrawGroupTable group_table;
+	std::vector<std::unordered_map<BatchKeys::GroupKey, uint32_t>> group_index_by_key;
 
 	std::shared_ptr<const RenderSnap::BatchLayout> current_layout;
 	std::shared_ptr<const RenderSnap::BatchLayout> slot_layouts[BUFFERING_LEVEL];
@@ -137,5 +106,4 @@ private:
 	uint64_t batches_revision = 0;
 	uint64_t rebuild_epoch = 0;
 	std::atomic<bool> dirty_batches{ true };
-	std::atomic<bool> dirty_resolve{ false };
 };

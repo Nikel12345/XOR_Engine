@@ -89,25 +89,13 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 				yg->SetNodeTransform(c.node, c.matrix);
 		});
 
-	// Дельту ставим руками: SetDirtyBatches дал бы тот же результат обходом ВСЕЙ сцены — на 1М
-	// энтити это фриз ради одной новой сущности.
 	cmd::Register<CommandId::CreateEntity>(im,
 		[](EngineContext* ctx, const CreateEntityCmd& c)
 		{
 			ObjectManager* om = ctx->GetObjectManager();
-			SceneData* scene = om->GetScene(c.scene);
-			if (scene) {
-				// Батч-дерево кормит только активная сцена: id чужой совпал бы с чужим объектом.
-				const bool feeds_batches = (scene == om->GetActiveScene());
-				const auto created = om->LoadScene(c.scene, c.sheaf);
-				if (!created) {
-					SDL_Log("CreateEntity: %s", created.error().c_str());
-					ctx->GetBatchBuilder()->SetDirtyBatches(true);
-					return;
-				}
-				for (Entity e : *created)
-					if (feeds_batches) ctx->GetBatchBuilder()->QueueCreate(e);
-			}
+			if (!om->GetScene(c.scene)) return;
+			const auto created = om->LoadScene(c.scene, c.sheaf);
+			if (!created) SDL_Log("CreateEntity: %s", created.error().c_str());
 		});
 }
 
@@ -296,7 +284,7 @@ void DefaultCommandSet::SetModelCommands(InputManager& im)
 						if (arr->data.model[i] == id) ctx->FitRenderableParts(arr->data, i);
 				});
 				om->BumpEntityRevision();
-				ctx->GetBatchBuilder()->SetDirtyResolve(true);
+				ctx->GetBatchBuilder()->SetDirtyBatches(true);
 			}
 		});
 }
