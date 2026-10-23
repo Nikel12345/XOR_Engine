@@ -89,19 +89,6 @@ void FrameProfiler::Frame()
     last_print = now;
 }
 
-std::vector<ProfileSample> FrameProfiler::TakeWindow()
-{
-    std::lock_guard<std::mutex> lk(mtx);
-    std::vector<ProfileSample> out;
-    out.reserve(slots.size());
-    for (Slot& s : slots) {
-        out.push_back({ s.name, s.parent, s.sum_ms, s.calls, s.has_bytes ? s.last_bytes : 0 });
-        s.sum_ms = 0.0; s.max_ms = 0.0; s.calls = 0;
-    }
-    frames = 0;
-    return out;
-}
-
 void FrameProfiler::PrintAndReset(double window_ms)
 {
     // Один fputs на весь отчёт: иначе строки sim- и render-потоков перемешиваются посреди слова.
