@@ -10,6 +10,14 @@
 #define ENGINE_PROFILE 1
 #endif
 
+struct ProfileSample {
+    std::string name;
+    size_t      parent = (size_t)-1;
+    double      sum_ms = 0.0;
+    uint64_t    calls = 0;
+    uint64_t    bytes = 0;
+};
+
 #if ENGINE_PROFILE
 
 class FrameProfiler {
@@ -27,6 +35,8 @@ public:
     void   Pop(size_t index, double ms, uint64_t bytes = 0);
 
     void Frame();
+
+    std::vector<ProfileSample> TakeWindow();
 
 private:
     struct Slot {
@@ -61,6 +71,7 @@ public:
     size_t Push(const char* /*name*/) { return 0; }
     void   Pop(size_t /*index*/, double /*ms*/, uint64_t /*bytes*/ = 0) {}
     void Frame() {}
+    std::vector<ProfileSample> TakeWindow() { return {}; }
 };
 
 #endif // ENGINE_PROFILE

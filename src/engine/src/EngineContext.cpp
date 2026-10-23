@@ -226,9 +226,6 @@ void EngineContext::ChangeModel(Entity e, const ModelName& model_name)
 
 	rc.model[i] = model_manager->InternModel(model_name);
 	FitRenderableParts(rc, i);
-
-	// Буфер bound-сфер гейтится ревизией сущностей, а не деревом батчей.
-	object_manager->BumpEntityRevision();
 	draw_population->MarkDirty();
 }
 

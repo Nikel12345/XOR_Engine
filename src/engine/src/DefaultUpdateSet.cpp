@@ -11,7 +11,6 @@
 #include "InstanceDataModule.h"
 #include "TextureStateDataModule.h"
 #include "IndirectDataModule.h"
-#include "BoundSphereDataModule.h"
 #include "CullingDataModule.h"
 #include "UI_DataModule.h"
 #include "FontManager.h"
@@ -116,11 +115,11 @@ void DefaultUpdateSet::SetDefaultIndirectUpdater(EngineContext& ctx, IndirectDat
     auto* bb = ctx.GetBatchBuilder();
 
     bm->CreateUpdateInstruction(DEFAULT_INDIRECT_BUFFER,
-        [pm, idm, bb](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { const uint8_t slot = bm->logic_index.load(); idm->StoreIndirect(bm, pm, &task, pm->AskRegions(slot), bb->BatchesRevision(), slot); },
+        [pm, idm, bb](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { const uint8_t slot = bm->logic_index.load(); idm->StoreIndirect(bm, bb->GetPassBatches(), &task, pm->AskRegions(slot), bb->BatchesRevision(), slot); },
         [pm, idm, bb, bm]() -> uint32_t { const uint8_t slot = bm->logic_index.load(); return idm->CalculateIndirectSize(pm->AskRegions(slot), bb->BatchesRevision(), slot); });
 }
 
-void DefaultUpdateSet::SetDefaultCullingUpdaters(EngineContext& ctx, CullingDataModule* cdm, BoundSphereDataModule* bdm)
+void DefaultUpdateSet::SetDefaultCullingUpdaters(EngineContext& ctx, CullingDataModule* cdm)
 {
     static bool inited = false;
     if (inited) { SDL_Log("DefaultUpdateSet::SetDefaultCullingUpdaters: already initialized"); return; }
@@ -129,10 +128,9 @@ void DefaultUpdateSet::SetDefaultCullingUpdaters(EngineContext& ctx, CullingData
     auto* bm = ctx.GetBufferManager();
     auto* pm = ctx.GetPassManager();
     auto* bb = ctx.GetBatchBuilder();
-    auto* om = ctx.GetObjectManager();
     auto* mm = ctx.GetModelManager();
 
-    auto stamp = [pm, bb, cdm](uint8_t slot) { cdm->Stamp(pm, bb->BatchesRevision(), slot); };
+    auto stamp = [pm, mm, bb, cdm](uint8_t slot) { cdm->Stamp(pm, mm, bb->GetPassBatches(), bb->BatchesRevision(), slot); };
 
     bm->CreateUpdateInstruction(DEFAULT_OUT_PIB_BUFFER, nullptr,
         [bm, cdm, stamp]() -> uint32_t { const uint8_t s = bm->logic_index.load(); stamp(s); return cdm->TotalOut(s) * sizeof(int32_t); });
@@ -140,23 +138,21 @@ void DefaultUpdateSet::SetDefaultCullingUpdaters(EngineContext& ctx, CullingData
         [bm, cdm, stamp]() -> uint32_t { const uint8_t s = bm->logic_index.load(); stamp(s); return cdm->TotalCounters(s) * sizeof(uint32_t); });
 
     using Table = CullingDataModule::Table;
-    auto table = [bm, bb, cdm, stamp](BufferDataName name, Table t) {
+    auto table = [bm, cdm, stamp](BufferDataName name, Table t, auto revision) {
         bm->CreateUpdateInstruction(name,
-            [bb, cdm, t](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) {
-                cdm->StoreTable(bm, &task, t, bb->BatchesRevision(), bm->logic_index.load()); },
-            [bm, bb, cdm, stamp, t]() -> uint32_t {
+            [cdm, t, revision](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) {
+                cdm->StoreTable(bm, &task, t, revision(), bm->logic_index.load()); },
+            [bm, cdm, stamp, t, revision]() -> uint32_t {
                 const uint8_t s = bm->logic_index.load(); stamp(s);
-                return cdm->TableSize(t, bb->BatchesRevision(), s); });
+                return cdm->TableSize(t, revision(), s); });
     };
-    table(DEFAULT_RECORD_GROUP_BUFFER,    Table::RecordGroup);
-    table(DEFAULT_GROUP_TABLE_BUFFER,     Table::Groups);
-    table(DEFAULT_CMD_GROUP_LEVEL_BUFFER, Table::CmdGroupLevel);
-
-    bm->CreateUpdateInstruction(DEFAULT_BOUND_SPHERE_BUFFER,
-        [om, mm, bdm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) {
-            bdm->StoreSpheres(bm, &task, om, mm, om->EntityRevision() + mm->SpheresRevision(), bm->logic_index.load()); },
-        [om, mm, bdm, bm]() -> uint32_t {
-            return bdm->CalculateSphereSize(om, om->EntityRevision() + mm->SpheresRevision(), bm->logic_index.load()); });
+    auto tree_revision = [bb]() { return bb->BatchesRevision(); };
+    // Убывание любой из двух ревизий повторит прошлую сумму, и таблица моделей молча не перезальётся.
+    auto models_revision = [bb, mm]() { return bb->BatchesRevision() + mm->SpheresRevision(); };
+    table(DEFAULT_CULL_RECORD_TO_GROUP_BUFFER,         Table::RecordToGroup,       tree_revision);
+    table(DEFAULT_CULL_GROUP_LAYOUT_BUFFER,            Table::GroupLayouts,        tree_revision);
+    table(DEFAULT_CULL_COMMAND_TO_GROUP_LEVEL_BUFFER,  Table::CommandToGroupLevel, tree_revision);
+    table(DEFAULT_CULL_MODEL_BUFFER,                   Table::Models,              models_revision);
 }
 
 void DefaultUpdateSet::SetDefaultTexStateChannel(EngineContext& ctx, TextureStateDataModule* tsm)

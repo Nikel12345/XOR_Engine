@@ -19,29 +19,6 @@ class PassManager;
 // заполнена. Оба случая читаются одинаково.
 inline constexpr uint32_t kPibNoRow = 0xFFFFFFFFu;
 
-struct SubMeshDraw {
-    uint32_t index_count = 0;
-    uint32_t index_offset = 0;
-    uint32_t vertex_offset = 0;
-};
-
-// Сущности, которые в проходе рисуются одинаковым набором команд. Все листы группы делят её
-// записи PIB: first_instance/num_instances у них общие.
-struct DrawGroup {
-    uint32_t pib_first = 0;
-    uint32_t size = 0;
-    uint8_t  lod_count = 1;
-    float    switches[3] = {};
-};
-
-struct ModelBatchData {
-    uint32_t    group_index = 0;
-    uint8_t     level = 0;
-    uint32_t    firstInstance = 0;
-    uint32_t    instanceCount = 0;
-    SubMeshDraw submesh;
-};
-
 // Должно совпадать с material_api.hlsl: шейдер читает блок как uint4 и распаковывает
 // unpackUnorm2x16, поэтому пары x/y обязаны лежать в одном слове.
 struct alignas(16) UVL_Block {
@@ -76,40 +53,6 @@ struct VariantLayout {
     uint32_t material_index = 0;
 };
 
-struct TextureBatchData {
-    std::unordered_map<BatchKeys::ModelBatchKey, ModelBatchData> model_batches;
-	std::vector<UVL_Block> texture_uvl;
-    VariantLayout variant_layout;
-    uint32_t indirect_command_index = 0;
-    std::shared_ptr<std::vector<uint8_t>> params;
-    std::shared_ptr<const PushInstructions> push_instructions;
-};
-
-struct MatSpLayout {
-    std::shared_ptr<SDL_GPUGraphicsPipeline>  pipeline;
-    std::vector<UVL_Block>                    uvl;
-    std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
-    SlotWord                slot[MAX_SLOTS] = {};
-    BatchKeys::MatSpKey     res_key = 0;
-    BatchKeys::GpuResourceBatchKey gpu_resource_key = 0;
-    bool                    bindable = false;
-    bool                    variative = false;
-};
-
-struct GpuResourceBatchData {
-    std::unordered_map<BatchKeys::TextureBatchKey, TextureBatchData> texture_batches;
-    std::vector<BufferData*> vertexStorageBuffers;
-    std::vector<BufferData*> fragmentStorageBuffers;
-    std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
-};
-
-struct ShaderBatchData {
-    std::unordered_map<BatchKeys::GpuResourceBatchKey, GpuResourceBatchData> resource_batches;
-	std::vector<BufferData*> vertexBuffers;
-	BufferData* indexBuffer = nullptr;
-    std::shared_ptr<SDL_GPUGraphicsPipeline> pipeline;
-};
-
 // Потолок SDL (MAX_COLOR_TARGET_BINDINGS в его исходниках).
 inline constexpr uint32_t MAX_COLOR_TARGETS = 8;
 
@@ -140,8 +83,6 @@ private:
 
 struct RenderPassStep {
     RenderPassTexturesInfo renderPassTexsData;
-    std::unordered_map<BatchKeys::ShaderBatchKey, ShaderBatchData> shader_batches;
-    std::vector<DrawGroup> draw_groups;
     std::function<void(SDL_GPUCommandBuffer*, PassManager*, RenderPassStep&)> render_function;
 
     std::vector<TextureAtlas*> global_texture_bindings;

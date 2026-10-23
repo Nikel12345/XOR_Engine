@@ -134,7 +134,7 @@ pass_manager->StampComputeLayout(slot, batch_builder->AskComputeLayout(slot));
 
 | слепок | кто штампует | что внутри |
 |---|---|---|
-| `RenderSnap::BatchLayout` | `BatchBuilder` | плоская раскладка дерева: проходы → шейдер-группы → атласы → дроу, плюс индирект-буфер раскладки |
+| `RenderSnap::BatchLayout` | `BatchBuilder` | плоская раскладка дерева: проходы → шейдерные → ресурсные → текстурные батчи (дроу), плюс индирект-буфер раскладки |
 | `RenderSnap::ComputeLayout` | `BatchBuilder` | диспатчи compute-проходов и препассов, по списку на проход |
 | `RenderSnap::LightCams` | `LightDataModule` | теневые камеры слота в порядке записи камерного буфера + число источников |
 | `PassRegions` | `PassManager` | регионы индиректа и out_pib: сколько у прохода блоков и где они лежат |

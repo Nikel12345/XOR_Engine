@@ -27,11 +27,11 @@ namespace DefaultBuffersNames {
 
 	inline constexpr const char* DEFAULT_INDIRECT_BUFFER = "DefaultIndirectBuffer";
 	inline constexpr const char* DEFAULT_OUT_PIB_BUFFER = "DefaultOutPibBuffer";
-	inline constexpr const char* DEFAULT_BOUND_SPHERE_BUFFER = "DefaultBoundSphereBuffer";
 	inline constexpr const char* DEFAULT_CULL_COUNTERS_BUFFER = "DefaultCullCountersBuffer";
-	inline constexpr const char* DEFAULT_RECORD_GROUP_BUFFER = "DefaultRecordGroupBuffer";
-	inline constexpr const char* DEFAULT_GROUP_TABLE_BUFFER = "DefaultGroupTableBuffer";
-	inline constexpr const char* DEFAULT_CMD_GROUP_LEVEL_BUFFER = "DefaultCmdGroupLevelBuffer";
+	inline constexpr const char* DEFAULT_CULL_RECORD_TO_GROUP_BUFFER = "DefaultCullRecordToGroupBuffer";
+	inline constexpr const char* DEFAULT_CULL_GROUP_LAYOUT_BUFFER = "DefaultCullGroupLayoutBuffer";
+	inline constexpr const char* DEFAULT_CULL_COMMAND_TO_GROUP_LEVEL_BUFFER = "DefaultCullCommandToGroupLevelBuffer";
+	inline constexpr const char* DEFAULT_CULL_MODEL_BUFFER = "DefaultCullModelBuffer";
 
 	inline constexpr const char* UI_TEXT_RANK_BUFFER     = "UITextRank";
 	inline constexpr const char* UI_TEXT_INDEX_BUFFER    = "UITextIndex";

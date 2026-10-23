@@ -2,7 +2,6 @@
 #include "TextureData.h"
 class EngineContext;
 class LightDataModule;
-class BatchBuilder;
 class PassManager;
 namespace DefaultRenderPassNamespace
 {

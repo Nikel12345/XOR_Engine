@@ -23,7 +23,7 @@ namespace RenderSnap {
         uint32_t num_lights = 0;
     };
 
-    struct TextureDraw {
+    struct TextureBatchSnap {
         std::vector<UVL_Block> texture_uvl;
         VariantLayout variant_layout;
         // Тот же блоб, что у материала, а не копия: правку слайдером в инспекторе видно сразу.
@@ -34,30 +34,28 @@ namespace RenderSnap {
         uint32_t draw_count = 0;
     };
 
-    struct GpuResourceGroup {
+    struct GpuResourceBatchSnap {
         std::vector<BufferData*> vertexStorageBuffers;
         std::vector<BufferData*> fragmentStorageBuffers;
         std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
-        std::vector<TextureDraw> draws;
+        std::vector<TextureBatchSnap> texture_batches;
     };
 
-    struct ShaderGroup {
+    struct ShaderBatchSnap {
         std::shared_ptr<SDL_GPUGraphicsPipeline> pipeline;
         std::vector<BufferData*> vertexBuffers;
         BufferData* indexBuffer = nullptr;
-        std::vector<GpuResourceGroup> resources;
+        std::vector<GpuResourceBatchSnap> resource_batches;
     };
 
-    struct PassDrawList {
-        std::vector<ShaderGroup> shaders;
+    struct PassBatchSnap {
+        std::vector<ShaderBatchSnap> shader_batches;
         std::vector<SDL_GPUTextureSamplerBinding> global_texture_bindings;
-        uint32_t first_instance = 0;
-        uint32_t num_instances = 0;
         uint32_t num_commands = 0;
     };
 
     struct BatchLayout {
-        std::vector<PassDrawList> passes;
+        std::vector<PassBatchSnap> passes;
         BufferData* indirectBuffer = nullptr;
     };
 

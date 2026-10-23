@@ -228,7 +228,6 @@ set(ENGINE_STRUCTS_HDR
     include/engine/LightStruct.h
 )
 set(ENGINE_DATAMODULES_SRC
-    src/BoundSphereDataModule.cpp
     src/CullingDataModule.cpp
     src/TextureStateDataModule.cpp
     src/IndirectDataModule.cpp
@@ -239,7 +238,6 @@ set(ENGINE_DATAMODULES_SRC
     src/UI_DataModule.cpp
 )
 set(ENGINE_DATAMODULES_HDR
-    include/engine/BoundSphereDataModule.h
     include/engine/CullingDataModule.h
     include/engine/TextureStateDataModule.h
     include/engine/IndirectDataModule.h

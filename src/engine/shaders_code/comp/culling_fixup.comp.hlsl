@@ -1,18 +1,21 @@
 // Переписывает команды прохода после scatter: поток на (блок, команда). Команда рисует кусок
 // out_pib своего группового уровня: first_instance = его начало, num_instances = его счётчик.
 
-struct GroupEntry {
+#ifndef GROUP_LEVEL_BITS
+#error GROUP_LEVEL_BITS
+#endif
+
+struct GroupLayout {
     uint  size;
     uint  out_offset;
-    uint  gl_base;
+    uint  first_group_level;
     uint  lod_count;
-    float switches[3];
-    uint  pad;
+    uint  model;
 };
 
-StructuredBuffer<uint>       CmdGroupLevel : register(t0, space0);   // команда -> (группа << 2) | уровень
-StructuredBuffer<GroupEntry> Groups        : register(t1, space0);
-StructuredBuffer<uint>       Counters      : register(t2, space0);
+StructuredBuffer<uint>        CommandToGroupLevel : register(t0, space0);   // команда -> (группа << GROUP_LEVEL_BITS) | уровень
+StructuredBuffer<GroupLayout> GroupLayouts        : register(t1, space0);
+StructuredBuffer<uint>        Counters            : register(t2, space0);
 
 RWByteAddressBuffer Indirect : register(u0, space1);
 
@@ -20,11 +23,11 @@ cbuffer FixupParams : register(b0, space2) {
     uint num_blocks;
     uint cmd_base;
     uint commands;
-    uint first_cmd;   // первая команда прохода в CmdGroupLevel
+    uint first_cmd;   // первая команда прохода в CommandToGroupLevel
     uint out_base;
-    uint out_cap;
+    uint out_capacity;
     uint cnt_base;
-    uint gl_count;
+    uint group_level_count;
 };
 
 static const uint CMD_STRIDE = 20u;   // sizeof(SDL_GPUIndexedIndirectDrawCommand); num_instances@4, first_instance@16
@@ -36,11 +39,11 @@ void main(uint3 tid : SV_DispatchThreadID)
     uint b = tid.x / commands;
     uint c = tid.x - b * commands;
 
-    uint word = CmdGroupLevel[first_cmd + c];
-    GroupEntry g = Groups[word >> 2];
-    uint L = word & 3u;
+    uint word = CommandToGroupLevel[first_cmd + c];
+    GroupLayout g = GroupLayouts[word >> GROUP_LEVEL_BITS];
+    uint L = word & ((1u << GROUP_LEVEL_BITS) - 1u);
 
     uint cmd = cmd_base + b * commands + c;
-    Indirect.Store(cmd * CMD_STRIDE + 4u,  Counters[cnt_base + b * gl_count + g.gl_base + L]);
-    Indirect.Store(cmd * CMD_STRIDE + 16u, out_base + b * out_cap + g.out_offset + L * g.size);
+    Indirect.Store(cmd * CMD_STRIDE + 4u,  Counters[cnt_base + b * group_level_count + g.first_group_level + L]);
+    Indirect.Store(cmd * CMD_STRIDE + 16u, out_base + b * out_capacity + g.out_offset + L * g.size);
 }

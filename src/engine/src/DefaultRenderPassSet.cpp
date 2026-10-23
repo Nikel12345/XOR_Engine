@@ -12,7 +12,6 @@
 #include "TexturesPresets.h"
 #include "TextureSamplerPresets.h"
 #include "ObjectManager.h"
-#include "BatchBuilder.h"
 #include "EngineContext.h"
 #include "TextureLoader.h"
 #include "LightDataModule.h"
@@ -109,7 +108,6 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
 	TextureManager* tm = ctx->GetTextureManager();
 	PassManager* pm = ctx->GetPassManager();
 	BufferManager* bm = ctx->GetBufferManager();
-	BatchBuilder* bb = ctx->GetBatchBuilder();   // слепок раскладки: num_commands/num_instances слота
 
     auto shadow_sampler = tm->GetSampler(DefaultSamplersNames::DEFAULT_SHADOW_SAMPLER);
     auto shadow_tci = TexturePresets::GetCreateInfo(TexturePreset::Depth_FlatArray1024_8Layers);
@@ -123,11 +121,11 @@ void DefaultRenderPassNamespace::SetDefaultShadowPCFRenderPass(EngineContext* ct
 
     auto shadowPass = pm->CreateRenderPass(
         SHADOW_PASS,
-        [pm, bm, tm, bb, ldm, max_layers](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
+        [pm, bm, tm, ldm, max_layers](SDL_GPUCommandBuffer* cb, PassManager* pm, RenderPassStep& rp)
     {
-        // Всё — из слепков рендеримого СЛОТА: таблица камер (LightDataModule) и счётчики
-        // раскладки (BatchBuilder). ECS отсюда не читается; camera_index совпадает с
-        // LIGHT_CAMERA_BUFFER слота по построению слепка (один проход в prepare пишет оба).
+        // Всё — из слепка камер рендеримого СЛОТА (LightDataModule). ECS отсюда не читается;
+        // camera_index совпадает с LIGHT_CAMERA_BUFFER слота по построению слепка (один проход в
+        // prepare пишет оба).
         const uint8_t slot = pm->RenderFrame();
         const std::vector<RenderSnap::ShadowCam>& cams = ldm->AskShadowCameras(slot);
 
@@ -716,8 +714,8 @@ void DefaultRenderPassNamespace::SetDefaultCullingPass(EngineContext* ctx)
     },
         PassAnchor::ChainStart()
     );
-    // Диапазоны и страйды каждая программа каллинга считает у себя из слепка раскладки
-    // (bb->AskLayout(slot)) — покадровые величины, в схему им нельзя. Настройка ровно одна:
+    // Диапазоны и страйды каждая программа каллинга берёт из раскладки отсева слота
+    // (CullingDataModule::Pass) — покадровые величины, в схему им нельзя. Настройка ровно одна:
     // порог отсева по экранному размеру, ради него схема и заведена.
     {
         using K = ParamsFieldKind;

@@ -19,7 +19,6 @@
 #include "BatchBuilder.h"
 #include "DrawPopulation.h"
 #include "PIB_DataModule.h"
-#include "BoundSphereDataModule.h"
 #include "CullingDataModule.h"
 #include "TransformDataModule.h"
 #include "InstanceDataModule.h"
@@ -303,7 +302,6 @@ Engine::Engine(const EngineConfig& cfg)
 	draw_population = new DrawPopulation();
 
 	pib_data_module = new PIB_DataModule();
-	bound_sphere_data_module = new BoundSphereDataModule();
 	culling_data_module = new CullingDataModule();
 	transform_data_module = new TransformDataModule();
 	instance_data_module = new InstanceDataModule();
@@ -359,7 +357,7 @@ void Engine::InitDefaultBufferUpdaters()
 	SetDefaultPositionIndexUpdater(*engine_context, pib_data_module);
 	SetDefaultLightCamerasUpdater(*engine_context, light_data_module);
 	SetDefaultIndirectUpdater(*engine_context, indirect_data_module, light_data_module);
-	SetDefaultCullingUpdaters(*engine_context, culling_data_module, bound_sphere_data_module);
+	SetDefaultCullingUpdaters(*engine_context, culling_data_module);
 
 	SetDefaultTexStateChannel(*engine_context, tex_state_data_module);
 	SetDefaultTexStateUpdater(*engine_context, tex_state_data_module);
@@ -466,7 +464,6 @@ Engine::~Engine()
 	delete batch_builder;
 	delete draw_population;
 	delete pib_data_module;
-	delete bound_sphere_data_module;
 	delete culling_data_module;
 	delete transform_data_module;
 	delete instance_data_module;

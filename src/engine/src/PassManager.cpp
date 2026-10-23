@@ -5,10 +5,6 @@
 
 PassManager::PassManager() {}
 
-// Пассы всех видов и препассы делят ОДНО пространство имён. Якорь называет проход одним именем,
-// без вида. Compute-программа тоже называет свой проход одним именем (compute_pass_name), а
-// BatchBuilder на сборке ищет его сначала среди пассов, потом среди препассов. Одноимённые увели бы
-// якорь или программу в чужой проход — молча, потому что оба варианта валидны.
 bool PassManager::IsPassNameTaken(const std::string& name) const
 {
 	return render_steps.count(name) || compute_steps.count(name)
@@ -363,18 +359,14 @@ void PassManager::StampRegions(uint8_t slot, const RenderSnap::BatchLayout* layo
 	PassRegions& stamped = regions[slot];
 	stamped.per_pass.clear();
 	stamped.total_commands = 0;
-	stamped.total_pib = 0;
 	if (!layout) return;
 
 	stamped.per_pass.resize(layout->passes.size());
 
 	for (uint32_t i = 0; i < stamped.per_pass.size(); ++i) {
-		const RenderSnap::PassDrawList& pass_list = layout->passes[i];
 		PassRegion& region = stamped.per_pass[i];
 		region.command_blocks_count = 1;
-		region.commands = pass_list.num_commands;
-		region.pib = pass_list.num_instances;
-		region.first_pib = pass_list.first_instance;
+		region.commands = layout->passes[i].num_commands;
 	}
 
 	for (const auto& [name, count_fn] : region_count_instructions) {
@@ -385,16 +377,12 @@ void PassManager::StampRegions(uint8_t slot, const RenderSnap::BatchLayout* layo
 	}
 
 	uint32_t cmd_base = 0;
-	uint32_t pib_base = 0;
 	for (PassRegion& region : stamped.per_pass) {
 		region.cmd_base = cmd_base;
-		region.pib_base = pib_base;
 		cmd_base += region.command_blocks_count * region.commands;
-		pib_base += region.command_blocks_count * region.pib;
 	}
 
 	stamped.total_commands = cmd_base;
-	stamped.total_pib = pib_base;
 }
 
 RenderPassStep* PassManager::GetRenderPassStep(const RenderPassName& name)
@@ -439,7 +427,7 @@ PassManager::~PassManager()
 inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPURenderPass* rp, const RenderPassStep& render_pass_step, BufferManager* bm, uint32_t additional_offset, const void* push_data_raw)
 {
 	if (!render_layout || render_pass_step.ordinal >= render_layout->passes.size()) return;
-	const RenderSnap::PassDrawList& pass_list = render_layout->passes[render_pass_step.ordinal];
+	const RenderSnap::PassBatchSnap& pass_list = render_layout->passes[render_pass_step.ordinal];
 
 	SDL_GPUBuffer* indirect_buf = bm->_GetGPUBufferForFrame(render_layout->indirectBuffer, render_frame);
 	if (!indirect_buf) {
@@ -451,7 +439,7 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 	const uint32_t global_sampler_count = safe_u32(global_samplers.size());
 
 	int draw_calls = 0;
-	for (const RenderSnap::ShaderGroup& shader_batch : pass_list.shaders)
+	for (const RenderSnap::ShaderBatchSnap& shader_batch : pass_list.shader_batches)
 	{
 		SDL_BindGPUGraphicsPipeline(rp, shader_batch.pipeline.get());
 		SDL_BindGPUFragmentSamplers(rp, 0, global_samplers.data(), global_sampler_count);
@@ -465,7 +453,7 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 			continue;
 		}
 
-		for (const RenderSnap::GpuResourceGroup& res_batch : shader_batch.resources) {
+		for (const RenderSnap::GpuResourceBatchSnap& res_batch : shader_batch.resource_batches) {
 			if (!res_batch.vertexStorageBuffers.empty()) {
 				bm->BindGPUVertexStorageBuffers(rp, 0, res_batch.vertexStorageBuffers, render_frame);
 			}
@@ -475,7 +463,7 @@ inline void PassManager::ExecuteRenderBatches(SDL_GPUCommandBuffer* cb, SDL_GPUR
 			if (!res_batch.texture_binding.empty()) {
 				SDL_BindGPUFragmentSamplers(rp, global_sampler_count, res_batch.texture_binding.data(), safe_u32(res_batch.texture_binding.size()));
 			}
-			for (const RenderSnap::TextureDraw& texture_batch : res_batch.draws) {
+			for (const RenderSnap::TextureBatchSnap& texture_batch : res_batch.texture_batches) {
 				const PushInput push_in{ push_data_raw, &texture_batch };
 				for (const PushInstruction& pi : *texture_batch.push_instructions)
 					pi.fn(PushConstantBinder{ cb, pi.stage, pi.uniform_slot, render_frame }, push_in);

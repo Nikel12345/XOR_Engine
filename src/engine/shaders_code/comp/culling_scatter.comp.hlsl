@@ -3,26 +3,33 @@
 // группового уровня. Команды после этого переписывает culling_fixup.
 //
 // Раскладка out_pib и счётчиков в регионе прохода (всё в элементах):
-//   out_pib:  out_base + b * out_cap + group.out_offset + L * group.size + слот
-//   счётчик:  cnt_base + b * gl_count + group.gl_base + L
+//   out_pib:  out_base + b * out_capacity + group.out_offset + L * group.size + слот
+//   счётчик:  cnt_base + b * group_level_count + group.first_group_level + L
 
-struct GroupEntry {
-    uint  size;         // записей в группе
-    uint  out_offset;   // кусок группы внутри блока прохода
-    uint  gl_base;      // первый групповой уровень группы в проходе
+#ifndef MAX_MODEL_LODS
+#error MAX_MODEL_LODS
+#endif
+
+struct GroupLayout {
+    uint  size;               // записей в группе
+    uint  out_offset;         // кусок группы внутри блока прохода
+    uint  first_group_level;  // первый групповой уровень группы в проходе
     uint  lod_count;
-    float switches[3];  // экранный радиус (px), ниже которого уровень L уступает L+1
-    uint  pad;
+    uint  model;              // запись в Models
+};
+struct CullModel {
+    float sphere[4];                     // в координатах модели; радиус < 0 = геометрии нет
+    float switches[MAX_MODEL_LODS - 1];  // экранный радиус (px), ниже которого уровень L уступает L+1
 };
 struct CameraData { float4x4 view; float4x4 proj; };
 
-StructuredBuffer<int>        PIB          : register(t0, space0);   // запись -> строка (-1 = нет строки)
-StructuredBuffer<uint>       RecordGroup  : register(t1, space0);   // запись -> группа
-StructuredBuffer<GroupEntry> Groups       : register(t2, space0);
-StructuredBuffer<float4>     BoundSpheres : register(t3, space0);   // по строкам; w<0 = геометрии нет
-StructuredBuffer<float4x4>   Transforms   : register(t4, space0);
-StructuredBuffer<CameraData> Cameras      : register(t5, space0);   // камеры блоков прохода
-StructuredBuffer<CameraData> LodCamera    : register(t6, space0);   // [0] — камера игрока
+StructuredBuffer<int>         PIB           : register(t0, space0);   // запись -> строка (-1 = нет строки)
+StructuredBuffer<uint>        RecordToGroup : register(t1, space0);
+StructuredBuffer<GroupLayout> GroupLayouts  : register(t2, space0);
+StructuredBuffer<CullModel>   Models        : register(t3, space0);
+StructuredBuffer<float4x4>    Transforms    : register(t4, space0);
+StructuredBuffer<CameraData>  Cameras       : register(t5, space0);   // камеры блоков прохода
+StructuredBuffer<CameraData>  LodCamera     : register(t6, space0);   // [0] — камера игрока
 
 RWStructuredBuffer<int>  OutPib   : register(u0, space1);
 RWStructuredBuffer<uint> Counters : register(u1, space1);
@@ -32,9 +39,9 @@ cbuffer ScatterParams : register(b0, space2) {
     uint  range_count;
     uint  num_blocks;
     uint  out_base;
-    uint  out_cap;
+    uint  out_capacity;
     uint  cnt_base;
-    uint  gl_count;
+    uint  group_level_count;
     uint  target_height;         // высота таргета камеры игрока: пиксели уровня
     float min_screen_radius_px;  // 0 = отсев мелочи выключен
 };
@@ -69,15 +76,15 @@ void main(uint3 tid : SV_DispatchThreadID)
     uint i = range_start + tid.x;
 
     int row = PIB[i];
-    GroupEntry g = Groups[RecordGroup[i]];
+    GroupLayout g = GroupLayouts[RecordToGroup[i]];
+    CullModel model = Models[g.model];
 
-    // [branch] обязателен: flatten прочитал бы BoundSpheres[-1].
-    float4 sphere = float4(0.0, 0.0, 0.0, -1.0);
-    [branch] if (row >= 0) sphere = BoundSpheres[row];
-    bool has_geom = (sphere.w >= 0.0);
+    float4 sphere = float4(model.sphere[0], model.sphere[1], model.sphere[2], model.sphere[3]);
+    bool has_geom = row >= 0 && sphere.w >= 0.0;
     float3 center = float3(0, 0, 0);
     float  radius = 0.0;
-    if (has_geom) {
+    // [branch] обязателен: flatten прочитал бы Transforms[-1].
+    [branch] if (has_geom) {
         float4x4 m = Transforms[row];
         center = mul(m, float4(sphere.xyz, 1.0)).xyz;
         float3 sc = float3(
@@ -92,11 +99,11 @@ void main(uint3 tid : SV_DispatchThreadID)
     if (has_geom && g.lod_count > 1) {
         float4x4 lod_vp = mul(LodCamera[0].proj, LodCamera[0].view);
         float px = ScreenRadiusPx(lod_vp, LodCamera[0].proj, center, radius);
-        while (L + 1 < g.lod_count && px < g.switches[L]) ++L;
+        while (L + 1 < g.lod_count && px < model.switches[L]) ++L;
     }
 
     uint chunk = g.out_offset + L * g.size;
-    uint level = g.gl_base + L;
+    uint level = g.first_group_level + L;
     for (uint b = 0; b < num_blocks; ++b) {
         if (has_geom) {
             float4x4 vp = mul(Cameras[b].proj, Cameras[b].view);
@@ -105,7 +112,7 @@ void main(uint3 tid : SV_DispatchThreadID)
                 continue;
         }
         uint slot;
-        InterlockedAdd(Counters[cnt_base + b * gl_count + level], 1u, slot);
-        OutPib[out_base + b * out_cap + chunk + slot] = row;
+        InterlockedAdd(Counters[cnt_base + b * group_level_count + level], 1u, slot);
+        OutPib[out_base + b * out_capacity + chunk + slot] = row;
     }
 }

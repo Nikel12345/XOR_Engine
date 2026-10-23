@@ -27,16 +27,11 @@ void Engine::PrepareFunc(uint8_t slot)
 {
 	buffer_manager->logic_index = slot;
 
-	// Раскладка UI — в пикселях ОКНА: размер элемента задан относительно экрана, и при
-	// render != window внутреннее разрешение съёжило бы или раздуло весь UI.
 	{
 		PROF_SCOPE(Sim, " ui_emit");
 		ui_yoga->Emit(engine_context, GetWindowWidth(), GetWindowHeight());
 	}
 
-	// Аспект — оконный, хотя сцена рисуется в своём разрешении: масштаб по обеим осям один и тот же,
-	// значит соотношение то же. Появится НЕравномерный размер сценового таргета — аспект придётся
-	// брать с него самого, и молча это не всплывёт никак.
 	if (Camera* cam = camera_manager->GetActiveCamera()) {
 		const float h = GetWindowHeight();
 		if (h > 0.0f) cam->SetAspect(GetWindowWidth() / h);

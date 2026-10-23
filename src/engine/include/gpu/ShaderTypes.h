@@ -10,7 +10,7 @@
 
 
 // Слепок группы draw'а — только по указателю в PushInput (полный тип у потребителя).
-namespace RenderSnap { struct TextureDraw; }
+namespace RenderSnap { struct TextureBatchSnap; }
 
 namespace ShaderBase {
     enum VertexSemantic : Uint32 { POSITION = 0, UV = 1, NORMAL = 2, TANGENT = 3 };
@@ -44,8 +44,8 @@ using ShaderDefines = std::vector<ShaderDefine>;
 enum class PushStage : uint8_t { Vertex, Fragment, Compute };
 
 struct PushInput {
-    const void*                    pass_state = nullptr;
-    const RenderSnap::TextureDraw* draw       = nullptr;
+    const void*                         pass_state    = nullptr;
+    const RenderSnap::TextureBatchSnap* texture_batch = nullptr;
 };
 
 struct PushConstantBinder {

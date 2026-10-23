@@ -56,31 +56,25 @@ bool DrawPopulation::TakeChanged(const ObjectManager* om)
     return marked || entities_changed;
 }
 
-bool DrawPopulation::Sweep(SceneData* scene)
+static void CountVisibleRecipes(Renderable& rend, RecipeRegistry& recipes, std::vector<uint32_t>& recipe_counts)
+{
+    for (size_t i = 0; i < rend.size(); ++i) {
+        if (!rend.visible[i]) continue;
+        RecipeId& recipe = rend.recipe[i];
+        if (!recipe) recipe = recipes.Intern(rend.model[i], rend.materials[i]);
+        const uint32_t recipe_index = safe_i_u32(recipe.v);
+        if (recipe_index >= recipe_counts.size()) recipe_counts.resize(recipe_index + 1, 0u);
+        ++recipe_counts[recipe_index];
+    }
+}
+
+bool DrawPopulation::Sweep(ObjectManager* om, SceneData* scene)
 {
     recipe_counts.assign(recipes.Count(), 0u);
 
-    // Отбор архетипов и их порядок обязаны совпадать с TransformDataModule: строка трансформа =
-    // база архетипа + индекс сущности в нём.
-    uint32_t row_base = 0;
-    for (auto& [signature, arch] : scene->archetypes) {
-        auto* renderables = arch.get_array<Renderable>();
-        if (!renderables) continue;
-        if (arch.get_array<Positions>()) {
-            arch.render_instance_base = row_base;
-            row_base += safe_u32(arch.entities.size());
-        }
-
-        Renderable& rend = renderables->data;
-        for (size_t i = 0; i < rend.size(); ++i) {
-            if (!rend.visible[i]) continue;
-            RecipeId& recipe = rend.recipe[i];
-            if (!recipe) recipe = recipes.Intern(rend.model[i], rend.materials[i]);
-            const uint32_t recipe_index = safe_i_u32(recipe.v);
-            if (recipe_index >= recipe_counts.size()) recipe_counts.resize(recipe_index + 1, 0u);
-            ++recipe_counts[recipe_index];
-        }
-    }
+    om->ForEachArchetype<Renderable>(scene, [&](ComponentArray<Renderable>* renderables) {
+        CountVisibleRecipes(renderables->data, recipes, recipe_counts);
+    });
 
     bool live_changed = false;
     recipe_live.resize(recipe_counts.size(), 0);
@@ -92,7 +86,25 @@ bool DrawPopulation::Sweep(SceneData* scene)
     return live_changed;
 }
 
-void DrawPopulation::Scatter(SceneData* scene, const DrawGroupTable& groups)
+static void ScatterArchetype(const Renderable& rend, bool has_rows, uint32_t row_base,
+                             const InstanceGroupTable& groups, size_t table_recipes,
+                             uint32_t* group_cursor, uint32_t* pib_rows)
+{
+    const uint32_t pass_count = groups.pass_count;
+    for (size_t i = 0; i < rend.size(); ++i) {
+        if (!rend.visible[i]) continue;
+        assert(rend.recipe[i] && "DrawPopulation::Scatter: visible entity without recipe - Sweep must run first");
+        const size_t recipe_index = safe_i_u32(rend.recipe[i].v);
+        if (recipe_index >= table_recipes) continue;
+
+        const uint32_t row = has_rows ? row_base + safe_u32(i) : kPibNoRow;
+        const uint32_t* group_of = &groups.group_of[recipe_index * pass_count];
+        for (uint32_t p = 0; p < pass_count; ++p)
+            if (group_of[p] != kNoGroup) pib_rows[group_cursor[group_of[p]]++] = row;
+    }
+}
+
+void DrawPopulation::Scatter(ObjectManager* om, SceneData* scene, const InstanceGroupTable& groups)
 {
     const uint32_t pass_count = groups.pass_count;
     const size_t table_recipes = pass_count ? groups.group_of.size() / pass_count : 0;
@@ -114,22 +126,26 @@ void DrawPopulation::Scatter(SceneData* scene, const DrawGroupTable& groups)
     }
     pib_rows.resize(total);
 
-    for (auto& [signature, arch] : scene->archetypes) {
-        auto* renderables = arch.get_array<Renderable>();
-        if (!renderables) continue;
-        const bool has_rows = arch.get_array<Positions>() != nullptr;
+    struct ArchetypeRowBase {
+        const Renderable* column;
+        uint32_t          base;
+    };
+    std::vector<ArchetypeRowBase> row_bases;
+    uint32_t row_count = 0;
+    // Отбор архетипов и их порядок обязаны совпадать с TransformDataModule: строка трансформа =
+    // число строк архетипов до этого + индекс сущности в нём.
+    om->ForEachArchetype<Positions, Renderable>(scene,
+        [&](ComponentArray<Positions>* positions, ComponentArray<Renderable>* renderables) {
+            row_bases.push_back({ &renderables->data, row_count });
+            row_count += safe_u32(positions->size());
+        });
 
+    om->ForEachArchetype<Renderable>(scene, [&](ComponentArray<Renderable>* renderables) {
         const Renderable& rend = renderables->data;
-        for (size_t i = 0; i < rend.size(); ++i) {
-            if (!rend.visible[i]) continue;
-            assert(rend.recipe[i] && "DrawPopulation::Scatter: visible entity without recipe - Sweep must run first");
-            const size_t recipe_index = safe_i_u32(rend.recipe[i].v);
-            if (recipe_index >= table_recipes) continue;
-
-            const uint32_t row = has_rows ? arch.render_instance_base + safe_u32(i) : kPibNoRow;
-            const uint32_t* group_of = &groups.group_of[recipe_index * pass_count];
-            for (uint32_t p = 0; p < pass_count; ++p)
-                if (group_of[p] != kNoGroup) pib_rows[group_cursor[group_of[p]]++] = row;
-        }
-    }
+        const auto row_base = std::find_if(row_bases.begin(), row_bases.end(),
+            [&](const ArchetypeRowBase& archetype) { return archetype.column == &rend; });
+        const bool has_rows = row_base != row_bases.end();
+        ScatterArchetype(rend, has_rows, has_rows ? row_base->base : 0, groups, table_recipes,
+                         group_cursor.data(), pib_rows.data());
+    });
 }

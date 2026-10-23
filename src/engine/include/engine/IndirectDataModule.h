@@ -4,16 +4,16 @@
 #include "config.h"
 
 class BufferManager;
-class PassManager;
 struct UploadTask;
 struct PassRegions;
+struct PassBatches;
 
 class IndirectDataModule
 {
 public:
 	IndirectDataModule();
 	uint32_t CalculateIndirectSize(const PassRegions& regions, uint64_t revision, uint8_t slot);
-	void StoreIndirect(BufferManager* bm, PassManager* pm, UploadTask* task, const PassRegions& regions,
+	void StoreIndirect(BufferManager* bm, const std::vector<PassBatches>& passes, UploadTask* task, const PassRegions& regions,
 	                   uint64_t revision, uint8_t slot);
 private:
 	uint64_t last_revision[BUFFERING_LEVEL];

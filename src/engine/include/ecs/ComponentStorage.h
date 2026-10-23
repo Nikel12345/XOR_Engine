@@ -131,11 +131,6 @@ struct ComponentArray<T, std::enable_if_t<is_soa<T>::value>> : IComponentArray {
 struct Archetype {
     std::vector<Entity> entities;
     std::unordered_map<std::type_index, std::unique_ptr<IComponentArray>> components;
-    // Номер первой инстанс-строки архетипа в рендер-буферах: строка сущности =
-    // render_instance_base + её индекс в колонках. Считает DrawPopulation::Sweep
-    // (только для архетипов с Renderable+Positions, в порядке обхода scene->archetypes), читают
-    // дата-модули. Само ECS его не трогает — поле живёт здесь как ячейка для рендера.
-    uint32_t render_instance_base = 0;
 
     template<typename T>
     ComponentArray<T>* get_array() {

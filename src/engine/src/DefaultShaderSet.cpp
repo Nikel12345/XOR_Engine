@@ -34,18 +34,18 @@ void DefaultShaderProgramSet::SetDefaultPushes(EngineContext* ctx)
         [](const PushConstantBinder& b, RP::LightCountPushData data) { b.Push(data); });
 
     sm->RegisterPushKind("uvl", PushStage::Fragment, [](const PushConstantBinder& b, const PushInput& in) {
-        if (!in.draw) return;
-        if (!in.draw->texture_uvl.empty()) { b.Push(in.draw->texture_uvl); return; }
+        if (!in.texture_batch) return;
+        if (!in.texture_batch->texture_uvl.empty()) { b.Push(in.texture_batch->texture_uvl); return; }
         const UVL_Block empty{};
         b.Push(empty);
     });
     sm->RegisterPushKind("material_params", PushStage::Fragment, [](const PushConstantBinder& b, const PushInput& in) {
-        if (!in.draw || !in.draw->params || in.draw->params->empty()) return;
-        b.Push(*in.draw->params);
+        if (!in.texture_batch || !in.texture_batch->params || in.texture_batch->params->empty()) return;
+        b.Push(*in.texture_batch->params);
     });
     sm->RegisterPushKind("variant_layout", PushStage::Fragment, [](const PushConstantBinder& b, const PushInput& in) {
-        if (!in.draw) return;
-        b.Push(in.draw->variant_layout);
+        if (!in.texture_batch) return;
+        b.Push(in.texture_batch->variant_layout);
     });
 
     sm->CreatePushInstruction<RP::ShadowPushData>("ShadowCaster", PushStage::Vertex,
@@ -203,7 +203,7 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 		ShaderProgramDescription spd;
 		spd.BehavesAsUIOverlay();
 		ctx->CreateShaderProgram("UI", spd, RP::UI_PASS,
-			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_OUT_PIB_BUFFER, DEFAULT_INSTANCE_BUFFER },
+			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_INSTANCE_BUFFER },
 			"ui_fs", { UI_TEXT_RANK_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER,
 			           DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
 			{ TextureSlotRole::Albedo }, ResourceTag::CodeOwned | ResourceTag::Default);
@@ -481,14 +481,14 @@ void DefaultShaderProgramSet::SetBloomPrograms(EngineContext* ctx)
 namespace {
     struct alignas(16) CullScatterPush {
         uint32_t range_start, range_count, num_blocks, out_base;
-        uint32_t out_cap, cnt_base, gl_count, target_height;
+        uint32_t out_capacity, cnt_base, group_level_count, target_height;
         float    min_screen_radius_px;
         uint32_t pad[3];
     };
 
     struct alignas(16) CullFixupPush {
         uint32_t num_blocks, cmd_base, commands, first_cmd;
-        uint32_t out_base, out_cap, cnt_base, gl_count;
+        uint32_t out_base, out_capacity, cnt_base, group_level_count;
     };
 
     struct alignas(16) CullClearPush {
@@ -505,8 +505,10 @@ void DefaultShaderProgramSet::SetCullingPrograms(EngineContext* ctx, CullingData
     const ResourceTag tags = ResourceTag::CodeOwned | ResourceTag::Default;
 
     ctx->CreateComputeShader("culling_clear_cs",   EnginePath("shaders_code/comp/culling_clear.comp.hlsl").c_str(), tags);
-    ctx->CreateComputeShader("culling_scatter_cs", EnginePath("shaders_code/comp/culling_scatter.comp.hlsl").c_str(), tags);
-    ctx->CreateComputeShader("culling_fixup_cs",   EnginePath("shaders_code/comp/culling_fixup.comp.hlsl").c_str(), tags);
+    ctx->CreateComputeShader("culling_scatter_cs", EnginePath("shaders_code/comp/culling_scatter.comp.hlsl").c_str(), tags,
+        { { "MAX_MODEL_LODS", std::to_string(MAX_MODEL_LODS) } });
+    ctx->CreateComputeShader("culling_fixup_cs",   EnginePath("shaders_code/comp/culling_fixup.comp.hlsl").c_str(), tags,
+        { { "GROUP_LEVEL_BITS", std::to_string(kGroupLevelBits) } });
 
     ctx->CreateComputeShaderProgram("csp_cull_clear", "culling_clear_cs", { DEFAULT_CULL_COUNTERS_BUFFER }, {}, {}, {}, {}, RP::CULLING_PASS, tags);
     shader_manager->CreateComputePushInstruction<RP::CullingState>("csp_cull_clear",
@@ -522,7 +524,6 @@ void DefaultShaderProgramSet::SetCullingPrograms(EngineContext* ctx, CullingData
     AddPassCulling(ctx, culling_module, RP::MAIN_PASS,        DEFAULT_CAMERA_BUFFER,       true);
     AddPassCulling(ctx, culling_module, RP::TRANSPARENT_PASS, DEFAULT_CAMERA_BUFFER,       false);
     AddPassCulling(ctx, culling_module, RP::DEBUG_PASS,       DEFAULT_CAMERA_BUFFER,       false);
-    AddPassCulling(ctx, culling_module, RP::UI_PASS,          DEFAULT_CAMERA_BUFFER,       false);
 }
 
 void DefaultShaderProgramSet::AddPassCulling(EngineContext* ctx, CullingDataModule* culling_module,
@@ -540,8 +541,8 @@ void DefaultShaderProgramSet::AddPassCulling(EngineContext* ctx, CullingDataModu
     const std::string scatter_program = "csp_cull_scatter_" + pass_name;
     ctx->CreateComputeShaderProgram(scatter_program, "culling_scatter_cs",
         { DEFAULT_OUT_PIB_BUFFER, DEFAULT_CULL_COUNTERS_BUFFER },
-        { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_RECORD_GROUP_BUFFER, DEFAULT_GROUP_TABLE_BUFFER,
-          DEFAULT_BOUND_SPHERE_BUFFER, DEFAULT_TRANSFORM_BUFFER, camera_buffer, DEFAULT_CAMERA_BUFFER },
+        { DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_CULL_RECORD_TO_GROUP_BUFFER, DEFAULT_CULL_GROUP_LAYOUT_BUFFER,
+          DEFAULT_CULL_MODEL_BUFFER, DEFAULT_TRANSFORM_BUFFER, camera_buffer, DEFAULT_CAMERA_BUFFER },
         {}, {}, {}, RP::CULLING_PASS, tags);
     shader_manager->CreateComputePushInstruction<RP::CullingState>(scatter_program,
         [culling_module, render_pass, lod_target, player_view](const PushConstantBinder& binder, RP::CullingState culling_state) {
@@ -551,9 +552,9 @@ void DefaultShaderProgramSet::AddPassCulling(EngineContext* ctx, CullingDataModu
             push.range_count = pass_layout.records;
             push.num_blocks = pass_layout.blocks;
             push.out_base = pass_layout.out_base;
-            push.out_cap = pass_layout.out_cap;
+            push.out_capacity = pass_layout.out_capacity;
             push.cnt_base = pass_layout.cnt_base;
-            push.gl_count = pass_layout.gl;
+            push.group_level_count = pass_layout.group_level_count;
             push.target_height = lod_target ? lod_target->height : 0u;
             push.min_screen_radius_px = player_view ? culling_state.min_screen_radius_px : 0.0f;
             binder.Push(push);
@@ -567,13 +568,13 @@ void DefaultShaderProgramSet::AddPassCulling(EngineContext* ctx, CullingDataModu
     const std::string fixup_program = "csp_cull_fixup_" + pass_name;
     ctx->CreateComputeShaderProgram(fixup_program, "culling_fixup_cs",
         { DEFAULT_INDIRECT_BUFFER },
-        { DEFAULT_CMD_GROUP_LEVEL_BUFFER, DEFAULT_GROUP_TABLE_BUFFER, DEFAULT_CULL_COUNTERS_BUFFER },
+        { DEFAULT_CULL_COMMAND_TO_GROUP_LEVEL_BUFFER, DEFAULT_CULL_GROUP_LAYOUT_BUFFER, DEFAULT_CULL_COUNTERS_BUFFER },
         {}, {}, {}, RP::CULLING_PASS, tags);
     shader_manager->CreateComputePushInstruction<RP::CullingState>(fixup_program,
         [culling_module, render_pass](const PushConstantBinder& binder, RP::CullingState) {
             const CullPassLayout& pass_layout = culling_module->Pass(binder.frame, render_pass->ordinal);
             binder.Push(CullFixupPush{ pass_layout.blocks, pass_layout.cmd_base, pass_layout.commands, pass_layout.first_cmd,
-                                       pass_layout.out_base, pass_layout.out_cap, pass_layout.cnt_base, pass_layout.gl });
+                                       pass_layout.out_base, pass_layout.out_capacity, pass_layout.cnt_base, pass_layout.group_level_count });
         });
     shader_manager->CreateDispatchInstruction<RP::DummyDispatchData>(fixup_program,
         [culling_module, render_pass](DispatchSizeBinder& binder, RP::DummyDispatchData) {

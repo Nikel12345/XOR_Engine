@@ -29,7 +29,7 @@ private:
 
 inline constexpr uint32_t kNoGroup = 0xFFFFFFFFu;
 
-struct DrawGroupTable {
+struct InstanceGroupTable {
     uint32_t pass_count = 0;
     uint32_t group_count = 0;
     // [рецепт * pass_count + проход] -> сквозной номер группы в порядке PIB; kNoGroup — рецепт в
@@ -47,8 +47,8 @@ public:
     void MarkDirty() { dirty = true; }
     bool TakeChanged(const ObjectManager* om);
 
-    bool Sweep(SceneData* scene);
-    void Scatter(SceneData* scene, const DrawGroupTable& groups);
+    bool Sweep(ObjectManager* om, SceneData* scene);
+    void Scatter(ObjectManager* om, SceneData* scene, const InstanceGroupTable& groups);
 
     const RecipeRegistry& Recipes() const { return recipes; }
     const std::vector<uint32_t>& RecipeCounts() const { return recipe_counts; }

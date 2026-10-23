@@ -12,15 +12,27 @@
 #include "MaterialManager.h"
 #include "ModelData.h"
 #include "TextureData.h"
+#include "EngineProfiler.h"
 #include <bit>
 
 using namespace BatchKeys;
 using namespace ShaderBase;
 
+struct MatSpLayout {
+    std::shared_ptr<SDL_GPUGraphicsPipeline>  pipeline;
+    std::vector<UVL_Block>                    uvl;
+    std::vector<SDL_GPUTextureSamplerBinding> texture_binding;
+    SlotWord                slot[MAX_SLOTS] = {};
+    MatSpKey                res_key = 0;
+    GpuResourceBatchKey     gpu_resource_key = 0;
+    bool                    bindable = false;
+    bool                    variative = false;
+};
 
-ModelBatchKey HashModelBatchKey(ModelId model, uint32_t submesh_index) {
-    ModelBatchKey key = std::hash<ModelId>{}(model);
-    key ^= static_cast<ModelBatchKey>(submesh_index) + 0x9e3779b97f4a7c15ull + (key << 6) + (key >> 2);
+
+CommandBatchKey HashCommandBatchKey(ModelId model, uint32_t submesh_index) {
+    CommandBatchKey key = std::hash<ModelId>{}(model);
+    key ^= static_cast<CommandBatchKey>(submesh_index) + 0x9e3779b97f4a7c15ull + (key << 6) + (key >> 2);
 
     key ^= key >> 33;
     key *= 0xff51afd7ed558ccd;
@@ -41,13 +53,6 @@ static inline uint64_t MixKey(uint64_t key) {
 }
 
 const std::shared_ptr<std::vector<uint8_t>> kNoParams{};
-
-MatSpKey HashMatSpMemo(const Material* mat, const ShaderProgram* sp,
-                       const std::vector<uint8_t>* params) {
-    MatSpKey key = reinterpret_cast<MatSpKey>(mat);
-    key = MixKey(key ^ reinterpret_cast<MatSpKey>(sp));
-    return MixKey(key ^ reinterpret_cast<MatSpKey>(params));
-}
 
 MatSpKey HashMatSpResources(ShaderProgramId push_source, const ShaderProgram* sp,
                             const std::vector<uint8_t>* params, const SlotWord* slot_words,
@@ -136,116 +141,93 @@ void BatchBuilder::SetDummyTexture(const std::string& name, TextureManager* tm)
     atlas->tci.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
 }
 
-void BatchBuilder::BuildMaterialLayouts(PipeManager* pm, PassManager* pass_manager, TextureManager* tm,
-    ShaderManager* sm, MaterialManager* mtm)
+MatSpLayout BatchBuilder::BuildMatSpLayout(PipeManager* pm, PassManager* pass_manager, TextureManager* tm,
+    ShaderManager* sm, const Material& material, const ShaderProgram& sp, ShaderProgramId sp_id,
+    const std::shared_ptr<std::vector<uint8_t>>& sp_params) const
 {
-    mat_sp_layouts.clear();
-    if (!mtm || !sm || !pm || !pass_manager) return;
-
     TextureHandle* dummy = tm ? tm->GetTextureHandle(dummy_texture) : nullptr;
     if (dummy && !dummy->atlas) dummy = nullptr;
-    ShaderProgram* fallback = sm->GetShaderProgram(fallback_sp);
 
+    const VariativeRoles cells = CollectVariativeRoles(material);
     std::vector<const TextureHandle*> block_handles;
 
-    const MaterialRegistry& mreg = mtm->Materials();
-    for (int32_t mi = 0; mi < mreg.Count(); ++mi) {
-        Material* material = mreg.At(mi).object.get();
-        if (!material) continue;
+    MatSpLayout lay{};
+    // Промах молчаливый: программа без пайплайна (например, проход перенастроили без
+    // пересборки пайплайнов) выпадает из отрисовки без строки в логе.
+    lay.pipeline = pm->FindGraphicsPipeline(sp, sm, pass_manager);
+    lay.bindable = true;
+    lay.uvl.reserve(sp.required_slots.size());
+    lay.texture_binding.reserve(sp.required_slots.size());
 
-        const VariativeRoles cells = CollectVariativeRoles(*material);
+    for (size_t s = 0; s < sp.required_slots.size(); ++s) {
+        const TextureSlotRole role = sp.required_slots[s];
+        auto it = material.textures.find(role);
+        const std::vector<TextureId>* names =
+            (it != material.textures.end()) ? &it->second : nullptr;
 
-        for (const SpBinding& binding : material->shader_programs) {
-            const std::shared_ptr<std::vector<uint8_t>>& sp_params =
-                (binding.params && !binding.params->empty()) ? binding.params : kNoParams;
-            ShaderProgramId sp_id = binding.sp;
-            ShaderProgram* sp = sm->GetShaderProgram(sp_id);
-            if (!sp) { sp = fallback; sp_id = fallback_sp; }
-            if (!sp) continue;
+        const uint32_t base = safe_u32(lay.uvl.size());
 
-            const MatSpKey memo = HashMatSpMemo(material, sp, sp_params.get());
-            if (mat_sp_layouts.count(memo)) continue;
-
-            MatSpLayout lay{};
-            // Промах молчаливый: программа без пайплайна (например, проход перенастроили без
-            // пересборки пайплайнов) выпадает из отрисовки без строки в логе.
-            lay.pipeline = pm->FindGraphicsPipeline(*sp, sm, pass_manager);
-            lay.bindable = true;
-            block_handles.clear();
-            lay.uvl.reserve(sp->required_slots.size());
-            lay.texture_binding.reserve(sp->required_slots.size());
-
-            for (size_t s = 0; s < sp->required_slots.size(); ++s) {
-                const TextureSlotRole role = sp->required_slots[s];
-                auto it = material->textures.find(role);
-                const std::vector<TextureId>* names =
-                    (it != material->textures.end()) ? &it->second : nullptr;
-
-                const uint32_t base = safe_u32(lay.uvl.size());
-
-                TextureHandle* def = (names && !names->empty() && tm)
-                    ? tm->GetTextureHandle((*names)[0]) : nullptr;
-                if (!def || !def->atlas) {
-                    def = dummy;
-                }
-                if (!def) { lay.bindable = false; break; }
-
-                lay.uvl.push_back(MakeUVL(def->texture_data));
-                block_handles.push_back(def);
-                lay.texture_binding.push_back(def->atlas->texture_binding);
-
-                uint32_t count = 1;
-                uint32_t cell = 0;
-                bool has_cell = false;
-                for (uint32_t c = 0; c < cells.count; ++c)
-                    if (cells.role[c] == role) { cell = c; has_cell = true; break; }
-
-                if (has_cell) {
-                    if (lay.uvl.size() + names->size() - 1 <= MAX_UVL_BLOCKS)
-                    for (size_t v = 1; v < names->size(); ++v) {
-                        TextureHandle* h = tm ? tm->GetTextureHandle((*names)[v]) : nullptr;
-                        if (!h || !h->atlas) continue;
-                        lay.uvl.push_back(MakeUVL(h->texture_data));
-                        block_handles.push_back(h);
-                        ++count;
-                    }
-                }
-                if (count == 1) cell = 0;
-                else            lay.variative = true;
-
-                assert((cells.count != 0 || (count == 1 && base == safe_u32(s)))
-                    && "BuildMaterialLayouts: material without variants must yield the legacy UVL table");
-
-                if (s < MAX_SLOTS)
-                    lay.slot[s] = { safe_u32_u8(count), safe_u32_u8(cell), safe_u32_u16(base) };
-            }
-
-            if (!lay.bindable) {
-                lay.uvl.clear();
-                lay.texture_binding.clear();
-            }
-            else {
-                lay.res_key          = HashMatSpResources(sp_id, sp, sp_params.get(), lay.slot, block_handles);
-                lay.gpu_resource_key = HashGpuResourceBatchKey(sp->vertex_shader_buffer_names,
-                    sp->fragment_shader_buffer_names, block_handles);
-            }
-            mat_sp_layouts.emplace(memo, std::move(lay));
+        TextureHandle* def = (names && !names->empty() && tm)
+            ? tm->GetTextureHandle((*names)[0]) : nullptr;
+        if (!def || !def->atlas) {
+            def = dummy;
         }
+        if (!def) { lay.bindable = false; break; }
+
+        lay.uvl.push_back(MakeUVL(def->texture_data));
+        block_handles.push_back(def);
+        lay.texture_binding.push_back(def->atlas->texture_binding);
+
+        uint32_t count = 1;
+        uint32_t cell = 0;
+        bool has_cell = false;
+        for (uint32_t c = 0; c < cells.count; ++c)
+            if (cells.role[c] == role) { cell = c; has_cell = true; break; }
+
+        if (has_cell) {
+            if (lay.uvl.size() + names->size() - 1 <= MAX_UVL_BLOCKS)
+            for (size_t v = 1; v < names->size(); ++v) {
+                TextureHandle* h = tm ? tm->GetTextureHandle((*names)[v]) : nullptr;
+                if (!h || !h->atlas) continue;
+                lay.uvl.push_back(MakeUVL(h->texture_data));
+                block_handles.push_back(h);
+                ++count;
+            }
+        }
+        if (count == 1) cell = 0;
+        else            lay.variative = true;
+
+        assert((cells.count != 0 || (count == 1 && base == safe_u32(s)))
+            && "BuildMatSpLayout: material without variants must yield the legacy UVL table");
+
+        if (s < MAX_SLOTS)
+            lay.slot[s] = { safe_u32_u8(count), safe_u32_u8(cell), safe_u32_u16(base) };
     }
+
+    if (!lay.bindable) {
+        lay.uvl.clear();
+        lay.texture_binding.clear();
+    }
+    else {
+        lay.res_key          = HashMatSpResources(sp_id, &sp, sp_params.get(), lay.slot, block_handles);
+        lay.gpu_resource_key = HashGpuResourceBatchKey(sp.vertex_shader_buffer_names,
+            sp.fragment_shader_buffer_names, block_handles);
+    }
+    return lay;
 }
 
-TextureBatchData* BatchBuilder::ResolveTextureBatch(RenderPassStep* rp, ShaderProgram* sp, const ShaderName& sp_name,
+TextureBatch* BatchBuilder::ResolveTextureBatch(PassBatches& pass, ShaderProgram* sp, const ShaderName& sp_name,
     const std::shared_ptr<std::vector<uint8_t>>& sp_params, const MatSpLayout& lay, uint32_t section,
     ShaderManager* sm, BufferManager* bm, uint64_t& path_key)
 {
     if (!lay.pipeline) return nullptr;
 
-    auto& shader_map = rp->shader_batches;
+    auto& shader_map = pass.shader_batches;
     const ShaderBatchKey shader_key = HashShaderBatchKey(lay.pipeline.get());
     auto it = shader_map.find(shader_key);
     if (it == shader_map.end())
     {
-        ShaderBatchData new_batch{};
+        ShaderBatch new_batch{};
         new_batch.pipeline = lay.pipeline;
         if (VertexShaderData* vsd = sm->GetVertexShader(sp->vs_id)) {
             new_batch.vertexBuffers = ResolveBuffers(bm, vsd->vertex_buffer_names);
@@ -258,7 +240,7 @@ TextureBatchData* BatchBuilder::ResolveTextureBatch(RenderPassStep* rp, ShaderPr
     auto& res_map = it->second.resource_batches;
     auto res_it = res_map.find(lay.gpu_resource_key);
     if (res_it == res_map.end()) {
-        GpuResourceBatchData new_res{};
+        GpuResourceBatch new_res{};
         new_res.vertexStorageBuffers   = ResolveBuffers(bm, sp->vertex_shader_buffer_names);
         new_res.fragmentStorageBuffers = ResolveBuffers(bm, sp->fragment_shader_buffer_names);
         new_res.texture_binding        = lay.texture_binding;
@@ -269,7 +251,7 @@ TextureBatchData* BatchBuilder::ResolveTextureBatch(RenderPassStep* rp, ShaderPr
     auto& tex_map = res_it->second.texture_batches;
     auto tex_it = tex_map.find(tex_key);
     if (tex_it == tex_map.end()) {
-        TextureBatchData new_texb{};
+        TextureBatch new_texb{};
         new_texb.params = sp_params;
         new_texb.push_instructions = std::make_shared<const PushInstructions>(sm->CollectPushInstructions(sp_name));
         new_texb.texture_uvl = lay.uvl;
@@ -282,15 +264,14 @@ TextureBatchData* BatchBuilder::ResolveTextureBatch(RenderPassStep* rp, ShaderPr
     return &tex_it->second;
 }
 
-void BatchBuilder::ResolveRecipe(PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
-    ModelManager* mdm, MaterialManager* mtm, const Recipe& recipe) {
+void BatchBuilder::ResolveRecipe(PipeManager* pm, PassManager* pass_manager, TextureManager* tm, ShaderManager* sm,
+    BufferManager* bm, ModelManager* mdm, MaterialManager* mtm, const Recipe& recipe) {
 
     resolved_scratch.clear();
     group_scratch.clear();
     const std::vector<RenderPassStep*>& passes = pass_manager->GetOrderedRenderPasses();
     const ModelId root = recipe.model;
     const uint32_t lod_count = mdm ? std::min(mdm->LevelCount(root), MAX_LOD) : 1u;
-    const ModelData* root_model = mdm ? mdm->FindModel(root) : nullptr;
 
     for (uint32_t lod = 0; lod < lod_count; ++lod) {
         const ModelId model_id = mdm ? mdm->LevelModel(root, lod) : root;
@@ -319,62 +300,60 @@ void BatchBuilder::ResolveRecipe(PassManager* pass_manager, ShaderManager* sm, B
                 }
                 RenderPassStep* rp = pass_manager->GetRenderPassStep(sp->render_pass_name);
                 if (!rp || rp->ordinal >= passes.size() || passes[rp->ordinal] != rp) continue;
+                const uint32_t pass_index = rp->ordinal;
 
-                auto lay_it = mat_sp_layouts.find(HashMatSpMemo(material, sp, sp_params.get()));
-                if (lay_it == mat_sp_layouts.end() || !lay_it->second.bindable) continue;
-                const MatSpLayout& lay = lay_it->second;
+                const MatSpLayout lay = BuildMatSpLayout(pm, pass_manager, tm, sm, *material, *sp, resolved_id, sp_params);
+                if (!lay.bindable) continue;
 
                 const uint32_t section = lay.variative ? StateSection(submesh.material_index, lod) : 0u;
                 uint64_t path_key = 0;
-                TextureBatchData* tb = ResolveTextureBatch(rp, sp, sm->ShaderProgramNameOf(resolved_id),
+                TextureBatch* tb = ResolveTextureBatch(pass_batches[pass_index], sp, sm->ShaderProgramNameOf(resolved_id),
                     sp_params, lay, section, sm, bm, path_key);
                 if (!tb) continue;
 
-                const uint64_t cmd_key = MixKey(MixKey(HashModelBatchKey(model_id, si) + lod) ^ path_key);
-                resolved_scratch.push_back({ rp, tb, &submesh, cmd_key, static_cast<uint8_t>(lod) });
+                const uint64_t cmd_key = MixKey(MixKey(HashCommandBatchKey(model_id, si) + lod) ^ path_key);
+                resolved_scratch.push_back({ pass_index, tb, &submesh, cmd_key, static_cast<uint8_t>(lod) });
             }
         }
     }
 
-    uint64_t lod_key = MixKey(lod_count);
-    for (uint32_t L = 0; L + 1 < lod_count; ++L)
-        lod_key = MixKey(lod_key ^ std::bit_cast<uint32_t>(root_model->lods[L].switch_px));
+    const uint64_t root_key = MixKey(std::hash<ModelId>{}(root));
 
     for (size_t first = 0; first < resolved_scratch.size(); ++first) {
-        RenderPassStep* rp = resolved_scratch[first].pass;
+        const uint32_t pass = resolved_scratch[first].pass;
         bool seen = false;
-        for (size_t i = 0; i < first && !seen; ++i) seen = resolved_scratch[i].pass == rp;
+        for (size_t i = 0; i < first && !seen; ++i) seen = resolved_scratch[i].pass == pass;
         if (seen) continue;
 
-        uint64_t group_key = lod_key;
+        uint64_t group_key = root_key;
         for (size_t i = first; i < resolved_scratch.size(); ++i)
-            if (resolved_scratch[i].pass == rp) group_key = MixKey(group_key ^ resolved_scratch[i].key);
-        group_scratch.push_back({ rp, group_key, static_cast<uint8_t>(lod_count), root_model });
+            if (resolved_scratch[i].pass == pass) group_key = MixKey(group_key ^ resolved_scratch[i].key);
+        group_scratch.push_back({ pass, group_key, static_cast<uint8_t>(lod_count), root });
     }
 }
 
 void BatchBuilder::InsertResolvedRecipe(uint32_t recipe_index)
 {
     for (const ResolvedGroup& g : group_scratch) {
-        std::vector<DrawGroup>& pass_groups = g.pass->draw_groups;
-        auto [index_it, created] = group_index_by_key[g.pass->ordinal].try_emplace(g.key, safe_u32(pass_groups.size()));
+        std::vector<InstanceGroup>& pass_groups = pass_batches[g.pass].instance_groups;
+        auto [index_it, created] = group_index_by_key[g.pass].try_emplace(g.key, safe_u32(pass_groups.size()));
         const uint32_t group_index = index_it->second;
         if (created) {
-            DrawGroup& group = pass_groups.emplace_back();
+            InstanceGroup& group = pass_groups.emplace_back();
             group.lod_count = g.lod_count;
-            for (uint32_t L = 0; L + 1u < g.lod_count; ++L) group.switches[L] = g.root_model->lods[L].switch_px;
+            group.root_model = g.root_model;
             for (const ResolvedCmd& c : resolved_scratch) {
                 if (c.pass != g.pass) continue;
-                auto [lit, leaf_created] = c.texture->model_batches.try_emplace(MixKey(g.key ^ c.key));
+                auto [lit, leaf_created] = c.texture->command_batches.try_emplace(MixKey(g.key ^ c.key));
                 if (leaf_created) {
-                    ModelBatchData& leaf = lit->second;
-                    leaf.group_index = group_index;
+                    CommandBatch& leaf = lit->second;
+                    leaf.instance_group_index = group_index;
                     leaf.level = c.level;
                     leaf.submesh = { c.submesh->indexCount, c.submesh->indexOffset, c.submesh->vertexOffset };
                 }
             }
         }
-        group_table.group_of[size_t(recipe_index) * group_table.pass_count + g.pass->ordinal] = group_index;
+        group_table.group_of[size_t(recipe_index) * group_table.pass_count + g.pass] = group_index;
     }
 }
 
@@ -388,26 +367,37 @@ void BatchBuilder::UpdateRenderBatches(PipeManager* pm, PassManager* pass_manage
     const bool population_changed = population->TakeChanged(om);
     if (!resources_changed && !population_changed) return;
 
-    const bool live_recipes_changed = population->Sweep(scene);
-    if (resources_changed || live_recipes_changed) {
-        BuildMaterialLayouts(pm, pass_manager, tm, sm, mtm);
-        BuildRenderBatches(pass_manager, sm, bm, mdm, mtm, *population);
+    bool live_recipes_changed = false;
+    {
+        PROF_SCOPE(Sim, "  population_sweep");
+        live_recipes_changed = population->Sweep(om, scene);
     }
-    population->Scatter(scene, group_table);
-    FinalizeOffsets(pass_manager, bm, population->Ranges());
+    if (resources_changed || live_recipes_changed) {
+        PROF_SCOPE(Sim, "  build_tree");
+        BuildRenderBatches(pm, pass_manager, tm, sm, bm, mdm, mtm, *population);
+    }
+    {
+        PROF_SCOPE(Sim, "  population_scatter");
+        population->Scatter(om, scene, group_table);
+    }
+    {
+        PROF_SCOPE(Sim, "  apply_population");
+        ApplyPopulation(population->Ranges());
+    }
+    {
+        PROF_SCOPE(Sim, "  build_layout_snapshot");
+        BuildLayoutSnapshot(pass_manager, bm);
+    }
 
     if (resources_changed) ++rebuild_epoch;
     ++batches_revision;
 }
 
-void BatchBuilder::BuildRenderBatches(PassManager* pass_manager, ShaderManager* sm, BufferManager* bm,
-    ModelManager* mdm, MaterialManager* mtm, const DrawPopulation& population)
+void BatchBuilder::BuildRenderBatches(PipeManager* pm, PassManager* pass_manager, TextureManager* tm,
+    ShaderManager* sm, BufferManager* bm, ModelManager* mdm, MaterialManager* mtm, const DrawPopulation& population)
 {
     const std::vector<RenderPassStep*>& passes = pass_manager->GetOrderedRenderPasses();
-    for (RenderPassStep* rp : passes) {
-        rp->shader_batches.clear();
-        rp->draw_groups.clear();
-    }
+    pass_batches.assign(passes.size(), {});
 
     const RecipeRegistry& recipes = population.Recipes();
     const std::vector<uint32_t>& recipe_counts = population.RecipeCounts();
@@ -417,7 +407,7 @@ void BatchBuilder::BuildRenderBatches(PassManager* pass_manager, ShaderManager* 
 
     for (uint32_t r = 0; r < recipes.Count(); ++r) {
         if (r >= recipe_counts.size() || recipe_counts[r] == 0) continue;
-        ResolveRecipe(pass_manager, sm, bm, mdm, mtm, recipes.At(RecipeId{ safe_u32t_i(r) }));
+        ResolveRecipe(pm, pass_manager, tm, sm, bm, mdm, mtm, recipes.At(RecipeId{ safe_u32t_i(r) }));
         InsertResolvedRecipe(r);
     }
 
@@ -425,7 +415,7 @@ void BatchBuilder::BuildRenderBatches(PassManager* pass_manager, ShaderManager* 
     uint32_t group_count = 0;
     for (size_t p = 0; p < passes.size(); ++p) {
         pass_group_base[p] = group_count;
-        group_count += safe_u32(passes[p]->draw_groups.size());
+        group_count += safe_u32(pass_batches[p].instance_groups.size());
     }
     group_table.group_count = group_count;
     for (size_t cell = 0; cell < group_table.group_of.size(); ++cell) {
@@ -434,87 +424,91 @@ void BatchBuilder::BuildRenderBatches(PassManager* pass_manager, ShaderManager* 
     }
 }
 
-void BatchBuilder::FinalizeOffsets(PassManager* pass_manager, BufferManager* bm, const std::vector<GroupRange>& ranges)
+void BatchBuilder::ApplyPopulation(const std::vector<GroupRange>& ranges)
 {
-    assert(ranges.size() == group_table.group_count && "FinalizeOffsets: population scattered against another group table");
+    assert(ranges.size() == group_table.group_count && "ApplyPopulation: population scattered against another group table");
     uint32_t offset = 0;
     uint32_t group_index = 0;
 
-    auto layout = std::make_shared<RenderSnap::BatchLayout>();
-    layout->passes.reserve(pass_manager->GetOrderedRenderPasses().size());
-    layout->indirectBuffer = bm->GetBufferData(DefaultBuffersNames::DEFAULT_INDIRECT_BUFFER);
-
-    for (RenderPassStep* rp : pass_manager->GetOrderedRenderPasses())
-    {
-        RenderSnap::PassDrawList pass_list;
-        pass_list.first_instance = offset;
-        for (DrawGroup& group : rp->draw_groups) {
+    for (PassBatches& pass : pass_batches) {
+        for (InstanceGroup& group : pass.instance_groups) {
             const GroupRange& range = ranges[group_index++];
-            assert(range.first == offset && "FinalizeOffsets: PIB order of DrawPopulation differs from the pass walk");
+            assert(range.first == offset && "ApplyPopulation: PIB order of DrawPopulation differs from the pass walk");
             group.pib_first = range.first;
             group.size = range.size;
             offset += range.size;
         }
-        pass_list.num_instances = offset - pass_list.first_instance;
-        pass_list.shaders.reserve(rp->shader_batches.size());
+        for (auto& [_, shader_batch] : pass.shader_batches)
+            for (auto& [_, res_batch] : shader_batch.resource_batches)
+                for (auto& [_, texture_batch] : res_batch.texture_batches)
+                    for (auto& [_, leaf] : texture_batch.command_batches) {
+                        const InstanceGroup& group = pass.instance_groups[leaf.instance_group_index];
+                        leaf.firstInstance = group.pib_first;
+                        leaf.instanceCount = leaf.level == 0 ? group.size : 0u;
+                    }
+    }
+}
 
-        uint32_t pass_cmd_index = 0;
-        uint32_t pass_cmds = 0;
+void BatchBuilder::BuildLayoutSnapshot(PassManager* pass_manager, BufferManager* bm)
+{
+    const std::vector<RenderPassStep*>& passes = pass_manager->GetOrderedRenderPasses();
+    auto layout = std::make_shared<RenderSnap::BatchLayout>();
+    layout->passes.reserve(passes.size());
+    layout->indirectBuffer = bm->GetBufferData(DefaultBuffersNames::DEFAULT_INDIRECT_BUFFER);
 
-        pass_list.global_texture_bindings.reserve(rp->global_texture_bindings.size());
+    static const PassBatches no_batches{};
+    for (size_t p = 0; p < passes.size(); ++p)
+    {
+        const RenderPassStep* rp = passes[p];
+        const PassBatches& pass = p < pass_batches.size() ? pass_batches[p] : no_batches;
+
+        RenderSnap::PassBatchSnap pass_snap;
+        pass_snap.shader_batches.reserve(pass.shader_batches.size());
+        pass_snap.global_texture_bindings.reserve(rp->global_texture_bindings.size());
 
         for (TextureAtlas* atlas : rp->global_texture_bindings) {
             if (!atlas || !atlas->texture_binding.texture) {
-                SDL_Log("BatchBuilder::FinalizeOffsets missing GPU texture in pass global_texture_bindings");
+                SDL_Log("BatchBuilder::BuildLayoutSnapshot missing GPU texture in pass global_texture_bindings");
                 continue;
             }
-            pass_list.global_texture_bindings.push_back(atlas->texture_binding);
+            pass_snap.global_texture_bindings.push_back(atlas->texture_binding);
         }
 
-        for (auto& [shader_key, shader_batch] : rp->shader_batches)
+        uint32_t pass_cmd_index = 0;
+        for (const auto& [shader_key, shader_batch] : pass.shader_batches)
         {
-            RenderSnap::ShaderGroup sg;
-            sg.pipeline = shader_batch.pipeline;
-            sg.vertexBuffers = shader_batch.vertexBuffers;
-            sg.indexBuffer = shader_batch.indexBuffer;
-            sg.resources.reserve(shader_batch.resource_batches.size());
+            RenderSnap::ShaderBatchSnap shader_snap;
+            shader_snap.pipeline = shader_batch.pipeline;
+            shader_snap.vertexBuffers = shader_batch.vertexBuffers;
+            shader_snap.indexBuffer = shader_batch.indexBuffer;
+            shader_snap.resource_batches.reserve(shader_batch.resource_batches.size());
 
-            for (auto& [res_key, res_batch] : shader_batch.resource_batches)
+            for (const auto& [res_key, res_batch] : shader_batch.resource_batches)
             {
-                RenderSnap::GpuResourceGroup rg;
-                rg.vertexStorageBuffers = res_batch.vertexStorageBuffers;
-                rg.fragmentStorageBuffers = res_batch.fragmentStorageBuffers;
-                rg.texture_binding = res_batch.texture_binding;
-                rg.draws.reserve(res_batch.texture_batches.size());
+                RenderSnap::GpuResourceBatchSnap res_snap;
+                res_snap.vertexStorageBuffers = res_batch.vertexStorageBuffers;
+                res_snap.fragmentStorageBuffers = res_batch.fragmentStorageBuffers;
+                res_snap.texture_binding = res_batch.texture_binding;
+                res_snap.texture_batches.reserve(res_batch.texture_batches.size());
 
-                for (auto& [texture_key, texture_batch] : res_batch.texture_batches)
+                for (const auto& [texture_key, texture_batch] : res_batch.texture_batches)
                 {
-                    texture_batch.indirect_command_index = pass_cmd_index;
-
-                    RenderSnap::TextureDraw td;
-                    td.texture_uvl = texture_batch.texture_uvl;
-                    td.variant_layout = texture_batch.variant_layout;
-                    td.params = texture_batch.params;
-                    td.push_instructions = texture_batch.push_instructions;
-                    td.indirect_command_index = pass_cmd_index;
-                    td.draw_count = safe_u32(texture_batch.model_batches.size());
-
-                    for (auto& [model_key, model_batch] : texture_batch.model_batches)
-                    {
-                        const DrawGroup& group = rp->draw_groups[model_batch.group_index];
-                        model_batch.firstInstance = group.pib_first;
-                        model_batch.instanceCount = model_batch.level == 0 ? group.size : 0u;
-                        pass_cmd_index++;
-                    }
-                    pass_cmds += td.draw_count;
-                    rg.draws.push_back(std::move(td));
+                    RenderSnap::TextureBatchSnap texture_snap;
+                    texture_snap.texture_uvl = texture_batch.texture_uvl;
+                    texture_snap.variant_layout = texture_batch.variant_layout;
+                    texture_snap.params = texture_batch.params;
+                    texture_snap.push_instructions = texture_batch.push_instructions;
+                    texture_snap.indirect_command_index = pass_cmd_index;
+                    texture_snap.draw_count = safe_u32(texture_batch.command_batches.size());
+                    pass_cmd_index += texture_snap.draw_count;
+                    res_snap.texture_batches.push_back(std::move(texture_snap));
                 }
-                sg.resources.push_back(std::move(rg));
+                shader_snap.resource_batches.push_back(std::move(res_snap));
             }
-            pass_list.shaders.push_back(std::move(sg));
+            pass_snap.shader_batches.push_back(std::move(shader_snap));
         }
-        pass_list.num_commands = pass_cmds;
-        layout->passes.push_back(std::move(pass_list));
+        pass_snap.num_commands = pass_cmd_index;
+        layout->passes.push_back(std::move(pass_snap));
     }
     current_layout = std::move(layout);
 }

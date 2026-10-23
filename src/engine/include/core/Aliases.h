@@ -15,10 +15,10 @@ using ShaderName = std::string;
 using BufferDataName = const char*;
 
 namespace BatchKeys {
-	using ModelBatchKey = uint64_t;
+	using CommandBatchKey = uint64_t;
 	using TextureBatchKey = uint64_t;
 	using GpuResourceBatchKey = uint64_t;
 	using ShaderBatchKey = uint64_t;
 	using MatSpKey = uint64_t;
-	using GroupKey = uint64_t;
+	using InstanceGroupKey = uint64_t;
 };

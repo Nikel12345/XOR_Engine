@@ -19,16 +19,12 @@ namespace RenderSnap { struct BatchLayout; struct ComputeLayout; }
 struct PassRegion {
     uint32_t command_blocks_count = 0;
     uint32_t commands = 0;
-    uint32_t pib = 0;
-    uint32_t first_pib = 0;
     uint32_t cmd_base = 0;
-    uint32_t pib_base = 0;
 };
 
 struct PassRegions {
     std::vector<PassRegion> per_pass;
     uint32_t total_commands = 0;
-    uint32_t total_pib = 0;
 };
 
 struct PassAnchor {

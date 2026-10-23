@@ -29,7 +29,6 @@ class FontManager;
 class BatchBuilder;
 class DrawPopulation;
 class PIB_DataModule;
-class BoundSphereDataModule;
 class CullingDataModule;
 class TransformDataModule;
 class InstanceDataModule;
@@ -173,7 +172,6 @@ private:
     DrawPopulation* draw_population = nullptr;
 
     PIB_DataModule* pib_data_module = nullptr;
-    BoundSphereDataModule* bound_sphere_data_module = nullptr;
     CullingDataModule* culling_data_module = nullptr;
     TransformDataModule* transform_data_module = nullptr;
     InstanceDataModule* instance_data_module = nullptr;

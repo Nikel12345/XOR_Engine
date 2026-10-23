@@ -3,6 +3,7 @@
 #include "BufferManager.h"
 #include "PassManager.h"
 #include "RenderSnapshot.h"
+#include "BatchBuilder.h"
 #include "ModelData.h"
 
 IndirectDataModule::IndirectDataModule()
@@ -18,8 +19,7 @@ static bool SameRegions(const PassRegions& a, const PassRegions& b)
 		const PassRegion& x = a.per_pass[i];
 		const PassRegion& y = b.per_pass[i];
 		if (x.command_blocks_count != y.command_blocks_count) return false;
-		if (x.commands != y.commands || x.pib != y.pib) return false;
-		if (x.cmd_base != y.cmd_base || x.pib_base != y.pib_base) return false;
+		if (x.commands != y.commands || x.cmd_base != y.cmd_base) return false;
 	}
 	return true;
 }
@@ -32,33 +32,31 @@ uint32_t IndirectDataModule::CalculateIndirectSize(const PassRegions& regions, u
 	return total_size;
 }
 
-void IndirectDataModule::StoreIndirect(BufferManager* bm, PassManager* pm, UploadTask* task,
+void IndirectDataModule::StoreIndirect(BufferManager* bm, const std::vector<PassBatches>& passes, UploadTask* task,
                                        const PassRegions& regions, uint64_t revision, uint8_t slot)
 {
 	if (revision == last_revision[slot] && SameRegions(regions, last_regions[slot])) return;
 	last_revision[slot] = revision;
 	last_regions[slot] = regions;
 
-	const std::vector<RenderPassStep*>& ordered = pm->GetOrderedRenderPasses();
-
 	// Порядок записи ОБЯЗАН совпадать со штампом регионов: пасс-мажорно, внутри прохода —
 	// блок за блоком.
-	for (uint32_t pass_i = 0; pass_i < ordered.size(); ++pass_i) {
+	for (uint32_t pass_i = 0; pass_i < passes.size(); ++pass_i) {
 		if (pass_i >= regions.per_pass.size()) break;
 		const PassRegion& reg = regions.per_pass[pass_i];
-		const RenderPassStep* rp = ordered[pass_i];
+		const PassBatches& pass = passes[pass_i];
 
 		for (uint32_t b = 0; b < reg.command_blocks_count; ++b) {
-			for (const auto& [_, shader_batch] : rp->shader_batches) {
+			for (const auto& [_, shader_batch] : pass.shader_batches) {
 				for (const auto& [_, res_batch] : shader_batch.resource_batches) {
 					for (const auto& [_, texture_batch] : res_batch.texture_batches) {
-						for (const auto& [_, model_batch] : texture_batch.model_batches) {
+						for (const auto& [_, command_batch] : texture_batch.command_batches) {
 							SDL_GPUIndexedIndirectDrawCommand data;
-							data.num_indices = model_batch.submesh.index_count;
-							data.num_instances = model_batch.instanceCount;
-							data.first_index = model_batch.submesh.index_offset;
-							data.vertex_offset = model_batch.submesh.vertex_offset;
-							data.first_instance = model_batch.firstInstance;
+							data.num_indices = command_batch.submesh.index_count;
+							data.num_instances = command_batch.instanceCount;
+							data.first_index = command_batch.submesh.index_offset;
+							data.vertex_offset = command_batch.submesh.vertex_offset;
+							data.first_instance = command_batch.firstInstance;
 
 							bm->UploadToTransferBuffer(task, sizeof(data), &data);
 						}

@@ -86,7 +86,7 @@ XOR Engine — набор статических библиотек. Прило�
   `CreateMaterial`, `CreateTextureFromFile`, `CreateModel`, `CreateFont`, `CreateGeometryPool`.
   Узкая GPU-половина того же фасада — `GpuContext`; ею пользуются шейдер-сеты и физика.
 - **Data-модули** (`*DataModule.cpp`: `Transform`, `Instance`, `PIB`, `Indirect`, `Light`,
-  `BoundSphere`, `TextureState`, `UI`) — покадровый мост «ECS → GPU-буфер», по буферу на модуль.
+  `Culling`, `TextureState`, `UI`) — покадровый мост «ECS → GPU-буфер», по буферу на модуль.
   Место, где сцена превращается в байты.
 - **Дефолт-сеты** (`DefaultRenderPassSet`, `DefaultShaderSet`, `DefaultUpdateSet`,
   `DefaultCommandSet`) — **наполнение** движка, а не его ядро: проходы, шейдеры, инструкции
