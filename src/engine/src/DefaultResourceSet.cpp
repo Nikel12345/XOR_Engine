@@ -37,7 +37,7 @@ void DefaultResourceSet::CreateDefaultBuffers(BufferManager* bm)
     bm->CreateBufferData(DEFAULT_CULL_MODEL_BUFFER,                  32 * 64,                BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
 
     bm->CreateBufferData(UI_TEXT_RANK_BUFFER,     sizeof(uint32_t) * 2 * 64,  BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
-    bm->CreateBufferData(UI_TEXT_INDEX_BUFFER,    sizeof(uint32_t) * 2 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(UI_TEXT_INDEX_BUFFER,    sizeof(uint32_t) * 4 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
     bm->CreateBufferData(UI_TEXT_BUFFER,          sizeof(uint32_t) * 4096,    BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
 
     bm->CreateBufferData(UI_FONT_UVL_BUFFER, sizeof(uint32_t) * 4 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);

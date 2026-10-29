@@ -7,6 +7,7 @@
 #include "ShaderTypes.h"
 #include "Aliases.h"
 #include "InputManager.h"
+#include "UI_Yoga.h"
 
 template<CommandId Id> struct CommandPayload;
 template<CommandId Id> using CommandPayloadT = typename CommandPayload<Id>::type;
@@ -186,3 +187,15 @@ struct UINodeTransformCmd {
     float    matrix[16];
 };
 template<> struct CommandPayload<CommandId::SetUINodeTransform> { using type = UINodeTransformCmd; };
+
+struct UINodeStyleCmd {
+    uint32_t node;
+    UIStyle  style;
+};
+template<> struct CommandPayload<CommandId::SetUINodeStyle> { using type = UINodeStyleCmd; };
+
+struct UINodeMaterialCmd {
+    uint32_t    node;
+    std::string material;   // "" — снять материал
+};
+template<> struct CommandPayload<CommandId::SetUINodeMaterial> { using type = UINodeMaterialCmd; };

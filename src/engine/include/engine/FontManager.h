@@ -35,6 +35,10 @@ struct alignas(16) GlyphUVL {
 };
 static_assert(sizeof(GlyphUVL) == 16, "GlyphUVL using in shader as uint4");
 
+// Код в потоке глифов (UITextComponent.glyphs), который не глиф, а перенос строки. ui_fs получает
+// его дефайном UI_LINE_BREAK_CODE и обязан проверять до чтения GlyphUVL[code] — индекс за буфером.
+inline constexpr uint32_t UI_LINE_BREAK_CODE = 0xFFFFFFFEu;
+
 // Растеризованный шрифт: глиф-атлас + метрики + карта codepoint→glyph_index + GlyphUVL.
 // Топ-левел (не вложен в FontManager) — чтобы EngineContext возвращал FontData* форвардом,
 // как TextureHandle*/Material* (заголовок фасада не тянет FontManager.h).
@@ -69,8 +73,9 @@ public:
 	// glyph_index по кодпоинту (0xFFFFFFFF — нет глифа в шрифте).
 	uint32_t GlyphIndex(const FontData* font, uint32_t codepoint) const;
 
-	// UTF-8 строка → коды глифов (glyph_index) для UITextComponent.glyphs. Кодпоинты, которых нет
-	// в шрифте, пропускаются. Продвинутый shaping (кернинг/лигатуры) — позже; сейчас codepoint→index.
+	// UTF-8 строка → коды глифов (glyph_index) для UITextComponent.glyphs. '\n' → UI_LINE_BREAK_CODE,
+	// остальные кодпоинты, которых нет в шрифте, пропускаются. Продвинутый shaping (кернинг/лигатуры)
+	// — позже; сейчас codepoint→index.
 	std::vector<uint32_t> ShapeString(const FontData* font, const std::string& utf8) const;
 
 	// Размер GlyphUVL-буфера в байтах (для size-фазы UpdateInstruction при проводке).

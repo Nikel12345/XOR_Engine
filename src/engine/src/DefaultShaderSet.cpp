@@ -18,6 +18,7 @@ using namespace ShaderBase;
 #include "RenderSnapshot.h"
 #include "CullingDataModule.h"
 #include "TextureData.h"
+#include "FontManager.h"
 
 namespace DefaultShaderProgramSet
 {
@@ -198,7 +199,9 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 	{
 		ctx->CreateVertexShader("ui_vs", EnginePath("shaders_code/ui/ui.vert.hlsl").c_str(),
 			POS_UV_NORM_POOL, { POSITION, UV }, ResourceTag::CodeOwned | ResourceTag::Default);
-		ctx->CreateFragmentShader("ui_fs", EnginePath("shaders_code/ui/ui.frag.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default, kVariantDefines);
+		ShaderDefines ui_defines = kVariantDefines;
+		ui_defines.push_back({ "UI_LINE_BREAK_CODE", std::to_string(UI_LINE_BREAK_CODE) + "u" });
+		ctx->CreateFragmentShader("ui_fs", EnginePath("shaders_code/ui/ui.frag.hlsl").c_str(), ResourceTag::CodeOwned | ResourceTag::Default, ui_defines);
 
 		ShaderProgramDescription spd;
 		spd.BehavesAsUIOverlay();

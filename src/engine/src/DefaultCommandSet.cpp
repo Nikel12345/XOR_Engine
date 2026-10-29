@@ -89,6 +89,20 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 				yg->SetNodeTransform(c.node, c.matrix);
 		});
 
+	cmd::Register<CommandId::SetUINodeStyle>(im,
+		[](EngineContext* ctx, const UINodeStyleCmd& c)
+		{
+			if (UI_Yoga* yg = ctx->GetUIYoga())
+				yg->SetNodeStyle(c.node, c.style);
+		});
+
+	cmd::Register<CommandId::SetUINodeMaterial>(im,
+		[](EngineContext* ctx, const UINodeMaterialCmd& c)
+		{
+			if (UI_Yoga* yg = ctx->GetUIYoga())
+				yg->SetNodeMaterial(ctx, c.node, c.material);
+		});
+
 	cmd::Register<CommandId::CreateEntity>(im,
 		[](EngineContext* ctx, const CreateEntityCmd& c)
 		{

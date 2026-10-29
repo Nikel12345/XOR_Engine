@@ -129,6 +129,7 @@ std::vector<uint32_t> FontManager::ShapeString(const FontData* font, const std::
 		}
 		i += len;
 		if (!ok) continue;
+		if (cp == '\n') { codes.push_back(UI_LINE_BREAK_CODE); continue; }
 
 		const uint32_t gi = GlyphIndex(font, cp);
 		if (gi != 0xFFFFFFFFu) codes.push_back(gi);   // нет глифа в шрифте — пропуск

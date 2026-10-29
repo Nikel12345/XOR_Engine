@@ -5,6 +5,7 @@
 #include "BufferManager.h"
 #include "ObjectManager.h"
 #include "SparseRankChannel.h"
+#include <bit>
 
 UI_DataModule::UI_DataModule() {}
 
@@ -45,6 +46,8 @@ void UI_DataModule::BuildStaging(ObjectManager* om)
 			text_.insert(text_.end(), txt.glyphs.begin(), txt.glyphs.end());
 			index_.push_back(offset);
 			index_.push_back(count);
+			index_.push_back(std::bit_cast<uint32_t>(txt.width_lines));
+			index_.push_back(std::bit_cast<uint32_t>(txt.height_lines));
 		});
 
 	rank_size_  = SparseRankBytes(rows_);

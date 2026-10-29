@@ -19,6 +19,7 @@
 #include "ComponentSerializer.h"
 #include "UI_ComponentEditor.h"
 #include "PassManager.h"
+#include "DefaultRenderPassSet.h"
 #include "UI_Yoga.h"
 #include "ImGuizmo.h"
 #include <glm/gtc/type_ptr.hpp>
@@ -36,6 +37,117 @@ using namespace ui;
 namespace {
     ImGuizmo::OPERATION g_gizmo_op   = ImGuizmo::TRANSLATE;
     ImGuizmo::MODE      g_gizmo_mode = ImGuizmo::WORLD;
+
+    // Камера UI-узла стоит точно напротив его центра, и кольца X и Y видны ребром: ухватить их
+    // нельзя. Поэтому у узла только плоские операции.
+    ImGuizmo::OPERATION UINodeGizmoOp(ImGuizmo::OPERATION op)
+    {
+        switch (op) {
+        case ImGuizmo::ROTATE: return ImGuizmo::ROTATE_Z;
+        case ImGuizmo::SCALE:  return ImGuizmo::SCALE_X  | ImGuizmo::SCALE_Y;
+        case ImGuizmo::SCALEU: return ImGuizmo::SCALE_XU | ImGuizmo::SCALE_YU;
+        default:               return ImGuizmo::TRANSLATE_X | ImGuizmo::TRANSLATE_Y;
+        }
+    }
+
+    // Команда доходит до sim-потока не раньше следующего кадра, а драг прибавляет приращение к тому,
+    // что видит в этом кадре: со стилем, заново прочитанным из узла, шаги драга терялись бы. Поэтому
+    // пока поле держат (и кадр после правки) инспектор правит свою копию.
+    void InspectUINodeStyle(EngineContext* ctx, UI_Yoga* yg, UI_Yoga::Node n)
+    {
+        static UI_Yoga::Node edited_node = UI_Yoga::kInvalid;
+        static UIStyle       edited;
+        UIStyle style;
+        if (edited_node == n)                 style = edited;
+        else if (!yg->GetNodeStyle(n, style)) return;
+
+        float layout_w = 0.0f, layout_h = 0.0f;
+        yg->GetNodeLayoutSize(n, layout_w, layout_h);
+
+        bool changed = false, active = false;
+        auto track = [&](bool edited_now) { changed |= edited_now; active |= ImGui::IsItemActive(); };
+        auto enum_combo = [&](const char* label, auto& value, const char* const* names, int count) {
+            int index = static_cast<int>(value);
+            if (ImGui::Combo(label, &index, names, count)) {
+                value = static_cast<std::remove_reference_t<decltype(value)>>(index);
+                changed = true;
+            }
+        };
+
+        static const char* kSizeModes[] = { "Auto", "Points", "Percent", "Grow" };
+        auto size_row = [&](const char* label, UISize& mode, float& value, float layout_px) {
+            ImGui::PushID(label);
+            int index = static_cast<int>(mode);
+            ImGui::SetNextItemWidth(90.0f);
+            if (ImGui::Combo("##mode", &index, kSizeModes, IM_ARRAYSIZE(kSizeModes))) {
+                mode  = static_cast<UISize>(index);
+                // Points стартует с текущего размера, чтобы узел не прыгнул.
+                value = mode == UISize::Points ? layout_px : mode == UISize::Percent ? 100.0f : 1.0f;
+                changed = true;
+            }
+            ImGui::SameLine();
+            if (mode == UISize::Auto) {
+                float shown = layout_px;   // размер считает раскладка, править нечего
+                ImGui::BeginDisabled();
+                ImGui::DragFloat(label, &shown, 1.0f, 0.0f, 0.0f, "%.0f px");
+                ImGui::EndDisabled();
+            }
+            else
+                track(ImGui::DragFloat(label, &value, mode == UISize::Grow ? 0.01f : 1.0f, 0.0f, FLT_MAX,
+                                       mode == UISize::Points ? "%.0f px" : mode == UISize::Percent ? "%.1f %%" : "%.2f"));
+            ImGui::PopID();
+        };
+
+        ImGui::Text("Layout size: %.0f x %.0f px", layout_w, layout_h);
+        size_row("Width",  style.wmode, style.w, layout_w);
+        size_row("Height", style.hmode, style.h, layout_h);
+        track(ImGui::DragFloat("Grow",   &style.grow,   0.01f, 0.0f, FLT_MAX, "%.2f"));
+        track(ImGui::DragFloat("Margin", &style.margin, 0.5f,  0.0f, FLT_MAX, "%.0f px"));
+        if (!yg->IsTextNode(n)) {
+            track(ImGui::DragFloat("Padding", &style.padding, 0.5f, 0.0f, FLT_MAX, "%.0f px"));
+            track(ImGui::DragFloat("Gap",     &style.gap,     0.5f, 0.0f, FLT_MAX, "%.0f px"));
+            static const char* kDirs[]    = { "Row", "Column" };
+            static const char* kJustify[] = { "Start", "Center", "End", "SpaceBetween" };
+            static const char* kAlign[]   = { "Start", "Center", "End", "Stretch" };
+            enum_combo("Direction", style.dir,     kDirs,    IM_ARRAYSIZE(kDirs));
+            enum_combo("Justify",   style.justify, kJustify, IM_ARRAYSIZE(kJustify));
+            enum_combo("Align",     style.align,   kAlign,   IM_ARRAYSIZE(kAlign));
+        }
+
+        if (changed)
+            cmd::Push<CommandId::SetUINodeStyle>(ctx->GetInputManager(), n, style);
+        edited_node = (active || changed) ? n : UI_Yoga::kInvalid;
+        edited      = style;
+    }
+
+    // Текущий материал читается из Renderable энтити узла, а не из имени в узле: имя — std::string,
+    // и sim-поток, переписывая его, может освободить буфер под читающим UI-потоком.
+    void InspectUINodeMaterial(EngineContext* ctx, UI_Yoga* yg, UI_Yoga::Node n)
+    {
+        MaterialManager* mm = ctx->GetMaterialManager();
+        ObjectManager*   om = ctx->GetObjectManager();
+        SceneData*    scene = om->GetActiveScene();
+        std::string current;
+        Entity e;
+        if (scene && yg->GetNodeEntity(n, e) && om->Has<Renderable>(scene, e)) {
+            SoAElement<Renderable> rend = om->GetComponent<Renderable>(scene, e);
+            const std::vector<MaterialSlot>& parts = rend.container().materials[rend.i()];
+            if (!parts.empty()) current = mm->MaterialNameOf(parts[0].per_lod[0]);
+        }
+
+        if (!ImGui::BeginCombo("Material", current.empty() ? "(none)" : current.c_str())) return;
+        if (!yg->IsTextNode(n) && ImGui::Selectable("(none)", current.empty()))
+            cmd::Push<CommandId::SetUINodeMaterial>(ctx->GetInputManager(), n, std::string{});
+        const MaterialRegistry& mreg = mm->Materials();
+        for (int32_t mi = 0; mi < mreg.Count(); ++mi) {
+            const MaterialCell& mc = mreg.At(mi);
+            if (!mc.object) continue;
+            if (!g_show_internal && HasTag(mc.object->tags, ResourceTag::System)) continue;
+            if (ImGui::Selectable(mc.name.c_str(), mc.name == current))
+                cmd::Push<CommandId::SetUINodeMaterial>(ctx->GetInputManager(), n, mc.name);
+        }
+        ImGui::EndCombo();
+    }
 
     glm::mat4 ReadPositionsMatrix(const Positions& P, size_t i)
     {
@@ -1118,7 +1230,8 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
     ObjectManager* om = ctx->GetObjectManager();
     SceneData* scene = om->GetActiveScene();
 
-    if (g_sel.kind == SelKind::Entity && scene && om->Has<Positions>(scene, g_sel.entity)) {
+    if ((g_sel.kind == SelKind::Entity && scene && om->Has<Positions>(scene, g_sel.entity))
+        || g_sel.kind == SelKind::UINode) {
         ImGui::TextUnformatted("Gizmo:");
 
         const ImGuiStyle& st = ImGui::GetStyle();
@@ -1195,6 +1308,9 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         ImGui::Text("UI node: %s", yg->NodeLabel(n).c_str());
         float dx, dy, dz; yg->GetOffset(n, dx, dy, dz);
         ImGui::Text("Offset: X=%.0f  Y=%.0f px", dx, dy);
+        InspectUINodeMaterial(ctx, yg, n);
+        ImGui::Separator();
+        InspectUINodeStyle(ctx, yg, n);
         ImGui::Separator();
         float local[16];
         if (yg->GetNodeTransform(n, local)) {
@@ -1228,8 +1344,6 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         if (ImGui::SmallButton("-"))         nudge_z(+0.01f);
         ImGui::SameLine();
         if (ImGui::SmallButton("+"))         nudge_z(-0.01f);
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Deselect"))  g_sel = Selection{};
         break;
     }
 
@@ -1243,37 +1357,53 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
 
 void UI_ImGui::DrawGizmo(EngineContext* ctx)
 {
-    // UI живёт в NDC, поэтому view/proj ЕДИНИЧНЫЕ: иначе ImGuizmo прогнал бы позицию через
-    // мировую камеру. Двигаем offset узла командой в sim, а не матрицу энтити.
+    // ui.vert смотрит на каждый узел своей камерой-обскурой напротив его центра и затем сдвигает
+    // картинку на место узла. Гизмо смотрит той же камерой: прямоугольник ImGuizmo центрирован на
+    // узле, а камера стоит там, откуда fov UI-прохода накрывает высоту окна. Единицы — пиксели
+    // раскладки, Y вверх. Сдвиг уходит в offset узла, поворот и масштаб — в его local.
     if (g_sel.kind == SelKind::UINode) {
         UI_Yoga* yg = ctx->GetUIYoga();
         if (!yg) return;
         const UI_Yoga::Node n = g_sel.ui_node;
         float cx, cy, z;
         if (!yg->GetNodeNdc(n, cx, cy, z)) return;
+        float local[16];
+        if (!yg->GetNodeTransform(n, local)) return;
+
+        DefaultRenderPassNamespace::UICameraPushData ui_camera;
+        const RenderPassStep* ui_pass = ctx->GetPassManager()->GetRenderPassStep(DefaultRenderPassNamespace::UI_PASS);
+        if (ui_pass && ui_pass->state.size() >= sizeof(ui_camera))
+            std::memcpy(&ui_camera, ui_pass->state.data(), sizeof(ui_camera));
 
         ImGuiIO& io = ImGui::GetIO();
-        glm::mat4 view(1.0f), proj(1.0f);
-        glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(cx, cy, z));
+        const float W = io.DisplaySize.x, H = io.DisplaySize.y;
+        const float camera_distance = 0.5f * H / std::tan(0.5f * ui_camera.fov);
+        const glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -camera_distance));
+        const glm::mat4 proj = glm::perspective(ui_camera.fov, W / H, 1.0f, 4.0f * camera_distance);
+        glm::mat4 model = glm::make_mat4(local);
+        model[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 
-        ImGuizmo::SetOrthographic(true);
+        const float center_x = (cx * 0.5f + 0.5f) * W;
+        const float center_y = (0.5f - cy * 0.5f) * H;
+        ImGuizmo::SetOrthographic(false);
         ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
-        ImGuizmo::SetRect(0.0f, 0.0f, io.DisplaySize.x, io.DisplaySize.y);
+        ImGuizmo::SetRect(center_x - 0.5f * W, center_y - 0.5f * H, W, H);
 
-        const ImGuizmo::OPERATION op =
-            static_cast<ImGuizmo::OPERATION>(ImGuizmo::TRANSLATE_X | ImGuizmo::TRANSLATE_Y);
         float delta[16];
-        if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(proj),
-                                 op, ImGuizmo::WORLD, glm::value_ptr(model), delta))
-        {
+        if (!ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(proj),
+                                  UINodeGizmoOp(g_gizmo_op), g_gizmo_mode, glm::value_ptr(model), delta))
+            return;
+
+        if (g_gizmo_op == ImGuizmo::TRANSLATE) {
             const float dtx = delta[12], dty = delta[13];
-            if (dtx != 0.0f || dty != 0.0f) {
-                // NDC → px (Y флип: NDC вверх, layout-px вниз). Двигаем offset узла командой.
-                cmd::Push<CommandId::NudgeUINode>(ctx->GetInputManager(), n,
-                                                  dtx * io.DisplaySize.x * 0.5f,
-                                                 -dty * io.DisplaySize.y * 0.5f, 0.0f);
-            }
+            if (dtx != 0.0f || dty != 0.0f)
+                cmd::Push<CommandId::NudgeUINode>(ctx->GetInputManager(), n, dtx, -dty, 0.0f);   // offset растёт вниз
+            return;
         }
+        model[3] = glm::make_vec4(local + 12);
+        UINodeTransformCmd payload{ n };
+        std::memcpy(payload.matrix, glm::value_ptr(model), sizeof(payload.matrix));
+        cmd::Push<CommandId::SetUINodeTransform>(ctx->GetInputManager(), payload);
         return;
     }
 

@@ -354,6 +354,10 @@ struct UIComponent {};
 struct UITextComponent {
 	std::vector<uint32_t> glyphs;
 	uint32_t              font = 0;
+	// Размер прямоугольника узла в высотах строки: ui.frag рисует текст размером шрифта от его
+	// левого верхнего угла, а не растягивает по прямоугольнику.
+	float                 width_lines  = 0.0f;
+	float                 height_lines = 0.0f;
 };
 
 struct TestComponent {};

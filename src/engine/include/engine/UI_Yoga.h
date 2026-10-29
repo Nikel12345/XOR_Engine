@@ -58,6 +58,16 @@ public:
     void GetOffset(Node n, float& dx, float& dy, float& dz) const;
     void SetNodeTransform(Node n, const float m[16]);
     bool GetNodeTransform(Node n, float m[16]) const;
+    // Стиль целиком (размеры, отступы, выравнивание). Правка не структурная: Emit переложит дерево,
+    // заново перенесёт текст и перепишет Positions на месте. У текстового узла padding всегда 0.
+    void SetNodeStyle(Node n, const UIStyle& s);
+    bool GetNodeStyle(Node n, UIStyle& s) const;
+    bool GetNodeLayoutSize(Node n, float& w, float& h) const;   // итог последней раскладки, px
+    bool IsTextNode(Node n) const;
+    // Материал узла по имени, "" — без материала (у текста недопустимо). Энтити, которая уже есть,
+    // меняет материал на месте; появление или исчезновение энтити — структурная правка.
+    void SetNodeMaterial(EngineContext* ctx, Node n, const std::string& material);
+    bool GetNodeEntity(Node n, uint32_t& entity) const;          // энтити последнего Emit
 
     struct Impl;
 

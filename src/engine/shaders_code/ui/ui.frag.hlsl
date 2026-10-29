@@ -22,7 +22,7 @@ struct PSInput
 
 // ── Storage-буферы (нумеруются ПОСЛЕ сэмплеров: 2 сэмплера → t2..). Разреженный текст-канал. ──
 SPARSE_CHANNEL(Text, t2, space2)                               // → TextWords, TextRank(row)
-StructuredBuffer<uint2> TextIndex : register(t3, space2);      // {offset,count} на текст-элемент (индекс = rank)
+StructuredBuffer<uint4> TextIndex : register(t3, space2);      // {offset,count,ширина,высота} на текст-элемент (индекс = rank)
 StructuredBuffer<uint>  TextPool  : register(t4, space2);      // коды глифов подряд
 StructuredBuffer<uint4> GlyphUVL  : register(t5, space2);      // code → UVL глифа (.w = advance-биты)
 
@@ -37,6 +37,9 @@ StructuredBuffer<uint4> GlyphUVL  : register(t5, space2);      // code → UVL �
 #endif
 #ifndef MAX_UVL_BLOCKS
 #define MAX_UVL_BLOCKS 32
+#endif
+#ifndef UI_LINE_BREAK_CODE
+#error "UI_LINE_BREAK_CODE is not defined: ui_fs gets it from DefaultShaderSet (FontManager.h)"
 #endif
 
 // ── Униформы (space3): b0 = UVL слотов материала (albedo), b1 = MaterialBlock (UIMaterialParams),
@@ -118,29 +121,32 @@ float4 main(PSInput input) : SV_Target0
     const int text_rank = TextRank(int(input.v_row));
 
     if (text_rank >= 0) {
-        uint2 span = TextIndex[text_rank];   // x=offset, y=count
+        uint4 span = TextIndex[text_rank];   // x=offset, y=count, zw=размер узла в высотах строки
         uint count = span.y;
         if (count > 0u) {
-            // Раскладка/посадку/форму узла считает Yoga (UI_Yoga) — rect УЖЕ правильной формы, поэтому
-            // шейдер просто ЗАЛИВАЕТ узел строкой: пропорционально advance по X, uv.y напрямую по Y.
-            // Единицы advance сокращаются (ratio), поэтому нормировка в GlyphUVL[code].w несущественна.
-            float totalAdv = 0.0;
-            for (uint i = 0u; i < count; ++i)
-                totalAdv += asfloat(GlyphUVL[TextPool[span.x + i]].w);
-
-            if (totalAdv > 0.0) {
-                float targetX = input.v_uv.x * totalAdv;
-                float accum   = 0.0;
-                [loop] for (uint i = 0u; i < count; ++i) {
-                    uint  code = TextPool[span.x + i];
-                    float a    = asfloat(GlyphUVL[code].w);
-                    if (targetX < accum + a) {
-                        float localX = (a > 0.0) ? (targetX - accum) / a : 0.0;   // 0..1 в advance-слоте
-                        coverage = UIGlyphCoverage(u_glyph, u_glyphSampler, GlyphUVL[code], float2(localX, input.v_uv.y));
-                        break;
-                    }
-                    accum += a;
+            // Переносы уже в потоке (UI_Yoga), поэтому текст лежит размером шрифта от левого верхнего
+            // угла узла: pen — позиция пикселя в высотах строки, в тех же единицах, что advance в
+            // GlyphUVL[code].w. Что не легло в узел, не рисуется.
+            const float2 pen        = saturate(input.v_uv) * asfloat(span.zw);
+            const uint   targetLine = uint(pen.y);
+            const float  localY     = pen.y - float(targetLine);
+            uint  lineIndex = 0u;
+            float accum     = 0.0;
+            [loop] for (uint i = 0u; i < count; ++i) {
+                uint code = TextPool[span.x + i];
+                if (code == UI_LINE_BREAK_CODE) {
+                    if (lineIndex == targetLine) break;
+                    ++lineIndex;
+                    continue;
                 }
+                if (lineIndex != targetLine) continue;
+                float a = asfloat(GlyphUVL[code].w);
+                if (pen.x < accum + a) {
+                    float localX = (a > 0.0) ? (pen.x - accum) / a : 0.0;   // 0..1 в advance-слоте
+                    coverage = UIGlyphCoverage(u_glyph, u_glyphSampler, GlyphUVL[code], float2(localX, localY));
+                    break;
+                }
+                accum += a;
             }
         }
     }

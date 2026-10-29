@@ -35,6 +35,8 @@ enum class CommandId : uint32_t {
     CreateEntity,
     NudgeUINode,
     SetUINodeTransform,
+    SetUINodeStyle,
+    SetUINodeMaterial,
 
     COUNT
 };
