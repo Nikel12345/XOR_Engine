@@ -2,10 +2,10 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "ResourceId.h"
 
 class EngineContext;
 class FontManager;
-struct FontData;
 
 enum class UIDir     : uint8_t { Row, Column };
 enum class UIJustify : uint8_t { Start, Center, End, SpaceBetween };   // вдоль главной оси
@@ -35,7 +35,7 @@ public:
     Node Root(const UIStyle& s);                                        // корень = холст экрана
     Node Box (Node parent, const UIStyle& s, const std::string& material, const std::string& quad);
     Node Text(Node parent, const UIStyle& s, const std::string& utf8,
-              const std::string& material, const std::string& quad, FontData* font, FontManager* fm);
+              const std::string& material, const std::string& quad, FontId font, const FontManager* fm);
 
     void Clear();                        // снести дерево (энтити снимутся на следующем Emit)
     void MarkDirty() { dirty = true; }  // ресайз окна / смена контента → пересчёт на следующем Emit
@@ -64,6 +64,9 @@ public:
     bool GetNodeStyle(Node n, UIStyle& s) const;
     bool GetNodeLayoutSize(Node n, float& w, float& h) const;   // итог последней раскладки, px
     bool IsTextNode(Node n) const;
+    // Строка текстового узла. Правка не структурная: Emit переложит дерево и перепишет текст
+    // энтити на месте. Та же строка — ничего не делает, так что звать можно каждый тик.
+    void SetText(Node n, const std::string& utf8, const FontManager* fm);
     // Материал узла по имени, "" — без материала (у текста недопустимо). Энтити, которая уже есть,
     // меняет материал на месте; появление или исчезновение энтити — структурная правка.
     void SetNodeMaterial(EngineContext* ctx, Node n, const std::string& material);

@@ -15,6 +15,7 @@ struct TextShape {
         uint32_t code;       // glyph_index или UI_LINE_BREAK_CODE
         float    advance;    // px
         bool     space;      // здесь можно перенести строку
+        bool operator==(const Glyph&) const = default;
     };
     std::vector<Glyph> glyphs;
     float              line_height = 0.0f;
@@ -28,8 +29,10 @@ struct NodeRec {
     std::string           quad;
     std::unique_ptr<TextShape> shape;            // есть → текстовый узел (UITextComponent)
     std::vector<uint32_t> glyphs;                // поток для UITextComponent: shape, перенесённый по ширине узла
-    uint32_t              font     = 0;
-    std::string           text;                  // исходная строка (для подписи в редакторе)
+    FontId                font;
+    // Подпись узла в редакторе. SetText её не трогает: NodeLabel копирует строку с UI-потока, и
+    // перезапись на sim дала бы чтение освобождённого буфера.
+    std::string           text;
     std::vector<uint32_t> children;              // индексы в Impl::nodes
     // Правка из редактора: смещение поверх посчитанной раскладки (offset px XY + z-bias слоя).
     float                 off_x = 0.0f, off_y = 0.0f, z_off = 0.0f;
@@ -92,6 +95,17 @@ static void ApplyStyle(YGNodeRef n, const UIStyle& s)
     YGNodeStyleSetPadding(n, YGEdgeAll, s.padding);
     YGNodeStyleSetMargin (n, YGEdgeAll, s.margin);
     YGNodeStyleSetGap    (n, YGGutterAll, s.gap);
+}
+
+static std::vector<TextShape::Glyph> ShapeGlyphs(const FontData* font, const FontManager* fm, const std::string& utf8)
+{
+    std::vector<TextShape::Glyph> glyphs;
+    for (uint32_t code : fm->ShapeString(font, utf8)) {
+        const GlyphInfo* glyph = code < font->glyphs.size() ? &font->glyphs[code] : nullptr;
+        glyphs.push_back({ code, glyph ? safe_sint32_f(glyph->advance) : 0.0f,
+                           glyph && glyph->codepoint == ' ' });
+    }
+    return glyphs;
 }
 
 struct WrappedSize {
@@ -249,6 +263,21 @@ bool UI_Yoga::IsTextNode(Node n) const
     return n < impl_->nodes.size() && impl_->nodes[n].shape != nullptr;
 }
 
+void UI_Yoga::SetText(Node n, const std::string& utf8, const FontManager* fm)
+{
+    if (n >= impl_->nodes.size() || !fm) return;
+    NodeRec& r = impl_->nodes[n];
+    const FontData* font = fm->GetFont(r.font);
+    if (!r.shape || !font) return;
+
+    std::vector<TextShape::Glyph> glyphs = ShapeGlyphs(font, fm, utf8);
+    if (glyphs == r.shape->glyphs) return;
+    r.shape->glyphs = std::move(glyphs);
+    // Yoga кэширует замер узла с measure-функцией и без пометки не спросит размер заново.
+    YGNodeMarkDirty(r.yg);
+    dirty = true;
+}
+
 void UI_Yoga::SetNodeMaterial(EngineContext* ctx, Node n, const std::string& material)
 {
     if (n >= impl_->nodes.size()) return;
@@ -306,7 +335,7 @@ UI_Yoga::Node UI_Yoga::Box(Node parent, const UIStyle& s, const std::string& mat
 }
 
 UI_Yoga::Node UI_Yoga::Text(Node parent, const UIStyle& s, const std::string& utf8,
-                            const std::string& material, const std::string& quad, FontData* font, FontManager* fm)
+                            const std::string& material, const std::string& quad, FontId font, const FontManager* fm)
 {
     // ui.frag рисует текст от угла рамки узла и об отступе внутри неё не знает.
     UIStyle text_style = s;
@@ -319,16 +348,12 @@ UI_Yoga::Node UI_Yoga::Text(Node parent, const UIStyle& s, const std::string& ut
     r.material = material;
     r.quad     = quad;
     r.draws    = true;
-    r.font     = 0;
+    r.font     = font;
     r.text     = utf8;
-    if (font && fm) {
+    if (const FontData* font_data = fm ? fm->GetFont(font) : nullptr) {
         r.shape = std::make_unique<TextShape>();
-        r.shape->line_height = safe_sint32_f(font->line_height);
-        for (uint32_t code : fm->ShapeString(font, utf8)) {
-            const GlyphInfo* glyph = code < font->glyphs.size() ? &font->glyphs[code] : nullptr;
-            r.shape->glyphs.push_back({ code, glyph ? safe_sint32_f(glyph->advance) : 0.0f,
-                                        glyph && glyph->codepoint == ' ' });
-        }
+        r.shape->line_height = safe_sint32_f(font_data->line_height);
+        r.shape->glyphs = ShapeGlyphs(font_data, fm, utf8);
         YGNodeSetContext(r.yg, r.shape.get());
         YGNodeSetMeasureFunc(r.yg, MeasureText);
     }

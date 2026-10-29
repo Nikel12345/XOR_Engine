@@ -213,7 +213,9 @@ void DefaultUpdateSet::SetUITextUpdaters(EngineContext& ctx, UI_DataModule* uidm
         [uidm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { uidm->StoreText(bm, &task); },
         [uidm]() -> uint32_t { return uidm->CalcTextSize(); });
 
+    // Шрифт создаёт приложение позже: ячейка заводится здесь по имени, и CreateFont ляжет в неё.
+    const FontId font = fm->InternFont(fontName);
     bm->CreateUpdateInstruction(UI_FONT_UVL_BUFFER,
-        [fm, fontName](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { fm->StoreGlyphUVL(fm->GetFont(fontName), bm, &task); },
-        [fm, fontName]() -> uint32_t { return fm->GlyphUvlBytes(fm->GetFont(fontName)); });
+        [fm, font](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { fm->StoreGlyphUVL(fm->GetFont(font), bm, &task); },
+        [fm, font]() -> uint32_t { return fm->GlyphUvlBytes(fm->GetFont(font)); });
 }

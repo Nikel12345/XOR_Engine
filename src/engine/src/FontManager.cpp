@@ -14,8 +14,8 @@ FontManager::FontManager()
 
 FontManager::~FontManager()
 {
-	for (auto& [n, fd] : fonts_)
-		if (fd.ttf) TTF_CloseFont(fd.ttf);
+	for (int32_t i = 0; i < fonts_.Count(); ++i)
+		if (const FontData* fd = fonts_.At(i).object.get(); fd && fd->ttf) TTF_CloseFont(fd->ttf);
 	if (ttf_ready_) TTF_Quit();
 }
 
@@ -23,14 +23,13 @@ FontData* FontManager::CreateFont(TextureManager* tm,
                                   const std::string& name, const char* path, float px, bool sdf)
 {
 	if (!ttf_ready_) { SDL_Log("FontManager::CreateFont: TTF not initialized"); return nullptr; }
-	if (fonts_.count(name)) { SDL_Log("FontManager::CreateFont: '%s' already exists", name.c_str()); return &fonts_[name]; }
+	if (FontData* existing = GetFont(name)) { SDL_Log("FontManager::CreateFont: '%s' already exists", name.c_str()); return existing; }
 
 	TTF_Font* ttf = TTF_OpenFont(path, px);
 	if (!ttf) { SDL_Log("FontManager::CreateFont: TTF_OpenFont('%s') failed: %s", path, SDL_GetError()); return nullptr; }
 	if (sdf) TTF_SetFontSDF(ttf, true);   // SDF — resolution-independence; шейдер интерпретирует альфу как SDF
 
 	FontData fd;
-	fd.name = name;
 	fd.ttf  = ttf;
 	fd.px   = px;
 	fd.sdf  = sdf;
@@ -84,16 +83,12 @@ FontData* FontManager::CreateFont(TextureManager* tm,
 	// GlyphUVL заливается в общий UI_FONT_UVL_BUFFER при проводке (StoreGlyphUVL читает UVL прямо
 	// из хэндлов после PackAtlases — отдельной CPU-копии нет).
 
-	auto [it, ok] = fonts_.emplace(name, std::move(fd));
+	const FontId id = fonts_.Intern(name);
+	fonts_.Put(id, std::make_unique<FontData>(std::move(fd)));
+	FontData* font = fonts_.Get(id);
 	SDL_Log("FontManager: font '%s' rasterized - %zu glyphs into '%s'",
-	        name.c_str(), it->second.glyphs.size(), DefaultAtlasNames::TEXT_ATLAS);
-	return &it->second;
-}
-
-FontData* FontManager::GetFont(const std::string& name)
-{
-	auto it = fonts_.find(name);
-	return it == fonts_.end() ? nullptr : &it->second;
+	        name.c_str(), font->glyphs.size(), DefaultAtlasNames::TEXT_ATLAS);
+	return font;
 }
 
 uint32_t FontManager::GlyphIndex(const FontData* font, uint32_t codepoint) const

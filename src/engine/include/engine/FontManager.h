@@ -1,9 +1,11 @@
 #pragma once
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include "TextureData.h"
+#include "ResourceRegistry.h"
 
 // SDL_ttf держим ТОЛЬКО в .cpp: заголовок форвардит opaque-тип шрифта.
 struct TTF_Font;
@@ -43,8 +45,7 @@ inline constexpr uint32_t UI_LINE_BREAK_CODE = 0xFFFFFFFEu;
 // Топ-левел (не вложен в FontManager) — чтобы EngineContext возвращал FontData* форвардом,
 // как TextureHandle*/Material* (заголовок фасада не тянет FontManager.h).
 struct FontData {
-	std::string   name;
-	TTF_Font*     ttf = nullptr;          // владелец — FontManager (TTF_CloseFont в его dtor)
+	TTF_Font*     ttf = nullptr;         // владелец — FontManager (TTF_CloseFont в его dtor)
 	float         px  = 0.0f;
 	bool          sdf = false;
 	int           line_height = 0;
@@ -53,6 +54,9 @@ struct FontData {
 	std::vector<GlyphInfo>                  glyphs;        // индекс = glyph_index
 	std::unordered_map<uint32_t, uint32_t>  cp_to_index;  // codepoint → glyph_index
 };
+
+struct FontCell { std::string name; std::unique_ptr<FontData> object; };
+using FontRegistry = ResourceRegistry<FontCell, FontId>;
 
 // FontManager — растеризация шрифтов в глиф-атлас. РЕСУРСНЫЙ менеджер (не покадровый модуль:
 // растеризация однократна, как загрузка текстуры/модели). НЕ владеет другими менеджерами —
@@ -68,7 +72,10 @@ public:
 	// шрифте — TTF_FontHasGlyph). Возвращает FontData* (владелец — FontManager) или nullptr.
 	FontData* CreateFont(TextureManager* tm, const std::string& name, const char* path, float px, bool sdf = false);
 
-	FontData* GetFont(const std::string& name);
+	FontData* GetFont(const std::string& name) const { return fonts_.Get(fonts_.Find(name)); }
+	FontData* GetFont(FontId id) const              { return fonts_.Get(id); }
+	FontId    FontIdOf(const std::string& name) const { return fonts_.Find(name); }
+	FontId    InternFont(const std::string& name)     { return fonts_.Intern(name); }
 
 	// glyph_index по кодпоинту (0xFFFFFFFF — нет глифа в шрифте).
 	uint32_t GlyphIndex(const FontData* font, uint32_t codepoint) const;
@@ -86,6 +93,6 @@ public:
 	void StoreGlyphUVL(FontData* font, BufferManager* bm, UploadTask* task);
 
 private:
-	std::unordered_map<std::string, FontData> fonts_;
+	FontRegistry fonts_;
 	bool ttf_ready_ = false;
 };
