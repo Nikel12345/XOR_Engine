@@ -75,7 +75,7 @@ static std::string DecodeEntities(std::string_view raw)
     return out;
 }
 
-// Курсор по куску файла. base — смещение куска от начала файла: по нему считаются UIMarkupSpan.
+// base — смещение куска от начала файла: от него считаются UIMarkupSpan.
 struct MarkupReader {
     std::string_view src;
     size_t           base = 0;
@@ -179,7 +179,7 @@ static bool ParseDeclarations(MarkupReader& r, std::vector<UIMarkupDeclaration>&
     }
 }
 
-// Конец тела правила: '}' вне комментария. npos — тело не закрыто или в нём вложенный блок.
+// npos — тело не закрыто или в нём вложенный блок.
 static size_t FindBlockEnd(std::string_view s, size_t from, bool& nested)
 {
     nested = false;
@@ -225,7 +225,6 @@ static bool ParseRules(MarkupReader& r, std::vector<UIMarkupRule>& rules)
 
 static bool IsStyleOpen(const MarkupReader& r) { return r.StartsWith("<style") && !IsNameChar(r.Peek(6)); }
 
-// <style> не становится узлом: его правила дописываются в документ.
 static bool ParseStyleBlock(MarkupReader& r, UIMarkupDocument& doc)
 {
     const uint32_t open_line = r.line;
@@ -343,7 +342,6 @@ static bool ParseElement(MarkupReader& r, UIMarkupDocument& doc, UIMarkupNode& n
         }
     }
 
-    // Как в HTML, <br> пустой и закрывающего тега не имеет.
     if (node.tag == "br") return true;
     return ParseContent(r, doc, node);
 }
@@ -439,6 +437,7 @@ std::vector<const UIMarkupDeclaration*> ResolveUIStyle(const UIMarkupDocument& d
                 case UIMarkupSelectorKind::Class:     hit = has_class(s.name);               break;
                 case UIMarkupSelectorKind::Id:        hit = id && id->value == s.name;       break;
             }
+            // Значения UIMarkupSelectorKind упорядочены по специфичности.
             if (hit && (!matched || s.kind > best)) best = s.kind;
             matched = matched || hit;
         }
@@ -460,7 +459,7 @@ std::string UIMarkupText(const UIMarkupNode& element)
     bool pending_space = false;
     for (const UIMarkupNode& child : element.children) {
         if (child.tag == "br") { out += '\n'; pending_space = false; continue; }
-        if (!child.tag.empty()) continue;
+        if (!child.IsText()) continue;
         for (char c : child.text) {
             if (IsSpace(c)) { pending_space = true; continue; }
             if (pending_space && !out.empty() && out.back() != '\n') out += ' ';

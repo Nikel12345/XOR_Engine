@@ -12,39 +12,38 @@ class EngineContext;
 class FontManager;
 class ObjectManager;
 struct SceneData;
-// Yoga держим ТОЛЬКО в .cpp: заголовок форвардит opaque-типы узла и конфига (YGNodeRef = YGNode*).
 struct YGNode;
 struct YGConfig;
 
 enum class UIDir     : uint8_t { Row, Column };
-enum class UIJustify : uint8_t { Start, Center, End, SpaceBetween };   // вдоль главной оси
-enum class UIAlign   : uint8_t { Start, Center, End, Stretch };        // поперёк главной оси
+enum class UIJustify : uint8_t { Start, Center, End, SpaceBetween };
+enum class UIAlign   : uint8_t { Start, Center, End, Stretch };
 enum class UISize    : uint8_t { Auto, Points, Percent, Grow };
 
-struct UIEdges {   // px, порядок как в CSS-сокращении
+struct UIEdges {
     float top = 0.0f, right = 0.0f, bottom = 0.0f, left = 0.0f;
     bool operator==(const UIEdges&) const = default;
 };
 
 struct UIStyle {
-    UIDir     dir     = UIDir::Column;
-    UIJustify justify = UIJustify::Start;   // распределение детей по главной оси
-    UIAlign   align   = UIAlign::Stretch;   // выравнивание детей поперёк (CSS-дефолт flex)
-    UISize    wmode   = UISize::Auto;   float w = 0.0f;   // Points=px, Percent=% родителя, Grow=flex-grow
-    UISize    hmode   = UISize::Auto;   float h = 0.0f;
-    float     grow    = 0.0f;   // flex-grow (заполнить свободное место главной оси)
+    UIDir     direction   = UIDir::Column;
+    UIJustify justify     = UIJustify::Start;
+    UIAlign   align       = UIAlign::Stretch;
+    UISize    width_mode  = UISize::Auto;
+    float     width       = 0.0f;
+    UISize    height_mode = UISize::Auto;
+    float     height      = 0.0f;
+    float     grow        = 0.0f;
     UIEdges   padding;
     UIEdges   margin;
-    float     gap     = 0.0f;   // зазор между детьми, px
+    float     gap         = 0.0f;
 };
 
-// Текст узла после ShapeString — всё, что нужно переносу, без FontData. Живёт отдельной аллокацией:
-// её адрес Yoga держит контекстом measure-функции, а UI_Manager::nodes переезжает при росте.
 struct UITextShape {
     struct Glyph {
-        uint32_t code;       // glyph_index или UI_LINE_BREAK_CODE
-        float    advance;    // px
-        bool     space;      // здесь можно перенести строку
+        uint32_t code;
+        float    advance;
+        bool     space;
         bool operator==(const Glyph&) const = default;
     };
     std::vector<Glyph> glyphs;
@@ -52,30 +51,24 @@ struct UITextShape {
 };
 
 struct UINode {
-    YGNode*               yg       = nullptr;
-    UIStyle               style;                 // применённый к yg — его же отдаёт GetNodeStyle
-    bool                  draws    = false;      // создавать ли энтити (контейнер без материала — нет)
-    std::string           material;               // имена ассетов (см. UI_Manager::Box) — как в компонентах
-    std::string           quad;
-    std::unique_ptr<UITextShape> shape;          // есть → текстовый узел (UITextComponent)
-    std::vector<uint32_t> glyphs;                // поток для UITextComponent: shape, перенесённый по ширине узла
-    FontId                font;
-    // Подпись узла в редакторе. SetText её не трогает: NodeLabel копирует строку с UI-потока, и
-    // перезапись на sim дала бы чтение освобождённого буфера.
-    std::string           text;
-    std::string           id;                    // id элемента UI-файла: подпись в редакторе
-    std::vector<uint32_t> children;              // индексы в UI_Manager::nodes
-    // Правка из редактора: смещение поверх посчитанной раскладки (offset px XY + z-bias слоя).
-    float                 off_x = 0.0f, off_y = 0.0f, z_off = 0.0f;
-    glm::mat4             local{ 1.0f };
-    // Слепок последнего Emit (центр в NDC + z, размер раскладки в px) — для гизмо и инспектора. Пишет
-    // sim, читает UI (benign).
-    float                 ndc_cx = 0.0f, ndc_cy = 0.0f, ndc_z = 0.5f;
-    float                 layout_w = 0.0f, layout_h = 0.0f;
-    bool                  emitted = false;
-    // Энтити этого узла (если рисуется) — для мутации Positions на месте на layout-правках (без recreate).
-    Entity                entity = static_cast<Entity>(-1);
-    bool                  has_entity = false;
+    YGNode*                      yoga_node = nullptr;
+    UIStyle                      style;
+    bool                         draws = false;
+    std::string                  material;
+    std::string                  quad;
+    std::unique_ptr<UITextShape> shape;
+    std::vector<uint32_t>        wrapped_glyphs;
+    FontId                       font;
+    std::string                  id;
+    std::vector<std::string>     classes;
+    std::vector<uint32_t>        children;
+    float                        offset_x = 0.0f, offset_y = 0.0f, offset_z = 0.0f;
+    glm::mat4                    local{ 1.0f };
+    float                        ndc_center_x = 0.0f, ndc_center_y = 0.0f, ndc_z = 0.5f;
+    float                        layout_width = 0.0f, layout_height = 0.0f;
+    bool                         emitted = false;
+    Entity                       entity = 0;
+    bool                         has_entity = false;
 };
 
 class UI_Manager {
@@ -86,63 +79,48 @@ public:
     using Node = uint32_t;
     static constexpr Node kInvalid = 0xFFFFFFFFu;
 
-    Node Root(const UIStyle& s);                                        // корень = холст экрана
-    Node Box (Node parent, const UIStyle& s, const std::string& material, const std::string& quad);
-    Node Text(Node parent, const UIStyle& s, const std::string& utf8,
-              const std::string& material, const std::string& quad, FontId font, const FontManager* fm);
+    Node Root(const UIStyle& style);
+    Node Box (Node parent, const UIStyle& style, const std::string& material, const std::string& quad);
+    Node Text(Node parent, const UIStyle& style, const std::string& utf8,
+              const std::string& material, const std::string& quad, FontId font, const FontManager* font_manager);
 
-    // Дерево из UI-файла (docs/ui.md, «UI-файл»). Документ проверяется целиком до сборки: при ошибках
-    // все они уходят в лог с файл:строка, а прежнее дерево остаётся.
-    bool Load(const FontManager* fm, const std::string& path);
-
-    void Clear();                        // снести дерево (энтити снимутся на следующем Emit)
-    bool HasTree() const;
-
+    bool Load(const FontManager* font_manager, const std::string& path);
     void Reset();
 
-    void Emit(EngineContext* ctx, float screen_w, float screen_h);
+    void Emit(EngineContext* ctx, float screen_width, float screen_height);
 
     Node        RootNode() const;
-    uint32_t    ChildCount(Node n) const;
-    Node        ChildAt(Node n, uint32_t i) const;
-    std::string NodeLabel(Node n) const;
+    uint32_t    ChildCount(Node node) const;
+    Node        ChildAt(Node node, uint32_t index) const;
+    std::string NodeLabel(Node node) const;
 
-    // ── Правка узла из редактора (гизмо XY + кнопки Z). Пишет sim-поток (через команду). ──
-    // += приращение: offset px по XY (применяется пост-layout в EmitNode → узел с поддеревом едет,
-    // соседи нет) + z-bias (слой). Сам ставит dirty → пересчёт на следующем Emit.
-    void NudgeNode(Node n, float ddx, float ddy, float ddz);
-    bool GetNodeNdc(Node n, float& ndc_x, float& ndc_y, float& z) const;
-    void GetOffset(Node n, float& dx, float& dy, float& dz) const;
-    void SetNodeTransform(Node n, const float m[16]);
-    bool GetNodeTransform(Node n, float m[16]) const;
-    // Стиль целиком (размеры, отступы, выравнивание). Правка не структурная: Emit переложит дерево,
-    // заново перенесёт текст и перепишет Positions на месте. У текстового узла padding всегда 0.
-    void SetNodeStyle(Node n, const UIStyle& s);
-    bool GetNodeStyle(Node n, UIStyle& s) const;
-    bool GetNodeLayoutSize(Node n, float& w, float& h) const;   // итог последней раскладки, px
-    bool IsTextNode(Node n) const;
-    // Строка текстового узла. Правка не структурная: Emit переложит дерево и перепишет текст
-    // энтити на месте. Та же строка — ничего не делает, так что звать можно каждый тик.
-    void SetText(Node n, const std::string& utf8, const FontManager* fm);
-    // Материал узла по имени, "" — без материала (у текста недопустимо). Энтити, которая уже есть,
-    // меняет материал на месте; появление или исчезновение энтити — структурная правка.
-    void SetNodeMaterial(EngineContext* ctx, Node n, const std::string& material);
-    bool GetNodeEntity(Node n, uint32_t& entity) const;          // энтити последнего Emit
+    void NudgeNode(Node node, float delta_x, float delta_y, float delta_z);
+    bool GetNodeNdc(Node node, float& ndc_x, float& ndc_y, float& ndc_z) const;
+    void GetOffset(Node node, float& offset_x, float& offset_y, float& offset_z) const;
+    void SetNodeTransform(Node node, const float matrix[16]);
+    bool GetNodeTransform(Node node, float matrix[16]) const;
+    void SetNodeStyle(Node node, const UIStyle& style);
+    bool GetNodeStyle(Node node, UIStyle& style) const;
+    bool GetNodeLayoutSize(Node node, float& width, float& height) const;
+    bool IsTextNode(Node node) const;
+    void SetText(Node node, const std::string& utf8, const FontManager* font_manager);
+    void SetNodeMaterial(EngineContext* ctx, Node node, const std::string& material);
+    bool GetNodeEntity(Node node, Entity& entity) const;
 
 private:
-    Node MakeNode(const UIStyle& s);
-    void EmitNode(EngineContext* ctx, ObjectManager* om, SceneData* scene_ptr, const SceneName& scene_name,
-                  Node id, float ox, float oy, float W, float H, int& order, bool create);
+    void Clear();
+    Node MakeNode(const UIStyle& style);
+    void AttachChild(Node parent, Node child);
+    void DeleteCreatedEntities(EngineContext* ctx, const SceneName& scene_name);
+    void EmitNode(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name,
+                  Node node, float parent_x, float parent_y, float screen_width, float screen_height,
+                  int& order, bool create_entities);
 
-    YGConfig*           cfg = nullptr;
+    YGConfig*           yoga_config = nullptr;
     std::vector<UINode> nodes;
-    std::vector<Entity> created;                 // энтити прошлого Emit (снимаются на пересборке)
+    std::vector<Entity> created_entities;
     Node                root = kInvalid;
-    // Размер экрана прошлой раскладки. Раскладка зависит от него (points-узлы дают разную ДОЛЮ экрана
-    // при разном разрешении) → его смена = layout-инвалидация, даже без dirty. -1 = ещё не раскладывали.
-    float               last_w = -1.0f, last_h = -1.0f;
-    bool                dirty = true;            // нужен Emit (раскладка/смещение изменились)
-    bool                structural = true;       // дерево изменилось (добавили/убрали узлы) → нужен полный recreate энтити.
-                                                 // Иначе Emit мутирует Positions существующих на месте (без recreate —
-                                                 // recreate каждый кадр драга роняет редактор, см. CLAUDE.md).
+    float               last_screen_width = -1.0f, last_screen_height = -1.0f;
+    bool                emit_needed = true;
+    bool                recreate_needed = true;
 };

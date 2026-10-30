@@ -98,20 +98,19 @@ namespace {
             ImGui::PopID();
         };
 
-        // Порядок полей — как в CSS-сокращении: сверху, справа, снизу, слева. Отступ снаружи бывает
-        // отрицательным, внутри — нет; границы 0..0 ImGui понимает как «без ограничений».
-        auto edges_row = [&](const char* label, UIEdges& e, bool non_negative) {
-            float v[4] = { e.top, e.right, e.bottom, e.left };
-            if (ImGui::DragFloat4(label, v, 0.5f, 0.0f, non_negative ? FLT_MAX : 0.0f, "%.0f")) {
-                e = { v[0], v[1], v[2], v[3] };
+        // Границы 0..0 ImGui понимает как «без ограничений»: внешний отступ бывает отрицательным.
+        auto edges_row = [&](const char* label, UIEdges& edges, bool non_negative) {
+            float values[4] = { edges.top, edges.right, edges.bottom, edges.left };
+            if (ImGui::DragFloat4(label, values, 0.5f, 0.0f, non_negative ? FLT_MAX : 0.0f, "%.0f")) {
+                edges = { values[0], values[1], values[2], values[3] };
                 changed = true;
             }
             active |= ImGui::IsItemActive();
         };
 
         ImGui::Text("Layout size: %.0f x %.0f px", layout_w, layout_h);
-        size_row("Width",  style.wmode, style.w, layout_w);
-        size_row("Height", style.hmode, style.h, layout_h);
+        size_row("Width",  style.width_mode,  style.width,  layout_w);
+        size_row("Height", style.height_mode, style.height, layout_h);
         track(ImGui::DragFloat("Grow",   &style.grow,   0.01f, 0.0f, FLT_MAX, "%.2f"));
         edges_row("Margin T R B L", style.margin, false);
         if (!ui_manager->IsTextNode(n)) {
@@ -120,9 +119,9 @@ namespace {
             static const char* kDirs[]    = { "Row", "Column" };
             static const char* kJustify[] = { "Start", "Center", "End", "SpaceBetween" };
             static const char* kAlign[]   = { "Start", "Center", "End", "Stretch" };
-            enum_combo("Direction", style.dir,     kDirs,    IM_ARRAYSIZE(kDirs));
-            enum_combo("Justify",   style.justify, kJustify, IM_ARRAYSIZE(kJustify));
-            enum_combo("Align",     style.align,   kAlign,   IM_ARRAYSIZE(kAlign));
+            enum_combo("Direction", style.direction, kDirs,    IM_ARRAYSIZE(kDirs));
+            enum_combo("Justify",   style.justify,   kJustify, IM_ARRAYSIZE(kJustify));
+            enum_combo("Align",     style.align,     kAlign,   IM_ARRAYSIZE(kAlign));
         }
 
         if (changed)

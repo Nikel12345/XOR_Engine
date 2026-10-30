@@ -6,20 +6,21 @@
 #include <fstream>
 #include <iterator>
 
-// Узел, собранный из элемента файла. Весь документ переводится в такие записи до первого вызова Root,
-// чтобы ошибка в файле не оставила полдерева.
+// Весь документ переводится в такие записи до первого вызова Root, чтобы ошибка в файле не оставила
+// полдерева.
 struct UILoadedNode {
     enum class Kind : uint8_t { Root, Box, Text };
     Kind        kind   = Kind::Box;
-    int32_t     parent = -1;   // индекс в списке записей
+    int32_t     parent = -1;
     UIStyle     style;
     std::string material, quad, font_family, text, id;
+    std::vector<std::string> classes;
 };
 
 struct UILoadState {
     const std::string&        path;
-    const UIMarkupDocument&   doc;
-    const FontManager*        fm;
+    const UIMarkupDocument&   document;
+    const FontManager*        font_manager;
     std::vector<UILoadedNode> nodes;
     std::vector<std::string>  errors;
 
@@ -29,130 +30,140 @@ struct UILoadState {
     }
 };
 
-static bool ParseFloat(std::string_view s, float& out)
+static bool ParseFloat(std::string_view value, float& number)
 {
-    const auto [end, ec] = std::from_chars(s.data(), s.data() + s.size(), out);
-    return !s.empty() && ec == std::errc{} && end == s.data() + s.size() && std::isfinite(out);
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), number);
+    return !value.empty() && error == std::errc{} && end == value.data() + value.size() && std::isfinite(number);
 }
 
-// Как в CSS: длина в px, ноль можно без единиц.
-static bool ParseLength(std::string_view s, float& px)
+static bool ParseLength(std::string_view value, float& px)
 {
-    if (s == "0") { px = 0.0f; return true; }
-    return s.ends_with("px") && ParseFloat(s.substr(0, s.size() - 2), px);
+    if (value == "0") { px = 0.0f; return true; }
+    return value.ends_with("px") && ParseFloat(value.substr(0, value.size() - 2), px);
 }
 
-static bool ParseSize(std::string_view s, UISize& mode, float& value)
+static bool ParseSize(std::string_view value, UISize& mode, float& size)
 {
-    if (s == "auto") { mode = UISize::Auto; value = 0.0f; return true; }
-    if (s.ends_with('%')) {
-        if (!ParseFloat(s.substr(0, s.size() - 1), value) || value < 0.0f) return false;
+    if (value == "auto") { mode = UISize::Auto; size = 0.0f; return true; }
+    if (value.ends_with('%')) {
+        if (!ParseFloat(value.substr(0, value.size() - 1), size) || size < 0.0f) return false;
         mode = UISize::Percent;
         return true;
     }
-    if (!ParseLength(s, value) || value < 0.0f) return false;
+    if (!ParseLength(value, size) || size < 0.0f) return false;
     mode = UISize::Points;
     return true;
 }
 
-static bool ParseEdge(std::string_view s, float& px, bool allow_negative)
+static bool ParseEdge(std::string_view value, float& px, bool allow_negative)
 {
-    return ParseLength(s, px) && (allow_negative || px >= 0.0f);
+    return ParseLength(value, px) && (allow_negative || px >= 0.0f);
 }
 
-// CSS-сокращение: 1 значение — все края, 2 — верх/низ и бока, 3 — верх, бока, низ, 4 — по часовой с верха.
-static bool ParseEdges(std::string_view s, UIEdges& e, bool allow_negative)
+static bool ParseEdges(std::string_view value, UIEdges& edges, bool allow_negative)
 {
-    float v[4] = {};
+    float lengths[4] = {};
     size_t count = 0;
     while (true) {
-        const size_t begin = s.find_first_not_of(" \t\r\n\f");
+        const size_t begin = value.find_first_not_of(" \t\r\n\f");
         if (begin == std::string_view::npos) break;
-        s.remove_prefix(begin);
-        const size_t end = std::min(s.find_first_of(" \t\r\n\f"), s.size());
-        if (count == 4 || !ParseEdge(s.substr(0, end), v[count], allow_negative)) return false;
+        value.remove_prefix(begin);
+        const size_t end = std::min(value.find_first_of(" \t\r\n\f"), value.size());
+        if (count == 4 || !ParseEdge(value.substr(0, end), lengths[count], allow_negative)) return false;
         ++count;
-        s.remove_prefix(end);
+        value.remove_prefix(end);
     }
     switch (count) {
-        case 1:  e = { v[0], v[0], v[0], v[0] }; return true;
-        case 2:  e = { v[0], v[1], v[0], v[1] }; return true;
-        case 3:  e = { v[0], v[1], v[2], v[1] }; return true;
-        case 4:  e = { v[0], v[1], v[2], v[3] }; return true;
+        case 1:  edges = { lengths[0], lengths[0], lengths[0], lengths[0] }; return true;
+        case 2:  edges = { lengths[0], lengths[1], lengths[0], lengths[1] }; return true;
+        case 3:  edges = { lengths[0], lengths[1], lengths[2], lengths[1] }; return true;
+        case 4:  edges = { lengths[0], lengths[1], lengths[2], lengths[3] }; return true;
         default: return false;
     }
 }
 
-static bool ParseDirection(std::string_view s, UIDir& dir)
+static bool ParseDirection(std::string_view value, UIDir& direction)
 {
-    if (s == "row")    { dir = UIDir::Row;    return true; }
-    if (s == "column") { dir = UIDir::Column; return true; }
+    if (value == "row")    { direction = UIDir::Row;    return true; }
+    if (value == "column") { direction = UIDir::Column; return true; }
     return false;
 }
 
-static bool ParseJustify(std::string_view s, UIJustify& justify)
+static bool ParseJustify(std::string_view value, UIJustify& justify)
 {
-    if (s == "flex-start" || s == "start") { justify = UIJustify::Start;        return true; }
-    if (s == "center")                     { justify = UIJustify::Center;       return true; }
-    if (s == "flex-end" || s == "end")     { justify = UIJustify::End;          return true; }
-    if (s == "space-between")              { justify = UIJustify::SpaceBetween; return true; }
+    if (value == "flex-start" || value == "start") { justify = UIJustify::Start;        return true; }
+    if (value == "center")                         { justify = UIJustify::Center;       return true; }
+    if (value == "flex-end" || value == "end")     { justify = UIJustify::End;          return true; }
+    if (value == "space-between")                  { justify = UIJustify::SpaceBetween; return true; }
     return false;
 }
 
-static bool ParseAlign(std::string_view s, UIAlign& align)
+static bool ParseAlign(std::string_view value, UIAlign& align)
 {
-    if (s == "flex-start" || s == "start") { align = UIAlign::Start;   return true; }
-    if (s == "center")                     { align = UIAlign::Center;  return true; }
-    if (s == "flex-end" || s == "end")     { align = UIAlign::End;     return true; }
-    if (s == "stretch")                    { align = UIAlign::Stretch; return true; }
+    if (value == "flex-start" || value == "start") { align = UIAlign::Start;   return true; }
+    if (value == "center")                         { align = UIAlign::Center;  return true; }
+    if (value == "flex-end" || value == "end")     { align = UIAlign::End;     return true; }
+    if (value == "stretch")                        { align = UIAlign::Stretch; return true; }
     return false;
 }
 
-// Имя ресурса. Кавычки, которые CSS допускает в font-family, снимаются.
-static bool ParseName(std::string_view s, std::string& name)
+static std::vector<std::string> SplitClasses(std::string_view value)
 {
-    if (s.size() >= 2 && (s.front() == '"' || s.front() == '\'') && s.back() == s.front())
-        s = s.substr(1, s.size() - 2);
-    name = s;
+    std::vector<std::string> classes;
+    while (true) {
+        const size_t begin = value.find_first_not_of(" \t\r\n\f");
+        if (begin == std::string_view::npos) return classes;
+        value.remove_prefix(begin);
+        const size_t end = std::min(value.find_first_of(" \t\r\n\f"), value.size());
+        classes.emplace_back(value.substr(0, end));
+        value.remove_prefix(end);
+    }
+}
+
+static bool ParseName(std::string_view value, std::string& name)
+{
+    if (value.size() >= 2 && (value.front() == '"' || value.front() == '\'') && value.back() == value.front())
+        value = value.substr(1, value.size() - 2);
+    name = value;
     return !name.empty();
 }
 
-// Свойство, которое элементу не к чему применить (font-family у бокса, padding у текста), пропускается
-// при сборке: его приносят общие правила вроде *. Значение проверяется всегда.
-static void ApplyDeclaration(UILoadState& state, UILoadedNode& node, const UIMarkupDeclaration& d)
+// Свойство, которое элементу не к чему применить, пропускается при сборке: его приносят общие правила
+// вроде *.
+static void ApplyDeclaration(UILoadState& state, UILoadedNode& node, const UIMarkupDeclaration& declaration)
 {
-    const std::string_view p = d.property;
-    const std::string_view v = d.value;
-    UIStyle& s = node.style;
-    bool ok = true;
-    if      (p == "flex-direction")  ok = ParseDirection(v, s.dir);
-    else if (p == "justify-content") ok = ParseJustify(v, s.justify);
-    else if (p == "align-items")     ok = ParseAlign(v, s.align);
-    else if (p == "width")           ok = ParseSize(v, s.wmode, s.w);
-    else if (p == "height")          ok = ParseSize(v, s.hmode, s.h);
-    else if (p == "flex-grow")       ok = ParseFloat(v, s.grow) && s.grow >= 0.0f;
-    else if (p == "gap")             ok = ParseEdge(v, s.gap, false);
-    else if (p == "padding")         ok = ParseEdges(v, s.padding, false);
-    else if (p == "padding-top")     ok = ParseEdge(v, s.padding.top,    false);
-    else if (p == "padding-right")   ok = ParseEdge(v, s.padding.right,  false);
-    else if (p == "padding-bottom")  ok = ParseEdge(v, s.padding.bottom, false);
-    else if (p == "padding-left")    ok = ParseEdge(v, s.padding.left,   false);
-    else if (p == "margin")          ok = ParseEdges(v, s.margin, true);
-    else if (p == "margin-top")      ok = ParseEdge(v, s.margin.top,    true);
-    else if (p == "margin-right")    ok = ParseEdge(v, s.margin.right,  true);
-    else if (p == "margin-bottom")   ok = ParseEdge(v, s.margin.bottom, true);
-    else if (p == "margin-left")     ok = ParseEdge(v, s.margin.left,   true);
-    else if (p == "material") {
-        ok = ParseName(v, node.material);
+    const std::string_view property = declaration.property;
+    const std::string_view value    = declaration.value;
+    UIStyle& style = node.style;
+    bool valid = true;
+    if      (property == "flex-direction")  valid = ParseDirection(value, style.direction);
+    else if (property == "justify-content") valid = ParseJustify(value, style.justify);
+    else if (property == "align-items")     valid = ParseAlign(value, style.align);
+    else if (property == "width")           valid = ParseSize(value, style.width_mode, style.width);
+    else if (property == "height")          valid = ParseSize(value, style.height_mode, style.height);
+    else if (property == "flex-grow")       valid = ParseFloat(value, style.grow) && style.grow >= 0.0f;
+    else if (property == "gap")             valid = ParseEdge(value, style.gap, false);
+    else if (property == "padding")         valid = ParseEdges(value, style.padding, false);
+    else if (property == "padding-top")     valid = ParseEdge(value, style.padding.top,    false);
+    else if (property == "padding-right")   valid = ParseEdge(value, style.padding.right,  false);
+    else if (property == "padding-bottom")  valid = ParseEdge(value, style.padding.bottom, false);
+    else if (property == "padding-left")    valid = ParseEdge(value, style.padding.left,   false);
+    else if (property == "margin")          valid = ParseEdges(value, style.margin, true);
+    else if (property == "margin-top")      valid = ParseEdge(value, style.margin.top,    true);
+    else if (property == "margin-right")    valid = ParseEdge(value, style.margin.right,  true);
+    else if (property == "margin-bottom")   valid = ParseEdge(value, style.margin.bottom, true);
+    else if (property == "margin-left")     valid = ParseEdge(value, style.margin.left,   true);
+    else if (property == "material") {
+        valid = ParseName(value, node.material);
         if (node.material == "none") node.material.clear();
     }
-    else if (p == "quad")            ok = ParseName(v, node.quad);
-    else if (p == "font-family")     ok = ParseName(v, node.font_family);
+    else if (property == "quad")            valid = ParseName(value, node.quad);
+    else if (property == "font-family")     valid = ParseName(value, node.font_family);
     else {
-        state.Error(d.line, "unknown property '" + d.property + "'");
+        state.Error(declaration.line, "unknown property '" + declaration.property + "'");
         return;
     }
-    if (!ok) state.Error(d.line, "invalid value '" + d.value + "' for '" + d.property + "'");
+    if (!valid) state.Error(declaration.line, "invalid value '" + declaration.value + "' for '" + declaration.property + "'");
 }
 
 static void LoadElement(UILoadState& state, const UIMarkupNode& element, int32_t parent)
@@ -173,22 +184,25 @@ static void LoadElement(UILoadState& state, const UIMarkupNode& element, int32_t
     else if (element.tag == "br") { state.Error(element.line, "<br/> belongs in <text>"); return; }
     else { state.Error(element.line, "unknown tag <" + element.tag + ">"); return; }
 
-    for (const UIMarkupAttribute& a : element.attributes)
-        if (a.name != "id" && a.name != "class")
-            state.Error(a.line, "attribute '" + a.name + "' is not supported on <" + element.tag + ">");
+    for (const UIMarkupAttribute& attribute : element.attributes)
+        if (attribute.name != "id" && attribute.name != "class")
+            state.Error(attribute.line, "attribute '" + attribute.name + "' is not supported on <" + element.tag + ">");
     if (const UIMarkupAttribute* id = element.Attribute("id")) node.id = id->value;
+    if (const UIMarkupAttribute* classes = element.Attribute("class")) node.classes = SplitClasses(classes->value);
 
-    for (const UIMarkupDeclaration* d : ResolveUIStyle(state.doc, element))
-        ApplyDeclaration(state, node, *d);
+    for (const UIMarkupDeclaration* declaration : ResolveUIStyle(state.document, element))
+        ApplyDeclaration(state, node, *declaration);
 
     if (node.kind == UILoadedNode::Kind::Text) {
         for (const UIMarkupNode& child : element.children)
-            if (!child.tag.empty() && child.tag != "br")
+            if (!child.IsText() && child.tag != "br")
                 state.Error(child.line, "<text> holds only text and <br/>, not <" + child.tag + ">");
         node.text = UIMarkupText(element);
         node.style.padding = {};
-        if (node.font_family.empty())                   state.Error(element.line, "<text> needs font-family");
-        else if (!state.fm->FontIdOf(node.font_family)) state.Error(element.line, "font '" + node.font_family + "' is not created");
+        if (node.font_family.empty())
+            state.Error(element.line, "<text> needs font-family");
+        else if (!state.font_manager->FontIdOf(node.font_family))
+            state.Error(element.line, "font '" + node.font_family + "' is not created");
         if (node.material.empty()) state.Error(element.line, "<text> needs material");
         if (node.quad.empty())     state.Error(element.line, "<text> needs quad");
         state.nodes.push_back(std::move(node));
@@ -197,47 +211,53 @@ static void LoadElement(UILoadState& state, const UIMarkupNode& element, int32_t
     if (node.kind == UILoadedNode::Kind::Box && !node.material.empty() && node.quad.empty())
         state.Error(element.line, "<box> with material needs quad");
 
-    const int32_t self = safe_size_i(state.nodes.size());
+    const int32_t index = safe_size_i(state.nodes.size());
     state.nodes.push_back(std::move(node));
     for (const UIMarkupNode& child : element.children) {
-        if (child.tag.empty()) { state.Error(child.line, "text belongs in <text>"); continue; }
-        LoadElement(state, child, self);
+        if (child.IsText()) { state.Error(child.line, "text belongs in <text>"); continue; }
+        LoadElement(state, child, index);
     }
 }
 
-bool UI_Manager::Load(const FontManager* fm, const std::string& path)
+bool UI_Manager::Load(const FontManager* font_manager, const std::string& path)
 {
-    if (!fm) { SDL_Log("UI_Manager::Load: no FontManager"); return false; }
+    if (!font_manager) { SDL_Log("UI_Manager::Load: no FontManager"); return false; }
     std::ifstream file(path, std::ios::binary);
     if (!file) { SDL_Log("UI_Manager::Load: cannot open '%s'", path.c_str()); return false; }
     const std::string source{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
 
-    const auto doc = ParseUIMarkup(source);
-    if (!doc) {
-        SDL_Log("UI_Manager::Load: %s:%u: %s", path.c_str(), doc.error().line, doc.error().message.c_str());
+    const auto document = ParseUIMarkup(source);
+    if (!document) {
+        SDL_Log("UI_Manager::Load: %s:%u: %s", path.c_str(), document.error().line, document.error().message.c_str());
         return false;
     }
 
-    UILoadState state{ path, *doc, fm };
-    LoadElement(state, doc->root, -1);
+    UILoadState state{ path, *document, font_manager };
+    LoadElement(state, document->root, -1);
     if (!state.errors.empty()) {
-        for (const std::string& e : state.errors) SDL_Log("UI_Manager::Load: %s", e.c_str());
+        for (const std::string& error : state.errors) SDL_Log("UI_Manager::Load: %s", error.c_str());
         return false;
     }
 
-    std::vector<Node> made(state.nodes.size());
+    std::vector<Node> created_nodes(state.nodes.size());
     for (size_t i = 0; i < state.nodes.size(); ++i) {
-        const UILoadedNode& s = state.nodes[i];
-        Node n = kInvalid;
-        switch (s.kind) {
-            case UILoadedNode::Kind::Root: n = Root(s.style); break;
-            case UILoadedNode::Kind::Box:  n = Box(made[safe_i_u32(s.parent)], s.style, s.material, s.quad); break;
+        const UILoadedNode& loaded = state.nodes[i];
+        Node node = kInvalid;
+        switch (loaded.kind) {
+            case UILoadedNode::Kind::Root:
+                node = Root(loaded.style);
+                break;
+            case UILoadedNode::Kind::Box:
+                node = Box(created_nodes[safe_i_u32(loaded.parent)], loaded.style, loaded.material, loaded.quad);
+                break;
             case UILoadedNode::Kind::Text:
-                n = Text(made[safe_i_u32(s.parent)], s.style, s.text, s.material, s.quad, fm->FontIdOf(s.font_family), fm);
+                node = Text(created_nodes[safe_i_u32(loaded.parent)], loaded.style, loaded.text, loaded.material,
+                            loaded.quad, font_manager->FontIdOf(loaded.font_family), font_manager);
                 break;
         }
-        nodes[n].id = s.id;
-        made[i] = n;
+        nodes[node].id      = loaded.id;
+        nodes[node].classes = loaded.classes;
+        created_nodes[i] = node;
     }
     return true;
 }
