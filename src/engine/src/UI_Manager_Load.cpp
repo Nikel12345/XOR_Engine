@@ -115,6 +115,13 @@ static bool ParseEdges(std::string_view value, UIEdges& edges, bool allow_negati
     }
 }
 
+static bool ParseDisplay(std::string_view value, UIDisplay& display)
+{
+    if (value == "flex") { display = UIDisplay::Flex; return true; }
+    if (value == "none") { display = UIDisplay::None; return true; }
+    return false;
+}
+
 static bool ParseDirection(std::string_view value, UIDir& direction)
 {
     if (value == "row")    { direction = UIDir::Row;    return true; }
@@ -179,7 +186,8 @@ static UIDeclarationResult ApplyDeclaration(std::string_view property, std::stri
 {
     UIStyle& style = values.style;
     bool valid = true;
-    if      (property == "flex-direction")  valid = ParseDirection(value, style.direction);
+    if      (property == "display")         valid = ParseDisplay(value, style.display);
+    else if (property == "flex-direction")  valid = ParseDirection(value, style.direction);
     else if (property == "justify-content") valid = ParseJustify(value, style.justify);
     else if (property == "align-items")     valid = ParseAlign(value, style.align);
     else if (property == "width")           valid = ParseSize(value, style.width_mode, style.width);

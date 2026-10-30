@@ -108,6 +108,8 @@ namespace {
             active |= ImGui::IsItemActive();
         };
 
+        static const char* kDisplay[] = { "Flex", "None" };
+        enum_combo("Display", style.display, kDisplay, IM_ARRAYSIZE(kDisplay));
         ImGui::Text("Layout size: %.0f x %.0f px", layout_w, layout_h);
         size_row("Width",  style.width_mode,  style.width,  layout_w);
         size_row("Height", style.height_mode, style.height, layout_h);

@@ -19,6 +19,7 @@ struct SceneData;
 struct YGNode;
 struct YGConfig;
 
+enum class UIDisplay : uint8_t { Flex, None };
 enum class UIDir     : uint8_t { Row, Column };
 enum class UIJustify : uint8_t { Start, Center, End, SpaceBetween };
 enum class UIAlign   : uint8_t { Start, Center, End, Stretch };
@@ -30,6 +31,7 @@ struct UIEdges {
 };
 
 struct UIStyle {
+    UIDisplay display     = UIDisplay::Flex;
     UIDir     direction   = UIDir::Column;
     UIJustify justify     = UIJustify::Start;
     UIAlign   align       = UIAlign::Stretch;
@@ -71,6 +73,7 @@ struct UINode {
     float                        ndc_center_x = 0.0f, ndc_center_y = 0.0f, ndc_z = 0.5f;
     float                        layout_width = 0.0f, layout_height = 0.0f;
     bool                         emitted = false;
+    bool                         shown = false;
     Entity                       entity = 0;
     bool                         has_entity = false;
 };
@@ -139,6 +142,7 @@ public:
     Node        ChildAt(Node node, uint32_t index) const;
     std::string NodeLabel(Node node) const;
     Node        FindNode(std::string_view id) const;
+    bool        IsNodeShown(Node node) const;
     bool        NodeContains(Node node, float window_x, float window_y) const;
 
     void NudgeNode(Node node, float delta_x, float delta_y, float delta_z);
@@ -161,7 +165,7 @@ private:
     void AddBinding(UIBinding binding);
     void DeleteCreatedEntities(EngineContext* ctx, const SceneName& scene_name);
     void EmitNode(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name,
-                  Node node, float parent_x, float parent_y, float screen_width, float screen_height,
+                  Node node, float parent_x, float parent_y, bool parent_shown, float screen_width, float screen_height,
                   int& order, bool create_entities);
 
     YGConfig*           yoga_config = nullptr;

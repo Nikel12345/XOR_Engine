@@ -18,6 +18,7 @@ static void ApplyEdges(YGNodeRef yoga_node, void (*set_edge)(YGNodeRef, YGEdge, 
 
 static void ApplyStyle(YGNodeRef yoga_node, const UIStyle& style)
 {
+    YGNodeStyleSetDisplay(yoga_node, style.display == UIDisplay::None ? YGDisplayNone : YGDisplayFlex);
     YGNodeStyleSetFlexDirection(yoga_node, style.direction == UIDir::Row ? YGFlexDirectionRow : YGFlexDirectionColumn);
 
     switch (style.justify) {
@@ -179,9 +180,14 @@ UI_Manager::Node UI_Manager::FindNode(std::string_view id) const
     return kInvalid;
 }
 
+bool UI_Manager::IsNodeShown(Node node) const
+{
+    return node < nodes.size() && nodes[node].emitted && nodes[node].shown;
+}
+
 bool UI_Manager::NodeContains(Node node, float window_x, float window_y) const
 {
-    if (node >= nodes.size() || !nodes[node].emitted) return false;
+    if (!IsNodeShown(node)) return false;
     const UINode& entry = nodes[node];
     const glm::mat2 local(entry.local);
     if (glm::determinant(local) == 0.0f) return false;
@@ -205,7 +211,7 @@ void UI_Manager::NudgeNode(Node node, float delta_x, float delta_y, float delta_
 
 bool UI_Manager::GetNodeNdc(Node node, float& ndc_x, float& ndc_y, float& ndc_z) const
 {
-    if (node >= nodes.size() || !nodes[node].emitted) return false;
+    if (!IsNodeShown(node)) return false;
     const UINode& entry = nodes[node];
     ndc_x = entry.ndc_center_x;
     ndc_y = entry.ndc_center_y;
@@ -400,7 +406,7 @@ void UI_Manager::DeleteCreatedEntities(EngineContext* ctx, const SceneName& scen
 }
 
 void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name,
-                          Node node, float parent_x, float parent_y, float screen_width, float screen_height,
+                          Node node, float parent_x, float parent_y, bool parent_shown, float screen_width, float screen_height,
                           int& order, bool create_entities)
 {
     constexpr float kZStep = 0.00001f;
@@ -428,6 +434,7 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
     entry.layout_width  = width;
     entry.layout_height = height;
     entry.emitted       = true;
+    entry.shown         = parent_shown && entry.style.display != UIDisplay::None;
 
     if (entry.shape) {
         // Yoga округляет раскладку до пикселя, и ширина узла расходится с той, по которой мерил
@@ -450,26 +457,28 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
             if (entry.shape)
                 entry.entity = ctx->CreateEntity(scene_name,
                     RenderableProxy::Single(ctx->GetModelManager()->InternModel(entry.quad),
-                                            { ctx->GetMaterialManager()->InternMaterial(entry.material) }),
+                                            { ctx->GetMaterialManager()->InternMaterial(entry.material) }, entry.shown),
                     positions, UIComponent{}, GeneratedComponent{}, TextureStateComponent{},
                     MakeTextComponent(entry, width, height));
             else
                 entry.entity = ctx->CreateEntity(scene_name,
                     RenderableProxy::Single(ctx->GetModelManager()->InternModel(entry.quad),
-                                            { ctx->GetMaterialManager()->InternMaterial(entry.material) }),
+                                            { ctx->GetMaterialManager()->InternMaterial(entry.material) }, entry.shown),
                     positions, UIComponent{}, GeneratedComponent{}, TextureStateComponent{});
             entry.has_entity = true;
             created_entities.push_back(entry.entity);
         }
         else if (entry.has_entity && object_manager->Has<Positions>(scene, entry.entity)) {
             WritePositions(object_manager, scene, entry.entity, positions);
+            ctx->HideEntity(scene_name, entry.entity, entry.shown);
             if (entry.shape && object_manager->Has<UITextComponent>(scene, entry.entity))
                 object_manager->GetComponent<UITextComponent>(scene, entry.entity) = MakeTextComponent(entry, width, height);
         }
     }
 
     for (Node child : entry.children)
-        EmitNode(ctx, object_manager, scene, scene_name, child, left, top, screen_width, screen_height, order, create_entities);
+        EmitNode(ctx, object_manager, scene, scene_name, child, left, top, entry.shown, screen_width, screen_height, order,
+                 create_entities);
 }
 
 void UI_Manager::Emit(EngineContext* ctx, float screen_width, float screen_height)
@@ -506,5 +515,5 @@ void UI_Manager::Emit(EngineContext* ctx, float screen_width, float screen_heigh
         recreate_needed = false;
     }
     int order = 0;
-    EmitNode(ctx, object_manager, scene, scene_name, root, 0.0f, 0.0f, screen_width, screen_height, order, create_entities);
+    EmitNode(ctx, object_manager, scene, scene_name, root, 0.0f, 0.0f, true, screen_width, screen_height, order, create_entities);
 }
