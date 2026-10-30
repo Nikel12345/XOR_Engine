@@ -189,6 +189,11 @@ static size_t FindBlockEnd(std::string_view s, size_t from, bool& nested)
             if (close == std::string_view::npos) return std::string_view::npos;
             i = close + 1;
         }
+        else if (s.substr(i).starts_with("{{")) {
+            const size_t close = s.find("}}", i + 2);
+            if (close == std::string_view::npos) return std::string_view::npos;
+            i = close + 1;
+        }
         else if (s[i] == '{') { nested = true; return std::string_view::npos; }
         else if (s[i] == '}') return i;
     }

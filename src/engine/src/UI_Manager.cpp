@@ -171,6 +171,28 @@ std::string UI_Manager::NodeLabel(Node node) const
     return label;
 }
 
+UI_Manager::Node UI_Manager::FindNode(std::string_view id) const
+{
+    if (id.empty()) return kInvalid;
+    for (size_t i = 0; i < nodes.size(); ++i)
+        if (nodes[i].id == id) return safe_u32(i);
+    return kInvalid;
+}
+
+bool UI_Manager::NodeContains(Node node, float window_x, float window_y) const
+{
+    if (node >= nodes.size() || !nodes[node].emitted) return false;
+    const UINode& entry = nodes[node];
+    const glm::mat2 local(entry.local);
+    if (glm::determinant(local) == 0.0f) return false;
+
+    const float center_x = (entry.ndc_center_x + 1.0f) * 0.5f * last_screen_width;
+    const float center_y = (1.0f - entry.ndc_center_y) * 0.5f * last_screen_height;
+    // local работает в пикселях с осью y вверх (как NDC), а окно считает y вниз.
+    const glm::vec2 point = glm::inverse(local) * glm::vec2(window_x - center_x, center_y - window_y);
+    return std::abs(point.x) <= 0.5f * entry.layout_width && std::abs(point.y) <= 0.5f * entry.layout_height;
+}
+
 void UI_Manager::NudgeNode(Node node, float delta_x, float delta_y, float delta_z)
 {
     if (node >= nodes.size()) return;
@@ -357,6 +379,12 @@ void UI_Manager::Clear()
     root            = kInvalid;
     emit_needed     = true;
     recreate_needed = true;
+
+    bindings.clear();
+    dirty_bindings.clear();
+    for (int32_t i = 0; i < variables.Count(); ++i)
+        if (UIVar* var = variables.Get(UIVarId{ i })) var->bindings.clear();
+    document_path.clear();
 }
 
 void UI_Manager::Reset()

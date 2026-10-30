@@ -29,6 +29,7 @@ void Engine::PrepareFunc(uint8_t slot)
 
 	{
 		PROF_SCOPE(Sim, " ui_emit");
+		ui_manager->ApplyDirtyBindings(engine_context, font_manager);
 		ui_manager->Emit(engine_context, GetWindowWidth(), GetWindowHeight());
 	}
 

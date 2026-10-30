@@ -13,6 +13,7 @@ struct FragmentShaderIdTag;
 struct ComputeShaderIdTag;
 struct RecipeIdTag;
 struct FontIdTag;
+struct UIVarIdTag;
 
 // -1, а не 0: нулевая ячейка реестра — обычный ресурс, заглушки под «ссылки нет» в нём нет.
 template <class Tag>
@@ -37,3 +38,4 @@ using FragmentShaderId = ResourceId<FragmentShaderIdTag>;
 using ComputeShaderId  = ResourceId<ComputeShaderIdTag>;
 using RecipeId         = ResourceId<RecipeIdTag>;
 using FontId           = ResourceId<FontIdTag>;
+using UIVarId          = ResourceId<UIVarIdTag>;

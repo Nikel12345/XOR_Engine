@@ -2,25 +2,39 @@
 #include "UI_Manager.h"
 #include "UI_Markup.h"
 #include "FontManager.h"
+#include <algorithm>
 #include <charconv>
 #include <fstream>
 #include <iterator>
 
+struct UIDeclaredValues {
+    UIStyle     style;
+    std::string material, quad, font_family;
+};
+
 // Весь документ переводится в такие записи до первого вызова Root, чтобы ошибка в файле не оставила
 // полдерева.
-struct UILoadedNode {
+struct UILoadedNode : UIDeclaredValues {
     enum class Kind : uint8_t { Root, Box, Text };
     Kind        kind   = Kind::Box;
     int32_t     parent = -1;
-    UIStyle     style;
-    std::string material, quad, font_family, text, id;
-    std::vector<std::string> classes;
+    std::string text, id;
+    std::vector<std::string>        classes;
+    std::vector<UITemplatePart>     text_template;
+    std::vector<UIBoundDeclaration> bound_declarations;
+};
+
+struct UILoadedVar {
+    std::string name;
+    std::string value;
+    UIVarId     id;
 };
 
 struct UILoadState {
     const std::string&        path;
     const UIMarkupDocument&   document;
     const FontManager*        font_manager;
+    std::vector<UILoadedVar>  vars;
     std::vector<UILoadedNode> nodes;
     std::vector<std::string>  errors;
 
@@ -28,7 +42,26 @@ struct UILoadState {
     {
         errors.push_back(path + ":" + std::to_string(line) + ": " + message);
     }
+
+    const UILoadedVar* FindVar(std::string_view name) const
+    {
+        for (const UILoadedVar& var : vars) if (var.name == name) return &var;
+        return nullptr;
+    }
+
+    std::string_view ValueOf(UIVarId id) const
+    {
+        for (const UILoadedVar& var : vars) if (var.id == id) return var.value;
+        return {};
+    }
 };
+
+static std::string_view TrimSpaces(std::string_view value)
+{
+    const size_t begin = value.find_first_not_of(" \t\r\n\f");
+    if (begin == std::string_view::npos) return {};
+    return value.substr(begin, value.find_last_not_of(" \t\r\n\f") + 1 - begin);
+}
 
 static bool ParseFloat(std::string_view value, float& number)
 {
@@ -128,13 +161,23 @@ static bool ParseName(std::string_view value, std::string& name)
     return !name.empty();
 }
 
+static bool IsVarNameChar(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+static bool IsVarName(std::string_view name)
+{
+    return !name.empty() && !(name[0] >= '0' && name[0] <= '9') && std::ranges::all_of(name, IsVarNameChar);
+}
+
+enum class UIDeclarationResult : uint8_t { Applied, UnknownProperty, InvalidValue };
+
 // Свойство, которое элементу не к чему применить, пропускается при сборке: его приносят общие правила
 // вроде *.
-static void ApplyDeclaration(UILoadState& state, UILoadedNode& node, const UIMarkupDeclaration& declaration)
+static UIDeclarationResult ApplyDeclaration(std::string_view property, std::string_view value, UIDeclaredValues& values)
 {
-    const std::string_view property = declaration.property;
-    const std::string_view value    = declaration.value;
-    UIStyle& style = node.style;
+    UIStyle& style = values.style;
     bool valid = true;
     if      (property == "flex-direction")  valid = ParseDirection(value, style.direction);
     else if (property == "justify-content") valid = ParseJustify(value, style.justify);
@@ -154,16 +197,99 @@ static void ApplyDeclaration(UILoadState& state, UILoadedNode& node, const UIMar
     else if (property == "margin-bottom")   valid = ParseEdge(value, style.margin.bottom, true);
     else if (property == "margin-left")     valid = ParseEdge(value, style.margin.left,   true);
     else if (property == "material") {
-        valid = ParseName(value, node.material);
-        if (node.material == "none") node.material.clear();
+        valid = ParseName(value, values.material);
+        if (values.material == "none") values.material.clear();
     }
-    else if (property == "quad")            valid = ParseName(value, node.quad);
-    else if (property == "font-family")     valid = ParseName(value, node.font_family);
-    else {
-        state.Error(declaration.line, "unknown property '" + declaration.property + "'");
-        return;
+    else if (property == "quad")            valid = ParseName(value, values.quad);
+    else if (property == "font-family")     valid = ParseName(value, values.font_family);
+    else return UIDeclarationResult::UnknownProperty;
+    return valid ? UIDeclarationResult::Applied : UIDeclarationResult::InvalidValue;
+}
+
+static bool HasVars(const std::vector<UITemplatePart>& parts)
+{
+    return std::ranges::any_of(parts, [](const UITemplatePart& part) { return bool(part.var); });
+}
+
+template <class ValueOf>
+static std::string RenderTemplate(const std::vector<UITemplatePart>& parts, const ValueOf& value_of)
+{
+    std::string out;
+    for (const UITemplatePart& part : parts) {
+        out += part.literal;
+        if (part.var) out += value_of(part.var);
     }
-    if (!valid) state.Error(declaration.line, "invalid value '" + declaration.value + "' for '" + declaration.property + "'");
+    return out;
+}
+
+// Часть шаблона — текст и следом за ним переменная; у последней части переменной нет.
+static bool ParseTemplate(UILoadState& state, std::string_view source, uint32_t line, std::vector<UITemplatePart>& parts)
+{
+    parts.assign(1, UITemplatePart{});
+    while (true) {
+        const size_t open = source.find("{{");
+        if (open == std::string_view::npos) { parts.back().literal += source; return true; }
+        parts.back().literal += source.substr(0, open);
+        const size_t close = source.find("}}", open + 2);
+        if (close == std::string_view::npos) { state.Error(line, "'{{' is not closed with '}}'"); return false; }
+        const std::string_view name = TrimSpaces(source.substr(open + 2, close - open - 2));
+        const UILoadedVar* var = state.FindVar(name);
+        if (!var) { state.Error(line, "variable '" + std::string(name) + "' is not declared with <var>"); return false; }
+        parts.back().var = var->id;
+        parts.emplace_back();
+        source.remove_prefix(close + 2);
+    }
+}
+
+static bool ReadVar(UILoadState& state, const UIMarkupNode& element, UILoadedVar& var)
+{
+    for (const UIMarkupAttribute& attribute : element.attributes)
+        if (attribute.name != "name" && attribute.name != "default")
+            state.Error(attribute.line, "attribute '" + attribute.name + "' is not supported on <var>");
+    if (!element.children.empty()) state.Error(element.line, "<var> holds nothing: the value goes in default");
+
+    const UIMarkupAttribute* name = element.Attribute("name");
+    if (!name) { state.Error(element.line, "<var> needs name"); return false; }
+    if (!IsVarName(name->value)) {
+        state.Error(name->line, "variable name '" + name->value + "' must be letters, digits and _, not starting with a digit");
+        return false;
+    }
+    if (state.FindVar(name->value)) { state.Error(name->line, "variable '" + name->value + "' is declared twice"); return false; }
+    var.name = name->value;
+    if (const UIMarkupAttribute* default_value = element.Attribute("default")) var.value = default_value->value;
+    return true;
+}
+
+static void LoadDeclarations(UILoadState& state, const UIMarkupNode& element, UILoadedNode& node, bool& material_bound)
+{
+    const auto value_of = [&state](UIVarId id) { return state.ValueOf(id); };
+    std::vector<UIBoundDeclaration> declarations;
+    bool bound = false;
+    for (const UIMarkupDeclaration* declaration : ResolveUIStyle(state.document, element)) {
+        UIBoundDeclaration& entry = declarations.emplace_back(UIBoundDeclaration{ declaration->property, {}, declaration->line });
+        if (!ParseTemplate(state, declaration->value, declaration->line, entry.value)) continue;
+        const bool has_vars = HasVars(entry.value);
+        if (has_vars && (entry.property == "quad" || entry.property == "font-family")) {
+            state.Error(declaration->line, "'" + entry.property + "' takes no {{ }}: it is read once at load");
+            continue;
+        }
+        bound          = bound || has_vars;
+        material_bound = material_bound || (has_vars && entry.property == "material");
+
+        const std::string value = RenderTemplate(entry.value, value_of);
+        switch (ApplyDeclaration(entry.property, value, node)) {
+            case UIDeclarationResult::Applied:
+                break;
+            case UIDeclarationResult::UnknownProperty:
+                state.Error(declaration->line, "unknown property '" + entry.property + "'");
+                break;
+            case UIDeclarationResult::InvalidValue:
+                state.Error(declaration->line, "invalid value '" + value + "' for '" + entry.property + "'" +
+                                               (has_vars ? " from '" + declaration->value + "'" : ""));
+                break;
+        }
+    }
+    if (bound) node.bound_declarations = std::move(declarations);
 }
 
 static void LoadElement(UILoadState& state, const UIMarkupNode& element, int32_t parent)
@@ -184,20 +310,27 @@ static void LoadElement(UILoadState& state, const UIMarkupNode& element, int32_t
     else if (element.tag == "br") { state.Error(element.line, "<br/> belongs in <text>"); return; }
     else { state.Error(element.line, "unknown tag <" + element.tag + ">"); return; }
 
-    for (const UIMarkupAttribute& attribute : element.attributes)
+    for (const UIMarkupAttribute& attribute : element.attributes) {
         if (attribute.name != "id" && attribute.name != "class")
             state.Error(attribute.line, "attribute '" + attribute.name + "' is not supported on <" + element.tag + ">");
+        else if (attribute.value.find("{{") != std::string::npos)
+            state.Error(attribute.line, "attribute '" + attribute.name + "' takes no {{ }}");
+    }
     if (const UIMarkupAttribute* id = element.Attribute("id")) node.id = id->value;
     if (const UIMarkupAttribute* classes = element.Attribute("class")) node.classes = SplitClasses(classes->value);
 
-    for (const UIMarkupDeclaration* declaration : ResolveUIStyle(state.document, element))
-        ApplyDeclaration(state, node, *declaration);
+    bool material_bound = false;
+    LoadDeclarations(state, element, node, material_bound);
 
     if (node.kind == UILoadedNode::Kind::Text) {
         for (const UIMarkupNode& child : element.children)
             if (!child.IsText() && child.tag != "br")
                 state.Error(child.line, "<text> holds only text and <br/>, not <" + child.tag + ">");
-        node.text = UIMarkupText(element);
+        std::vector<UITemplatePart> text_template;
+        if (ParseTemplate(state, UIMarkupText(element), element.line, text_template)) {
+            node.text = RenderTemplate(text_template, [&state](UIVarId id) { return state.ValueOf(id); });
+            if (HasVars(text_template)) node.text_template = std::move(text_template);
+        }
         node.style.padding = {};
         if (node.font_family.empty())
             state.Error(element.line, "<text> needs font-family");
@@ -208,7 +341,7 @@ static void LoadElement(UILoadState& state, const UIMarkupNode& element, int32_t
         state.nodes.push_back(std::move(node));
         return;
     }
-    if (node.kind == UILoadedNode::Kind::Box && !node.material.empty() && node.quad.empty())
+    if (node.kind == UILoadedNode::Kind::Box && (!node.material.empty() || material_bound) && node.quad.empty())
         state.Error(element.line, "<box> with material needs quad");
 
     const int32_t index = safe_size_i(state.nodes.size());
@@ -233,15 +366,25 @@ bool UI_Manager::Load(const FontManager* font_manager, const std::string& path)
     }
 
     UILoadState state{ path, *document, font_manager };
+    for (const UIMarkupNode& element : document->root.children) {
+        if (element.tag != "var") continue;
+        UILoadedVar var;
+        if (!ReadVar(state, element, var)) continue;
+        var.id = InternVar(var.name);
+        if (const UIVar* existing = variables.Get(var.id); existing->assigned) var.value = existing->value;
+        state.vars.push_back(std::move(var));
+    }
     LoadElement(state, document->root, -1);
     if (!state.errors.empty()) {
         for (const std::string& error : state.errors) SDL_Log("UI_Manager::Load: %s", error.c_str());
         return false;
     }
 
+    for (const UILoadedVar& var : state.vars) variables.Get(var.id)->value = var.value;
+
     std::vector<Node> created_nodes(state.nodes.size());
     for (size_t i = 0; i < state.nodes.size(); ++i) {
-        const UILoadedNode& loaded = state.nodes[i];
+        UILoadedNode& loaded = state.nodes[i];
         Node node = kInvalid;
         switch (loaded.kind) {
             case UILoadedNode::Kind::Root:
@@ -258,6 +401,81 @@ bool UI_Manager::Load(const FontManager* font_manager, const std::string& path)
         nodes[node].id      = loaded.id;
         nodes[node].classes = loaded.classes;
         created_nodes[i] = node;
+
+        if (!loaded.text_template.empty())
+            AddBinding({ UIBindingKind::Text, node, std::move(loaded.text_template) });
+        if (!loaded.bound_declarations.empty())
+            AddBinding({ UIBindingKind::Style, node, {}, std::move(loaded.bound_declarations) });
     }
+    document_path = path;
     return true;
+}
+
+void UI_Manager::AddBinding(UIBinding binding)
+{
+    const uint32_t index = safe_u32(bindings.size());
+    const auto link = [this, index](const std::vector<UITemplatePart>& parts) {
+        for (const UITemplatePart& part : parts) {
+            UIVar* var = variables.Get(part.var);
+            if (var && (var->bindings.empty() || var->bindings.back() != index)) var->bindings.push_back(index);
+        }
+    };
+    link(binding.text);
+    for (const UIBoundDeclaration& declaration : binding.declarations) link(declaration.value);
+    bindings.push_back(std::move(binding));
+}
+
+UIVarId UI_Manager::InternVar(const std::string& name)
+{
+    const UIVarId id = variables.Intern(name);
+    if (id && !variables.Get(id)) variables.Put(id, std::make_unique<UIVar>());
+    return id;
+}
+
+void UI_Manager::SetVar(UIVarId id, std::string_view value)
+{
+    UIVar* var = variables.Get(id);
+    if (!var) return;
+    var->assigned = true;
+    if (var->value == value) return;
+    var->value = value;
+    for (uint32_t index : var->bindings) {
+        UIBinding& binding = bindings[index];
+        if (binding.queued) continue;
+        binding.queued = true;
+        dirty_bindings.push_back(index);
+    }
+}
+
+void UI_Manager::ApplyDirtyBindings(EngineContext* ctx, const FontManager* font_manager)
+{
+    const auto value_of = [this](UIVarId id) {
+        const UIVar* var = variables.Get(id);
+        return var ? std::string_view(var->value) : std::string_view();
+    };
+    for (uint32_t index : dirty_bindings) {
+        UIBinding& binding = bindings[index];
+        binding.queued = false;
+        if (binding.kind == UIBindingKind::Text) {
+            SetText(binding.node, RenderTemplate(binding.text, value_of), font_manager);
+            continue;
+        }
+
+        // Стиль собирается заново из всех объявлений узла: связанное объявление может перекрываться
+        // следующими, в том числе частично (padding и padding-left).
+        UIDeclaredValues values;
+        for (const UIBoundDeclaration& declaration : binding.declarations) {
+            const std::string value = RenderTemplate(declaration.value, value_of);
+            // Разбор пишет в поле до проверки диапазона: неверное значение применяется к копии.
+            UIDeclaredValues candidate = values;
+            if (ApplyDeclaration(declaration.property, value, candidate) == UIDeclarationResult::Applied)
+                values = std::move(candidate);
+            else
+                SDL_Log("UI_Manager: %s:%u: invalid value '%s' for '%s'", document_path.c_str(), declaration.line,
+                        value.c_str(), declaration.property.c_str());
+        }
+        SetNodeStyle(binding.node, values.style);
+        SetNodeMaterial(ctx, binding.node, values.material);
+    }
+    dirty_bindings.clear();
 }

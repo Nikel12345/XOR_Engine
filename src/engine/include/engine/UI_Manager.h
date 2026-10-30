@@ -1,12 +1,16 @@
 #pragma once
+#include <charconv>
+#include <concepts>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <glm/glm.hpp>
 #include "Aliases.h"
 #include "ComponentStorage.h"
 #include "ResourceId.h"
+#include "ResourceRegistry.h"
 
 class EngineContext;
 class FontManager;
@@ -71,6 +75,36 @@ struct UINode {
     bool                         has_entity = false;
 };
 
+struct UITemplatePart {
+    std::string literal;
+    UIVarId     var;
+};
+
+struct UIBoundDeclaration {
+    std::string                 property;
+    std::vector<UITemplatePart> value;
+    uint32_t                    line = 0;
+};
+
+enum class UIBindingKind : uint8_t { Text, Style };
+
+struct UIBinding {
+    UIBindingKind                   kind = UIBindingKind::Text;
+    uint32_t                        node = 0;
+    std::vector<UITemplatePart>     text;
+    std::vector<UIBoundDeclaration> declarations;
+    bool                            queued = false;
+};
+
+struct UIVar {
+    std::string           value;
+    bool                  assigned = false;
+    std::vector<uint32_t> bindings;
+};
+
+struct UIVarCell { std::string name; std::unique_ptr<UIVar> object; };
+using UIVarRegistry = ResourceRegistry<UIVarCell, UIVarId>;
+
 class UI_Manager {
 public:
     UI_Manager();
@@ -87,12 +121,25 @@ public:
     bool Load(const FontManager* font_manager, const std::string& path);
     void Reset();
 
+    UIVarId InternVar(const std::string& name);
+    void    SetVar(UIVarId var, std::string_view value);
+    template <class Number> requires std::integral<Number> || std::floating_point<Number>
+    void    SetVar(UIVarId var, Number value)
+    {
+        char buffer[32];
+        const std::to_chars_result result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+        SetVar(var, std::string_view(buffer, result.ptr));
+    }
+
+    void ApplyDirtyBindings(EngineContext* ctx, const FontManager* font_manager);
     void Emit(EngineContext* ctx, float screen_width, float screen_height);
 
     Node        RootNode() const;
     uint32_t    ChildCount(Node node) const;
     Node        ChildAt(Node node, uint32_t index) const;
     std::string NodeLabel(Node node) const;
+    Node        FindNode(std::string_view id) const;
+    bool        NodeContains(Node node, float window_x, float window_y) const;
 
     void NudgeNode(Node node, float delta_x, float delta_y, float delta_z);
     bool GetNodeNdc(Node node, float& ndc_x, float& ndc_y, float& ndc_z) const;
@@ -111,6 +158,7 @@ private:
     void Clear();
     Node MakeNode(const UIStyle& style);
     void AttachChild(Node parent, Node child);
+    void AddBinding(UIBinding binding);
     void DeleteCreatedEntities(EngineContext* ctx, const SceneName& scene_name);
     void EmitNode(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name,
                   Node node, float parent_x, float parent_y, float screen_width, float screen_height,
@@ -123,4 +171,9 @@ private:
     float               last_screen_width = -1.0f, last_screen_height = -1.0f;
     bool                emit_needed = true;
     bool                recreate_needed = true;
+
+    UIVarRegistry          variables;
+    std::vector<UIBinding> bindings;
+    std::vector<uint32_t>  dirty_bindings;
+    std::string            document_path;
 };
