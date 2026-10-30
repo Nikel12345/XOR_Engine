@@ -94,7 +94,7 @@ XOR Engine — набор статических библиотек. Прило�
   не открывается.
 - **UI** — две независимые вещи под одним префиксом: `UI_ImGui` / `UI_Hierarchy` / `UI_Inspector` /
   `UI_AssetBrowser` / `UI_ComponentEditor` — редактор на ImGui; `UI_Manager` + `UI_DataModule` —
-  UI приложения как ECS-энтити с flex-раскладкой Yoga.
+  UI приложения как ECS-энтити с flex-раскладкой Yoga; `UI_Markup` — разбор UI-файла (HTML + CSS).
 
 Дальше — `BatchBuilder` (дерево батчей по рецептам), `DrawPopulation` (рецепты сущностей и
 раскладка PIB) и ядро цикла: `Engine.cpp`, `Engine_Frame.cpp`, `Engine_Scene.cpp`.

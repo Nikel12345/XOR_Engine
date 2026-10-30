@@ -280,6 +280,7 @@ set(ENGINE_CORE_SRC
     src/EngineContext.cpp
     src/TextureLoader.cpp
     src/UI_Manager.cpp
+    src/UI_Markup.cpp
 )
 set(ENGINE_CORE_HDR
     include/engine/Engine.h
@@ -295,6 +296,7 @@ set(ENGINE_CORE_HDR
     include/engine/PCH_Engine.h
     include/engine/EngineContext.h
     include/engine/UI_Manager.h
+    include/engine/UI_Markup.h
 )
 
 # Абсолютим всё одинаково — иначе source_group не совпадёт с target_sources.
