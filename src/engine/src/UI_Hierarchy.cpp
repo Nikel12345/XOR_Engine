@@ -266,6 +266,16 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
 
     if (ImGui::CollapsingHeader("UI", ImGuiTreeNodeFlags_DefaultOpen))
     {
+        if (ImGui::SmallButton("Load")) {
+            // Загрузка нумерует узлы заново: выделение указало бы на чужой узел.
+            if (g_sel.kind == SelKind::UINode) g_sel = Selection{};
+            cmd::Push<CommandId::LoadUI>(ctx->GetInputManager());
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled();
+        ImGui::SmallButton("Save");
+        ImGui::EndDisabled();
+
         if (UI_Manager* ui_manager = ctx->GetUIManager()) {
             const UI_Manager::Node root = ui_manager->RootNode();
             if (root == UI_Manager::kInvalid) ImGui::TextDisabled("(no UI tree)");

@@ -761,9 +761,9 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 		if (SceneData* scene = object_manager->GetScene(scene_name)) {
 			object_manager->SetActiveScene(scene_name);
 
+			ui_path = dir + "/ui.html";
 			if (ui_manager) {
 				ui_manager->Reset();
-				const std::string ui_path = dir + "/ui.html";
 				if (std::filesystem::exists(ui_path)) ui_manager->Load(font_manager, ui_path);
 			}
 
@@ -779,4 +779,10 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 		loaded_count, bytes.size() / (1024.0 * 1024.0),
 		read_ms, wipe_ms, tex_ms, mdl_ms, shd_ms, mat_ms, clear_ms, ecs_ms,
 		read_ms + wipe_ms + tex_ms + mdl_ms + shd_ms + mat_ms + clear_ms + ecs_ms);
+}
+
+void Engine::LoadUI()
+{
+	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
+	if (ui_manager && !ui_path.empty()) ui_manager->Load(font_manager, ui_path);
 }

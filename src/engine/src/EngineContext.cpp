@@ -364,6 +364,12 @@ void EngineContext::LoadScene(const SceneName& scene_name, const std::string& sc
 	else SDL_Log("LoadScene: engine back-pointer not set");
 }
 
+void EngineContext::LoadUI()
+{
+	if (engine) engine->LoadUI();
+	else SDL_Log("LoadUI: engine back-pointer not set");
+}
+
 void EngineContext::ExecuteSceneGenerators()
 {
 	auto scene = object_manager->GetActiveScene();

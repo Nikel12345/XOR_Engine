@@ -100,6 +100,7 @@ public:
 
     void SaveScene(const SceneName& scene_name, const std::string& scenes_root);
     void LoadScene(const SceneName& scene_name, const std::string& scenes_root);
+    void LoadUI();
 
     void PrepareFunc(uint8_t idx);
 
@@ -180,6 +181,7 @@ private:
     TextureStateDataModule* tex_state_data_module = nullptr;
     UI_DataModule* ui_data_module = nullptr;
     UI_Manager* ui_manager = nullptr;
+    std::string ui_path;
 
     EngineContext* engine_context = nullptr;
     bool init_ok = false;

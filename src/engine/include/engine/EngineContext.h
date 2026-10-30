@@ -113,6 +113,7 @@ public:
 
 	void SaveScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
 	void LoadScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
+	void LoadUI();
 	void ExecuteSceneGenerators();
 	void ExecuteSceneDestructors();
 	// Сущности сносятся у названной сцены.

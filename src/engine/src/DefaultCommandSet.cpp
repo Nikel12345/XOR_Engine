@@ -126,6 +126,12 @@ void DefaultCommandSet::SetSceneCommands(InputManager& im)
 		{
 			ctx->LoadScene(c.scene, c.path);
 		});
+
+	cmd::Register<CommandId::LoadUI>(im,
+		[](EngineContext* ctx, const UILoadCmd&)
+		{
+			ctx->LoadUI();
+		});
 }
 
 void DefaultCommandSet::SetMaterialCommands(InputManager& im)
