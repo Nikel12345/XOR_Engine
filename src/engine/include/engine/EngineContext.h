@@ -34,7 +34,7 @@ class InputManager;
 class TextureLoader;
 class FontManager;
 struct FontData;
-class UI_Yoga;
+class UI_Manager;
 class Engine;
 class DrawPopulation;
 
@@ -159,8 +159,8 @@ public:
 	void SetFontManager(FontManager* fm) { font_manager = fm; }
 	FontManager* GetFontManager() const { return font_manager; }
 
-	void SetUIYoga(UI_Yoga* y) { ui_yoga = y; }
-	UI_Yoga* GetUIYoga() const { return ui_yoga; }
+	void SetUIManager(UI_Manager* manager) { ui_manager = manager; }
+	UI_Manager* GetUIManager() const { return ui_manager; }
 
 	void SetEngine(Engine* e) { engine = e; }
 
@@ -178,7 +178,7 @@ private:
 	InputManager* input_manager = nullptr;
 	TextureLoader* texture_loader = nullptr;
 	FontManager* font_manager = nullptr;
-	UI_Yoga* ui_yoga = nullptr;
+	UI_Manager* ui_manager = nullptr;
 	Engine* engine = nullptr;
 
 	GpuContext* gpu_ctx = nullptr;

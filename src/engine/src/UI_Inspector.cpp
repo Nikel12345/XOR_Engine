@@ -20,7 +20,7 @@
 #include "UI_ComponentEditor.h"
 #include "PassManager.h"
 #include "DefaultRenderPassSet.h"
-#include "UI_Yoga.h"
+#include "UI_Manager.h"
 #include "ImGuizmo.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -53,16 +53,16 @@ namespace {
     // Команда доходит до sim-потока не раньше следующего кадра, а драг прибавляет приращение к тому,
     // что видит в этом кадре: со стилем, заново прочитанным из узла, шаги драга терялись бы. Поэтому
     // пока поле держат (и кадр после правки) инспектор правит свою копию.
-    void InspectUINodeStyle(EngineContext* ctx, UI_Yoga* yg, UI_Yoga::Node n)
+    void InspectUINodeStyle(EngineContext* ctx, UI_Manager* ui_manager, UI_Manager::Node n)
     {
-        static UI_Yoga::Node edited_node = UI_Yoga::kInvalid;
+        static UI_Manager::Node edited_node = UI_Manager::kInvalid;
         static UIStyle       edited;
         UIStyle style;
         if (edited_node == n)                 style = edited;
-        else if (!yg->GetNodeStyle(n, style)) return;
+        else if (!ui_manager->GetNodeStyle(n, style)) return;
 
         float layout_w = 0.0f, layout_h = 0.0f;
-        yg->GetNodeLayoutSize(n, layout_w, layout_h);
+        ui_manager->GetNodeLayoutSize(n, layout_w, layout_h);
 
         bool changed = false, active = false;
         auto track = [&](bool edited_now) { changed |= edited_now; active |= ImGui::IsItemActive(); };
@@ -103,7 +103,7 @@ namespace {
         size_row("Height", style.hmode, style.h, layout_h);
         track(ImGui::DragFloat("Grow",   &style.grow,   0.01f, 0.0f, FLT_MAX, "%.2f"));
         track(ImGui::DragFloat("Margin", &style.margin, 0.5f,  0.0f, FLT_MAX, "%.0f px"));
-        if (!yg->IsTextNode(n)) {
+        if (!ui_manager->IsTextNode(n)) {
             track(ImGui::DragFloat("Padding", &style.padding, 0.5f, 0.0f, FLT_MAX, "%.0f px"));
             track(ImGui::DragFloat("Gap",     &style.gap,     0.5f, 0.0f, FLT_MAX, "%.0f px"));
             static const char* kDirs[]    = { "Row", "Column" };
@@ -116,27 +116,27 @@ namespace {
 
         if (changed)
             cmd::Push<CommandId::SetUINodeStyle>(ctx->GetInputManager(), n, style);
-        edited_node = (active || changed) ? n : UI_Yoga::kInvalid;
+        edited_node = (active || changed) ? n : UI_Manager::kInvalid;
         edited      = style;
     }
 
     // Текущий материал читается из Renderable энтити узла, а не из имени в узле: имя — std::string,
     // и sim-поток, переписывая его, может освободить буфер под читающим UI-потоком.
-    void InspectUINodeMaterial(EngineContext* ctx, UI_Yoga* yg, UI_Yoga::Node n)
+    void InspectUINodeMaterial(EngineContext* ctx, UI_Manager* ui_manager, UI_Manager::Node n)
     {
         MaterialManager* mm = ctx->GetMaterialManager();
         ObjectManager*   om = ctx->GetObjectManager();
         SceneData*    scene = om->GetActiveScene();
         std::string current;
         Entity e;
-        if (scene && yg->GetNodeEntity(n, e) && om->Has<Renderable>(scene, e)) {
+        if (scene && ui_manager->GetNodeEntity(n, e) && om->Has<Renderable>(scene, e)) {
             SoAElement<Renderable> rend = om->GetComponent<Renderable>(scene, e);
             const std::vector<MaterialSlot>& parts = rend.container().materials[rend.i()];
             if (!parts.empty()) current = mm->MaterialNameOf(parts[0].per_lod[0]);
         }
 
         if (!ImGui::BeginCombo("Material", current.empty() ? "(none)" : current.c_str())) return;
-        if (!yg->IsTextNode(n) && ImGui::Selectable("(none)", current.empty()))
+        if (!ui_manager->IsTextNode(n) && ImGui::Selectable("(none)", current.empty()))
             cmd::Push<CommandId::SetUINodeMaterial>(ctx->GetInputManager(), n, std::string{});
         const MaterialRegistry& mreg = mm->Materials();
         for (int32_t mi = 0; mi < mreg.Count(); ++mi) {
@@ -1302,18 +1302,18 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
 
     case SelKind::UINode:
     {
-        UI_Yoga* yg = ctx->GetUIYoga();
-        if (!yg) { ImGui::TextDisabled("no UI tree"); break; }
-        const UI_Yoga::Node n = g_sel.ui_node;
-        ImGui::Text("UI node: %s", yg->NodeLabel(n).c_str());
-        float dx, dy, dz; yg->GetOffset(n, dx, dy, dz);
+        UI_Manager* ui_manager = ctx->GetUIManager();
+        if (!ui_manager) { ImGui::TextDisabled("no UI tree"); break; }
+        const UI_Manager::Node n = g_sel.ui_node;
+        ImGui::Text("UI node: %s", ui_manager->NodeLabel(n).c_str());
+        float dx, dy, dz; ui_manager->GetOffset(n, dx, dy, dz);
         ImGui::Text("Offset: X=%.0f  Y=%.0f px", dx, dy);
-        InspectUINodeMaterial(ctx, yg, n);
+        InspectUINodeMaterial(ctx, ui_manager, n);
         ImGui::Separator();
-        InspectUINodeStyle(ctx, yg, n);
+        InspectUINodeStyle(ctx, ui_manager, n);
         ImGui::Separator();
         float local[16];
-        if (yg->GetNodeTransform(n, local)) {
+        if (ui_manager->GetNodeTransform(n, local)) {
             static constexpr int kLine[16] = { 0, 1, 2, 12,  4, 5, 6, 13,  8, 9, 10, 14,  3, 7, 11, 15 };
             float lines[16];
             for (int k = 0; k < 16; ++k) lines[k] = local[kLine[k]];
@@ -1362,13 +1362,13 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
     // узле, а камера стоит там, откуда fov UI-прохода накрывает высоту окна. Единицы — пиксели
     // раскладки, Y вверх. Сдвиг уходит в offset узла, поворот и масштаб — в его local.
     if (g_sel.kind == SelKind::UINode) {
-        UI_Yoga* yg = ctx->GetUIYoga();
-        if (!yg) return;
-        const UI_Yoga::Node n = g_sel.ui_node;
+        UI_Manager* ui_manager = ctx->GetUIManager();
+        if (!ui_manager) return;
+        const UI_Manager::Node n = g_sel.ui_node;
         float cx, cy, z;
-        if (!yg->GetNodeNdc(n, cx, cy, z)) return;
+        if (!ui_manager->GetNodeNdc(n, cx, cy, z)) return;
         float local[16];
-        if (!yg->GetNodeTransform(n, local)) return;
+        if (!ui_manager->GetNodeTransform(n, local)) return;
 
         DefaultRenderPassNamespace::UICameraPushData ui_camera;
         const RenderPassStep* ui_pass = ctx->GetPassManager()->GetRenderPassStep(DefaultRenderPassNamespace::UI_PASS);

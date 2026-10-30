@@ -14,7 +14,7 @@
 #include "PositionStructure.h"
 #include "BatchBuilder.h"
 #include "EngineContext.h"
-#include "UI_Yoga.h"
+#include "UI_Manager.h"
 #include <fstream>
 #include <filesystem>
 #include "yyjson.h"
@@ -761,7 +761,7 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 		if (SceneData* scene = object_manager->GetScene(scene_name)) {
 			object_manager->SetActiveScene(scene_name);
 
-			if (ui_yoga) ui_yoga->Reset();
+			if (ui_manager) ui_manager->Reset();
 
 			engine_context->ExecuteSceneGenerators();
 		}

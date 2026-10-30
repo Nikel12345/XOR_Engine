@@ -36,7 +36,7 @@ class LightDataModule;
 class IndirectDataModule;
 class TextureStateDataModule;
 class UI_DataModule;
-class UI_Yoga;
+class UI_Manager;
 class EngineContext;
 struct TransferBufferData;
 struct PrepassTimingReport;
@@ -95,7 +95,7 @@ public:
     LightDataModule* GetLightDataModule() const { return light_data_module; }
     CullingDataModule* GetCullingDataModule() const { return culling_data_module; }
     UI_DataModule* GetUIDataModule() const { return ui_data_module; }
-    UI_Yoga* GetUIYoga() const { return ui_yoga; }
+    UI_Manager* GetUIManager() const { return ui_manager; }
 
 
     void SaveScene(const SceneName& scene_name, const std::string& scenes_root);
@@ -179,7 +179,7 @@ private:
     IndirectDataModule* indirect_data_module = nullptr;
     TextureStateDataModule* tex_state_data_module = nullptr;
     UI_DataModule* ui_data_module = nullptr;
-    UI_Yoga* ui_yoga = nullptr;
+    UI_Manager* ui_manager = nullptr;
 
     EngineContext* engine_context = nullptr;
     bool init_ok = false;

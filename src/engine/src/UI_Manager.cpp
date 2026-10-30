@@ -1,5 +1,5 @@
 #include "PCH.h"
-#include "UI_Yoga.h"
+#include "UI_Manager.h"
 #include "EngineContext.h"
 #include "MaterialManager.h"
 #include "ModelManager.h"
@@ -7,55 +7,6 @@
 #include "BaseComponents.h"
 #include "FontManager.h"
 #include <yoga/Yoga.h>
-
-// Текст узла после ShapeString — всё, что нужно переносу, без FontData. Живёт отдельной аллокацией:
-// её адрес Yoga держит контекстом measure-функции, а Impl::nodes переезжает при росте.
-struct TextShape {
-    struct Glyph {
-        uint32_t code;       // glyph_index или UI_LINE_BREAK_CODE
-        float    advance;    // px
-        bool     space;      // здесь можно перенести строку
-        bool operator==(const Glyph&) const = default;
-    };
-    std::vector<Glyph> glyphs;
-    float              line_height = 0.0f;
-};
-
-struct NodeRec {
-    YGNodeRef             yg       = nullptr;
-    UIStyle               style;                 // применённый к yg — его же отдаёт GetNodeStyle
-    bool                  draws    = false;      // создавать ли энтити (контейнер без материала — нет)
-    std::string           material;               // имена ассетов (см. UI_Yoga::Box) — как в компонентах
-    std::string           quad;
-    std::unique_ptr<TextShape> shape;            // есть → текстовый узел (UITextComponent)
-    std::vector<uint32_t> glyphs;                // поток для UITextComponent: shape, перенесённый по ширине узла
-    FontId                font;
-    // Подпись узла в редакторе. SetText её не трогает: NodeLabel копирует строку с UI-потока, и
-    // перезапись на sim дала бы чтение освобождённого буфера.
-    std::string           text;
-    std::vector<uint32_t> children;              // индексы в Impl::nodes
-    // Правка из редактора: смещение поверх посчитанной раскладки (offset px XY + z-bias слоя).
-    float                 off_x = 0.0f, off_y = 0.0f, z_off = 0.0f;
-    glm::mat4             local{ 1.0f };
-    // Слепок последнего Emit (центр в NDC + z, размер раскладки в px) — для гизмо и инспектора. Пишет
-    // sim, читает UI (benign).
-    float                 ndc_cx = 0.0f, ndc_cy = 0.0f, ndc_z = 0.5f;
-    float                 layout_w = 0.0f, layout_h = 0.0f;
-    bool                  emitted = false;
-    // Энтити этого узла (если рисуется) — для мутации Positions на месте на layout-правках (без recreate).
-    Entity                entity = static_cast<Entity>(-1);
-    bool                  has_entity = false;
-};
-
-struct UI_Yoga::Impl {
-    YGConfigRef          cfg  = nullptr;
-    std::vector<NodeRec> nodes;
-    std::vector<Entity>  created;                // энтити прошлого Emit (снимаются на пересборке)
-    Node                 root = UI_Yoga::kInvalid;
-    // Размер экрана прошлой раскладки. Раскладка зависит от него (points-узлы дают разную ДОЛЮ экрана
-    // при разном разрешении) → его смена = layout-инвалидация, даже без dirty_. -1 = ещё не раскладывали.
-    float                last_w = -1.0f, last_h = -1.0f;
-};
 
 static void ApplyStyle(YGNodeRef n, const UIStyle& s)
 {
@@ -97,9 +48,9 @@ static void ApplyStyle(YGNodeRef n, const UIStyle& s)
     YGNodeStyleSetGap    (n, YGGutterAll, s.gap);
 }
 
-static std::vector<TextShape::Glyph> ShapeGlyphs(const FontData* font, const FontManager* fm, const std::string& utf8)
+static std::vector<UITextShape::Glyph> ShapeGlyphs(const FontData* font, const FontManager* fm, const std::string& utf8)
 {
-    std::vector<TextShape::Glyph> glyphs;
+    std::vector<UITextShape::Glyph> glyphs;
     for (uint32_t code : fm->ShapeString(font, utf8)) {
         const GlyphInfo* glyph = code < font->glyphs.size() ? &font->glyphs[code] : nullptr;
         glyphs.push_back({ code, glyph ? safe_sint32_f(glyph->advance) : 0.0f,
@@ -115,9 +66,9 @@ struct WrappedSize {
 
 // Жадный перенос по пробелам. Пробелы на месте автопереноса и в конце строки выпадают; слово шире
 // max_width не рвётся и вылезает за узел, как в CSS. out == nullptr — только замер.
-static WrappedSize WrapText(const TextShape& shape, float max_width, std::vector<uint32_t>* out)
+static WrappedSize WrapText(const UITextShape& shape, float max_width, std::vector<uint32_t>* out)
 {
-    const std::vector<TextShape::Glyph>& glyphs = shape.glyphs;
+    const std::vector<UITextShape::Glyph>& glyphs = shape.glyphs;
     WrappedSize size;
     float line_width    = 0.0f;
     bool  line_has_word = false;
@@ -157,120 +108,119 @@ static WrappedSize WrapText(const TextShape& shape, float max_width, std::vector
 
 static YGSize MeasureText(YGNodeConstRef node, float width, YGMeasureMode width_mode, float, YGMeasureMode)
 {
-    const TextShape& shape = *static_cast<const TextShape*>(YGNodeGetContext(node));
+    const UITextShape& shape = *static_cast<const UITextShape*>(YGNodeGetContext(node));
     const float max_width = (width_mode == YGMeasureModeUndefined) ? std::numeric_limits<float>::infinity() : width;
     const WrappedSize size = WrapText(shape, max_width, nullptr);
     return { size.width, safe_sint32_f(size.lines) * shape.line_height };
 }
 
-UI_Yoga::UI_Yoga() : impl_(new Impl) { impl_->cfg = YGConfigNew(); }
+UI_Manager::UI_Manager() : cfg(YGConfigNew()) {}
 
-UI_Yoga::~UI_Yoga()
+UI_Manager::~UI_Manager()
 {
     Clear();
-    if (impl_->cfg) YGConfigFree(impl_->cfg);
-    delete impl_;
+    if (cfg) YGConfigFree(cfg);
 }
 
-bool UI_Yoga::HasTree() const { return impl_->root != kInvalid; }
+bool UI_Manager::HasTree() const { return root != kInvalid; }
 
-UI_Yoga::Node UI_Yoga::RootNode() const { return impl_->root; }
+UI_Manager::Node UI_Manager::RootNode() const { return root; }
 
-uint32_t UI_Yoga::ChildCount(Node n) const
+uint32_t UI_Manager::ChildCount(Node n) const
 {
-    return (n < impl_->nodes.size()) ? static_cast<uint32_t>(impl_->nodes[n].children.size()) : 0u;
+    return (n < nodes.size()) ? static_cast<uint32_t>(nodes[n].children.size()) : 0u;
 }
 
-UI_Yoga::Node UI_Yoga::ChildAt(Node n, uint32_t i) const
+UI_Manager::Node UI_Manager::ChildAt(Node n, uint32_t i) const
 {
-    if (n >= impl_->nodes.size() || i >= impl_->nodes[n].children.size()) return kInvalid;
-    return impl_->nodes[n].children[i];
+    if (n >= nodes.size() || i >= nodes[n].children.size()) return kInvalid;
+    return nodes[n].children[i];
 }
 
-std::string UI_Yoga::NodeLabel(Node n) const
+std::string UI_Manager::NodeLabel(Node n) const
 {
-    if (n >= impl_->nodes.size()) return "<invalid>";
-    const NodeRec& r = impl_->nodes[n];
-    if (n == impl_->root)   return "UI Root";
+    if (n >= nodes.size()) return "<invalid>";
+    const UINode& r = nodes[n];
+    if (n == root)   return "UI Root";
     if (!r.text.empty())    return "Text: " + r.text;
     if (!r.material.empty()) return "Panel";
     return "Group";
 }
 
-void UI_Yoga::NudgeNode(Node n, float ddx, float ddy, float ddz)
+void UI_Manager::NudgeNode(Node n, float ddx, float ddy, float ddz)
 {
-    if (n >= impl_->nodes.size()) return;
-    NodeRec& r = impl_->nodes[n];
+    if (n >= nodes.size()) return;
+    UINode& r = nodes[n];
     r.off_x += ddx;  r.off_y += ddy;  r.z_off += ddz;
     dirty = true;
 }
 
-bool UI_Yoga::GetNodeNdc(Node n, float& ndc_x, float& ndc_y, float& z) const
+bool UI_Manager::GetNodeNdc(Node n, float& ndc_x, float& ndc_y, float& z) const
 {
-    if (n >= impl_->nodes.size() || !impl_->nodes[n].emitted) return false;
-    const NodeRec& r = impl_->nodes[n];
+    if (n >= nodes.size() || !nodes[n].emitted) return false;
+    const UINode& r = nodes[n];
     ndc_x = r.ndc_cx;  ndc_y = r.ndc_cy;  z = r.ndc_z;
     return true;
 }
 
-void UI_Yoga::GetOffset(Node n, float& dx, float& dy, float& dz) const
+void UI_Manager::GetOffset(Node n, float& dx, float& dy, float& dz) const
 {
-    if (n >= impl_->nodes.size()) { dx = dy = dz = 0.0f; return; }
-    const NodeRec& r = impl_->nodes[n];
+    if (n >= nodes.size()) { dx = dy = dz = 0.0f; return; }
+    const UINode& r = nodes[n];
     dx = r.off_x;  dy = r.off_y;  dz = r.z_off;
 }
 
-void UI_Yoga::SetNodeTransform(Node n, const float m[16])
+void UI_Manager::SetNodeTransform(Node n, const float m[16])
 {
-    if (n >= impl_->nodes.size()) return;
-    impl_->nodes[n].local = glm::make_mat4(m);
+    if (n >= nodes.size()) return;
+    nodes[n].local = glm::make_mat4(m);
     dirty = true;
 }
 
-bool UI_Yoga::GetNodeTransform(Node n, float m[16]) const
+bool UI_Manager::GetNodeTransform(Node n, float m[16]) const
 {
-    if (n >= impl_->nodes.size()) return false;
-    std::memcpy(m, glm::value_ptr(impl_->nodes[n].local), 16 * sizeof(float));
+    if (n >= nodes.size()) return false;
+    std::memcpy(m, glm::value_ptr(nodes[n].local), 16 * sizeof(float));
     return true;
 }
 
-void UI_Yoga::SetNodeStyle(Node n, const UIStyle& s)
+void UI_Manager::SetNodeStyle(Node n, const UIStyle& s)
 {
-    if (n >= impl_->nodes.size()) return;
-    NodeRec& r = impl_->nodes[n];
+    if (n >= nodes.size()) return;
+    UINode& r = nodes[n];
     r.style = s;
-    if (r.shape) r.style.padding = 0.0f;   // см. UI_Yoga::Text
+    if (r.shape) r.style.padding = 0.0f;   // см. UI_Manager::Text
     ApplyStyle(r.yg, r.style);
     dirty = true;
 }
 
-bool UI_Yoga::GetNodeStyle(Node n, UIStyle& s) const
+bool UI_Manager::GetNodeStyle(Node n, UIStyle& s) const
 {
-    if (n >= impl_->nodes.size()) return false;
-    s = impl_->nodes[n].style;
+    if (n >= nodes.size()) return false;
+    s = nodes[n].style;
     return true;
 }
 
-bool UI_Yoga::GetNodeLayoutSize(Node n, float& w, float& h) const
+bool UI_Manager::GetNodeLayoutSize(Node n, float& w, float& h) const
 {
-    if (n >= impl_->nodes.size() || !impl_->nodes[n].emitted) return false;
-    w = impl_->nodes[n].layout_w;  h = impl_->nodes[n].layout_h;
+    if (n >= nodes.size() || !nodes[n].emitted) return false;
+    w = nodes[n].layout_w;  h = nodes[n].layout_h;
     return true;
 }
 
-bool UI_Yoga::IsTextNode(Node n) const
+bool UI_Manager::IsTextNode(Node n) const
 {
-    return n < impl_->nodes.size() && impl_->nodes[n].shape != nullptr;
+    return n < nodes.size() && nodes[n].shape != nullptr;
 }
 
-void UI_Yoga::SetText(Node n, const std::string& utf8, const FontManager* fm)
+void UI_Manager::SetText(Node n, const std::string& utf8, const FontManager* fm)
 {
-    if (n >= impl_->nodes.size() || !fm) return;
-    NodeRec& r = impl_->nodes[n];
+    if (n >= nodes.size() || !fm) return;
+    UINode& r = nodes[n];
     const FontData* font = fm->GetFont(r.font);
     if (!r.shape || !font) return;
 
-    std::vector<TextShape::Glyph> glyphs = ShapeGlyphs(font, fm, utf8);
+    std::vector<UITextShape::Glyph> glyphs = ShapeGlyphs(font, fm, utf8);
     if (glyphs == r.shape->glyphs) return;
     r.shape->glyphs = std::move(glyphs);
     // Yoga кэширует замер узла с measure-функцией и без пометки не спросит размер заново.
@@ -278,108 +228,108 @@ void UI_Yoga::SetText(Node n, const std::string& utf8, const FontManager* fm)
     dirty = true;
 }
 
-void UI_Yoga::SetNodeMaterial(EngineContext* ctx, Node n, const std::string& material)
+void UI_Manager::SetNodeMaterial(EngineContext* ctx, Node n, const std::string& material)
 {
-    if (n >= impl_->nodes.size()) return;
-    NodeRec& r = impl_->nodes[n];
+    if (n >= nodes.size()) return;
+    UINode& r = nodes[n];
     if (r.material == material || (r.shape && material.empty())) return;
     r.material = material;
 
     const bool draws = r.shape || !material.empty();
     if (draws != r.draws) {
         r.draws = draws;
-        dirty = true;  structural_ = true;
+        dirty = true;  structural = true;
     }
     else if (r.has_entity) {
         ctx->ChangeMaterial(r.entity, material);
     }
 }
 
-bool UI_Yoga::GetNodeEntity(Node n, uint32_t& entity) const
+bool UI_Manager::GetNodeEntity(Node n, uint32_t& entity) const
 {
-    if (n >= impl_->nodes.size() || !impl_->nodes[n].has_entity) return false;
-    entity = impl_->nodes[n].entity;
+    if (n >= nodes.size() || !nodes[n].has_entity) return false;
+    entity = nodes[n].entity;
     return true;
 }
 
-static UI_Yoga::Node MakeNode(UI_Yoga::Impl* impl, const UIStyle& s)
+UI_Manager::Node UI_Manager::MakeNode(const UIStyle& s)
 {
-    YGNodeRef yg = YGNodeNewWithConfig(impl->cfg);
+    YGNodeRef yg = YGNodeNewWithConfig(cfg);
     ApplyStyle(yg, s);
-    const UI_Yoga::Node id = static_cast<UI_Yoga::Node>(impl->nodes.size());
-    impl->nodes.push_back(NodeRec{ yg, s });   // push_back МОЖЕТ реаллоцировать — берём ссылки ПОСЛЕ
+    const Node id = static_cast<Node>(nodes.size());
+    nodes.push_back(UINode{ yg, s });   // push_back МОЖЕТ реаллоцировать — берём ссылки ПОСЛЕ
     return id;
 }
 
-UI_Yoga::Node UI_Yoga::Root(const UIStyle& s)
+UI_Manager::Node UI_Manager::Root(const UIStyle& s)
 {
     Clear();
-    const Node id = MakeNode(impl_, s);
-    impl_->root = id;
-    dirty = true;  structural_ = true;
+    const Node id = MakeNode(s);
+    root = id;
+    dirty = true;  structural = true;
     return id;
 }
 
-UI_Yoga::Node UI_Yoga::Box(Node parent, const UIStyle& s, const std::string& material, const std::string& quad)
+UI_Manager::Node UI_Manager::Box(Node parent, const UIStyle& s, const std::string& material, const std::string& quad)
 {
-    const Node id = MakeNode(impl_, s);   // единственный push_back — ссылки берём после него
-    NodeRec& r = impl_->nodes[id];
+    const Node id = MakeNode(s);   // единственный push_back — ссылки берём после него
+    UINode& r = nodes[id];
     r.material = material;
     r.quad     = quad;
     r.draws    = !material.empty();
-    NodeRec& p = impl_->nodes[parent];
+    UINode& p = nodes[parent];
     YGNodeInsertChild(p.yg, r.yg, YGNodeGetChildCount(p.yg));
     p.children.push_back(id);
-    dirty = true;  structural_ = true;
+    dirty = true;  structural = true;
     return id;
 }
 
-UI_Yoga::Node UI_Yoga::Text(Node parent, const UIStyle& s, const std::string& utf8,
-                            const std::string& material, const std::string& quad, FontId font, const FontManager* fm)
+UI_Manager::Node UI_Manager::Text(Node parent, const UIStyle& s, const std::string& utf8,
+                                  const std::string& material, const std::string& quad, FontId font, const FontManager* fm)
 {
     // ui.frag рисует текст от угла рамки узла и об отступе внутри неё не знает.
     UIStyle text_style = s;
     if (text_style.padding > 0.0f) {
-        SDL_Log("UI_Yoga::Text: padding belongs to the parent box, ignored");
+        SDL_Log("UI_Manager::Text: padding belongs to the parent box, ignored");
         text_style.padding = 0.0f;
     }
-    const Node id = MakeNode(impl_, text_style);
-    NodeRec& r = impl_->nodes[id];
+    const Node id = MakeNode(text_style);
+    UINode& r = nodes[id];
     r.material = material;
     r.quad     = quad;
     r.draws    = true;
     r.font     = font;
     r.text     = utf8;
     if (const FontData* font_data = fm ? fm->GetFont(font) : nullptr) {
-        r.shape = std::make_unique<TextShape>();
+        r.shape = std::make_unique<UITextShape>();
         r.shape->line_height = safe_sint32_f(font_data->line_height);
         r.shape->glyphs = ShapeGlyphs(font_data, fm, utf8);
         YGNodeSetContext(r.yg, r.shape.get());
         YGNodeSetMeasureFunc(r.yg, MeasureText);
     }
-    NodeRec& p = impl_->nodes[parent];
+    UINode& p = nodes[parent];
     YGNodeInsertChild(p.yg, r.yg, YGNodeGetChildCount(p.yg));
     p.children.push_back(id);
-    dirty = true;  structural_ = true;
+    dirty = true;  structural = true;
     return id;
 }
 
-void UI_Yoga::Clear()
+void UI_Manager::Clear()
 {
     // Все узлы достижимы из корня (Box/Text всегда вставляются в родителя) → рекурсивный free
     // корня освобождает всё дерево. Созданные энтити тут НЕ трогаем (нет ctx) — они снимутся на
-    // следующем Emit по impl_->created.
-    if (impl_->root != kInvalid && impl_->nodes[impl_->root].yg)
-        YGNodeFreeRecursive(impl_->nodes[impl_->root].yg);
-    impl_->nodes.clear();
-    impl_->root = kInvalid;
-    dirty = true;  structural_ = true;
+    // следующем Emit по created.
+    if (root != kInvalid && nodes[root].yg)
+        YGNodeFreeRecursive(nodes[root].yg);
+    nodes.clear();
+    root = kInvalid;
+    dirty = true;  structural = true;
 }
 
-void UI_Yoga::Reset()
+void UI_Manager::Reset()
 {
-    Clear();                  // дерево — под нож (Yoga-узлы + записи), dirty/structural взводит сам
-    impl_->created.clear();   // а вот энтити НЕ удаляем: их уже нет, id принадлежат новой сцене
+    Clear();           // дерево — под нож (Yoga-узлы + записи), dirty/structural взводит сам
+    created.clear();   // а вот энтити НЕ удаляем: их уже нет, id принадлежат новой сцене
 }
 
 // Запись матрицы узла в Positions существующей энтити (мутация НА МЕСТЕ, без recreate). row-major:
@@ -395,7 +345,7 @@ static void WritePositions(ObjectManager* om, SceneData* scene, Entity e, const 
     P.i[i]=m.i; P.j[i]=m.j; P.k[i]=m.k; P.l[i]=m.l;
 }
 
-static UITextComponent MakeTextComponent(const NodeRec& r, float w, float h)
+static UITextComponent MakeTextComponent(const UINode& r, float w, float h)
 {
     return UITextComponent{ r.glyphs, r.font, w / r.shape->line_height, h / r.shape->line_height };
 }
@@ -404,13 +354,13 @@ static UITextComponent MakeTextComponent(const NodeRec& r, float w, float h)
 // СОЗДАЁМ энтити (структурный проход); create=false — МУТИРУЕМ Positions существующей энтити на месте
 // (layout-правки: драг/ресайз — без recreate, иначе структурная мутация ECS каждый кадр роняет
 // редактор, см. CLAUDE.md).
-static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om, SceneData* scene_ptr,
-                     const SceneName& scene_name, UI_Yoga::Node id, float ox, float oy,
-                     float W, float H, int& order, bool create)
+void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* om, SceneData* scene_ptr,
+                          const SceneName& scene_name, Node id, float ox, float oy,
+                          float W, float H, int& order, bool create)
 {
     constexpr float kZStep = 0.00001f;
 
-    NodeRec& r = impl->nodes[id];
+    UINode& r = nodes[id];
     const float x = ox + YGNodeLayoutGetLeft(r.yg) + r.off_x;
     const float y = oy + YGNodeLayoutGetTop(r.yg)  + r.off_y;
     const float w = YGNodeLayoutGetWidth(r.yg);
@@ -453,7 +403,7 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
         if (create) {
             Entity e;
             // GeneratedComponent → SaveScene не пишет их в scene.sheaf: узлы UI пересоздаёт
-            // UI_Yoga::Emit из дерева каждую сессию, копия в файле = дубли/баги при загрузке.
+            // UI_Manager::Emit из дерева каждую сессию, копия в файле = дубли/баги при загрузке.
             // TextureStateComponent — БЕЗУСЛОВНО: тег ставится только при создании (миграции
             // архетипов нет), а материал узлу можно сменить на вариативный позже. Узлов UI
             // десятки, лишний элемент из нулей в буфере состояний ничего не стоит.
@@ -469,7 +419,7 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
                                                 { ctx->GetMaterialManager()->InternMaterial(r.material) }),
                         m, UIComponent{}, GeneratedComponent{}, TextureStateComponent{});
             r.entity = e;  r.has_entity = true;
-            impl->created.push_back(e);
+            created.push_back(e);
         }
         else if (r.has_entity && om->Has<Positions>(scene_ptr, r.entity)) {
             WritePositions(om, scene_ptr, r.entity, m);   // мутация на месте (без recreate)
@@ -478,50 +428,50 @@ static void EmitNode(UI_Yoga::Impl* impl, EngineContext* ctx, ObjectManager* om,
         }
     }
 
-    for (UI_Yoga::Node ch : r.children)
-        EmitNode(impl, ctx, om, scene_ptr, scene_name, ch, x, y, W, H, order, create);
+    for (Node ch : r.children)
+        EmitNode(ctx, om, scene_ptr, scene_name, ch, x, y, W, H, order, create);
 }
 
-void UI_Yoga::Emit(EngineContext* ctx, float screen_w, float screen_h)
+void UI_Manager::Emit(EngineContext* ctx, float screen_w, float screen_h)
 {
     if (!ctx) return;
 
     ObjectManager* om       = ctx->GetObjectManager();
     SceneData*     scene    = om->GetActiveScene();
-    // Узлы UI — обычные энтити активной сцены, класть их некуда. Выходим ДО гашения dirty_ и до
+    // Узлы UI — обычные энтити активной сцены, класть их некуда. Выходим ДО гашения dirty и до
     // записи last_w/h: иначе состояние «раскладка не выложена» считалось бы обработанным, и
     // появившаяся позже сцена осталась бы без UI до следующего структурного изменения.
     if (!scene) return;
     const SceneName scene_name = om->GetActiveSceneName();
 
-    // Смена размера экрана инвалидирует раскладку так же, как dirty_ (см. Impl::last_w/h): без этого
+    // Смена размера экрана инвалидирует раскладку так же, как dirty (см. last_w/h): без этого
     // ресайз не перекладывал UI — узлы держали NDC от стартового разрешения, отсюда «другой размер UI».
-    const bool size_changed = (screen_w != impl_->last_w) || (screen_h != impl_->last_h);
+    const bool size_changed = (screen_w != last_w) || (screen_h != last_h);
     if (!dirty && !size_changed) return;
-    impl_->last_w = screen_w;  impl_->last_h = screen_h;
+    last_w = screen_w;  last_h = screen_h;
 
-    if (impl_->root == kInvalid || screen_w <= 0.0f || screen_h <= 0.0f) {
-        for (Entity e : impl_->created) ctx->DeleteEntity(scene_name, e);
-        impl_->created.clear();
-        structural_ = false;  dirty = false;  return;
+    if (root == kInvalid || screen_w <= 0.0f || screen_h <= 0.0f) {
+        for (Entity e : created) ctx->DeleteEntity(scene_name, e);
+        created.clear();
+        structural = false;  dirty = false;  return;
     }
 
-    YGNodeCalculateLayout(impl_->nodes[impl_->root].yg, screen_w, screen_h, YGDirectionLTR);
+    YGNodeCalculateLayout(nodes[root].yg, screen_w, screen_h, YGDirectionLTR);
 
     int order = 0;
-    if (structural_) {
+    if (structural) {
         // Структурное изменение дерева (сборка/добавление узлов, редко) → полный recreate.
-        for (Entity e : impl_->created) ctx->DeleteEntity(scene_name, e);
-        impl_->created.clear();
-        for (NodeRec& n : impl_->nodes) { n.has_entity = false; n.entity = static_cast<Entity>(-1); }
-        EmitNode(impl_, ctx, om, scene, scene_name, impl_->root, 0.0f, 0.0f, screen_w, screen_h, order, /*create*/true);
-        structural_ = false;
+        for (Entity e : created) ctx->DeleteEntity(scene_name, e);
+        created.clear();
+        for (UINode& n : nodes) { n.has_entity = false; n.entity = static_cast<Entity>(-1); }
+        EmitNode(ctx, om, scene, scene_name, root, 0.0f, 0.0f, screen_w, screen_h, order, /*create*/true);
+        structural = false;
     }
     else {
         // Только раскладка/смещение (драг гизмо, ресайз) → мутируем Positions существующих энтити на
         // месте, БЕЗ create/delete: иначе структурная мутация ECS каждый кадр против ForEach редактора
         // = краш (см. CLAUDE.md). Бонус: ресайз больше не тасует порядок батчей.
-        EmitNode(impl_, ctx, om, scene, scene_name, impl_->root, 0.0f, 0.0f, screen_w, screen_h, order, /*create*/false);
+        EmitNode(ctx, om, scene, scene_name, root, 0.0f, 0.0f, screen_w, screen_h, order, /*create*/false);
     }
     dirty = false;
 }

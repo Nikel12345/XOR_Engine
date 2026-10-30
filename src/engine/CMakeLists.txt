@@ -14,7 +14,7 @@ target_include_directories(yyjson PUBLIC
 
 # Yoga — flex-раскладка UI (Meta, MIT). Компилируем исходники напрямую (external/yoga/yoga/*.cpp),
 # include-корень external/yoga (#include <yoga/...>). Требует C++20. Линкует только Engine (PRIVATE):
-# Yoga-типы прячет UI_Yoga (pimpl), в игру не течёт — как SDL_ttf в FontManager.
+# Yoga-типы прячет UI_Manager (заголовок форвардит opaque-типы), в игру не течёт — как SDL_ttf в FontManager.
 file(GLOB_RECURSE YOGA_SRC CONFIGURE_DEPENDS "${XOR_Engine_SOURCE_DIR}/external/yoga/yoga/*.cpp")
 add_library(yoga STATIC ${YOGA_SRC})
 target_include_directories(yoga PUBLIC "${XOR_Engine_SOURCE_DIR}/external/yoga")
@@ -279,7 +279,7 @@ set(ENGINE_CORE_SRC
     src/UI_ComponentEditor.cpp
     src/EngineContext.cpp
     src/TextureLoader.cpp
-    src/UI_Yoga.cpp
+    src/UI_Manager.cpp
 )
 set(ENGINE_CORE_HDR
     include/engine/Engine.h
@@ -294,7 +294,7 @@ set(ENGINE_CORE_HDR
     include/engine/UI_ComponentEditor.h
     include/engine/PCH_Engine.h
     include/engine/EngineContext.h
-    include/engine/UI_Yoga.h
+    include/engine/UI_Manager.h
 )
 
 # Абсолютим всё одинаково — иначе source_group не совпадёт с target_sources.
@@ -337,7 +337,7 @@ target_include_directories(Engine PUBLIC
 target_include_directories(Engine PRIVATE
     "${XOR_Engine_SOURCE_DIR}/external/SDL3_image/include"   # только TextureLoader.cpp
     "${XOR_Engine_SOURCE_DIR}/external/SDL3_ttf/include"     # только FontManager.cpp (растеризация глифов)
-    "${XOR_Engine_SOURCE_DIR}/external/yoga"                 # только UI_Yoga.cpp (#include <yoga/...>)
+    "${XOR_Engine_SOURCE_DIR}/external/yoga"                 # только UI_Manager.cpp (#include <yoga/...>)
 )
 
 # Свой PCH: PCH.h + imgui.h (8 из 38 TU зовут ImGui). Отдельный он не ради скорости, а по
@@ -355,7 +355,7 @@ target_link_libraries(Engine PRIVATE
     "${XOR_Engine_SOURCE_DIR}/external/SDL3_image/lib/x64/SDL3_image.lib"  # только TextureLoader
     "${XOR_Engine_SOURCE_DIR}/external/SDL3_ttf/lib/x64/SDL3_ttf.lib"      # только FontManager (SDL_ttf)
     yyjson                                                            # манифесты ресурсов сцены (Save/LoadScene)
-    yoga                                                              # только UI_Yoga (flex-раскладка; pimpl прячет типы)
+    yoga                                                              # только UI_Manager (flex-раскладка; заголовок форвардит типы)
 )
 
 target_compile_definitions(Engine PRIVATE

@@ -93,7 +93,7 @@ XOR Engine — набор статических библиотек. Прило�
   заливки и команды ввода по умолчанию. Кому нужен свой конвейер — пишет свой сет, ядро при этом
   не открывается.
 - **UI** — две независимые вещи под одним префиксом: `UI_ImGui` / `UI_Hierarchy` / `UI_Inspector` /
-  `UI_AssetBrowser` / `UI_ComponentEditor` — редактор на ImGui; `UI_Yoga` + `UI_DataModule` —
+  `UI_AssetBrowser` / `UI_ComponentEditor` — редактор на ImGui; `UI_Manager` + `UI_DataModule` —
   UI приложения как ECS-энтити с flex-раскладкой Yoga.
 
 Дальше — `BatchBuilder` (дерево батчей по рецептам), `DrawPopulation` (рецепты сущностей и
@@ -175,7 +175,7 @@ id раньше, чем появится сам ресурс. Имя при эт
 | **SDL3_shadercross** | **форк** `Nikel12345/SDL_shadercross`, ветка `main`, собирается статически из исходников `external/SDL3_shadercross` вместе с SPIRV-Cross. DXC — готовые бинарники; `copy_runtime_dlls` кладёт их рядом с exe, иначе Windows подхватит `dxcompiler.dll` другой версии из PATH | `EngineGpu`, использует только `ShaderManager` |
 | **SDL3_image / SDL3_ttf** | бинарные дистрибутивы; грузят `SDL3.dll` динамически, **ABI привязан к версии форка** — бампаешь SDL, обновляй и их | PRIVATE: image — только `TextureLoader`, ttf — только `FontManager` |
 | **ImGui + ImGuizmo** | исходники, свой таргет `ImGui` | PRIVATE к `Engine`; наружу торчит фасад `UI_ImGui` |
-| **yoga** | исходники, требует C++20 | PRIVATE к `Engine`; типы спрятаны за pimpl в `UI_Yoga` |
+| **yoga** | исходники, требует C++20 | PRIVATE к `Engine`; заголовок `UI_Manager` форвардит её opaque-типы, сама она включается только в `.cpp` |
 | **yyjson** | один `.c`, вендорный | PRIVATE к `Engine`: манифесты ресурсов сцены |
 | **glm** | header-only | PUBLIC — публичные заголовки его раскрывают |
 | **rectpack2D** | header-only | PRIVATE, только упаковка атласа в `TextureManager` |

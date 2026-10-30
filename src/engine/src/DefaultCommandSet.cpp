@@ -12,7 +12,7 @@
 #include "ModelManager.h"
 #include "PipeManager.h"
 #include "PassManager.h"
-#include "UI_Yoga.h"
+#include "UI_Manager.h"
 
 using namespace ShaderBase;
 
@@ -78,29 +78,29 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 	cmd::Register<CommandId::NudgeUINode>(im,
 		[](EngineContext* ctx, const UINodeNudgeCmd& c)
 		{
-			if (UI_Yoga* yg = ctx->GetUIYoga())
-				yg->NudgeNode(c.node, c.ddx, c.ddy, c.ddz);
+			if (UI_Manager* ui_manager = ctx->GetUIManager())
+				ui_manager->NudgeNode(c.node, c.ddx, c.ddy, c.ddz);
 		});
 
 	cmd::Register<CommandId::SetUINodeTransform>(im,
 		[](EngineContext* ctx, const UINodeTransformCmd& c)
 		{
-			if (UI_Yoga* yg = ctx->GetUIYoga())
-				yg->SetNodeTransform(c.node, c.matrix);
+			if (UI_Manager* ui_manager = ctx->GetUIManager())
+				ui_manager->SetNodeTransform(c.node, c.matrix);
 		});
 
 	cmd::Register<CommandId::SetUINodeStyle>(im,
 		[](EngineContext* ctx, const UINodeStyleCmd& c)
 		{
-			if (UI_Yoga* yg = ctx->GetUIYoga())
-				yg->SetNodeStyle(c.node, c.style);
+			if (UI_Manager* ui_manager = ctx->GetUIManager())
+				ui_manager->SetNodeStyle(c.node, c.style);
 		});
 
 	cmd::Register<CommandId::SetUINodeMaterial>(im,
 		[](EngineContext* ctx, const UINodeMaterialCmd& c)
 		{
-			if (UI_Yoga* yg = ctx->GetUIYoga())
-				yg->SetNodeMaterial(ctx, c.node, c.material);
+			if (UI_Manager* ui_manager = ctx->GetUIManager())
+				ui_manager->SetNodeMaterial(ctx, c.node, c.material);
 		});
 
 	cmd::Register<CommandId::CreateEntity>(im,

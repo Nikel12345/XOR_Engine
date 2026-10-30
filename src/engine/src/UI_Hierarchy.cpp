@@ -10,7 +10,7 @@
 #include "InputCommands.h"
 #include "ComponentSerializer.h"
 #include "UI_ComponentEditor.h"
-#include "UI_Yoga.h"
+#include "UI_Manager.h"
 #include <set>
 #include <algorithm>
 #include <filesystem>
@@ -141,11 +141,11 @@ namespace {
     }
 }
 
-static void DrawUITree(UI_Yoga* yg, UI_Yoga::Node n)
+static void DrawUITree(UI_Manager* ui_manager, UI_Manager::Node n)
 {
-    if (n == UI_Yoga::kInvalid) return;
-    const uint32_t child_count = yg->ChildCount(n);
-    const std::string label = yg->NodeLabel(n);
+    if (n == UI_Manager::kInvalid) return;
+    const uint32_t child_count = ui_manager->ChildCount(n);
+    const std::string label = ui_manager->NodeLabel(n);
 
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_DefaultOpen
                              | ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -160,7 +160,7 @@ static void DrawUITree(UI_Yoga* yg, UI_Yoga::Node n)
     }
     if (open) {
         for (uint32_t i = 0; i < child_count; ++i)
-            DrawUITree(yg, yg->ChildAt(n, i));
+            DrawUITree(ui_manager, ui_manager->ChildAt(n, i));
         ImGui::TreePop();
     }
 }
@@ -266,10 +266,10 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
 
     if (ImGui::CollapsingHeader("UI", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        if (UI_Yoga* yg = ctx->GetUIYoga()) {
-            const UI_Yoga::Node root = yg->RootNode();
-            if (root == UI_Yoga::kInvalid) ImGui::TextDisabled("(no UI tree)");
-            else DrawUITree(yg, root);
+        if (UI_Manager* ui_manager = ctx->GetUIManager()) {
+            const UI_Manager::Node root = ui_manager->RootNode();
+            if (root == UI_Manager::kInvalid) ImGui::TextDisabled("(no UI tree)");
+            else DrawUITree(ui_manager, root);
         }
     }
 

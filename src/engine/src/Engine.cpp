@@ -26,7 +26,7 @@
 #include "LightDataModule.h"
 #include "IndirectDataModule.h"
 #include "UI_DataModule.h"
-#include "UI_Yoga.h"
+#include "UI_Manager.h"
 #include "EngineContext.h"
 #include "DefaultUpdateSet.h"
 #include "DefaultRenderPassSet.h"
@@ -309,13 +309,13 @@ Engine::Engine(const EngineConfig& cfg)
 	indirect_data_module = new IndirectDataModule();
 	tex_state_data_module = new TextureStateDataModule();
 	ui_data_module = new UI_DataModule();
-	ui_yoga = new UI_Yoga();
+	ui_manager = new UI_Manager();
 
 	engine_context = new EngineContext(buffer_manager, texture_manager, pass_manager, material_manager, object_manager, shader_manager, model_manager, camera_manager, pipe_manager, batch_builder, texture_loader);
 	engine_context->SetInputManager(input_manager);
 	engine_context->SetDrawPopulation(draw_population);
 	engine_context->SetFontManager(font_manager);
-	engine_context->SetUIYoga(ui_yoga);
+	engine_context->SetUIManager(ui_manager);
 	engine_context->SetEngine(this);
 	engine_context->CreateGeometryPool(POS_UV_NORM_POOL, sizeof(PosUVNormal), PosUVNormLayout());
 	InitDefaultBufferUpdaters();
@@ -471,7 +471,7 @@ Engine::~Engine()
 	delete indirect_data_module;
 	delete tex_state_data_module;
 	delete ui_data_module;
-	delete ui_yoga;
+	delete ui_manager;
 
 	SDL_ReleaseWindowFromGPUDevice(dev, win);
 	SDL_DestroyGPUDevice(dev);

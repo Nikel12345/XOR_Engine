@@ -13,7 +13,7 @@
 #include "ObjectManager.h"
 #include "BatchBuilder.h"
 #include "EngineContext.h"
-#include "UI_Yoga.h"
+#include "UI_Manager.h"
 #include "CameraManager.h"
 #include "CameraStruct.h"
 #include "DefaultRenderPassSet.h"
@@ -29,7 +29,7 @@ void Engine::PrepareFunc(uint8_t slot)
 
 	{
 		PROF_SCOPE(Sim, " ui_emit");
-		ui_yoga->Emit(engine_context, GetWindowWidth(), GetWindowHeight());
+		ui_manager->Emit(engine_context, GetWindowWidth(), GetWindowHeight());
 	}
 
 	if (Camera* cam = camera_manager->GetActiveCamera()) {
