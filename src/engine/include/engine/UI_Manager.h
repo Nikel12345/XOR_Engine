@@ -21,6 +21,11 @@ enum class UIJustify : uint8_t { Start, Center, End, SpaceBetween };   // вдо
 enum class UIAlign   : uint8_t { Start, Center, End, Stretch };        // поперёк главной оси
 enum class UISize    : uint8_t { Auto, Points, Percent, Grow };
 
+struct UIEdges {   // px, порядок как в CSS-сокращении
+    float top = 0.0f, right = 0.0f, bottom = 0.0f, left = 0.0f;
+    bool operator==(const UIEdges&) const = default;
+};
+
 struct UIStyle {
     UIDir     dir     = UIDir::Column;
     UIJustify justify = UIJustify::Start;   // распределение детей по главной оси
@@ -28,8 +33,8 @@ struct UIStyle {
     UISize    wmode   = UISize::Auto;   float w = 0.0f;   // Points=px, Percent=% родителя, Grow=flex-grow
     UISize    hmode   = UISize::Auto;   float h = 0.0f;
     float     grow    = 0.0f;   // flex-grow (заполнить свободное место главной оси)
-    float     padding = 0.0f;   // все края, px
-    float     margin  = 0.0f;   // все края, px
+    UIEdges   padding;
+    UIEdges   margin;
     float     gap     = 0.0f;   // зазор между детьми, px
 };
 
@@ -58,6 +63,7 @@ struct UINode {
     // Подпись узла в редакторе. SetText её не трогает: NodeLabel копирует строку с UI-потока, и
     // перезапись на sim дала бы чтение освобождённого буфера.
     std::string           text;
+    std::string           id;                    // id элемента UI-файла: подпись в редакторе
     std::vector<uint32_t> children;              // индексы в UI_Manager::nodes
     // Правка из редактора: смещение поверх посчитанной раскладки (offset px XY + z-bias слоя).
     float                 off_x = 0.0f, off_y = 0.0f, z_off = 0.0f;
@@ -84,6 +90,10 @@ public:
     Node Box (Node parent, const UIStyle& s, const std::string& material, const std::string& quad);
     Node Text(Node parent, const UIStyle& s, const std::string& utf8,
               const std::string& material, const std::string& quad, FontId font, const FontManager* fm);
+
+    // Дерево из UI-файла (docs/ui.md, «UI-файл»). Документ проверяется целиком до сборки: при ошибках
+    // все они уходят в лог с файл:строка, а прежнее дерево остаётся.
+    bool Load(const FontManager* fm, const std::string& path);
 
     void Clear();                        // снести дерево (энтити снимутся на следующем Emit)
     bool HasTree() const;

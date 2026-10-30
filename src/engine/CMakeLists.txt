@@ -280,6 +280,7 @@ set(ENGINE_CORE_SRC
     src/EngineContext.cpp
     src/TextureLoader.cpp
     src/UI_Manager.cpp
+    src/UI_Manager_Load.cpp
     src/UI_Markup.cpp
 )
 set(ENGINE_CORE_HDR

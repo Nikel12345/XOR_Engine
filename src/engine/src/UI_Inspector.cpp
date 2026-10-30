@@ -98,13 +98,24 @@ namespace {
             ImGui::PopID();
         };
 
+        // Порядок полей — как в CSS-сокращении: сверху, справа, снизу, слева. Отступ снаружи бывает
+        // отрицательным, внутри — нет; границы 0..0 ImGui понимает как «без ограничений».
+        auto edges_row = [&](const char* label, UIEdges& e, bool non_negative) {
+            float v[4] = { e.top, e.right, e.bottom, e.left };
+            if (ImGui::DragFloat4(label, v, 0.5f, 0.0f, non_negative ? FLT_MAX : 0.0f, "%.0f")) {
+                e = { v[0], v[1], v[2], v[3] };
+                changed = true;
+            }
+            active |= ImGui::IsItemActive();
+        };
+
         ImGui::Text("Layout size: %.0f x %.0f px", layout_w, layout_h);
         size_row("Width",  style.wmode, style.w, layout_w);
         size_row("Height", style.hmode, style.h, layout_h);
         track(ImGui::DragFloat("Grow",   &style.grow,   0.01f, 0.0f, FLT_MAX, "%.2f"));
-        track(ImGui::DragFloat("Margin", &style.margin, 0.5f,  0.0f, FLT_MAX, "%.0f px"));
+        edges_row("Margin T R B L", style.margin, false);
         if (!ui_manager->IsTextNode(n)) {
-            track(ImGui::DragFloat("Padding", &style.padding, 0.5f, 0.0f, FLT_MAX, "%.0f px"));
+            edges_row("Padding T R B L", style.padding, true);
             track(ImGui::DragFloat("Gap",     &style.gap,     0.5f, 0.0f, FLT_MAX, "%.0f px"));
             static const char* kDirs[]    = { "Row", "Column" };
             static const char* kJustify[] = { "Start", "Center", "End", "SpaceBetween" };

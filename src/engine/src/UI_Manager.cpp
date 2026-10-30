@@ -8,6 +8,14 @@
 #include "FontManager.h"
 #include <yoga/Yoga.h>
 
+static void ApplyEdges(YGNodeRef n, void (*set)(YGNodeRef, YGEdge, float), const UIEdges& e)
+{
+    set(n, YGEdgeTop,    e.top);
+    set(n, YGEdgeRight,  e.right);
+    set(n, YGEdgeBottom, e.bottom);
+    set(n, YGEdgeLeft,   e.left);
+}
+
 static void ApplyStyle(YGNodeRef n, const UIStyle& s)
 {
     YGNodeStyleSetFlexDirection(n, s.dir == UIDir::Row ? YGFlexDirectionRow : YGFlexDirectionColumn);
@@ -43,9 +51,9 @@ static void ApplyStyle(YGNodeRef n, const UIStyle& s)
     if (s.hmode == UISize::Grow && s.h > 0) grow = s.h;
     if (s.grow > 0.0f)                      grow = s.grow;
     YGNodeStyleSetFlexGrow(n, grow);
-    YGNodeStyleSetPadding(n, YGEdgeAll, s.padding);
-    YGNodeStyleSetMargin (n, YGEdgeAll, s.margin);
-    YGNodeStyleSetGap    (n, YGGutterAll, s.gap);
+    ApplyEdges(n, YGNodeStyleSetPadding, s.padding);
+    ApplyEdges(n, YGNodeStyleSetMargin,  s.margin);
+    YGNodeStyleSetGap(n, YGGutterAll, s.gap);
 }
 
 static std::vector<UITextShape::Glyph> ShapeGlyphs(const FontData* font, const FontManager* fm, const std::string& utf8)
@@ -141,10 +149,11 @@ std::string UI_Manager::NodeLabel(Node n) const
 {
     if (n >= nodes.size()) return "<invalid>";
     const UINode& r = nodes[n];
-    if (n == root)   return "UI Root";
-    if (!r.text.empty())    return "Text: " + r.text;
-    if (!r.material.empty()) return "Panel";
-    return "Group";
+    const std::string id = r.id.empty() ? std::string() : " #" + r.id;
+    if (n == root)           return "UI Root" + id;
+    if (!r.text.empty())     return "Text" + id + ": " + r.text;
+    if (!r.material.empty()) return "Panel" + id;
+    return "Group" + id;
 }
 
 void UI_Manager::NudgeNode(Node n, float ddx, float ddy, float ddz)
@@ -189,7 +198,7 @@ void UI_Manager::SetNodeStyle(Node n, const UIStyle& s)
     if (n >= nodes.size()) return;
     UINode& r = nodes[n];
     r.style = s;
-    if (r.shape) r.style.padding = 0.0f;   // см. UI_Manager::Text
+    if (r.shape) r.style.padding = {};   // см. UI_Manager::Text
     ApplyStyle(r.yg, r.style);
     dirty = true;
 }
@@ -289,9 +298,9 @@ UI_Manager::Node UI_Manager::Text(Node parent, const UIStyle& s, const std::stri
 {
     // ui.frag рисует текст от угла рамки узла и об отступе внутри неё не знает.
     UIStyle text_style = s;
-    if (text_style.padding > 0.0f) {
+    if (text_style.padding != UIEdges{}) {
         SDL_Log("UI_Manager::Text: padding belongs to the parent box, ignored");
-        text_style.padding = 0.0f;
+        text_style.padding = {};
     }
     const Node id = MakeNode(text_style);
     UINode& r = nodes[id];

@@ -761,7 +761,11 @@ void Engine::LoadScene(const SceneName& scene_name, const std::string& scenes_ro
 		if (SceneData* scene = object_manager->GetScene(scene_name)) {
 			object_manager->SetActiveScene(scene_name);
 
-			if (ui_manager) ui_manager->Reset();
+			if (ui_manager) {
+				ui_manager->Reset();
+				const std::string ui_path = dir + "/ui.html";
+				if (std::filesystem::exists(ui_path)) ui_manager->Load(font_manager, ui_path);
+			}
 
 			engine_context->ExecuteSceneGenerators();
 		}
