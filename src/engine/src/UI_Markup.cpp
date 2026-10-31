@@ -311,6 +311,18 @@ static bool ParseElement(MarkupReader& r, UIMarkupDocument& doc, UIMarkupNode& n
     if (!IsNameStart(r.Peek())) return r.Fail(node.line, "expected a tag name after '<'");
     node.tag = r.ReadName();
 
+    // Заголовок <for> — выражение, а не атрибуты: его разбирает загрузчик.
+    if (node.tag == "for") {
+        const size_t header_begin = r.pos;
+        while (!r.AtEnd() && r.Peek() != '>') r.Advance();
+        if (r.AtEnd()) return r.Fail(node.line, "<for is not closed with '>'");
+        const std::string_view header = Trim(r.src.substr(header_begin, r.pos - header_begin));
+        r.Advance();
+        if (header.ends_with('/')) return r.Fail(node.line, "<for> needs a body closed with </for>");
+        node.header = header;
+        return ParseContent(r, doc, node);
+    }
+
     bool has_style = false;
     while (true) {
         r.SkipSpaces();

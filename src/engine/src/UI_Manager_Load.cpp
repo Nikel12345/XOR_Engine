@@ -12,31 +12,22 @@ struct UIDeclaredValues {
     std::string material, quad, font_family;
 };
 
-// Весь документ переводится в такие записи до первого вызова Root, чтобы ошибка в файле не оставила
-// полдерева.
-struct UILoadedNode : UIDeclaredValues {
-    enum class Kind : uint8_t { Root, Box, Text };
-    Kind        kind   = Kind::Box;
-    int32_t     parent = -1;
-    std::string text, id;
-    std::vector<std::string>        classes;
-    std::vector<UITemplatePart>     text_template;
-    std::vector<UIBoundDeclaration> bound_declarations;
-};
-
 struct UILoadedVar {
     std::string name;
+    std::string default_value;
     std::string value;
     UIVarId     id;
 };
 
+// Весь документ переводится в элементы до первого вызова Root, чтобы ошибка в файле не оставила полдерева.
 struct UILoadState {
-    const std::string&        path;
-    const UIMarkupDocument&   document;
-    const FontManager*        font_manager;
-    std::vector<UILoadedVar>  vars;
-    std::vector<UILoadedNode> nodes;
-    std::vector<std::string>  errors;
+    const std::string&       path;
+    const UIMarkupDocument&  document;
+    const FontManager*       font_manager;
+    std::vector<UILoadedVar> vars;
+    std::vector<UIElement>   elements;
+    std::vector<std::string> loop_indices;
+    std::vector<std::string> errors;
 
     void Error(uint32_t line, const std::string& message)
     {
@@ -49,9 +40,18 @@ struct UILoadState {
         return nullptr;
     }
 
-    std::string_view ValueOf(UIVarId id) const
+    int32_t FindLoopIndex(std::string_view name) const
     {
-        for (const UILoadedVar& var : vars) if (var.id == id) return var.value;
+        for (size_t depth = loop_indices.size(); depth-- > 0;)
+            if (loop_indices[depth] == name) return safe_size_i(depth);
+        return -1;
+    }
+
+    std::string ValueOf(const UITemplatePart& part) const
+    {
+        if (part.loop >= 0) return "0";
+        for (const UILoadedVar& var : vars)
+            if (var.id == part.var) return part.key.empty() ? var.value : var.default_value;
         return {};
     }
 };
@@ -180,8 +180,7 @@ static bool IsVarName(std::string_view name)
 
 enum class UIDeclarationResult : uint8_t { Applied, UnknownProperty, InvalidValue };
 
-// Свойство, которое элементу не к чему применить, пропускается при сборке: его приносят общие правила
-// вроде *.
+
 static UIDeclarationResult ApplyDeclaration(std::string_view property, std::string_view value, UIDeclaredValues& values)
 {
     UIStyle& style = values.style;
@@ -214,9 +213,32 @@ static UIDeclarationResult ApplyDeclaration(std::string_view property, std::stri
     return valid ? UIDeclarationResult::Applied : UIDeclarationResult::InvalidValue;
 }
 
+static bool ParseUnsigned(std::string_view text, uint32_t& number)
+{
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), number);
+    return !text.empty() && error == std::errc{} && end == text.data() + text.size();
+}
+
+static size_t NameLength(std::string_view text)
+{
+    size_t length = 0;
+    while (length < text.size() && IsVarNameChar(text[length])) ++length;
+    return length;
+}
+
 static bool HasVars(const std::vector<UITemplatePart>& parts)
 {
     return std::ranges::any_of(parts, [](const UITemplatePart& part) { return bool(part.var); });
+}
+
+static bool HasSubstitutions(const std::vector<UITemplatePart>& parts)
+{
+    return std::ranges::any_of(parts, [](const UITemplatePart& part) { return part.var || part.loop >= 0; });
+}
+
+static bool HasBoundDeclarations(const UIElement& element)
+{
+    return std::ranges::any_of(element.declarations, [](const UIDeclaration& declaration) { return HasVars(declaration.value); });
 }
 
 template <class ValueOf>
@@ -225,12 +247,66 @@ static std::string RenderTemplate(const std::vector<UITemplatePart>& parts, cons
     std::string out;
     for (const UITemplatePart& part : parts) {
         out += part.literal;
-        if (part.var) out += value_of(part.var);
+        if (part.var || part.loop >= 0) out += value_of(part);
     }
     return out;
 }
 
-// Часть шаблона — текст и следом за ним переменная; у последней части переменной нет.
+template <class ValueOf>
+static UIDeclaredValues RenderValues(const std::vector<UIDeclaration>& declarations, const ValueOf& value_of,
+                                     const std::string& path)
+{
+    UIDeclaredValues values;
+    for (const UIDeclaration& declaration : declarations) {
+        const std::string value = RenderTemplate(declaration.value, value_of);
+        // Разбор пишет в поле до проверки диапазона: неверное значение применяется к копии.
+        UIDeclaredValues candidate = values;
+        if (ApplyDeclaration(declaration.property, value, candidate) == UIDeclarationResult::Applied)
+            values = std::move(candidate);
+        else
+            SDL_Log("UI_Manager: %s:%u: invalid value '%s' for '%s'", path.c_str(), declaration.line, value.c_str(),
+                    declaration.property.c_str());
+    }
+    return values;
+}
+
+static UIVarKey ResolveKey(const std::vector<UIKeyIndex>& key, const UIVarKey& instance)
+{
+    UIVarKey resolved;
+    resolved.reserve(key.size());
+    for (const UIKeyIndex& index : key) resolved.push_back(index.from_loop ? instance[index.value] : index.value);
+    return resolved;
+}
+
+static bool ParseReference(UILoadState& state, std::string_view text, uint32_t line, UITemplatePart& part)
+{
+    text = TrimSpaces(text);
+    const std::string source(text);
+    const auto fail = [&state, line](const std::string& message) { state.Error(line, message); return false; };
+
+    const std::string_view name = text.substr(0, NameLength(text));
+    if (!IsVarName(name)) return fail("'" + source + "' must start with a variable or a loop index");
+    text.remove_prefix(name.size());
+    if (const int32_t depth = state.FindLoopIndex(name); depth >= 0) part.loop = depth;
+    else if (const UILoadedVar* var = state.FindVar(name))         part.var  = var->id;
+    else return fail("variable '" + std::string(name) + "' is not declared with <var>");
+
+    for (text = TrimSpaces(text); !text.empty(); text = TrimSpaces(text)) {
+        const size_t close = text.find(']');
+        if (text.front() != '[' || close == std::string_view::npos) return fail("malformed index in '" + source + "'");
+        const std::string_view index = TrimSpaces(text.substr(1, close - 1));
+        text.remove_prefix(close + 1);
+        UIKeyIndex key_index;
+        if (const int32_t depth = state.FindLoopIndex(index); depth >= 0) key_index = { safe_i_u32(depth), true };
+        else if (!ParseUnsigned(index, key_index.value))
+            return fail("index '" + std::string(index) + "' in '" + source + "' must be a loop index or a number");
+        part.key.push_back(key_index);
+    }
+    if (part.loop >= 0 && !part.key.empty()) return fail("loop index '" + std::string(name) + "' takes no [ ]");
+    return true;
+}
+
+// Часть шаблона — текст и следом за ним подстановка; у последней части подстановки нет.
 static bool ParseTemplate(UILoadState& state, std::string_view source, uint32_t line, std::vector<UITemplatePart>& parts)
 {
     parts.assign(1, UITemplatePart{});
@@ -240,13 +316,48 @@ static bool ParseTemplate(UILoadState& state, std::string_view source, uint32_t 
         parts.back().literal += source.substr(0, open);
         const size_t close = source.find("}}", open + 2);
         if (close == std::string_view::npos) { state.Error(line, "'{{' is not closed with '}}'"); return false; }
-        const std::string_view name = TrimSpaces(source.substr(open + 2, close - open - 2));
-        const UILoadedVar* var = state.FindVar(name);
-        if (!var) { state.Error(line, "variable '" + std::string(name) + "' is not declared with <var>"); return false; }
-        parts.back().var = var->id;
+        if (!ParseReference(state, source.substr(open + 2, close - open - 2), line, parts.back())) return false;
         parts.emplace_back();
         source.remove_prefix(close + 2);
     }
+}
+
+static bool ParseLoopHeader(UILoadState& state, const UIMarkupNode& markup, std::string& index_name,
+                            std::vector<UITemplatePart>& count)
+{
+    std::string_view rest = markup.header;
+    const auto take_word = [&rest] {
+        rest = TrimSpaces(rest);
+        const std::string_view word = rest.substr(0, NameLength(rest));
+        rest.remove_prefix(word.size());
+        return word;
+    };
+    const std::string_view name    = take_word();
+    const std::string_view keyword = take_word();
+    const std::string_view range   = take_word();
+    rest = TrimSpaces(rest);
+    if (!IsVarName(name) || keyword != "in" || range != "range" || !rest.starts_with('(') || !rest.ends_with(')')) {
+        state.Error(markup.line, "<for> takes 'NAME in range(COUNT)', not '" + markup.header + "'");
+        return false;
+    }
+
+    index_name = name;
+    if (index_name != "_" && state.FindVar(index_name)) {
+        state.Error(markup.line, "loop index '" + index_name + "' hides variable '" + index_name + "'");
+        return false;
+    }
+    if (state.FindLoopIndex(index_name) >= 0) {
+        state.Error(markup.line, "loop index '" + index_name + "' hides the index of an outer loop");
+        return false;
+    }
+
+    const std::string_view operand = TrimSpaces(rest.substr(1, rest.size() - 2));
+    count.assign(1, UITemplatePart{});
+    uint32_t number = 0;
+    if (ParseUnsigned(operand, number)) { count[0].literal = operand; return true; }
+    if (!ParseReference(state, operand, markup.line, count[0])) return false;
+    count.emplace_back();
+    return true;
 }
 
 static bool ReadVar(UILoadState& state, const UIMarkupNode& element, UILoadedVar& var)
@@ -264,28 +375,26 @@ static bool ReadVar(UILoadState& state, const UIMarkupNode& element, UILoadedVar
     }
     if (state.FindVar(name->value)) { state.Error(name->line, "variable '" + name->value + "' is declared twice"); return false; }
     var.name = name->value;
-    if (const UIMarkupAttribute* default_value = element.Attribute("default")) var.value = default_value->value;
+    if (const UIMarkupAttribute* default_value = element.Attribute("default")) var.default_value = default_value->value;
     return true;
 }
 
-static void LoadDeclarations(UILoadState& state, const UIMarkupNode& element, UILoadedNode& node, bool& material_bound)
+static void LoadDeclarations(UILoadState& state, const UIMarkupNode& markup, UIElement& element, UIDeclaredValues& values,
+                             bool& material_bound)
 {
-    const auto value_of = [&state](UIVarId id) { return state.ValueOf(id); };
-    std::vector<UIBoundDeclaration> declarations;
-    bool bound = false;
-    for (const UIMarkupDeclaration* declaration : ResolveUIStyle(state.document, element)) {
-        UIBoundDeclaration& entry = declarations.emplace_back(UIBoundDeclaration{ declaration->property, {}, declaration->line });
+    const auto value_of = [&state](const UITemplatePart& part) { return state.ValueOf(part); };
+    for (const UIMarkupDeclaration* declaration : ResolveUIStyle(state.document, markup)) {
+        UIDeclaration& entry = element.declarations.emplace_back(UIDeclaration{ declaration->property, {}, declaration->line });
         if (!ParseTemplate(state, declaration->value, declaration->line, entry.value)) continue;
-        const bool has_vars = HasVars(entry.value);
-        if (has_vars && (entry.property == "quad" || entry.property == "font-family")) {
+        const bool substituted = HasSubstitutions(entry.value);
+        if (substituted && (entry.property == "quad" || entry.property == "font-family")) {
             state.Error(declaration->line, "'" + entry.property + "' takes no {{ }}: it is read once at load");
             continue;
         }
-        bound          = bound || has_vars;
-        material_bound = material_bound || (has_vars && entry.property == "material");
+        material_bound = material_bound || (substituted && entry.property == "material");
 
         const std::string value = RenderTemplate(entry.value, value_of);
-        switch (ApplyDeclaration(entry.property, value, node)) {
+        switch (ApplyDeclaration(entry.property, value, values)) {
             case UIDeclarationResult::Applied:
                 break;
             case UIDeclarationResult::UnknownProperty:
@@ -293,71 +402,95 @@ static void LoadDeclarations(UILoadState& state, const UIMarkupNode& element, UI
                 break;
             case UIDeclarationResult::InvalidValue:
                 state.Error(declaration->line, "invalid value '" + value + "' for '" + entry.property + "'" +
-                                               (has_vars ? " from '" + declaration->value + "'" : ""));
+                                               (substituted ? " from '" + declaration->value + "'" : ""));
                 break;
         }
     }
-    if (bound) node.bound_declarations = std::move(declarations);
 }
 
-static void LoadElement(UILoadState& state, const UIMarkupNode& element, int32_t parent)
+static void LoadLoop(UILoadState& state, const UIMarkupNode& markup, int32_t parent);
+
+static void LoadElement(UILoadState& state, const UIMarkupNode& markup, int32_t parent)
 {
-    UILoadedNode node;
-    node.parent = parent;
+    UIElement element;
+    element.line = markup.line;
     if (parent < 0) {
-        if (element.tag != "ui") { state.Error(element.line, "root element must be <ui>, not <" + element.tag + ">"); return; }
-        node.kind = UILoadedNode::Kind::Root;
+        if (markup.tag != "ui") { state.Error(markup.line, "root element must be <ui>, not <" + markup.tag + ">"); return; }
+        element.kind = UIElementKind::Root;
     }
-    else if (element.tag == "box")  node.kind = UILoadedNode::Kind::Box;
-    else if (element.tag == "text") node.kind = UILoadedNode::Kind::Text;
-    else if (element.tag == "var") {
-        if (state.nodes[safe_i_u32(parent)].kind != UILoadedNode::Kind::Root)
-            state.Error(element.line, "<var> belongs directly in <ui>");
+    else if (markup.tag == "box")  element.kind = UIElementKind::Box;
+    else if (markup.tag == "text") element.kind = UIElementKind::Text;
+    else if (markup.tag == "for")  { LoadLoop(state, markup, parent); return; }
+    else if (markup.tag == "var") {
+        if (state.elements[safe_i_u32(parent)].kind != UIElementKind::Root)
+            state.Error(markup.line, "<var> belongs directly in <ui>");
         return;
     }
-    else if (element.tag == "br") { state.Error(element.line, "<br/> belongs in <text>"); return; }
-    else { state.Error(element.line, "unknown tag <" + element.tag + ">"); return; }
+    else if (markup.tag == "br") { state.Error(markup.line, "<br/> belongs in <text>"); return; }
+    else { state.Error(markup.line, "unknown tag <" + markup.tag + ">"); return; }
 
-    for (const UIMarkupAttribute& attribute : element.attributes) {
+    for (const UIMarkupAttribute& attribute : markup.attributes) {
         if (attribute.name != "id" && attribute.name != "class")
-            state.Error(attribute.line, "attribute '" + attribute.name + "' is not supported on <" + element.tag + ">");
+            state.Error(attribute.line, "attribute '" + attribute.name + "' is not supported on <" + markup.tag + ">");
         else if (attribute.value.find("{{") != std::string::npos)
             state.Error(attribute.line, "attribute '" + attribute.name + "' takes no {{ }}");
     }
-    if (const UIMarkupAttribute* id = element.Attribute("id")) node.id = id->value;
-    if (const UIMarkupAttribute* classes = element.Attribute("class")) node.classes = SplitClasses(classes->value);
+    if (const UIMarkupAttribute* id = markup.Attribute("id")) element.id = id->value;
+    if (const UIMarkupAttribute* classes = markup.Attribute("class")) element.classes = SplitClasses(classes->value);
 
+    UIDeclaredValues values;
     bool material_bound = false;
-    LoadDeclarations(state, element, node, material_bound);
+    LoadDeclarations(state, markup, element, values, material_bound);
 
-    if (node.kind == UILoadedNode::Kind::Text) {
-        for (const UIMarkupNode& child : element.children)
+    if (element.kind == UIElementKind::Text) {
+        for (const UIMarkupNode& child : markup.children)
             if (!child.IsText() && child.tag != "br")
                 state.Error(child.line, "<text> holds only text and <br/>, not <" + child.tag + ">");
-        std::vector<UITemplatePart> text_template;
-        if (ParseTemplate(state, UIMarkupText(element), element.line, text_template)) {
-            node.text = RenderTemplate(text_template, [&state](UIVarId id) { return state.ValueOf(id); });
-            if (HasVars(text_template)) node.text_template = std::move(text_template);
-        }
-        node.style.padding = {};
-        if (node.font_family.empty())
-            state.Error(element.line, "<text> needs font-family");
-        else if (!state.font_manager->FontIdOf(node.font_family))
-            state.Error(element.line, "font '" + node.font_family + "' is not created");
-        if (node.material.empty()) state.Error(element.line, "<text> needs material");
-        if (node.quad.empty())     state.Error(element.line, "<text> needs quad");
-        state.nodes.push_back(std::move(node));
-        return;
+        ParseTemplate(state, UIMarkupText(markup), markup.line, element.text);
+        if (values.font_family.empty())
+            state.Error(markup.line, "<text> needs font-family");
+        else if (!state.font_manager->FontIdOf(values.font_family))
+            state.Error(markup.line, "font '" + values.font_family + "' is not created");
+        if (values.material.empty()) state.Error(markup.line, "<text> needs material");
+        if (values.quad.empty())     state.Error(markup.line, "<text> needs quad");
     }
-    if (node.kind == UILoadedNode::Kind::Box && (!node.material.empty() || material_bound) && node.quad.empty())
-        state.Error(element.line, "<box> with material needs quad");
+    else if (element.kind == UIElementKind::Box && (!values.material.empty() || material_bound) && values.quad.empty())
+        state.Error(markup.line, "<box> with material needs quad");
 
-    const int32_t index = safe_size_i(state.nodes.size());
-    state.nodes.push_back(std::move(node));
-    for (const UIMarkupNode& child : element.children) {
+    const int32_t index = safe_size_i(state.elements.size());
+    if (parent >= 0) state.elements[safe_i_u32(parent)].children.push_back(safe_i_u32(index));
+    const bool holds_elements = element.kind != UIElementKind::Text;
+    state.elements.push_back(std::move(element));
+    if (!holds_elements) return;
+    for (const UIMarkupNode& child : markup.children) {
         if (child.IsText()) { state.Error(child.line, "text belongs in <text>"); continue; }
         LoadElement(state, child, index);
     }
+}
+
+static void LoadLoop(UILoadState& state, const UIMarkupNode& markup, int32_t parent)
+{
+    UIElement element;
+    element.kind = UIElementKind::Loop;
+    element.line = markup.line;
+    std::string index_name;
+    if (ParseLoopHeader(state, markup, index_name, element.count)) {
+        const std::string count = RenderTemplate(element.count, [&state](const UITemplatePart& part) { return state.ValueOf(part); });
+        uint32_t number = 0;
+        if (!ParseUnsigned(count, number))
+            state.Error(markup.line, "invalid loop count '" + count + "' from '" + markup.header + "'");
+    }
+
+    const int32_t index = safe_size_i(state.elements.size());
+    state.elements[safe_i_u32(parent)].children.push_back(safe_i_u32(index));
+    state.elements.push_back(std::move(element));
+
+    state.loop_indices.push_back(index_name == "_" ? std::string() : index_name);
+    for (const UIMarkupNode& child : markup.children) {
+        if (child.IsText()) { state.Error(child.line, "text belongs in <text>"); continue; }
+        LoadElement(state, child, index);
+    }
+    state.loop_indices.pop_back();
 }
 
 bool UI_Manager::Load(const FontManager* font_manager, const std::string& path)
@@ -379,7 +512,10 @@ bool UI_Manager::Load(const FontManager* font_manager, const std::string& path)
         UILoadedVar var;
         if (!ReadVar(state, element, var)) continue;
         var.id = InternVar(var.name);
-        if (const UIVar* existing = variables.Get(var.id); existing->assigned) var.value = existing->value;
+        const UIVar* existing = variables.Get(var.id);
+        const auto scalar = existing->elements.find(UIVarKey{});
+        const bool assigned = scalar != existing->elements.end() && scalar->second.assigned;
+        var.value = assigned ? scalar->second.value : var.default_value;
         state.vars.push_back(std::move(var));
     }
     LoadElement(state, document->root, -1);
@@ -388,48 +524,148 @@ bool UI_Manager::Load(const FontManager* font_manager, const std::string& path)
         return false;
     }
 
-    for (const UILoadedVar& var : state.vars) variables.Get(var.id)->value = var.value;
+    for (const UILoadedVar& var : state.vars) variables.Get(var.id)->default_value = var.default_value;
 
-    std::vector<Node> created_nodes(state.nodes.size());
-    for (size_t i = 0; i < state.nodes.size(); ++i) {
-        UILoadedNode& loaded = state.nodes[i];
-        Node node = kInvalid;
-        switch (loaded.kind) {
-            case UILoadedNode::Kind::Root:
-                node = Root(loaded.style);
-                break;
-            case UILoadedNode::Kind::Box:
-                node = Box(created_nodes[safe_i_u32(loaded.parent)], loaded.style, loaded.material, loaded.quad);
-                break;
-            case UILoadedNode::Kind::Text:
-                node = Text(created_nodes[safe_i_u32(loaded.parent)], loaded.style, loaded.text, loaded.material,
-                            loaded.quad, font_manager->FontIdOf(loaded.font_family), font_manager);
-                break;
-        }
-        nodes[node].id      = loaded.id;
-        nodes[node].classes = loaded.classes;
-        created_nodes[i] = node;
-
-        if (!loaded.text_template.empty())
-            AddBinding({ UIBindingKind::Text, node, std::move(loaded.text_template) });
-        if (!loaded.bound_declarations.empty())
-            AddBinding({ UIBindingKind::Style, node, {}, std::move(loaded.bound_declarations) });
-    }
+    const UIVarKey no_instance;
+    const auto value_of = [this, &no_instance](const UITemplatePart& part) { return PartValue(part, no_instance); };
+    const Node root_node = Root(RenderValues(state.elements[0].declarations, value_of, path).style);
+    elements      = std::move(state.elements);
     document_path = path;
+    nodes[root_node].id      = elements[0].id;
+    nodes[root_node].classes = elements[0].classes;
+    if (HasBoundDeclarations(elements[0])) AddBinding({ UIBindingKind::Style, root_node, 0 });
+    std::vector<UISlot> slots = BuildItems(0, root_node, no_instance, font_manager);
+    nodes[root_node].slots = std::move(slots);
     return true;
+}
+
+std::string UI_Manager::PartValue(const UITemplatePart& part, const UIVarKey& instance) const
+{
+    if (part.loop >= 0) return std::to_string(instance[safe_i_u32(part.loop)]);
+    const UIVar* var = variables.Get(part.var);
+    if (!var) return {};
+    const auto element = var->elements.find(ResolveKey(part.key, instance));
+    return element != var->elements.end() && element->second.assigned ? element->second.value : var->default_value;
+}
+
+std::vector<UISlot> UI_Manager::BuildItems(uint32_t element, Node parent, const UIVarKey& instance,
+                                           const FontManager* font_manager)
+{
+    std::vector<UISlot> slots;
+    for (uint32_t child : elements[element].children) {
+        if (elements[child].kind == UIElementKind::Loop) {
+            slots.push_back({ .loop = BuildLoop(child, parent, instance, font_manager) });
+            continue;
+        }
+        const Node node = BuildNode(child, parent, instance, font_manager);
+        slots.push_back({ .node = node });
+        std::vector<UISlot> child_slots = BuildItems(child, node, instance, font_manager);
+        nodes[node].slots = std::move(child_slots);
+    }
+    return slots;
+}
+
+UI_Manager::Node UI_Manager::BuildNode(uint32_t element_index, Node parent, const UIVarKey& instance,
+                                       const FontManager* font_manager)
+{
+    const UIElement& element = elements[element_index];
+    const auto value_of = [this, &instance](const UITemplatePart& part) { return PartValue(part, instance); };
+    UIDeclaredValues values = RenderValues(element.declarations, value_of, document_path);
+    Node node = kInvalid;
+    if (element.kind == UIElementKind::Text) {
+        values.style.padding = {};
+        node = Text(parent, values.style, RenderTemplate(element.text, value_of), values.material, values.quad,
+                    font_manager->FontIdOf(values.font_family), font_manager);
+    }
+    else
+        node = Box(parent, values.style, values.material, values.quad);
+    nodes[node].id       = element.id;
+    nodes[node].classes  = element.classes;
+    nodes[node].instance = instance;
+
+    if (HasVars(element.text))           AddBinding({ UIBindingKind::Text,  node, element_index, instance });
+    if (HasBoundDeclarations(element))   AddBinding({ UIBindingKind::Style, node, element_index, instance });
+    return node;
+}
+
+uint32_t UI_Manager::BuildLoop(uint32_t element, Node parent, const UIVarKey& outer, const FontManager* font_manager)
+{
+    const uint32_t loop = safe_u32(loops.size());
+    loops.push_back(UILoop{ element, parent, outer });
+    if (HasVars(elements[element].count)) AddBinding({ UIBindingKind::Count, loop, element, outer });
+    uint32_t count = 0;
+    if (ReadLoopCount(loop, count)) loops[loop].count = count;
+    BuildInstances(loop, loops[loop].count, font_manager);
+    return loop;
+}
+
+void UI_Manager::BuildInstances(uint32_t loop, uint32_t count, const FontManager* font_manager)
+{
+    while (loops[loop].instances.size() < count) {
+        UIVarKey instance = loops[loop].outer;
+        instance.push_back(safe_u32(loops[loop].instances.size()));
+        std::vector<UISlot> slots = BuildItems(loops[loop].element, loops[loop].parent, instance, font_manager);
+        loops[loop].instances.push_back({ std::move(slots) });
+    }
+}
+
+bool UI_Manager::ReadLoopCount(uint32_t loop, uint32_t& count) const
+{
+    const UIElement& element = elements[loops[loop].element];
+    const UIVarKey&  outer   = loops[loop].outer;
+    const std::string value = RenderTemplate(element.count, [this, &outer](const UITemplatePart& part) { return PartValue(part, outer); });
+    if (ParseUnsigned(value, count)) return true;
+    SDL_Log("UI_Manager: %s:%u: invalid loop count '%s'", document_path.c_str(), element.line, value.c_str());
+    return false;
+}
+
+void UI_Manager::ResizeLoop(uint32_t loop, uint32_t count, const FontManager* font_manager)
+{
+    loops[loop].count = count;
+    if (count > loops[loop].instances.size()) {
+        BuildInstances(loop, count, font_manager);
+        RebuildChildren(loops[loop].parent);
+    }
+    UpdateParking(loop);
+}
+
+void UI_Manager::UpdateParking(uint32_t loop)
+{
+    for (uint32_t index = 0; index < loops[loop].instances.size(); ++index) {
+        const bool parked = loops[loop].parked || index >= loops[loop].count;
+        for (const UISlot& slot : loops[loop].instances[index].slots) {
+            if (slot.node != kInvalid) { SetNodeParked(slot.node, parked); continue; }
+            loops[slot.loop].parked = parked;
+            UpdateParking(slot.loop);
+        }
+    }
+}
+
+void UI_Manager::AppendSlotNodes(const std::vector<UISlot>& slots, std::vector<Node>& out) const
+{
+    for (const UISlot& slot : slots) {
+        if (slot.node != kInvalid) { out.push_back(slot.node); continue; }
+        for (const UILoopInstance& instance : loops[slot.loop].instances) AppendSlotNodes(instance.slots, out);
+    }
 }
 
 void UI_Manager::AddBinding(UIBinding binding)
 {
     const uint32_t index = safe_u32(bindings.size());
-    const auto link = [this, index](const std::vector<UITemplatePart>& parts) {
+    const auto link = [this, index, &binding](const std::vector<UITemplatePart>& parts) {
         for (const UITemplatePart& part : parts) {
             UIVar* var = variables.Get(part.var);
-            if (var && (var->bindings.empty() || var->bindings.back() != index)) var->bindings.push_back(index);
+            if (!var) continue;
+            std::vector<uint32_t>& linked = var->elements[ResolveKey(part.key, binding.instance)].bindings;
+            if (linked.empty() || linked.back() != index) linked.push_back(index);
         }
     };
-    link(binding.text);
-    for (const UIBoundDeclaration& declaration : binding.declarations) link(declaration.value);
+    const UIElement& element = elements[binding.element];
+    switch (binding.kind) {
+        case UIBindingKind::Text:  link(element.text); break;
+        case UIBindingKind::Style: for (const UIDeclaration& declaration : element.declarations) link(declaration.value); break;
+        case UIBindingKind::Count: link(element.count); break;
+    }
     bindings.push_back(std::move(binding));
 }
 
@@ -440,14 +676,16 @@ UIVarId UI_Manager::InternVar(const std::string& name)
     return id;
 }
 
-void UI_Manager::SetVar(UIVarId id, std::string_view value)
+void UI_Manager::SetVar(UIVarId id, const UIVarKey& key, std::string_view value)
 {
     UIVar* var = variables.Get(id);
     if (!var) return;
-    var->assigned = true;
-    if (var->value == value) return;
-    var->value = value;
-    for (uint32_t index : var->bindings) {
+    UIVarElement& element = var->elements[key];
+    const bool unchanged = (element.assigned ? element.value : var->default_value) == value;
+    element.assigned = true;
+    element.value    = value;
+    if (unchanged) return;
+    for (uint32_t index : element.bindings) {
         UIBinding& binding = bindings[index];
         if (binding.queued) continue;
         binding.queued = true;
@@ -455,35 +693,37 @@ void UI_Manager::SetVar(UIVarId id, std::string_view value)
     }
 }
 
-void UI_Manager::ApplyDirtyBindings(EngineContext* ctx, const FontManager* font_manager)
+void UI_Manager::ApplyDirtyBindings(EngineContext* ctx, const FontManager* font_manager, std::mutex& structure_mutex)
 {
-    const auto value_of = [this](UIVarId id) {
-        const UIVar* var = variables.Get(id);
-        return var ? std::string_view(var->value) : std::string_view();
-    };
-    for (uint32_t index : dirty_bindings) {
-        UIBinding& binding = bindings[index];
-        binding.queued = false;
-        if (binding.kind == UIBindingKind::Text) {
-            SetText(binding.node, RenderTemplate(binding.text, value_of), font_manager);
-            continue;
+    // Рост цикла сверх запаса добавляет узлы, а панели редактора ходят по ним с рендер-потока: рост идёт под
+    // тем же мьютексом, что и загрузка файла.
+    std::unique_lock<std::mutex> structure_lock(structure_mutex, std::defer_lock);
+    for (size_t i = 0; i < dirty_bindings.size(); ++i) {
+        bindings[dirty_bindings[i]].queued = false;
+        // Копия: постройка экземпляров добавляет связи, и вектор связей переезжает.
+        const UIBinding  binding = bindings[dirty_bindings[i]];
+        const UIElement& element = elements[binding.element];
+        const auto value_of = [this, &binding](const UITemplatePart& part) { return PartValue(part, binding.instance); };
+        switch (binding.kind) {
+            case UIBindingKind::Text:
+                SetText(binding.target, RenderTemplate(element.text, value_of), font_manager);
+                break;
+            case UIBindingKind::Style: {
+                // Стиль собирается заново из всех объявлений узла: связанное объявление может перекрываться
+                // следующими, в том числе частично (padding и padding-left).
+                const UIDeclaredValues values = RenderValues(element.declarations, value_of, document_path);
+                SetNodeStyle(binding.target, values.style);
+                SetNodeMaterial(ctx, binding.target, values.material);
+                break;
+            }
+            case UIBindingKind::Count: {
+                uint32_t count = 0;
+                if (!ReadLoopCount(binding.target, count)) break;
+                if (count > loops[binding.target].instances.size() && !structure_lock.owns_lock()) structure_lock.lock();
+                ResizeLoop(binding.target, count, font_manager);
+                break;
+            }
         }
-
-        // Стиль собирается заново из всех объявлений узла: связанное объявление может перекрываться
-        // следующими, в том числе частично (padding и padding-left).
-        UIDeclaredValues values;
-        for (const UIBoundDeclaration& declaration : binding.declarations) {
-            const std::string value = RenderTemplate(declaration.value, value_of);
-            // Разбор пишет в поле до проверки диапазона: неверное значение применяется к копии.
-            UIDeclaredValues candidate = values;
-            if (ApplyDeclaration(declaration.property, value, candidate) == UIDeclarationResult::Applied)
-                values = std::move(candidate);
-            else
-                SDL_Log("UI_Manager: %s:%u: invalid value '%s' for '%s'", document_path.c_str(), declaration.line,
-                        value.c_str(), declaration.property.c_str());
-        }
-        SetNodeStyle(binding.node, values.style);
-        SetNodeMaterial(ctx, binding.node, values.material);
     }
     dirty_bindings.clear();
 }

@@ -40,6 +40,7 @@ struct UIMarkupRule {
 struct UIMarkupNode {
     std::string                      tag;
     std::string                      text;
+    std::string                      header;
     std::vector<UIMarkupAttribute>   attributes;
     std::vector<UIMarkupDeclaration> style;
     std::vector<UIMarkupNode>        children;

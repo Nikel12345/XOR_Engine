@@ -16,9 +16,9 @@ static void ApplyEdges(YGNodeRef yoga_node, void (*set_edge)(YGNodeRef, YGEdge, 
     set_edge(yoga_node, YGEdgeLeft,   edges.left);
 }
 
-static void ApplyStyle(YGNodeRef yoga_node, const UIStyle& style)
+static void ApplyStyle(YGNodeRef yoga_node, const UIStyle& style, bool parked)
 {
-    YGNodeStyleSetDisplay(yoga_node, style.display == UIDisplay::None ? YGDisplayNone : YGDisplayFlex);
+    YGNodeStyleSetDisplay(yoga_node, style.display == UIDisplay::None || parked ? YGDisplayNone : YGDisplayFlex);
     YGNodeStyleSetFlexDirection(yoga_node, style.direction == UIDir::Row ? YGFlexDirectionRow : YGFlexDirectionColumn);
 
     switch (style.justify) {
@@ -169,14 +169,15 @@ std::string UI_Manager::NodeLabel(Node node) const
     std::string label = node == root ? "ui" : entry.shape ? "text" : "box";
     if (!entry.id.empty()) label += "#" + entry.id;
     for (const std::string& name : entry.classes) label += "." + name;
+    for (uint32_t index : entry.instance) label += "[" + std::to_string(index) + "]";
     return label;
 }
 
-UI_Manager::Node UI_Manager::FindNode(std::string_view id) const
+UI_Manager::Node UI_Manager::FindNode(std::string_view id, const UIVarKey& instance) const
 {
     if (id.empty()) return kInvalid;
     for (size_t i = 0; i < nodes.size(); ++i)
-        if (nodes[i].id == id) return safe_u32(i);
+        if (nodes[i].id == id && nodes[i].instance == instance) return safe_u32(i);
     return kInvalid;
 }
 
@@ -248,7 +249,28 @@ void UI_Manager::SetNodeStyle(Node node, const UIStyle& style)
     UINode& entry = nodes[node];
     entry.style = style;
     if (entry.shape) entry.style.padding = {};
-    ApplyStyle(entry.yoga_node, entry.style);
+    ApplyStyle(entry.yoga_node, entry.style, entry.parked);
+    emit_needed = true;
+}
+
+void UI_Manager::SetNodeParked(Node node, bool parked)
+{
+    UINode& entry = nodes[node];
+    if (entry.parked == parked) return;
+    entry.parked = parked;
+    ApplyStyle(entry.yoga_node, entry.style, parked);
+    emit_needed = true;
+}
+
+void UI_Manager::RebuildChildren(Node parent)
+{
+    std::vector<Node> order;
+    AppendSlotNodes(nodes[parent].slots, order);
+    std::vector<YGNodeRef> yoga_children;
+    yoga_children.reserve(order.size());
+    for (Node child : order) yoga_children.push_back(nodes[child].yoga_node);
+    YGNodeSetChildren(nodes[parent].yoga_node, yoga_children.data(), yoga_children.size());
+    nodes[parent].children = std::move(order);
     emit_needed = true;
 }
 
@@ -315,7 +337,7 @@ bool UI_Manager::GetNodeEntity(Node node, Entity& entity) const
 UI_Manager::Node UI_Manager::MakeNode(const UIStyle& style)
 {
     YGNodeRef yoga_node = YGNodeNewWithConfig(yoga_config);
-    ApplyStyle(yoga_node, style);
+    ApplyStyle(yoga_node, style, false);
     const Node node = safe_u32(nodes.size());
     nodes.push_back(UINode{ yoga_node, style });   // может реаллоцировать: ссылки на узлы — только после него
     return node;
@@ -386,10 +408,16 @@ void UI_Manager::Clear()
     emit_needed     = true;
     recreate_needed = true;
 
+    elements.clear();
+    loops.clear();
     bindings.clear();
     dirty_bindings.clear();
-    for (int32_t i = 0; i < variables.Count(); ++i)
-        if (UIVar* var = variables.Get(UIVarId{ i })) var->bindings.clear();
+    for (int32_t i = 0; i < variables.Count(); ++i) {
+        UIVar* var = variables.Get(UIVarId{ i });
+        if (!var) continue;
+        for (auto& entry : var->elements) entry.second.bindings.clear();
+        std::erase_if(var->elements, [](const auto& entry) { return !entry.second.assigned; });
+    }
     document_path.clear();
 }
 
@@ -434,7 +462,7 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
     entry.layout_width  = width;
     entry.layout_height = height;
     entry.emitted       = true;
-    entry.shown         = parent_shown && entry.style.display != UIDisplay::None;
+    entry.shown         = parent_shown && entry.style.display != UIDisplay::None && !entry.parked;
 
     if (entry.shape) {
         // Yoga округляет раскладку до пикселя, и ширина узла расходится с той, по которой мерил
