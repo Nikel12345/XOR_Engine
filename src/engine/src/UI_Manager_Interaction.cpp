@@ -53,6 +53,7 @@ void UI_Manager::PressAt(float window_x, float window_y)
     press_on_ui  = IsOverUI(window_x, window_y);
     pressed_node = ClickableNodeAt(window_x, window_y);
     SetFocus(pressed_node);
+    if (focused_node != kInvalid) caret = CaretAt(window_x, window_y);
 }
 
 void UI_Manager::ReleaseAt(float window_x, float window_y)
@@ -85,7 +86,6 @@ void UI_Manager::SetFocus(Node node)
 {
     focused_node = InputVarOf(node, focused_var, focused_key) ? node : kInvalid;
     if (focused_node == kInvalid) return;
-    caret             = CharacterCount(GetVar(focused_var, focused_key));
     focused_prefix    = InputPrefixLength(node);
     caret_blink_start = SDL_GetTicks();
 }
@@ -99,6 +99,24 @@ size_t UI_Manager::InputPrefixLength(Node node) const
         if (part.loop >= 0) length += CharacterCount(PartValue(part, nodes[node].instance));
     }
     return length;
+}
+
+size_t UI_Manager::CaretAt(float window_x, float window_y) const
+{
+    const UINode& entry = nodes[focused_node];
+    const std::vector<UIGlyphPlace>& places = entry.glyph_places;
+    const glm::vec2 point = NodePoint(focused_node, window_x, window_y);
+    const float x = point.x + 0.5f * entry.layout_width;
+    const float y = 0.5f * entry.layout_height - point.y;
+    const int line = std::clamp(safe_sint32(y / entry.shape->line_height), 0, places.back().line);
+
+    size_t record = places.size() - 1;
+    for (size_t i = 0; i + 1 < places.size(); ++i) {
+        if (places[i].line < line) continue;
+        if (places[i + 1].line != line || x < 0.5f * (places[i].x + places[i + 1].x)) { record = i; break; }
+    }
+    const size_t length = CharacterCount(GetVar(focused_var, focused_key));
+    return std::clamp(record, focused_prefix, focused_prefix + length) - focused_prefix;
 }
 
 void UI_Manager::ClearFocus()

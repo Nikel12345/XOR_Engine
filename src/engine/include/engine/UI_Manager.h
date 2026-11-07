@@ -302,11 +302,13 @@ private:
     void        SetEdit(UIElement& element, UIProperty property, std::string value, const std::string& file_value);
     std::string SourceWithEdits() const;
 
+    glm::vec2 NodePoint(Node node, float window_x, float window_y) const;
     Node ClickableNodeAt(float window_x, float window_y) const;
     bool IsOverUI(float window_x, float window_y) const;
     bool IsInputNode(Node node) const;
     bool InputVarOf(Node node, UIVarId& var, UIVarKey& key) const;
     size_t InputPrefixLength(Node node) const;
+    size_t CaretAt(float window_x, float window_y) const;
     void SetFocus(Node node);
     void FindClickableNode(Node node, Node clickable_ancestor, float window_x, float window_y,
                            float& top_z, Node& clickable) const;

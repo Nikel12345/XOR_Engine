@@ -200,17 +200,22 @@ bool UI_Manager::IsNodeShown(Node node) const
     return node < nodes.size() && nodes[node].emitted && nodes[node].shown;
 }
 
+glm::vec2 UI_Manager::NodePoint(Node node, float window_x, float window_y) const
+{
+    const UINode& entry = nodes[node];
+    const float center_x = (entry.ndc_center_x + 1.0f) * 0.5f * last_screen_width;
+    const float center_y = (1.0f - entry.ndc_center_y) * 0.5f * last_screen_height;
+    // local работает в пикселях с осью y вверх (как NDC), а окно считает y вниз.
+    return glm::inverse(glm::mat2(entry.local)) * glm::vec2(window_x - center_x, center_y - window_y);
+}
+
 bool UI_Manager::NodeContains(Node node, float window_x, float window_y) const
 {
     if (!IsNodeShown(node)) return false;
     const UINode& entry = nodes[node];
-    const glm::mat2 local(entry.local);
-    if (glm::determinant(local) == 0.0f) return false;
+    if (glm::determinant(glm::mat2(entry.local)) == 0.0f) return false;
 
-    const float center_x = (entry.ndc_center_x + 1.0f) * 0.5f * last_screen_width;
-    const float center_y = (1.0f - entry.ndc_center_y) * 0.5f * last_screen_height;
-    // local работает в пикселях с осью y вверх (как NDC), а окно считает y вниз.
-    const glm::vec2 point = glm::inverse(local) * glm::vec2(window_x - center_x, center_y - window_y);
+    const glm::vec2 point = NodePoint(node, window_x, window_y);
     return std::abs(point.x) <= 0.5f * entry.layout_width && std::abs(point.y) <= 0.5f * entry.layout_height;
 }
 
