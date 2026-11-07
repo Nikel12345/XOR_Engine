@@ -22,6 +22,7 @@ void InputManager::HandleEvent(const SDL_Event& event)
             std::lock_guard<std::mutex> lock(key_mutex_);
             key_events_.push_back({ sc, true });
         }
+        PushUIInputEvent({ .kind = UIInputKind::Key, .scancode = sc });
         break;
     }
     case SDL_EVENT_KEY_UP:
@@ -33,15 +34,20 @@ void InputManager::HandleEvent(const SDL_Event& event)
         key_events_.push_back({ sc, false });
         break;
     }
+    case SDL_EVENT_TEXT_INPUT:
+        PushUIInputEvent({ .kind = UIInputKind::Text, .text = event.text.text });
+        break;
     case SDL_EVENT_MOUSE_MOTION:
         mouse_x_.store(event.motion.x, std::memory_order_relaxed);
         mouse_y_.store(event.motion.y, std::memory_order_relaxed);
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
         mouse_buttons_.fetch_or(MouseBit(event.button.button), std::memory_order_relaxed);
+        PushMouseButtonEvent(event.button);
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
         mouse_buttons_.fetch_and(~MouseBit(event.button.button), std::memory_order_relaxed);
+        PushMouseButtonEvent(event.button);
         break;
     case SDL_EVENT_MOUSE_WHEEL:
     {
@@ -59,6 +65,32 @@ void InputManager::DrainKeyEvents(std::vector<KeyEvent>& out)
     out.clear();
     std::lock_guard<std::mutex> lock(key_mutex_);
     out.swap(key_events_);
+}
+
+void InputManager::PushMouseButtonEvent(const SDL_MouseButtonEvent& event)
+{
+    std::lock_guard<std::mutex> lock(mouse_button_mutex);
+    mouse_button_events.push_back({ event.button, event.down, event.x, event.y });
+}
+
+void InputManager::DrainMouseButtonEvents(std::vector<MouseButtonEvent>& out)
+{
+    out.clear();
+    std::lock_guard<std::mutex> lock(mouse_button_mutex);
+    out.swap(mouse_button_events);
+}
+
+void InputManager::PushUIInputEvent(UIInputEvent event)
+{
+    std::lock_guard<std::mutex> lock(ui_input_mutex);
+    ui_input_events.push_back(std::move(event));
+}
+
+void InputManager::DrainUIInputEvents(std::vector<UIInputEvent>& out)
+{
+    out.clear();
+    std::lock_guard<std::mutex> lock(ui_input_mutex);
+    out.swap(ui_input_events);
 }
 
 void InputManager::SnapshotHeldKeys(std::vector<SDL_Scancode>& out) const

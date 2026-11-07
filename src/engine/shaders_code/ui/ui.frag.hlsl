@@ -22,7 +22,10 @@ struct PSInput
 
 // ── Storage-буферы (нумеруются ПОСЛЕ сэмплеров: 2 сэмплера → t2..). Разреженный текст-канал. ──
 SPARSE_CHANNEL(Text, t2, space2)                               // → TextWords, TextRank(row)
-StructuredBuffer<uint4> TextIndex : register(t3, space2);      // {offset,count,ширина,высота} на текст-элемент (индекс = rank)
+// На текст-элемент, индекс = rank. Размеры — в высотах строки. Только скаляры: шаг буфера обязан
+// совпадать с пятью uint32 на запись в UI_DataModule.
+struct TextSpan { uint offset; uint count; float width; float height; float indent; };
+StructuredBuffer<TextSpan> TextIndex : register(t3, space2);
 StructuredBuffer<uint>  TextPool  : register(t4, space2);      // коды глифов подряд
 StructuredBuffer<uint4> GlyphUVL  : register(t5, space2);      // code → UVL глифа (.w = advance-биты)
 
@@ -121,19 +124,18 @@ float4 main(PSInput input) : SV_Target0
     const int text_rank = TextRank(int(input.v_row));
 
     if (text_rank >= 0) {
-        uint4 span = TextIndex[text_rank];   // x=offset, y=count, zw=размер узла в высотах строки
-        uint count = span.y;
-        if (count > 0u) {
-            // Переносы уже в потоке (UI_Yoga), поэтому текст лежит размером шрифта от левого верхнего
-            // угла узла: pen — позиция пикселя в высотах строки, в тех же единицах, что advance в
-            // GlyphUVL[code].w. Что не легло в узел, не рисуется.
-            const float2 pen        = saturate(input.v_uv) * asfloat(span.zw);
+        const TextSpan span = TextIndex[text_rank];
+        // Переносы уже в потоке (UI_Yoga), поэтому текст лежит размером шрифта от левого верхнего
+        // угла узла со сдвигом indent: pen — позиция пикселя в высотах строки, в тех же единицах, что
+        // advance в GlyphUVL[code].w. Что не легло в узел, не рисуется.
+        const float2 pen = saturate(input.v_uv) * float2(span.width, span.height) - float2(span.indent, 0.0);
+        if (span.count > 0u && pen.x >= 0.0) {
             const uint   targetLine = uint(pen.y);
             const float  localY     = pen.y - float(targetLine);
             uint  lineIndex = 0u;
             float accum     = 0.0;
-            [loop] for (uint i = 0u; i < count; ++i) {
-                uint code = TextPool[span.x + i];
+            [loop] for (uint i = 0u; i < span.count; ++i) {
+                uint code = TextPool[span.offset + i];
                 if (code == UI_LINE_BREAK_CODE) {
                     if (lineIndex == targetLine) break;
                     ++lineIndex;
@@ -152,8 +154,9 @@ float4 main(PSInput input) : SV_Target0
     }
 
     // Композит: текст поверх фона, замаскирован покрытием.
-    float3 rgb = lerp(bg.rgb, text_color.rgb, coverage * text_color.a);
-    float  a   = max(bg.a, coverage * text_color.a);
+    const float text_alpha = coverage * text_color.a * input.v_alpha;
+    float3 rgb = lerp(bg.rgb, text_color.rgb, text_alpha);
+    float  a   = max(bg.a, text_alpha);
 
     clip(a - 0.004);   // depth_write ON → прозрачные пиксели не пишут ни глубину, ни цвет
     return float4(rgb, a);

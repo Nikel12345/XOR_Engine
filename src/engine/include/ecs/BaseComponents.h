@@ -358,6 +358,7 @@ struct UITextComponent {
 	// левого верхнего угла, а не растягивает по прямоугольнику.
 	float                 width_lines  = 0.0f;
 	float                 height_lines = 0.0f;
+	float                 indent_lines = 0.0f;
 };
 
 struct TestComponent {};

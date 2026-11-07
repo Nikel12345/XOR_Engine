@@ -167,6 +167,9 @@ template<> struct CommandPayload<CommandId::LoadScene> { using type = SceneIOCmd
 struct UILoadCmd {};
 template<> struct CommandPayload<CommandId::LoadUI> { using type = UILoadCmd; };
 
+struct UISaveCmd {};
+template<> struct CommandPayload<CommandId::SaveUI> { using type = UISaveCmd; };
+
 struct CreateEntityCmd {
     std::string          scene;
     std::vector<uint8_t> sheaf;   // черновик формы создания, записанный ObjectManager::SaveScene

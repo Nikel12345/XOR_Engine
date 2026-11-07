@@ -23,6 +23,7 @@ public:
     // Кадр ImGui идёт на рендер-потоке, а спрашивает игра с sim: ответ отстаёт на кадр.
     static bool WantCaptureMouse();
     static bool WantCaptureKeyboard();
+    static bool WantTextInput();
     // Звать с MAIN-потока, из цикла событий приложения.
     static void ProcessEvent(const SDL_Event& event);
 

@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,6 +44,8 @@ struct UIMarkupNode {
     std::string                      header;
     std::vector<UIMarkupAttribute>   attributes;
     std::vector<UIMarkupDeclaration> style;
+    std::optional<UIMarkupSpan>      style_value;
+    uint32_t                         attributes_end = 0;
     std::vector<UIMarkupNode>        children;
     uint32_t                         line = 0;
 

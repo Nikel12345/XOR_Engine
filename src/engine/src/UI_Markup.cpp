@@ -323,7 +323,7 @@ static bool ParseElement(MarkupReader& r, UIMarkupDocument& doc, UIMarkupNode& n
         return ParseContent(r, doc, node);
     }
 
-    bool has_style = false;
+    node.attributes_end = safe_u32(r.base + r.pos);
     while (true) {
         r.SkipSpaces();
         if (r.StartsWith("/>")) { r.Advance(2); return true; }
@@ -347,13 +347,14 @@ static bool ParseElement(MarkupReader& r, UIMarkupDocument& doc, UIMarkupNode& n
         if (r.AtEnd()) return r.Fail(attr_line, "value of '" + name + "' is not closed");
         const std::string_view raw = r.src.substr(value_begin, r.pos - value_begin);
         r.Advance();
+        node.attributes_end = safe_u32(r.base + r.pos);
 
-        if (node.Attribute(name) || (name == "style" && has_style))
+        if (node.Attribute(name) || (name == "style" && node.style_value))
             return r.Fail(attr_line, "duplicate attribute '" + name + "'");
         if (name == "style") {
             MarkupReader css{ raw, r.base + value_begin, value_line };
             if (!ParseDeclarations(css, node.style)) { r.error = css.error; return false; }
-            has_style = true;
+            node.style_value = r.Span(value_begin, raw.size());
         } else {
             node.attributes.push_back({ std::move(name), DecodeEntities(raw), attr_line, r.Span(value_begin, raw.size()) });
         }

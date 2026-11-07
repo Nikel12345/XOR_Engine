@@ -5,14 +5,19 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 #include <glm/glm.hpp>
 #include "Aliases.h"
 #include "ComponentStorage.h"
 #include "ResourceId.h"
 #include "ResourceRegistry.h"
+#include "UI_Interaction.h"
+#include "UI_Markup.h"
 
 class EngineContext;
 class FontManager;
@@ -45,7 +50,29 @@ struct UIStyle {
     UIEdges   padding;
     UIEdges   margin;
     float     gap         = 0.0f;
+    UISize    caret_width_mode = UISize::Points;
+    float     caret_width      = 2.0f;
+    UISize    caret_gap_mode   = UISize::Points;
+    float     caret_gap        = 0.0f;
+
+    float FlexGrow() const
+    {
+        if (grow > 0.0f)                                  return grow;
+        if (height_mode == UISize::Grow && height > 0.0f) return height;
+        if (width_mode == UISize::Grow)                   return width > 0.0f ? width : 1.0f;
+        return 0.0f;
+    }
 };
+
+enum class UIProperty : uint8_t {
+    Display, FlexDirection, JustifyContent, AlignItems, Width, Height, FlexGrow, Gap,
+    PaddingTop, PaddingRight, PaddingBottom, PaddingLeft,
+    MarginTop, MarginRight, MarginBottom, MarginLeft,
+    Material,
+    Count
+};
+
+constexpr uint32_t UIPropertyBit(UIProperty property) { return 1u << std::to_underlying(property); }
 
 struct UITextShape {
     struct Glyph {
@@ -58,7 +85,11 @@ struct UITextShape {
     float              line_height = 0.0f;
 };
 
-using UIVarKey = std::vector<uint32_t>;
+struct UIGlyphPlace {
+    uint32_t wrapped_index = 0;
+    int      line = 0;
+    float    x = 0.0f;
+};
 
 struct UISlot {
     uint32_t node = 0xFFFFFFFFu;
@@ -73,9 +104,11 @@ struct UINode {
     std::string                  quad;
     std::unique_ptr<UITextShape> shape;
     std::vector<uint32_t>        wrapped_glyphs;
+    std::vector<UIGlyphPlace>    glyph_places;
     FontId                       font;
     std::string                  id;
     std::vector<std::string>     classes;
+    uint32_t                     element = 0xFFFFFFFFu;
     UIVarKey                     instance;
     std::vector<uint32_t>        children;
     std::vector<UISlot>          slots;
@@ -88,6 +121,9 @@ struct UINode {
     bool                         parked = false;
     Entity                       entity = 0;
     bool                         has_entity = false;
+    std::string                  caret_material;
+    std::string                  caret_quad;
+    Entity                       caret_entity = 0;
 };
 
 struct UIKeyIndex {
@@ -106,6 +142,13 @@ struct UIDeclaration {
     std::string                 property;
     std::vector<UITemplatePart> value;
     uint32_t                    line = 0;
+    UIMarkupSpan                span;
+    bool                        from_style_attribute = false;
+};
+
+struct UIEdit {
+    UIProperty  property = UIProperty::Display;
+    std::string value;
 };
 
 enum class UIElementKind : uint8_t { Root, Box, Text, Loop };
@@ -116,9 +159,14 @@ struct UIElement {
     std::vector<std::string>    classes;
     std::vector<UIDeclaration>  declarations;
     std::vector<UITemplatePart> text;
+    bool                        input = false;
     std::vector<UITemplatePart> count;
     std::vector<uint32_t>       children;
     uint32_t                    line = 0;
+    std::optional<UIMarkupSpan> style_value;
+    uint32_t                    attributes_end = 0;
+    uint32_t                    bound_properties = 0;
+    std::vector<UIEdit>         edits;
 };
 
 enum class UIBindingKind : uint8_t { Text, Style, Count };
@@ -172,11 +220,14 @@ public:
               const std::string& material, const std::string& quad, FontId font, const FontManager* font_manager);
 
     bool Load(const FontManager* font_manager, const std::string& path);
+    bool Save(const FontManager* font_manager);
+    bool HasUnsavedChanges() const { return unsaved_edits > 0 || source_unsaved; }
     void Reset();
 
     UIVarId InternVar(const std::string& name);
     void    SetVar(UIVarId var, const UIVarKey& key, std::string_view value);
     void    SetVar(UIVarId var, std::string_view value) { SetVar(var, UIVarKey{}, value); }
+    std::string GetVar(UIVarId var, const UIVarKey& key = {}) const;
     template <class Number> requires std::integral<Number> || std::floating_point<Number>
     void    SetVar(UIVarId var, const UIVarKey& key, Number value)
     {
@@ -207,9 +258,26 @@ public:
     bool GetNodeStyle(Node node, UIStyle& style) const;
     bool GetNodeLayoutSize(Node node, float& width, float& height) const;
     bool IsTextNode(Node node) const;
+    bool IsLoopInstance(Node node) const;
+    uint32_t BoundProperties(Node node) const;
     void SetText(Node node, const std::string& utf8, const FontManager* font_manager);
     void SetNodeMaterial(EngineContext* ctx, Node node, const std::string& material);
     bool GetNodeEntity(Node node, Entity& entity) const;
+
+    void EditNodeStyle(Node node, const UIStyle& style);
+    void EditNodeMaterial(EngineContext* ctx, Node node, const std::string& material);
+
+    void OnClick(const std::string& node_id, UIClickFunc fn);
+    void PressAt(float window_x, float window_y);
+    void ReleaseAt(float window_x, float window_y);
+    void CancelPress();
+    void ExecuteClicks();
+    void SetMouseEnabled(bool enabled);
+    bool WantCaptureMouse(float window_x, float window_y) const;
+    void HandleInput(const std::vector<UIInputEvent>& events);
+    void ClearFocus();
+    bool WantCaptureKeyboard() const;
+    void UpdateCaret(EngineContext* ctx);
 
 private:
     void Clear();
@@ -228,6 +296,20 @@ private:
     void                ResizeLoop(uint32_t loop, uint32_t count, const FontManager* font_manager);
     void                UpdateParking(uint32_t loop);
     void                AddBinding(UIBinding binding);
+
+    bool        LoadSource(const FontManager* font_manager, const std::string& path, const std::string& source);
+    UIElement*  EditableElement(Node node);
+    void        SetEdit(UIElement& element, UIProperty property, std::string value, const std::string& file_value);
+    std::string SourceWithEdits() const;
+
+    Node ClickableNodeAt(float window_x, float window_y) const;
+    bool IsOverUI(float window_x, float window_y) const;
+    bool IsInputNode(Node node) const;
+    bool InputVarOf(Node node, UIVarId& var, UIVarKey& key) const;
+    size_t InputPrefixLength(Node node) const;
+    void SetFocus(Node node);
+    void FindClickableNode(Node node, Node clickable_ancestor, float window_x, float window_y,
+                           float& top_z, Node& clickable) const;
 
     void DeleteCreatedEntities(EngineContext* ctx, const SceneName& scene_name);
     void EmitNode(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name,
@@ -248,4 +330,21 @@ private:
     std::vector<UIBinding> bindings;
     std::vector<uint32_t>  dirty_bindings;
     std::string            document_path;
+    std::string            document_source;
+    std::string            disk_source;
+    uint32_t               unsaved_edits = 0;
+    bool                   source_unsaved = false;
+
+    std::unordered_map<std::string, UIClickFunc> click_instructions;
+    std::vector<UIClick>                         pending_clicks;
+    Node                                         pressed_node = kInvalid;
+    bool                                         press_on_ui = false;
+    bool                                         mouse_enabled = true;
+    Node                                         focused_node = kInvalid;
+    UIVarId                                      focused_var;
+    UIVarKey                                     focused_key;
+    size_t                                       focused_prefix = 0;
+    size_t                                       caret = 0;
+    Node                                         caret_node = kInvalid;
+    uint64_t                                     caret_blink_start = 0;
 };

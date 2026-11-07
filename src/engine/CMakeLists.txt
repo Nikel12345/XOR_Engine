@@ -281,6 +281,7 @@ set(ENGINE_CORE_SRC
     src/TextureLoader.cpp
     src/UI_Manager.cpp
     src/UI_Manager_Load.cpp
+    src/UI_Manager_Interaction.cpp
     src/UI_Markup.cpp
 )
 set(ENGINE_CORE_HDR
@@ -297,6 +298,7 @@ set(ENGINE_CORE_HDR
     include/engine/PCH_Engine.h
     include/engine/EngineContext.h
     include/engine/UI_Manager.h
+    include/engine/UI_Interaction.h
     include/engine/UI_Markup.h
 )
 

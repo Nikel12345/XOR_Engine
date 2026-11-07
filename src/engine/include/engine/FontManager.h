@@ -53,6 +53,7 @@ struct FontData {
 
 	std::vector<GlyphInfo>                  glyphs;        // индекс = glyph_index
 	std::unordered_map<uint32_t, uint32_t>  cp_to_index;  // codepoint → glyph_index
+	uint32_t                                missing_glyph = 0;
 };
 
 struct FontCell { std::string name; std::unique_ptr<FontData> object; };
@@ -81,7 +82,7 @@ public:
 	uint32_t GlyphIndex(const FontData* font, uint32_t codepoint) const;
 
 	// UTF-8 строка → коды глифов (glyph_index) для UITextComponent.glyphs. '\n' → UI_LINE_BREAK_CODE,
-	// остальные кодпоинты, которых нет в шрифте, пропускаются. Продвинутый shaping (кернинг/лигатуры)
+	// кодпоинт вне атласа → FontData::missing_glyph. Продвинутый shaping (кернинг/лигатуры)
 	// — позже; сейчас codepoint→index.
 	std::vector<uint32_t> ShapeString(const FontData* font, const std::string& utf8) const;
 

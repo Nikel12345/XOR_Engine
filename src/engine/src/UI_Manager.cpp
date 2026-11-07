@@ -47,11 +47,7 @@ static void ApplyStyle(YGNodeRef yoga_node, const UIStyle& style, bool parked)
         default:              YGNodeStyleSetHeightAuto(yoga_node);                  break;
     }
 
-    float grow = 0.0f;
-    if (style.width_mode == UISize::Grow)                         grow = style.width > 0.0f ? style.width : 1.0f;
-    if (style.height_mode == UISize::Grow && style.height > 0.0f) grow = style.height;
-    if (style.grow > 0.0f)                                        grow = style.grow;
-    YGNodeStyleSetFlexGrow(yoga_node, grow);
+    YGNodeStyleSetFlexGrow(yoga_node, style.FlexGrow());
     ApplyEdges(yoga_node, YGNodeStyleSetPadding, style.padding);
     ApplyEdges(yoga_node, YGNodeStyleSetMargin,  style.margin);
     YGNodeStyleSetGap(yoga_node, YGGutterAll, style.gap);
@@ -73,20 +69,32 @@ struct WrappedSize {
 };
 
 // wrapped == nullptr — только замер.
-static WrappedSize WrapText(const UITextShape& shape, float max_width, std::vector<uint32_t>* wrapped)
+static WrappedSize WrapText(const UITextShape& shape, float max_width, std::vector<uint32_t>* wrapped,
+                            std::vector<UIGlyphPlace>* places)
 {
     const std::vector<UITextShape::Glyph>& glyphs = shape.glyphs;
     WrappedSize size;
     float line_width    = 0.0f;
+    float pen           = 0.0f;
     bool  line_has_word = false;
+    const auto place = [&](size_t index) {
+        if (places) places->push_back({ safe_u32(wrapped->size()), size.lines - 1, pen });
+        pen += glyphs[index].advance;
+    };
+    const auto write = [&](size_t index) {
+        place(index);
+        if (wrapped) wrapped->push_back(glyphs[index].code);
+    };
+
     size_t i = 0;
     while (i < glyphs.size()) {
         if (glyphs[i].code == UI_LINE_BREAK_CODE) {
             size.width    = std::max(size.width, line_width);
             line_width    = 0.0f;
             line_has_word = false;
+            write(i);
+            pen = 0.0f;
             ++size.lines;
-            if (wrapped) wrapped->push_back(UI_LINE_BREAK_CODE);
             ++i;
             continue;
         }
@@ -98,21 +106,27 @@ static WrappedSize WrapText(const UITextShape& shape, float max_width, std::vect
         float word_width = 0.0f;
         for (; i < glyphs.size() && !glyphs[i].space && glyphs[i].code != UI_LINE_BREAK_CODE; ++i)
             word_width += glyphs[i].advance;
-        if (word_begin == i) continue;
+        if (word_begin == i) {
+            for (size_t k = spaces_begin; k < word_begin; ++k) place(k);
+            continue;
+        }
 
         if (line_has_word && line_width + spaces_width + word_width > max_width) {
+            for (size_t k = spaces_begin; k < word_begin; ++k) place(k);
             size.width = std::max(size.width, line_width);
             line_width = word_width;
+            pen        = 0.0f;
             ++size.lines;
             if (wrapped) wrapped->push_back(UI_LINE_BREAK_CODE);
         } else {
             line_width += spaces_width + word_width;
-            if (wrapped) for (size_t k = spaces_begin; k < word_begin; ++k) wrapped->push_back(glyphs[k].code);
+            for (size_t k = spaces_begin; k < word_begin; ++k) write(k);
         }
-        if (wrapped) for (size_t k = word_begin; k < i; ++k) wrapped->push_back(glyphs[k].code);
+        for (size_t k = word_begin; k < i; ++k) write(k);
         line_has_word = true;
     }
     size.width = std::max(size.width, line_width);
+    if (places) places->push_back({ safe_u32(wrapped->size()), size.lines - 1, pen });
     return size;
 }
 
@@ -120,7 +134,7 @@ static YGSize MeasureText(YGNodeConstRef yoga_node, float width, YGMeasureMode w
 {
     const UITextShape& shape = *static_cast<const UITextShape*>(YGNodeGetContext(yoga_node));
     const float max_width = width_mode == YGMeasureModeUndefined ? std::numeric_limits<float>::infinity() : width;
-    const WrappedSize size = WrapText(shape, max_width, nullptr);
+    const WrappedSize size = WrapText(shape, max_width, nullptr, nullptr);
     return { size.width, safe_sint32_f(size.lines) * shape.line_height };
 }
 
@@ -166,7 +180,7 @@ std::string UI_Manager::NodeLabel(Node node) const
 {
     if (node >= nodes.size()) return "<invalid>";
     const UINode& entry = nodes[node];
-    std::string label = node == root ? "ui" : entry.shape ? "text" : "box";
+    std::string label = node == root ? "ui" : IsInputNode(node) ? "input" : entry.shape ? "text" : "box";
     if (!entry.id.empty()) label += "#" + entry.id;
     for (const std::string& name : entry.classes) label += "." + name;
     for (uint32_t index : entry.instance) label += "[" + std::to_string(index) + "]";
@@ -294,6 +308,17 @@ bool UI_Manager::IsTextNode(Node node) const
     return node < nodes.size() && nodes[node].shape != nullptr;
 }
 
+bool UI_Manager::IsLoopInstance(Node node) const
+{
+    return node < nodes.size() && !nodes[node].instance.empty();
+}
+
+uint32_t UI_Manager::BoundProperties(Node node) const
+{
+    if (node >= nodes.size() || nodes[node].element >= elements.size()) return 0;
+    return elements[nodes[node].element].bound_properties;
+}
+
 void UI_Manager::SetText(Node node, const std::string& utf8, const FontManager* font_manager)
 {
     if (node >= nodes.size() || !font_manager) return;
@@ -405,10 +430,15 @@ void UI_Manager::Clear()
     if (root != kInvalid && nodes[root].yoga_node) YGNodeFreeRecursive(nodes[root].yoga_node);
     nodes.clear();
     root            = kInvalid;
+    pressed_node    = kInvalid;
+    focused_node    = kInvalid;
+    caret_node      = kInvalid;
     emit_needed     = true;
     recreate_needed = true;
 
     elements.clear();
+    unsaved_edits  = 0;
+    source_unsaved = false;
     loops.clear();
     bindings.clear();
     dirty_bindings.clear();
@@ -424,7 +454,11 @@ void UI_Manager::Clear()
 void UI_Manager::Reset()
 {
     Clear();
+    document_source.clear();
+    disk_source.clear();
     created_entities.clear();   // энтити не удаляем: их уже нет, id принадлежат новой сцене
+    click_instructions.clear();
+    pending_clicks.clear();
 }
 
 void UI_Manager::DeleteCreatedEntities(EngineContext* ctx, const SceneName& scene_name)
@@ -469,7 +503,8 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
         // MeasureText, на долю пикселя: без запаса строка, влезшая при замере, здесь перенеслась бы.
         constexpr float kWrapSlack = 1.0f;
         entry.wrapped_glyphs.clear();
-        WrapText(*entry.shape, width + kWrapSlack, &entry.wrapped_glyphs);
+        entry.glyph_places.clear();
+        WrapText(*entry.shape, width + kWrapSlack, &entry.wrapped_glyphs, &entry.glyph_places);
     }
 
     if (entry.draws && !entry.quad.empty()) {
@@ -495,6 +530,13 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
                     positions, UIComponent{}, GeneratedComponent{}, TextureStateComponent{});
             entry.has_entity = true;
             created_entities.push_back(entry.entity);
+            // Каретку удаляет каскад вместе с полем: в created_entities её удалили бы дважды.
+            if (IsInputNode(node))
+                entry.caret_entity = ctx->CreateEntity(scene_name,
+                    RenderableProxy::Single(ctx->GetModelManager()->InternModel(entry.caret_quad),
+                                            { ctx->GetMaterialManager()->InternMaterial(entry.caret_material) }, false),
+                    PositionProxy16{}, ParentComponent{ entry.entity }, LocalMatrixProxy16{},
+                    UIComponent{}, GeneratedComponent{}, TextureStateComponent{}, UITextComponent{ {}, entry.font });
         }
         else if (entry.has_entity && object_manager->Has<Positions>(scene, entry.entity)) {
             WritePositions(object_manager, scene, entry.entity, positions);

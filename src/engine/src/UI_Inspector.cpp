@@ -64,18 +64,26 @@ namespace {
         float layout_w = 0.0f, layout_h = 0.0f;
         ui_manager->GetNodeLayoutSize(n, layout_w, layout_h);
 
+        // Значение связанного свойства решает переменная: литерал из инспектора оборвал бы связь.
+        const uint32_t bound = ui_manager->BoundProperties(n);
+        auto bits = [](auto... properties) { return (UIPropertyBit(properties) | ...); };
+        auto begin_locked = [bound](uint32_t property_bits) { ImGui::BeginDisabled((bound & property_bits) != 0); };
+
         bool changed = false, active = false;
         auto track = [&](bool edited_now) { changed |= edited_now; active |= ImGui::IsItemActive(); };
-        auto enum_combo = [&](const char* label, auto& value, const char* const* names, int count) {
+        auto enum_combo = [&](const char* label, auto& value, const char* const* names, int count, UIProperty property) {
+            begin_locked(bits(property));
             int index = static_cast<int>(value);
             if (ImGui::Combo(label, &index, names, count)) {
                 value = static_cast<std::remove_reference_t<decltype(value)>>(index);
                 changed = true;
             }
+            ImGui::EndDisabled();
         };
 
         static const char* kSizeModes[] = { "Auto", "Points", "Percent", "Grow" };
-        auto size_row = [&](const char* label, UISize& mode, float& value, float layout_px) {
+        auto size_row = [&](const char* label, UISize& mode, float& value, float layout_px, UIProperty property) {
+            begin_locked(bits(property));
             ImGui::PushID(label);
             int index = static_cast<int>(mode);
             ImGui::SetNextItemWidth(90.0f);
@@ -96,34 +104,43 @@ namespace {
                 track(ImGui::DragFloat(label, &value, mode == UISize::Grow ? 0.01f : 1.0f, 0.0f, FLT_MAX,
                                        mode == UISize::Points ? "%.0f px" : mode == UISize::Percent ? "%.1f %%" : "%.2f"));
             ImGui::PopID();
+            ImGui::EndDisabled();
         };
 
         // Границы 0..0 ImGui понимает как «без ограничений»: внешний отступ бывает отрицательным.
-        auto edges_row = [&](const char* label, UIEdges& edges, bool non_negative) {
+        auto edges_row = [&](const char* label, UIEdges& edges, bool non_negative, uint32_t property_bits) {
+            begin_locked(property_bits);
             float values[4] = { edges.top, edges.right, edges.bottom, edges.left };
             if (ImGui::DragFloat4(label, values, 0.5f, 0.0f, non_negative ? FLT_MAX : 0.0f, "%.0f")) {
                 edges = { values[0], values[1], values[2], values[3] };
                 changed = true;
             }
             active |= ImGui::IsItemActive();
+            ImGui::EndDisabled();
         };
 
         static const char* kDisplay[] = { "Flex", "None" };
-        enum_combo("Display", style.display, kDisplay, IM_ARRAYSIZE(kDisplay));
+        enum_combo("Display", style.display, kDisplay, IM_ARRAYSIZE(kDisplay), UIProperty::Display);
         ImGui::Text("Layout size: %.0f x %.0f px", layout_w, layout_h);
-        size_row("Width",  style.width_mode,  style.width,  layout_w);
-        size_row("Height", style.height_mode, style.height, layout_h);
+        size_row("Width",  style.width_mode,  style.width,  layout_w, UIProperty::Width);
+        size_row("Height", style.height_mode, style.height, layout_h, UIProperty::Height);
+        begin_locked(bits(UIProperty::FlexGrow));
         track(ImGui::DragFloat("Grow",   &style.grow,   0.01f, 0.0f, FLT_MAX, "%.2f"));
-        edges_row("Margin T R B L", style.margin, false);
+        ImGui::EndDisabled();
+        edges_row("Margin T R B L", style.margin, false,
+                  bits(UIProperty::MarginTop, UIProperty::MarginRight, UIProperty::MarginBottom, UIProperty::MarginLeft));
         if (!ui_manager->IsTextNode(n)) {
-            edges_row("Padding T R B L", style.padding, true);
+            edges_row("Padding T R B L", style.padding, true,
+                      bits(UIProperty::PaddingTop, UIProperty::PaddingRight, UIProperty::PaddingBottom, UIProperty::PaddingLeft));
+            begin_locked(bits(UIProperty::Gap));
             track(ImGui::DragFloat("Gap",     &style.gap,     0.5f, 0.0f, FLT_MAX, "%.0f px"));
+            ImGui::EndDisabled();
             static const char* kDirs[]    = { "Row", "Column" };
             static const char* kJustify[] = { "Start", "Center", "End", "SpaceBetween" };
             static const char* kAlign[]   = { "Start", "Center", "End", "Stretch" };
-            enum_combo("Direction", style.direction, kDirs,    IM_ARRAYSIZE(kDirs));
-            enum_combo("Justify",   style.justify,   kJustify, IM_ARRAYSIZE(kJustify));
-            enum_combo("Align",     style.align,     kAlign,   IM_ARRAYSIZE(kAlign));
+            enum_combo("Direction", style.direction, kDirs,    IM_ARRAYSIZE(kDirs),    UIProperty::FlexDirection);
+            enum_combo("Justify",   style.justify,   kJustify, IM_ARRAYSIZE(kJustify), UIProperty::JustifyContent);
+            enum_combo("Align",     style.align,     kAlign,   IM_ARRAYSIZE(kAlign),   UIProperty::AlignItems);
         }
 
         if (changed)
@@ -147,18 +164,21 @@ namespace {
             if (!parts.empty()) current = mm->MaterialNameOf(parts[0].per_lod[0]);
         }
 
-        if (!ImGui::BeginCombo("Material", current.empty() ? "(none)" : current.c_str())) return;
-        if (!ui_manager->IsTextNode(n) && ImGui::Selectable("(none)", current.empty()))
-            cmd::Push<CommandId::SetUINodeMaterial>(ctx->GetInputManager(), n, std::string{});
-        const MaterialRegistry& mreg = mm->Materials();
-        for (int32_t mi = 0; mi < mreg.Count(); ++mi) {
-            const MaterialCell& mc = mreg.At(mi);
-            if (!mc.object) continue;
-            if (!g_show_internal && HasTag(mc.object->tags, ResourceTag::System)) continue;
-            if (ImGui::Selectable(mc.name.c_str(), mc.name == current))
-                cmd::Push<CommandId::SetUINodeMaterial>(ctx->GetInputManager(), n, mc.name);
+        ImGui::BeginDisabled((ui_manager->BoundProperties(n) & UIPropertyBit(UIProperty::Material)) != 0);
+        if (ImGui::BeginCombo("Material", current.empty() ? "(none)" : current.c_str())) {
+            if (!ui_manager->IsTextNode(n) && ImGui::Selectable("(none)", current.empty()))
+                cmd::Push<CommandId::SetUINodeMaterial>(ctx->GetInputManager(), n, std::string{});
+            const MaterialRegistry& mreg = mm->Materials();
+            for (int32_t mi = 0; mi < mreg.Count(); ++mi) {
+                const MaterialCell& mc = mreg.At(mi);
+                if (!mc.object) continue;
+                if (!g_show_internal && HasTag(mc.object->tags, ResourceTag::System)) continue;
+                if (ImGui::Selectable(mc.name.c_str(), mc.name == current))
+                    cmd::Push<CommandId::SetUINodeMaterial>(ctx->GetInputManager(), n, mc.name);
+            }
+            ImGui::EndCombo();
         }
-        ImGui::EndCombo();
+        ImGui::EndDisabled();
     }
 
     glm::mat4 ReadPositionsMatrix(const Positions& P, size_t i)
@@ -1320,9 +1340,14 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
         ImGui::Text("UI node: %s", ui_manager->NodeLabel(n).c_str());
         float dx, dy, dz; ui_manager->GetOffset(n, dx, dy, dz);
         ImGui::Text("Offset: X=%.0f  Y=%.0f px", dx, dy);
+        // У экземпляров цикла один элемент файла на всех, и правку одного экземпляра Save записать не может.
+        const bool loop_instance = ui_manager->IsLoopInstance(n);
+        if (loop_instance) ImGui::TextDisabled("Loop instance: style is edited in the file");
+        ImGui::BeginDisabled(loop_instance);
         InspectUINodeMaterial(ctx, ui_manager, n);
         ImGui::Separator();
         InspectUINodeStyle(ctx, ui_manager, n);
+        ImGui::EndDisabled();
         ImGui::Separator();
         float local[16];
         if (ui_manager->GetNodeTransform(n, local)) {

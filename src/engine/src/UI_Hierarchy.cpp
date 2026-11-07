@@ -272,11 +272,16 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
             cmd::Push<CommandId::LoadUI>(ctx->GetInputManager());
         }
         ImGui::SameLine();
-        ImGui::BeginDisabled();
-        ImGui::SmallButton("Save");
+        UI_Manager* ui_manager = ctx->GetUIManager();
+        ImGui::BeginDisabled(!ui_manager || !ui_manager->HasUnsavedChanges());
+        if (ImGui::SmallButton("Save")) {
+            // Save перезагружает файл с правками, и узлы нумеруются заново.
+            if (g_sel.kind == SelKind::UINode) g_sel = Selection{};
+            cmd::Push<CommandId::SaveUI>(ctx->GetInputManager());
+        }
         ImGui::EndDisabled();
 
-        if (UI_Manager* ui_manager = ctx->GetUIManager()) {
+        if (ui_manager) {
             const UI_Manager::Node root = ui_manager->RootNode();
             if (root == UI_Manager::kInvalid) ImGui::TextDisabled("(no UI tree)");
             else DrawUITree(ui_manager, root);

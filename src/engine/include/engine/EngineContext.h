@@ -114,6 +114,7 @@ public:
 	void SaveScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
 	void LoadScene(const SceneName& scene_name, const std::string& scenes_root = kScenesRoot);
 	void LoadUI();
+	void SaveUI();
 	void ExecuteSceneGenerators();
 	void ExecuteSceneDestructors();
 	// Сущности сносятся у названной сцены.
@@ -121,6 +122,11 @@ public:
 
 	void RegisterSceneGenerator(const SceneName& scene_name, SceneGenerator generator);
 	void RegisterSceneDestructor(const SceneName& scene_name, SceneDestructor destructor);
+
+	void ProcessUIClicks();
+	void ProcessUIInput();
+	bool WantCaptureMouse() const;
+	bool WantCaptureKeyboard() const;
 
 	void CreateFragmentShader(const std::string& name, const char* hlsl_path, ResourceTag tags = ResourceTag::None, const ShaderDefines& defines = {});
 	void CreateVertexShader(const std::string& name, const char* hlsl_path, const std::string& pool_name,

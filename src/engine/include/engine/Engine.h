@@ -101,6 +101,7 @@ public:
     void SaveScene(const SceneName& scene_name, const std::string& scenes_root);
     void LoadScene(const SceneName& scene_name, const std::string& scenes_root);
     void LoadUI();
+    void SaveUI();
 
     void PrepareFunc(uint8_t idx);
 
@@ -137,6 +138,8 @@ public:
     ~Engine();
 
 private:
+    void UpdateTextInput();
+
     bool InitPlatform(const EngineConfig& cfg);
 
     void PrepareFuncPrepassUndepended(uint8_t idx);
@@ -151,6 +154,7 @@ private:
     std::mutex scene_swap_mutex;
 
     SDL_Window* win = nullptr;
+    bool        text_input_was_wanted = false;
     SDL_GPUDevice* dev = nullptr;
     QueueManager* queue_manager = nullptr;
     TransferManager* transfer_manager = nullptr;

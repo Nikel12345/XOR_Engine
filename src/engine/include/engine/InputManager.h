@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "CommandId.h"
+#include "UI_Interaction.h"
 
 class EngineContext;
 
@@ -18,6 +19,13 @@ public:
         bool         down;
     };
 
+    struct MouseButtonEvent {
+        uint8_t button;
+        bool    down;
+        float   x;
+        float   y;
+    };
+
     InputManager();
 
     InputManager(const InputManager&) = delete;
@@ -26,6 +34,11 @@ public:
     void HandleEvent(const SDL_Event& event);
 
     void DrainKeyEvents(std::vector<KeyEvent>& out);
+    void DrainMouseButtonEvents(std::vector<MouseButtonEvent>& out);
+    void DrainUIInputEvents(std::vector<UIInputEvent>& out);
+
+    void SetTextInputWanted(bool wanted) { text_input_wanted.store(wanted, std::memory_order_relaxed); }
+    bool TextInputWanted() const { return text_input_wanted.load(std::memory_order_relaxed); }
 
     void  SnapshotHeldKeys(std::vector<SDL_Scancode>& out) const;
 
@@ -46,6 +59,9 @@ public:
     void ExecuteCommands(EngineContext* ctx);
 
 private:
+    void PushMouseButtonEvent(const SDL_MouseButtonEvent& event);
+    void PushUIInputEvent(UIInputEvent event);
+
     struct InterfaceCommand {
         CommandId   id;
         const void* data;
@@ -59,6 +75,13 @@ private:
 
     std::mutex            key_mutex_;
     std::vector<KeyEvent> key_events_;
+
+    std::mutex                    mouse_button_mutex;
+    std::vector<MouseButtonEvent> mouse_button_events;
+
+    std::mutex                ui_input_mutex;
+    std::vector<UIInputEvent> ui_input_events;
+    std::atomic<bool>         text_input_wanted{ false };
 
     std::mutex                    cmd_mutex_;
     std::vector<InterfaceCommand> commands_;

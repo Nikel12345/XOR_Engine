@@ -12,6 +12,9 @@
 #include "ShaderManager.h"
 #include "PipeManager.h"
 #include "FontManager.h"
+#include "InputManager.h"
+#include "UI_ImGui.h"
+#include "UI_Manager.h"
 
 using namespace ShaderBase;
 
@@ -340,6 +343,40 @@ void EngineContext::RegisterSceneDestructor(const SceneName& scene_name, SceneDe
 	scene->destructors.push_back(std::move(destructor));
 }
 
+void EngineContext::ProcessUIClicks()
+{
+	std::vector<InputManager::MouseButtonEvent> events;
+	input_manager->DrainMouseButtonEvents(events);
+	for (const InputManager::MouseButtonEvent& event : events) {
+		if (event.button != SDL_BUTTON_LEFT) continue;
+		if (UI_ImGui::WantCaptureMouse()) {
+			ui_manager->CancelPress();
+			ui_manager->ClearFocus();
+		}
+		else if (event.down) ui_manager->PressAt(event.x, event.y);
+		else ui_manager->ReleaseAt(event.x, event.y);
+	}
+}
+
+void EngineContext::ProcessUIInput()
+{
+	std::vector<UIInputEvent> events;
+	input_manager->DrainUIInputEvents(events);
+	ui_manager->HandleInput(events);
+	input_manager->SetTextInputWanted(ui_manager->WantCaptureKeyboard());
+}
+
+bool EngineContext::WantCaptureMouse() const
+{
+	return UI_ImGui::WantCaptureMouse()
+		|| ui_manager->WantCaptureMouse(input_manager->MouseX(), input_manager->MouseY());
+}
+
+bool EngineContext::WantCaptureKeyboard() const
+{
+	return UI_ImGui::WantCaptureKeyboard() || ui_manager->WantCaptureKeyboard();
+}
+
 void EngineContext::ClearScene(const SceneName& scene_name)
 {
 	const size_t mat = material_manager->ClearSceneMaterials();
@@ -368,6 +405,12 @@ void EngineContext::LoadUI()
 {
 	if (engine) engine->LoadUI();
 	else SDL_Log("LoadUI: engine back-pointer not set");
+}
+
+void EngineContext::SaveUI()
+{
+	if (engine) engine->SaveUI();
+	else SDL_Log("SaveUI: engine back-pointer not set");
 }
 
 void EngineContext::ExecuteSceneGenerators()

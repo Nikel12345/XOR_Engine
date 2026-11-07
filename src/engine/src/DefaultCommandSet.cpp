@@ -93,14 +93,14 @@ void DefaultCommandSet::SetEntityCommands(InputManager& im)
 		[](EngineContext* ctx, const UINodeStyleCmd& c)
 		{
 			if (UI_Manager* ui_manager = ctx->GetUIManager())
-				ui_manager->SetNodeStyle(c.node, c.style);
+				ui_manager->EditNodeStyle(c.node, c.style);
 		});
 
 	cmd::Register<CommandId::SetUINodeMaterial>(im,
 		[](EngineContext* ctx, const UINodeMaterialCmd& c)
 		{
 			if (UI_Manager* ui_manager = ctx->GetUIManager())
-				ui_manager->SetNodeMaterial(ctx, c.node, c.material);
+				ui_manager->EditNodeMaterial(ctx, c.node, c.material);
 		});
 
 	cmd::Register<CommandId::CreateEntity>(im,
@@ -131,6 +131,12 @@ void DefaultCommandSet::SetSceneCommands(InputManager& im)
 		[](EngineContext* ctx, const UILoadCmd&)
 		{
 			ctx->LoadUI();
+		});
+
+	cmd::Register<CommandId::SaveUI>(im,
+		[](EngineContext* ctx, const UISaveCmd&)
+		{
+			ctx->SaveUI();
 		});
 }
 

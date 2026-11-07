@@ -47,38 +47,44 @@ FontData* FontManager::CreateFont(TextureManager* tm,
 	// Растеризация диапазона кодпоинтов в глиф-атлас через штатный путь текстур: каждый глиф —
 	// CreateTexture, PackAtlases (в кадре) посчитает ему UVL. Порядок = glyph_index.
 	const SDL_Color WHITE{ 255, 255, 255, 255 };
+	// Шрифт не назначает этой кодовой точке глиф, и SDL_ttf отдаёт за неё .notdef.
+	constexpr uint32_t kNoGlyphCodepoint = 0xFFFF;
+	auto rasterize_glyph = [&](uint32_t cp) {
+		GlyphInfo g{};
+		g.codepoint = cp;
+		TTF_GetGlyphMetrics(ttf, cp, nullptr, nullptr, nullptr, nullptr, &g.advance);   // advance для пропорц. раскладки
+
+		SDL_Surface* s = TTF_RenderGlyph_Blended(ttf, cp, WHITE);
+		if (s && s->w > 0 && s->h > 0) {
+			// Blended кладёт ПОКРЫТИЕ в АЛЬФУ (RGB=белый). Атлас R8 — вытаскиваем альфу в один
+			// канал R. Пиксельный размер осядет в handle->width/height (свой в GlyphInfo не держим).
+			std::vector<std::byte> bgra = TextureManager::SurfaceToPixels(s, SDL_PIXELFORMAT_BGRA32);
+			if (!bgra.empty()) {
+				const size_t n = static_cast<size_t>(s->w) * s->h;
+				std::vector<std::byte> r8(n);
+				for (size_t i = 0; i < n; ++i) r8[i] = bgra[i * 4 + 3];   // альфа BGRA (index 3) → R
+				// имена глиф-текстур с "__" (движковая инфраструктура; в textures.json не пишутся)
+				g.handle = tm->CreateTexture("glyph_" + name + "_" + std::to_string(cp),
+				                             fd.atlas, static_cast<uint32_t>(s->w), static_cast<uint32_t>(s->h),
+				                             std::move(r8));
+				if (g.handle) g.handle->tags = ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System;
+			}
+		}
+		if (s) SDL_DestroySurface(s);   // пробел/пустой глиф: без пикселей, остаётся advance
+
+		fd.cp_to_index[cp] = static_cast<uint32_t>(fd.glyphs.size());
+		fd.glyphs.push_back(g);
+	};
 	auto rasterize_range = [&](uint32_t lo, uint32_t hi) {
 		for (uint32_t cp = lo; cp <= hi; ++cp) {
 			if (!TTF_FontHasGlyph(ttf, cp)) continue;   // глиф — дело ШРИФТА, не библиотеки
-
-			GlyphInfo g{};
-			g.codepoint = cp;
-			TTF_GetGlyphMetrics(ttf, cp, nullptr, nullptr, nullptr, nullptr, &g.advance);   // advance для пропорц. раскладки
-
-			SDL_Surface* s = TTF_RenderGlyph_Blended(ttf, cp, WHITE);
-			if (s && s->w > 0 && s->h > 0) {
-				// Blended кладёт ПОКРЫТИЕ в АЛЬФУ (RGB=белый). Атлас R8 — вытаскиваем альфу в один
-				// канал R. Пиксельный размер осядет в handle->width/height (свой в GlyphInfo не держим).
-				std::vector<std::byte> bgra = TextureManager::SurfaceToPixels(s, SDL_PIXELFORMAT_BGRA32);
-				if (!bgra.empty()) {
-					const size_t n = static_cast<size_t>(s->w) * s->h;
-					std::vector<std::byte> r8(n);
-					for (size_t i = 0; i < n; ++i) r8[i] = bgra[i * 4 + 3];   // альфа BGRA (index 3) → R
-					// имена глиф-текстур с "__" (движковая инфраструктура; в textures.json не пишутся)
-					g.handle = tm->CreateTexture("glyph_" + name + "_" + std::to_string(cp),
-					                             fd.atlas, static_cast<uint32_t>(s->w), static_cast<uint32_t>(s->h),
-					                             std::move(r8));
-					if (g.handle) g.handle->tags = ResourceTag::CodeOwned | ResourceTag::Default | ResourceTag::System;
-				}
-			}
-			if (s) SDL_DestroySurface(s);   // пробел/пустой глиф: без пикселей, остаётся advance
-
-			fd.cp_to_index[cp] = static_cast<uint32_t>(fd.glyphs.size());
-			fd.glyphs.push_back(g);
+			rasterize_glyph(cp);
 		}
 	};
 	rasterize_range(0x0020, 0x007E);   // ASCII печатные
 	rasterize_range(0x0400, 0x04FF);   // кириллица
+	rasterize_glyph(kNoGlyphCodepoint);
+	fd.missing_glyph = fd.cp_to_index[kNoGlyphCodepoint];
 
 	// GlyphUVL заливается в общий UI_FONT_UVL_BUFFER при проводке (StoreGlyphUVL читает UVL прямо
 	// из хэндлов после PackAtlases — отдельной CPU-копии нет).
@@ -127,7 +133,7 @@ std::vector<uint32_t> FontManager::ShapeString(const FontData* font, const std::
 		if (cp == '\n') { codes.push_back(UI_LINE_BREAK_CODE); continue; }
 
 		const uint32_t gi = GlyphIndex(font, cp);
-		if (gi != 0xFFFFFFFFu) codes.push_back(gi);   // нет глифа в шрифте — пропуск
+		codes.push_back(gi != 0xFFFFFFFFu ? gi : font->missing_glyph);
 	}
 	return codes;
 }

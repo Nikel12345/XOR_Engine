@@ -786,3 +786,10 @@ void Engine::LoadUI()
 	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
 	if (ui_manager && !ui_path.empty()) ui_manager->Load(font_manager, ui_path);
 }
+
+void Engine::SaveUI()
+{
+	// Save загружает дерево заново из текста с правками.
+	std::lock_guard<std::mutex> scene_guard(scene_swap_mutex);
+	if (ui_manager) ui_manager->Save(font_manager);
+}

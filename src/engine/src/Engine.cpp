@@ -387,7 +387,19 @@ void Engine::InitPasses()
 
 void Engine::SetGameIterate(std::function<void()> cb)
 {
-	thread_controller->SetGameIterationCallback(std::move(cb));
+	thread_controller->SetGameIterationCallback([this, game_iterate = std::move(cb)] {
+		engine_context->ProcessUIClicks();
+		engine_context->ProcessUIInput();
+		game_iterate();
+	});
+}
+
+void Engine::UpdateTextInput()
+{
+	const bool wanted = input_manager->TextInputWanted();
+	if (wanted && !SDL_TextInputActive(win)) SDL_StartTextInput(win);
+	if (!wanted && text_input_was_wanted && !UI_ImGui::WantTextInput()) SDL_StopTextInput(win);
+	text_input_was_wanted = wanted;
 }
 
 int Engine::Run()
@@ -414,6 +426,7 @@ int Engine::Run()
 
 			input_manager->HandleEvent(event);
 		}
+		UpdateTextInput();
 		SDL_Delay(16);
 	}
 

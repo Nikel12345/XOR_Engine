@@ -38,6 +38,7 @@ enum class CommandId : uint32_t {
     SetUINodeStyle,
     SetUINodeMaterial,
     LoadUI,
+    SaveUI,
 
     COUNT
 };

@@ -20,6 +20,7 @@ void UI_ImGui::Init(SDL_Window* win, SDL_GPUDevice* dev)
     static const std::string ini_path = std::string(SDL_GetBasePath()) + "imgui.ini";
     io.IniFilename = ini_path.c_str();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigNavCaptureKeyboard = false;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     ImGui_ImplSDL3_InitForSDLGPU(win);
@@ -74,6 +75,7 @@ void UI_ImGui::SetSelectedEntities(const std::vector<uint32_t>& entities)
 
 bool UI_ImGui::WantCaptureMouse()    { return ImGui::GetIO().WantCaptureMouse; }
 bool UI_ImGui::WantCaptureKeyboard() { return ImGui::GetIO().WantCaptureKeyboard; }
+bool UI_ImGui::WantTextInput()       { return ImGui::GetIO().WantTextInput; }
 
 void UI_ImGui::ProcessEvent(const SDL_Event& event)
 {

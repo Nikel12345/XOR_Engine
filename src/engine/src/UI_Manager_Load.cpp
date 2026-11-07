@@ -4,12 +4,13 @@
 #include "FontManager.h"
 #include <algorithm>
 #include <charconv>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 
 struct UIDeclaredValues {
     UIStyle     style;
-    std::string material, quad, font_family;
+    std::string material, quad, font_family, caret_material, caret_quad;
 };
 
 struct UILoadedVar {
@@ -88,6 +89,11 @@ static bool ParseSize(std::string_view value, UISize& mode, float& size)
     return true;
 }
 
+static bool ParseCaretLength(std::string_view value, UISize& mode, float& length)
+{
+    return ParseSize(value, mode, length) && mode != UISize::Auto;
+}
+
 static bool ParseEdge(std::string_view value, float& px, bool allow_negative)
 {
     return ParseLength(value, px) && (allow_negative || px >= 0.0f);
@@ -115,36 +121,38 @@ static bool ParseEdges(std::string_view value, UIEdges& edges, bool allow_negati
     }
 }
 
-static bool ParseDisplay(std::string_view value, UIDisplay& display)
+template <class Value>
+struct UIKeyword {
+    std::string_view name;
+    Value            value;
+};
+
+// Первое имя значения — то, что пишет Save; следующие с тем же значением — синонимы для разбора.
+static constexpr UIKeyword<UIDisplay> kDisplayNames[] = { { "flex", UIDisplay::Flex }, { "none", UIDisplay::None } };
+static constexpr UIKeyword<UIDir>     kDirectionNames[] = { { "row", UIDir::Row }, { "column", UIDir::Column } };
+static constexpr UIKeyword<UIJustify> kJustifyNames[] = {
+    { "flex-start", UIJustify::Start }, { "center", UIJustify::Center }, { "flex-end", UIJustify::End },
+    { "space-between", UIJustify::SpaceBetween }, { "start", UIJustify::Start }, { "end", UIJustify::End },
+};
+static constexpr UIKeyword<UIAlign> kAlignNames[] = {
+    { "flex-start", UIAlign::Start }, { "center", UIAlign::Center }, { "flex-end", UIAlign::End },
+    { "stretch", UIAlign::Stretch }, { "start", UIAlign::Start }, { "end", UIAlign::End },
+};
+
+template <class Value, size_t Count>
+static bool ParseKeyword(std::string_view text, const UIKeyword<Value> (&names)[Count], Value& value)
 {
-    if (value == "flex") { display = UIDisplay::Flex; return true; }
-    if (value == "none") { display = UIDisplay::None; return true; }
+    for (const UIKeyword<Value>& keyword : names)
+        if (keyword.name == text) { value = keyword.value; return true; }
     return false;
 }
 
-static bool ParseDirection(std::string_view value, UIDir& direction)
+template <class Value, size_t Count>
+static std::string_view KeywordOf(const UIKeyword<Value> (&names)[Count], Value value)
 {
-    if (value == "row")    { direction = UIDir::Row;    return true; }
-    if (value == "column") { direction = UIDir::Column; return true; }
-    return false;
-}
-
-static bool ParseJustify(std::string_view value, UIJustify& justify)
-{
-    if (value == "flex-start" || value == "start") { justify = UIJustify::Start;        return true; }
-    if (value == "center")                         { justify = UIJustify::Center;       return true; }
-    if (value == "flex-end" || value == "end")     { justify = UIJustify::End;          return true; }
-    if (value == "space-between")                  { justify = UIJustify::SpaceBetween; return true; }
-    return false;
-}
-
-static bool ParseAlign(std::string_view value, UIAlign& align)
-{
-    if (value == "flex-start" || value == "start") { align = UIAlign::Start;   return true; }
-    if (value == "center")                         { align = UIAlign::Center;  return true; }
-    if (value == "flex-end" || value == "end")     { align = UIAlign::End;     return true; }
-    if (value == "stretch")                        { align = UIAlign::Stretch; return true; }
-    return false;
+    for (const UIKeyword<Value>& keyword : names)
+        if (keyword.value == value) return keyword.name;
+    return {};
 }
 
 static std::vector<std::string> SplitClasses(std::string_view value)
@@ -185,10 +193,10 @@ static UIDeclarationResult ApplyDeclaration(std::string_view property, std::stri
 {
     UIStyle& style = values.style;
     bool valid = true;
-    if      (property == "display")         valid = ParseDisplay(value, style.display);
-    else if (property == "flex-direction")  valid = ParseDirection(value, style.direction);
-    else if (property == "justify-content") valid = ParseJustify(value, style.justify);
-    else if (property == "align-items")     valid = ParseAlign(value, style.align);
+    if      (property == "display")         valid = ParseKeyword(value, kDisplayNames,   style.display);
+    else if (property == "flex-direction")  valid = ParseKeyword(value, kDirectionNames, style.direction);
+    else if (property == "justify-content") valid = ParseKeyword(value, kJustifyNames,   style.justify);
+    else if (property == "align-items")     valid = ParseKeyword(value, kAlignNames,     style.align);
     else if (property == "width")           valid = ParseSize(value, style.width_mode, style.width);
     else if (property == "height")          valid = ParseSize(value, style.height_mode, style.height);
     else if (property == "flex-grow")       valid = ParseFloat(value, style.grow) && style.grow >= 0.0f;
@@ -209,8 +217,79 @@ static UIDeclarationResult ApplyDeclaration(std::string_view property, std::stri
     }
     else if (property == "quad")            valid = ParseName(value, values.quad);
     else if (property == "font-family")     valid = ParseName(value, values.font_family);
+    else if (property == "caret-material")  valid = ParseName(value, values.caret_material);
+    else if (property == "caret-quad")      valid = ParseName(value, values.caret_quad);
+    else if (property == "caret-width")     valid = ParseCaretLength(value, style.caret_width_mode, style.caret_width);
+    else if (property == "caret-gap")       valid = ParseCaretLength(value, style.caret_gap_mode, style.caret_gap);
     else return UIDeclarationResult::UnknownProperty;
     return valid ? UIDeclarationResult::Applied : UIDeclarationResult::InvalidValue;
+}
+
+static constexpr std::string_view kPropertyNames[] = {
+    "display", "flex-direction", "justify-content", "align-items", "width", "height", "flex-grow", "gap",
+    "padding-top", "padding-right", "padding-bottom", "padding-left",
+    "margin-top", "margin-right", "margin-bottom", "margin-left",
+    "material",
+};
+static_assert(std::size(kPropertyNames) == std::to_underlying(UIProperty::Count));
+
+static std::string_view PropertyName(UIProperty property) { return kPropertyNames[std::to_underlying(property)]; }
+
+static bool Covers(std::string_view declared, UIProperty property)
+{
+    const std::string_view name = PropertyName(property);
+    return declared == name || (declared == "padding" && name.starts_with("padding-")) ||
+           (declared == "margin" && name.starts_with("margin-"));
+}
+
+static std::string FormatNumber(float value)
+{
+    char buffer[32];
+    // to_chars пишет -0 как "-0".
+    const std::to_chars_result result = std::to_chars(buffer, buffer + sizeof(buffer), value == 0.0f ? 0.0f : value);
+    return std::string(buffer, result.ptr);
+}
+
+static std::string FormatLength(float px) { return FormatNumber(px) + "px"; }
+
+static std::string FormatSize(UISize mode, float size)
+{
+    switch (mode) {
+        case UISize::Points:  return FormatLength(size);
+        case UISize::Percent: return FormatNumber(size) + "%";
+        default:              return "auto";   // режим Grow в файле — flex-grow
+    }
+}
+
+static std::string StyleValue(const UIStyle& style, UIProperty property)
+{
+    switch (property) {
+        case UIProperty::Display:        return std::string(KeywordOf(kDisplayNames,   style.display));
+        case UIProperty::FlexDirection:  return std::string(KeywordOf(kDirectionNames, style.direction));
+        case UIProperty::JustifyContent: return std::string(KeywordOf(kJustifyNames,   style.justify));
+        case UIProperty::AlignItems:     return std::string(KeywordOf(kAlignNames,     style.align));
+        case UIProperty::Width:          return FormatSize(style.width_mode,  style.width);
+        case UIProperty::Height:         return FormatSize(style.height_mode, style.height);
+        case UIProperty::FlexGrow:       return FormatNumber(style.FlexGrow());
+        case UIProperty::Gap:            return FormatLength(style.gap);
+        case UIProperty::PaddingTop:     return FormatLength(style.padding.top);
+        case UIProperty::PaddingRight:   return FormatLength(style.padding.right);
+        case UIProperty::PaddingBottom:  return FormatLength(style.padding.bottom);
+        case UIProperty::PaddingLeft:    return FormatLength(style.padding.left);
+        case UIProperty::MarginTop:      return FormatLength(style.margin.top);
+        case UIProperty::MarginRight:    return FormatLength(style.margin.right);
+        case UIProperty::MarginBottom:   return FormatLength(style.margin.bottom);
+        case UIProperty::MarginLeft:     return FormatLength(style.margin.left);
+        default:                         return {};
+    }
+}
+
+static std::string MaterialValue(const std::string& material) { return material.empty() ? "none" : material; }
+
+// Значение встаёт в атрибут style как есть: кавычка закрыла бы атрибут, а ';' и скобки — объявление.
+static bool IsWritableValue(std::string_view value)
+{
+    return !value.empty() && value.find_first_of("\"';{}") == std::string_view::npos;
 }
 
 static bool ParseUnsigned(std::string_view text, uint32_t& number)
@@ -241,6 +320,24 @@ static bool HasBoundDeclarations(const UIElement& element)
     return std::ranges::any_of(element.declarations, [](const UIDeclaration& declaration) { return HasVars(declaration.value); });
 }
 
+static const UIDeclaration* WinningDeclaration(const std::vector<UIDeclaration>& declarations, UIProperty property)
+{
+    for (size_t i = declarations.size(); i-- > 0;)
+        if (Covers(declarations[i].property, property)) return &declarations[i];
+    return nullptr;
+}
+
+static uint32_t BoundPropertiesOf(const std::vector<UIDeclaration>& declarations)
+{
+    uint32_t bound = 0;
+    for (uint8_t index = 0; index < std::to_underlying(UIProperty::Count); ++index) {
+        const UIProperty property{ index };
+        const UIDeclaration* winner = WinningDeclaration(declarations, property);
+        if (winner && HasSubstitutions(winner->value)) bound |= UIPropertyBit(property);
+    }
+    return bound;
+}
+
 template <class ValueOf>
 static std::string RenderTemplate(const std::vector<UITemplatePart>& parts, const ValueOf& value_of)
 {
@@ -267,6 +364,14 @@ static UIDeclaredValues RenderValues(const std::vector<UIDeclaration>& declarati
             SDL_Log("UI_Manager: %s:%u: invalid value '%s' for '%s'", path.c_str(), declaration.line, value.c_str(),
                     declaration.property.c_str());
     }
+    return values;
+}
+
+template <class ValueOf>
+static UIDeclaredValues RenderElement(const UIElement& element, const ValueOf& value_of, const std::string& path)
+{
+    UIDeclaredValues values = RenderValues(element.declarations, value_of, path);
+    for (const UIEdit& edit : element.edits) ApplyDeclaration(PropertyName(edit.property), edit.value, values);
     return values;
 }
 
@@ -383,11 +488,17 @@ static void LoadDeclarations(UILoadState& state, const UIMarkupNode& markup, UIE
                              bool& material_bound)
 {
     const auto value_of = [&state](const UITemplatePart& part) { return state.ValueOf(part); };
-    for (const UIMarkupDeclaration* declaration : ResolveUIStyle(state.document, markup)) {
-        UIDeclaration& entry = element.declarations.emplace_back(UIDeclaration{ declaration->property, {}, declaration->line });
+    const std::vector<const UIMarkupDeclaration*> resolved = ResolveUIStyle(state.document, markup);
+    // ResolveUIStyle кладёт объявления атрибута style последними.
+    const size_t first_from_style_attribute = resolved.size() - markup.style.size();
+    for (size_t index = 0; index < resolved.size(); ++index) {
+        const UIMarkupDeclaration* declaration = resolved[index];
+        UIDeclaration& entry = element.declarations.emplace_back(UIDeclaration{
+            declaration->property, {}, declaration->line, declaration->span, index >= first_from_style_attribute });
         if (!ParseTemplate(state, declaration->value, declaration->line, entry.value)) continue;
         const bool substituted = HasSubstitutions(entry.value);
-        if (substituted && (entry.property == "quad" || entry.property == "font-family")) {
+        if (substituted && (entry.property == "quad" || entry.property == "font-family" ||
+                            entry.property == "caret-material" || entry.property == "caret-quad")) {
             state.Error(declaration->line, "'" + entry.property + "' takes no {{ }}: it is read once at load");
             continue;
         }
@@ -420,13 +531,17 @@ static void LoadElement(UILoadState& state, const UIMarkupNode& markup, int32_t 
     }
     else if (markup.tag == "box")  element.kind = UIElementKind::Box;
     else if (markup.tag == "text") element.kind = UIElementKind::Text;
+    else if (markup.tag == "input") {
+        element.kind  = UIElementKind::Text;
+        element.input = true;
+    }
     else if (markup.tag == "for")  { LoadLoop(state, markup, parent); return; }
     else if (markup.tag == "var") {
         if (state.elements[safe_i_u32(parent)].kind != UIElementKind::Root)
             state.Error(markup.line, "<var> belongs directly in <ui>");
         return;
     }
-    else if (markup.tag == "br") { state.Error(markup.line, "<br/> belongs in <text>"); return; }
+    else if (markup.tag == "br") { state.Error(markup.line, "<br/> belongs in <text> or <input>"); return; }
     else { state.Error(markup.line, "unknown tag <" + markup.tag + ">"); return; }
 
     for (const UIMarkupAttribute& attribute : markup.attributes) {
@@ -437,22 +552,31 @@ static void LoadElement(UILoadState& state, const UIMarkupNode& markup, int32_t 
     }
     if (const UIMarkupAttribute* id = markup.Attribute("id")) element.id = id->value;
     if (const UIMarkupAttribute* classes = markup.Attribute("class")) element.classes = SplitClasses(classes->value);
+    element.style_value    = markup.style_value;
+    element.attributes_end = markup.attributes_end;
 
     UIDeclaredValues values;
     bool material_bound = false;
     LoadDeclarations(state, markup, element, values, material_bound);
+    element.bound_properties = BoundPropertiesOf(element.declarations);
 
     if (element.kind == UIElementKind::Text) {
         for (const UIMarkupNode& child : markup.children)
             if (!child.IsText() && child.tag != "br")
-                state.Error(child.line, "<text> holds only text and <br/>, not <" + child.tag + ">");
+                state.Error(child.line, "<" + markup.tag + "> holds only text and <br/>, not <" + child.tag + ">");
         ParseTemplate(state, UIMarkupText(markup), markup.line, element.text);
+        if (element.input) {
+            if (std::ranges::count_if(element.text, [](const UITemplatePart& part) { return bool(part.var); }) != 1)
+                state.Error(markup.line, "<input> needs exactly one {{variable}}");
+            if (values.caret_material.empty()) state.Error(markup.line, "<input> needs caret-material");
+            if (values.caret_quad.empty())     state.Error(markup.line, "<input> needs caret-quad");
+        }
         if (values.font_family.empty())
-            state.Error(markup.line, "<text> needs font-family");
+            state.Error(markup.line, "<" + markup.tag + "> needs font-family");
         else if (!state.font_manager->FontIdOf(values.font_family))
             state.Error(markup.line, "font '" + values.font_family + "' is not created");
-        if (values.material.empty()) state.Error(markup.line, "<text> needs material");
-        if (values.quad.empty())     state.Error(markup.line, "<text> needs quad");
+        if (values.material.empty()) state.Error(markup.line, "<" + markup.tag + "> needs material");
+        if (values.quad.empty())     state.Error(markup.line, "<" + markup.tag + "> needs quad");
     }
     else if (element.kind == UIElementKind::Box && (!values.material.empty() || material_bound) && values.quad.empty())
         state.Error(markup.line, "<box> with material needs quad");
@@ -493,13 +617,65 @@ static void LoadLoop(UILoadState& state, const UIMarkupNode& markup, int32_t par
     state.loop_indices.pop_back();
 }
 
+static bool ReadTextFile(const std::string& path, std::string& text)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return false;
+    text.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    return !file.bad();
+}
+
+// Запись идёт во временный файл, который затем подменяет исходник: оборванная запись не испортит рукописный файл.
+static bool WriteTextFile(const std::string& path, const std::string& text)
+{
+    const std::string temporary = path + ".tmp";
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+    file.write(text.data(), safe_size_ss(text.size()));
+    file.close();
+    if (!file) return false;
+    std::error_code error;
+    std::filesystem::rename(temporary, path, error);
+    return !error;
+}
+
 bool UI_Manager::Load(const FontManager* font_manager, const std::string& path)
 {
-    if (!font_manager) { SDL_Log("UI_Manager::Load: no FontManager"); return false; }
-    std::ifstream file(path, std::ios::binary);
-    if (!file) { SDL_Log("UI_Manager::Load: cannot open '%s'", path.c_str()); return false; }
-    const std::string source{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
+    std::string source;
+    if (!ReadTextFile(path, source)) { SDL_Log("UI_Manager::Load: cannot open '%s'", path.c_str()); return false; }
+    if (!LoadSource(font_manager, path, source)) return false;
+    disk_source = std::move(source);
+    return true;
+}
 
+bool UI_Manager::Save(const FontManager* font_manager)
+{
+    if (document_path.empty()) { SDL_Log("UI_Manager::Save: no UI file is loaded"); return false; }
+    if (!HasUnsavedChanges()) return true;
+    // LoadSource через Root чистит document_path.
+    const std::string path = document_path;
+    std::string disk;
+    if (!ReadTextFile(path, disk)) { SDL_Log("UI_Manager::Save: cannot read '%s'", path.c_str()); return false; }
+    if (disk != disk_source) {
+        SDL_Log("UI_Manager::Save: '%s' was changed outside the editor; Load picks it up and drops the edits", path.c_str());
+        return false;
+    }
+
+    if (unsaved_edits > 0) {
+        if (!LoadSource(font_manager, path, SourceWithEdits())) {
+            SDL_Log("UI_Manager::Save: the edited file does not load, '%s' is not written", path.c_str());
+            return false;
+        }
+        source_unsaved = true;
+    }
+    if (!WriteTextFile(path, document_source)) { SDL_Log("UI_Manager::Save: cannot write '%s'", path.c_str()); return false; }
+    disk_source    = document_source;
+    source_unsaved = false;
+    return true;
+}
+
+bool UI_Manager::LoadSource(const FontManager* font_manager, const std::string& path, const std::string& source)
+{
+    if (!font_manager) { SDL_Log("UI_Manager::Load: no FontManager"); return false; }
     const auto document = ParseUIMarkup(source);
     if (!document) {
         SDL_Log("UI_Manager::Load: %s:%u: %s", path.c_str(), document.error().line, document.error().message.c_str());
@@ -529,10 +705,12 @@ bool UI_Manager::Load(const FontManager* font_manager, const std::string& path)
     const UIVarKey no_instance;
     const auto value_of = [this, &no_instance](const UITemplatePart& part) { return PartValue(part, no_instance); };
     const Node root_node = Root(RenderValues(state.elements[0].declarations, value_of, path).style);
-    elements      = std::move(state.elements);
-    document_path = path;
+    elements        = std::move(state.elements);
+    document_path   = path;
+    document_source = source;
     nodes[root_node].id      = elements[0].id;
     nodes[root_node].classes = elements[0].classes;
+    nodes[root_node].element = 0;
     if (HasBoundDeclarations(elements[0])) AddBinding({ UIBindingKind::Style, root_node, 0 });
     std::vector<UISlot> slots = BuildItems(0, root_node, no_instance, font_manager);
     nodes[root_node].slots = std::move(slots);
@@ -542,10 +720,22 @@ bool UI_Manager::Load(const FontManager* font_manager, const std::string& path)
 std::string UI_Manager::PartValue(const UITemplatePart& part, const UIVarKey& instance) const
 {
     if (part.loop >= 0) return std::to_string(instance[safe_i_u32(part.loop)]);
-    const UIVar* var = variables.Get(part.var);
-    if (!var) return {};
-    const auto element = var->elements.find(ResolveKey(part.key, instance));
-    return element != var->elements.end() && element->second.assigned ? element->second.value : var->default_value;
+    return GetVar(part.var, ResolveKey(part.key, instance));
+}
+
+bool UI_Manager::IsInputNode(Node node) const
+{
+    return node < nodes.size() && nodes[node].element < elements.size() && elements[nodes[node].element].input;
+}
+
+bool UI_Manager::InputVarOf(Node node, UIVarId& var, UIVarKey& key) const
+{
+    if (!IsInputNode(node)) return false;
+    const std::vector<UITemplatePart>& text = elements[nodes[node].element].text;
+    const auto part = std::ranges::find_if(text, [](const UITemplatePart& candidate) { return bool(candidate.var); });
+    var = part->var;
+    key = ResolveKey(part->key, nodes[node].instance);
+    return true;
 }
 
 std::vector<UISlot> UI_Manager::BuildItems(uint32_t element, Node parent, const UIVarKey& instance,
@@ -570,7 +760,7 @@ UI_Manager::Node UI_Manager::BuildNode(uint32_t element_index, Node parent, cons
 {
     const UIElement& element = elements[element_index];
     const auto value_of = [this, &instance](const UITemplatePart& part) { return PartValue(part, instance); };
-    UIDeclaredValues values = RenderValues(element.declarations, value_of, document_path);
+    UIDeclaredValues values = RenderElement(element, value_of, document_path);
     Node node = kInvalid;
     if (element.kind == UIElementKind::Text) {
         values.style.padding = {};
@@ -579,9 +769,12 @@ UI_Manager::Node UI_Manager::BuildNode(uint32_t element_index, Node parent, cons
     }
     else
         node = Box(parent, values.style, values.material, values.quad);
-    nodes[node].id       = element.id;
-    nodes[node].classes  = element.classes;
-    nodes[node].instance = instance;
+    nodes[node].id             = element.id;
+    nodes[node].classes        = element.classes;
+    nodes[node].element        = element_index;
+    nodes[node].instance       = instance;
+    nodes[node].caret_material = values.caret_material;
+    nodes[node].caret_quad     = values.caret_quad;
 
     if (HasVars(element.text))           AddBinding({ UIBindingKind::Text,  node, element_index, instance });
     if (HasBoundDeclarations(element))   AddBinding({ UIBindingKind::Style, node, element_index, instance });
@@ -676,6 +869,14 @@ UIVarId UI_Manager::InternVar(const std::string& name)
     return id;
 }
 
+std::string UI_Manager::GetVar(UIVarId id, const UIVarKey& key) const
+{
+    const UIVar* var = variables.Get(id);
+    if (!var) return {};
+    const auto element = var->elements.find(key);
+    return element != var->elements.end() && element->second.assigned ? element->second.value : var->default_value;
+}
+
 void UI_Manager::SetVar(UIVarId id, const UIVarKey& key, std::string_view value)
 {
     UIVar* var = variables.Get(id);
@@ -711,7 +912,7 @@ void UI_Manager::ApplyDirtyBindings(EngineContext* ctx, const FontManager* font_
             case UIBindingKind::Style: {
                 // Стиль собирается заново из всех объявлений узла: связанное объявление может перекрываться
                 // следующими, в том числе частично (padding и padding-left).
-                const UIDeclaredValues values = RenderValues(element.declarations, value_of, document_path);
+                const UIDeclaredValues values = RenderElement(element, value_of, document_path);
                 SetNodeStyle(binding.target, values.style);
                 SetNodeMaterial(ctx, binding.target, values.material);
                 break;
@@ -726,4 +927,103 @@ void UI_Manager::ApplyDirtyBindings(EngineContext* ctx, const FontManager* font_
         }
     }
     dirty_bindings.clear();
+}
+
+// У экземпляров цикла один элемент на всех: правку одного экземпляра файл не выражает.
+UIElement* UI_Manager::EditableElement(Node node)
+{
+    if (node >= nodes.size() || nodes[node].element >= elements.size() || !nodes[node].instance.empty()) return nullptr;
+    return &elements[nodes[node].element];
+}
+
+void UI_Manager::SetEdit(UIElement& element, UIProperty property, std::string value, const std::string& file_value)
+{
+    const auto edit = std::ranges::find(element.edits, property, &UIEdit::property);
+    if (value == file_value) {
+        if (edit == element.edits.end()) return;
+        element.edits.erase(edit);
+        --unsaved_edits;
+        return;
+    }
+    if (edit != element.edits.end()) { edit->value = std::move(value); return; }
+    element.edits.push_back({ property, std::move(value) });
+    ++unsaved_edits;
+}
+
+void UI_Manager::EditNodeStyle(Node node, const UIStyle& style)
+{
+    if (node >= nodes.size()) return;
+    if (UIElement* element = EditableElement(node)) {
+        const UIVarKey no_instance;
+        const auto value_of = [this, &no_instance](const UITemplatePart& part) { return PartValue(part, no_instance); };
+        const UIStyle file_style = RenderValues(element->declarations, value_of, document_path).style;
+        for (uint8_t index = 0; index < std::to_underlying(UIProperty::Count); ++index) {
+            const UIProperty property{ index };
+            if (property == UIProperty::Material || (element->bound_properties & UIPropertyBit(property))) continue;
+            std::string value = StyleValue(style, property);
+            if (value != StyleValue(nodes[node].style, property))
+                SetEdit(*element, property, std::move(value), StyleValue(file_style, property));
+        }
+    }
+    SetNodeStyle(node, style);
+}
+
+void UI_Manager::EditNodeMaterial(EngineContext* ctx, Node node, const std::string& material)
+{
+    if (node >= nodes.size() || (nodes[node].shape && material.empty())) return;
+    UIElement* element = EditableElement(node);
+    if (element && !(element->bound_properties & UIPropertyBit(UIProperty::Material))) {
+        const UIVarKey no_instance;
+        const auto value_of = [this, &no_instance](const UITemplatePart& part) { return PartValue(part, no_instance); };
+        std::string value = MaterialValue(material);
+        if (IsWritableValue(value))
+            SetEdit(*element, UIProperty::Material, std::move(value),
+                    MaterialValue(RenderValues(element->declarations, value_of, document_path).material));
+        else
+            SDL_Log("UI_Manager: material '%s' cannot be written to the UI file", material.c_str());
+    }
+    SetNodeMaterial(ctx, node, material);
+}
+
+struct UISourcePatch {
+    uint32_t    offset = 0;
+    uint32_t    length = 0;
+    std::string text;
+};
+
+// Правка заменяет объявление атрибута style, если оно и решает значение свойства, а иначе дописывается в конец
+// атрибута: он последний в каскаде и перекрывает любые правила. Правила <style> не меняются.
+std::string UI_Manager::SourceWithEdits() const
+{
+    std::vector<UISourcePatch> patches;
+    for (const UIElement& element : elements) {
+        std::string appended;
+        for (const UIEdit& edit : element.edits) {
+            const std::string_view property = PropertyName(edit.property);
+            const UIDeclaration* winner = WinningDeclaration(element.declarations, edit.property);
+            if (winner && winner->from_style_attribute && winner->property == property && !HasSubstitutions(winner->value)) {
+                patches.push_back({ winner->span.offset, winner->span.length, edit.value });
+                continue;
+            }
+            if (!appended.empty()) appended += "; ";
+            appended.append(property).append(": ").append(edit.value);
+        }
+        if (appended.empty()) continue;
+
+        if (!element.style_value) {
+            patches.push_back({ element.attributes_end, 0, " style=\"" + appended + "\"" });
+            continue;
+        }
+        const UIMarkupSpan span = *element.style_value;
+        const std::string_view style = std::string_view(document_source).substr(span.offset, span.length);
+        const size_t last = style.find_last_not_of(" \t\r\n\f");
+        if (last == std::string_view::npos) { patches.push_back({ span.offset, 0, appended }); continue; }
+        patches.push_back({ span.offset + safe_u32(last + 1), 0, (style[last] == ';' ? " " : "; ") + appended });
+    }
+
+    // С конца файла: замена другой длины сдвигает всё, что за ней.
+    std::ranges::sort(patches, std::ranges::greater{}, &UISourcePatch::offset);
+    std::string source = document_source;
+    for (const UISourcePatch& patch : patches) source.replace(patch.offset, patch.length, patch.text);
+    return source;
 }

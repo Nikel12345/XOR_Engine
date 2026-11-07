@@ -31,6 +31,7 @@ void Engine::PrepareFunc(uint8_t slot)
 		PROF_SCOPE(Sim, " ui_emit");
 		ui_manager->ApplyDirtyBindings(engine_context, font_manager, scene_swap_mutex);
 		ui_manager->Emit(engine_context, GetWindowWidth(), GetWindowHeight());
+		ui_manager->UpdateCaret(engine_context);
 	}
 
 	if (Camera* cam = camera_manager->GetActiveCamera()) {
