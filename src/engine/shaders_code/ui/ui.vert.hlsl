@@ -18,6 +18,7 @@ StructuredBuffer<int>      Rows           : register(t1, space0);   // -1 = не
 struct InstanceData { float alpha; uint flags; };
 StructuredBuffer<InstanceData> InstanceDataBlock : register(t2, space0);
 
+//@push ui_camera
 cbuffer UICamera : register(b0, space1) { float4 ui_camera; };
 
 VSOutput main(VSInput input)

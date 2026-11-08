@@ -49,6 +49,12 @@ void DefaultShaderProgramSet::SetDefaultPushes(EngineContext* ctx)
         b.Push(in.texture_batch->variant_layout);
     });
 
+    sm->RegisterPushKind<RP::UICameraPushData>("ui_camera", PushStage::Vertex,
+        [](const PushConstantBinder& binder, RP::UICameraPushData camera) { binder.Push(camera); });
+    sm->RegisterPushKind("ui_window_size", PushStage::Fragment, [ctx](const PushConstantBinder& binder, const PushInput&) {
+        binder.Push(RP::UIWindowSizePushData{ ctx->GetWindowWidth(), ctx->GetWindowHeight() });
+    });
+
     sm->CreatePushInstruction<RP::ShadowPushData>("ShadowCaster", PushStage::Vertex,
         [](const PushConstantBinder& b, RP::ShadowPushData data) { b.Push(data.camera_index); });
     sm->CreatePushInstruction<RP::ShadowPushData>("ShadowCaster", PushStage::Fragment,
@@ -59,8 +65,6 @@ void DefaultShaderProgramSet::SetDefaultPushes(EngineContext* ctx)
         [](const PushConstantBinder& b, RP::ShadowPushData data) { b.Push(data); });
     sm->CreatePushInstruction<RP::DebugColliderPushData>("Wireframe", PushStage::Fragment,
         [](const PushConstantBinder& b, RP::DebugColliderPushData data) { b.Push(data); });
-    sm->CreatePushInstruction<RP::UICameraPushData>("UI", PushStage::Vertex,
-        [](const PushConstantBinder& b, RP::UICameraPushData data) { b.Push(data); });
 }
 
 void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
@@ -209,6 +213,13 @@ void DefaultShaderProgramSet::SetDefaultShaders(EngineContext* ctx)
 			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_INSTANCE_BUFFER },
 			"ui_fs", { UI_TEXT_RANK_BUFFER, UI_TEXT_INDEX_BUFFER, UI_TEXT_BUFFER, UI_FONT_UVL_BUFFER,
 			           DEFAULT_TEX_STATE_RANK_BUFFER, DEFAULT_TEX_STATE_INDEX_BUFFER, DEFAULT_TEX_STATE_BUFFER },
+			{ TextureSlotRole::Albedo }, ResourceTag::CodeOwned | ResourceTag::Default);
+
+		ctx->CreateFragmentShader("ui_nine_slice_fs", EnginePath("shaders_code/ui/nine_slice_surface.hlsl").c_str(),
+			ResourceTag::CodeOwned | ResourceTag::Default, { { "MAX_UVL_BLOCKS", std::to_string(MAX_UVL_BLOCKS) } });
+		ctx->CreateShaderProgram("UINineSlice", spd, RP::UI_PASS,
+			"ui_vs", { DEFAULT_TRANSFORM_BUFFER, DEFAULT_POSITION_INDEX_BUFFER, DEFAULT_INSTANCE_BUFFER },
+			"ui_nine_slice_fs", { DEFAULT_TRANSFORM_BUFFER },
 			{ TextureSlotRole::Albedo }, ResourceTag::CodeOwned | ResourceTag::Default);
 	}
 

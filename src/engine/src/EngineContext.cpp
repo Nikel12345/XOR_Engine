@@ -413,6 +413,16 @@ void EngineContext::SaveUI()
 	else SDL_Log("SaveUI: engine back-pointer not set");
 }
 
+float EngineContext::GetWindowWidth() const
+{
+	return engine ? engine->GetWindowWidth() : 0.0f;
+}
+
+float EngineContext::GetWindowHeight() const
+{
+	return engine ? engine->GetWindowHeight() : 0.0f;
+}
+
 void EngineContext::ExecuteSceneGenerators()
 {
 	auto scene = object_manager->GetActiveScene();

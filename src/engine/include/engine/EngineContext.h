@@ -170,6 +170,8 @@ public:
 	UI_Manager* GetUIManager() const { return ui_manager; }
 
 	void SetEngine(Engine* e) { engine = e; }
+	float GetWindowWidth() const;
+	float GetWindowHeight() const;
 
 private:
 	TextureManager* texture_manager = nullptr;

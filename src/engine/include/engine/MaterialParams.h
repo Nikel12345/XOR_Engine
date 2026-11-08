@@ -32,3 +32,10 @@ struct alignas(16) UIMaterialParams
 };
 static_assert(sizeof(UIMaterialParams) == 48,
               "MaterialBlock должен быть кратен 16 байтам (cbuffer-выравнивание)");
+
+struct alignas(16) UINineSliceMaterialParams
+{
+    float tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+};
+static_assert(sizeof(UINineSliceMaterialParams) == 16,
+              "MaterialBlock должен быть кратен 16 байтам (cbuffer-выравнивание)");

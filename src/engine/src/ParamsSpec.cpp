@@ -141,4 +141,8 @@ void RegisterBuiltinMaterialParamsSpecs()
         ParamsFieldSpec::Num(PARAMS_FIELD(UIMaterialParams, text_height), K::F32, 0, 1).Label("Text Height"),
         ParamsFieldSpec::Num(PARAMS_FIELD(UIMaterialParams, text_anchor), K::F32, 0, 1).Label("Text Anchor (0=top,1=bot)"),
     }));
+
+    reg.Register(MakeParamsSpec<UINineSliceMaterialParams>("UINineSlice", {
+        ParamsFieldSpec::Num(PARAMS_FIELD(UINineSliceMaterialParams, tint), K::Color4).Label("Tint"),
+    }));
 }

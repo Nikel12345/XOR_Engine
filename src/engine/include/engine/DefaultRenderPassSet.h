@@ -85,6 +85,7 @@ namespace DefaultRenderPassNamespace
     void SetUIPass(EngineContext* ctx);
     struct alignas(16) UICameraPushData { float fov = 0.7853982f; float pad[3] = { 0.0f, 0.0f, 0.0f }; };
     inline const std::string UI_CAMERA_STATE = "UICamera";
+    struct alignas(16) UIWindowSizePushData { float width = 0.0f; float height = 0.0f; float pad[2] = { 0.0f, 0.0f }; };
 
     // Финальный проход: blit HDR-сцены (scene_hdr) в свопчейн с конвертацией формата.
     void SetPresentPass(EngineContext* ctx);
