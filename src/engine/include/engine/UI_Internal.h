@@ -2,6 +2,7 @@
 #include <string>
 #include "ComponentStorage.h"
 #include "ShaderTypes.h"
+#include "UI_Index.h"
 
 namespace ui {
 
@@ -15,7 +16,7 @@ struct Selection {
     Entity      entity  = static_cast<Entity>(-1);
     int         index   = -1;
     std::string name;
-    uint32_t    ui_node = 0xFFFFFFFFu;
+    UINodeIndex ui_node;
 };
 
 extern Selection g_sel;

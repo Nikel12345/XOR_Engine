@@ -149,10 +149,34 @@ static void WritePositions(ObjectManager* object_manager, SceneData* scene, Enti
     columns.i[row] = matrix.i;  columns.j[row] = matrix.j;  columns.k[row] = matrix.k;  columns.l[row] = matrix.l;
 }
 
-static UITextComponent MakeTextComponent(const UINode& entry, float width, float height)
+static UITextComponent MakeTextComponent(const UITextData& text, float width, float height)
 {
-    const float line_height = entry.shape->line_height;
-    return UITextComponent{ entry.wrapped_glyphs, entry.font, width / line_height, height / line_height };
+    const float line_height = text.shape->line_height;
+    return UITextComponent{ text.wrapped_glyphs, text.font, width / line_height, height / line_height };
+}
+
+static const char* KindName(const UINodeKind& kind)
+{
+    if (std::holds_alternative<UIBoxData>(kind))   return "box";
+    if (std::holds_alternative<UITextData>(kind))  return "text";
+    if (std::holds_alternative<UIInputData>(kind)) return "input";
+    assert(false && "KindName: node of unknown kind");
+    return "?";
+}
+
+static std::optional<UITextData> MakeTextData(YGNodeRef yoga_node, const std::string& utf8, FontId font,
+                                              const FontManager* font_manager)
+{
+    const FontData* font_data = font_manager ? font_manager->GetFont(font) : nullptr;
+    if (!font_data) return std::nullopt;
+    UITextData text{ std::make_unique<UITextShape>(), font };
+    text.shape->line_height = safe_sint32_f(font_data->line_height);
+    text.shape->glyphs      = ShapeGlyphs(font_data, font_manager, utf8);
+    // Адрес shape — контекст measure-функции, поэтому shape живёт отдельной аллокацией: nodes
+    // переезжает при росте.
+    YGNodeSetContext(yoga_node, text.shape.get());
+    YGNodeSetMeasureFunc(yoga_node, MeasureText);
+    return text;
 }
 
 UI_Manager::UI_Manager() : yoga_config(YGConfigNew()) {}
@@ -163,190 +187,192 @@ UI_Manager::~UI_Manager()
     if (yoga_config) YGConfigFree(yoga_config);
 }
 
-UI_Manager::Node UI_Manager::RootNode() const { return root; }
+UINodeIndex UI_Manager::RootNode() const { return root; }
 
-uint32_t UI_Manager::ChildCount(Node node) const
+uint32_t UI_Manager::ChildCount(UINodeIndex node) const
 {
-    return node < nodes.size() ? safe_u32(nodes[node].children.size()) : 0u;
+    return node.value < nodes.size() ? safe_u32(nodes[node.value].children.size()) : 0u;
 }
 
-UI_Manager::Node UI_Manager::ChildAt(Node node, uint32_t index) const
+UINodeIndex UI_Manager::ChildAt(UINodeIndex node, uint32_t index) const
 {
-    if (node >= nodes.size() || index >= nodes[node].children.size()) return kInvalid;
-    return nodes[node].children[index];
+    if (node.value >= nodes.size() || index >= nodes[node.value].children.size()) return {};
+    return nodes[node.value].children[index];
 }
 
-std::string UI_Manager::NodeLabel(Node node) const
+std::string UI_Manager::NodeLabel(UINodeIndex node) const
 {
-    if (node >= nodes.size()) return "<invalid>";
-    const UINode& entry = nodes[node];
-    std::string label = node == root ? "ui" : IsInputNode(node) ? "input" : entry.shape ? "text" : "box";
+    if (node.value >= nodes.size()) return "<invalid>";
+    const UINode& entry = nodes[node.value];
+    std::string label = node == root ? "ui" : KindName(entry.kind);
     if (!entry.id.empty()) label += "#" + entry.id;
     for (const std::string& name : entry.classes) label += "." + name;
     for (uint32_t index : entry.instance) label += "[" + std::to_string(index) + "]";
     return label;
 }
 
-UI_Manager::Node UI_Manager::FindNode(std::string_view id, const UIVarKey& instance) const
+UINodeIndex UI_Manager::FindNode(std::string_view id, const UIVarKey& instance) const
 {
-    if (id.empty()) return kInvalid;
+    if (id.empty()) return {};
     for (size_t i = 0; i < nodes.size(); ++i)
-        if (nodes[i].id == id && nodes[i].instance == instance) return safe_u32(i);
-    return kInvalid;
+        if (nodes[i].id == id && nodes[i].instance == instance) return UINodeIndex{ safe_u32(i) };
+    return {};
 }
 
-bool UI_Manager::IsNodeShown(Node node) const
+bool UI_Manager::IsNodeShown(UINodeIndex node) const
 {
-    return node < nodes.size() && nodes[node].emitted && nodes[node].shown;
+    return node.value < nodes.size() && nodes[node.value].emitted && nodes[node.value].shown;
 }
 
-glm::vec2 UI_Manager::NodePoint(Node node, float window_x, float window_y) const
+glm::vec2 UI_Manager::NodePoint(UINodeIndex node, float window_x, float window_y) const
 {
-    const UINode& entry = nodes[node];
+    const UINode& entry = nodes[node.value];
     const float center_x = (entry.ndc_center_x + 1.0f) * 0.5f * last_screen_width;
     const float center_y = (1.0f - entry.ndc_center_y) * 0.5f * last_screen_height;
     // local работает в пикселях с осью y вверх (как NDC), а окно считает y вниз.
     return glm::inverse(glm::mat2(entry.local)) * glm::vec2(window_x - center_x, center_y - window_y);
 }
 
-bool UI_Manager::NodeContains(Node node, float window_x, float window_y) const
+bool UI_Manager::NodeContains(UINodeIndex node, float window_x, float window_y) const
 {
     if (!IsNodeShown(node)) return false;
-    const UINode& entry = nodes[node];
+    const UINode& entry = nodes[node.value];
     if (glm::determinant(glm::mat2(entry.local)) == 0.0f) return false;
 
     const glm::vec2 point = NodePoint(node, window_x, window_y);
     return std::abs(point.x) <= 0.5f * entry.layout_width && std::abs(point.y) <= 0.5f * entry.layout_height;
 }
 
-void UI_Manager::NudgeNode(Node node, float delta_x, float delta_y, float delta_z)
+void UI_Manager::NudgeNode(UINodeIndex node, float delta_x, float delta_y, float delta_z)
 {
-    if (node >= nodes.size()) return;
-    UINode& entry = nodes[node];
+    if (node.value >= nodes.size()) return;
+    UINode& entry = nodes[node.value];
     entry.offset_x += delta_x;
     entry.offset_y += delta_y;
     entry.offset_z += delta_z;
     emit_needed = true;
 }
 
-bool UI_Manager::GetNodeNdc(Node node, float& ndc_x, float& ndc_y, float& ndc_z) const
+bool UI_Manager::GetNodeNdc(UINodeIndex node, float& ndc_x, float& ndc_y, float& ndc_z) const
 {
     if (!IsNodeShown(node)) return false;
-    const UINode& entry = nodes[node];
+    const UINode& entry = nodes[node.value];
     ndc_x = entry.ndc_center_x;
     ndc_y = entry.ndc_center_y;
     ndc_z = entry.ndc_z;
     return true;
 }
 
-void UI_Manager::GetOffset(Node node, float& offset_x, float& offset_y, float& offset_z) const
+void UI_Manager::GetOffset(UINodeIndex node, float& offset_x, float& offset_y, float& offset_z) const
 {
-    if (node >= nodes.size()) { offset_x = offset_y = offset_z = 0.0f; return; }
-    const UINode& entry = nodes[node];
+    if (node.value >= nodes.size()) { offset_x = offset_y = offset_z = 0.0f; return; }
+    const UINode& entry = nodes[node.value];
     offset_x = entry.offset_x;
     offset_y = entry.offset_y;
     offset_z = entry.offset_z;
 }
 
-void UI_Manager::SetNodeTransform(Node node, const float matrix[16])
+void UI_Manager::SetNodeTransform(UINodeIndex node, const float matrix[16])
 {
-    if (node >= nodes.size()) return;
-    nodes[node].local = glm::make_mat4(matrix);
+    if (node.value >= nodes.size()) return;
+    nodes[node.value].local = glm::make_mat4(matrix);
     emit_needed = true;
 }
 
-bool UI_Manager::GetNodeTransform(Node node, float matrix[16]) const
+bool UI_Manager::GetNodeTransform(UINodeIndex node, float matrix[16]) const
 {
-    if (node >= nodes.size()) return false;
-    std::memcpy(matrix, glm::value_ptr(nodes[node].local), 16 * sizeof(float));
+    if (node.value >= nodes.size()) return false;
+    std::memcpy(matrix, glm::value_ptr(nodes[node.value].local), 16 * sizeof(float));
     return true;
 }
 
-void UI_Manager::SetNodeStyle(Node node, const UIStyle& style)
+void UI_Manager::SetNodeStyle(UINodeIndex node, const UIStyle& style)
 {
-    if (node >= nodes.size()) return;
-    UINode& entry = nodes[node];
+    if (node.value >= nodes.size()) return;
+    UINode& entry = nodes[node.value];
     entry.style = style;
-    if (entry.shape) entry.style.padding = {};
+    if (entry.TextData()) entry.style.padding = {};
     ApplyStyle(entry.yoga_node, entry.style, entry.parked);
     emit_needed = true;
 }
 
-void UI_Manager::SetNodeParked(Node node, bool parked)
+void UI_Manager::SetNodeParked(UINodeIndex node, bool parked)
 {
-    UINode& entry = nodes[node];
+    UINode& entry = nodes[node.value];
     if (entry.parked == parked) return;
     entry.parked = parked;
     ApplyStyle(entry.yoga_node, entry.style, parked);
     emit_needed = true;
 }
 
-void UI_Manager::RebuildChildren(Node parent)
+void UI_Manager::RebuildChildren(UINodeIndex parent)
 {
-    std::vector<Node> order;
-    AppendSlotNodes(nodes[parent].slots, order);
+    std::vector<UINodeIndex> order;
+    AppendSlotNodes(nodes[parent.value].slots, order);
     std::vector<YGNodeRef> yoga_children;
     yoga_children.reserve(order.size());
-    for (Node child : order) yoga_children.push_back(nodes[child].yoga_node);
-    YGNodeSetChildren(nodes[parent].yoga_node, yoga_children.data(), yoga_children.size());
-    nodes[parent].children = std::move(order);
+    for (UINodeIndex child : order) yoga_children.push_back(nodes[child.value].yoga_node);
+    YGNodeSetChildren(nodes[parent.value].yoga_node, yoga_children.data(), yoga_children.size());
+    nodes[parent.value].children = std::move(order);
     emit_needed = true;
 }
 
-bool UI_Manager::GetNodeStyle(Node node, UIStyle& style) const
+bool UI_Manager::GetNodeStyle(UINodeIndex node, UIStyle& style) const
 {
-    if (node >= nodes.size()) return false;
-    style = nodes[node].style;
+    if (node.value >= nodes.size()) return false;
+    style = nodes[node.value].style;
     return true;
 }
 
-bool UI_Manager::GetNodeLayoutSize(Node node, float& width, float& height) const
+bool UI_Manager::GetNodeLayoutSize(UINodeIndex node, float& width, float& height) const
 {
-    if (node >= nodes.size() || !nodes[node].emitted) return false;
-    width  = nodes[node].layout_width;
-    height = nodes[node].layout_height;
+    if (node.value >= nodes.size() || !nodes[node.value].emitted) return false;
+    width  = nodes[node.value].layout_width;
+    height = nodes[node.value].layout_height;
     return true;
 }
 
-bool UI_Manager::IsTextNode(Node node) const
+bool UI_Manager::IsTextNode(UINodeIndex node) const
 {
-    return node < nodes.size() && nodes[node].shape != nullptr;
+    return node.value < nodes.size() && nodes[node.value].TextData() != nullptr;
 }
 
-bool UI_Manager::IsLoopInstance(Node node) const
+bool UI_Manager::IsLoopInstance(UINodeIndex node) const
 {
-    return node < nodes.size() && !nodes[node].instance.empty();
+    return node.value < nodes.size() && !nodes[node.value].instance.empty();
 }
 
-uint32_t UI_Manager::BoundProperties(Node node) const
+uint32_t UI_Manager::BoundProperties(UINodeIndex node) const
 {
-    if (node >= nodes.size() || nodes[node].element >= elements.size()) return 0;
-    return elements[nodes[node].element].bound_properties;
+    if (node.value >= nodes.size() || nodes[node.value].element.value >= elements.size()) return 0;
+    const UIElementStyle* style = elements[nodes[node.value].element.value].Style();
+    return style ? style->bound_properties : 0;
 }
 
-void UI_Manager::SetText(Node node, const std::string& utf8, const FontManager* font_manager)
+void UI_Manager::SetText(UINodeIndex node, const std::string& utf8, const FontManager* font_manager)
 {
-    if (node >= nodes.size() || !font_manager) return;
-    UINode& entry = nodes[node];
-    const FontData* font = font_manager->GetFont(entry.font);
-    if (!entry.shape || !font) return;
+    if (node.value >= nodes.size() || !font_manager) return;
+    UINode& entry = nodes[node.value];
+    UITextData* text = entry.TextData();
+    const FontData* font = text ? font_manager->GetFont(text->font) : nullptr;
+    if (!font) return;
 
     std::vector<UITextShape::Glyph> glyphs = ShapeGlyphs(font, font_manager, utf8);
-    if (glyphs == entry.shape->glyphs) return;
-    entry.shape->glyphs = std::move(glyphs);
+    if (glyphs == text->shape->glyphs) return;
+    text->shape->glyphs = std::move(glyphs);
     // Yoga кэширует замер узла с measure-функцией и без пометки не спросит размер заново.
     YGNodeMarkDirty(entry.yoga_node);
     emit_needed = true;
 }
 
-void UI_Manager::SetNodeMaterial(EngineContext* ctx, Node node, const std::string& material)
+void UI_Manager::SetNodeMaterial(EngineContext* ctx, UINodeIndex node, const std::string& material)
 {
-    if (node >= nodes.size()) return;
-    UINode& entry = nodes[node];
-    if (entry.material == material || (entry.shape && material.empty())) return;
+    if (node.value >= nodes.size()) return;
+    UINode& entry = nodes[node.value];
+    if (entry.material == material || (entry.TextData() && material.empty())) return;
     entry.material = material;
 
-    const bool draws = entry.shape || !material.empty();
+    const bool draws = entry.TextData() || !material.empty();
     if (draws != entry.draws) {
         entry.draws     = draws;
         emit_needed     = true;
@@ -357,42 +383,42 @@ void UI_Manager::SetNodeMaterial(EngineContext* ctx, Node node, const std::strin
     }
 }
 
-bool UI_Manager::GetNodeEntity(Node node, Entity& entity) const
+bool UI_Manager::GetNodeEntity(UINodeIndex node, Entity& entity) const
 {
-    if (node >= nodes.size() || !nodes[node].has_entity) return false;
-    entity = nodes[node].entity;
+    if (node.value >= nodes.size() || !nodes[node.value].has_entity) return false;
+    entity = nodes[node.value].entity;
     return true;
 }
 
-UI_Manager::Node UI_Manager::MakeNode(const UIStyle& style)
+UINodeIndex UI_Manager::MakeNode(const UIStyle& style)
 {
     YGNodeRef yoga_node = YGNodeNewWithConfig(yoga_config);
     ApplyStyle(yoga_node, style, false);
-    const Node node = safe_u32(nodes.size());
+    const UINodeIndex node{ safe_u32(nodes.size()) };
     nodes.push_back(UINode{ yoga_node, style });   // может реаллоцировать: ссылки на узлы — только после него
     return node;
 }
 
-void UI_Manager::AttachChild(Node parent, Node child)
+void UI_Manager::AttachChild(UINodeIndex parent, UINodeIndex child)
 {
-    UINode& parent_entry = nodes[parent];
-    YGNodeInsertChild(parent_entry.yoga_node, nodes[child].yoga_node, YGNodeGetChildCount(parent_entry.yoga_node));
+    UINode& parent_entry = nodes[parent.value];
+    YGNodeInsertChild(parent_entry.yoga_node, nodes[child.value].yoga_node, YGNodeGetChildCount(parent_entry.yoga_node));
     parent_entry.children.push_back(child);
     emit_needed     = true;
     recreate_needed = true;
 }
 
-UI_Manager::Node UI_Manager::Root(const UIStyle& style)
+UINodeIndex UI_Manager::Root(const UIStyle& style)
 {
     Clear();
     root = MakeNode(style);
     return root;
 }
 
-UI_Manager::Node UI_Manager::Box(Node parent, const UIStyle& style, const std::string& material, const std::string& quad)
+UINodeIndex UI_Manager::Box(UINodeIndex parent, const UIStyle& style, const std::string& material, const std::string& quad)
 {
-    const Node node = MakeNode(style);
-    UINode& entry = nodes[node];
+    const UINodeIndex node = MakeNode(style);
+    UINode& entry = nodes[node.value];
     entry.material = material;
     entry.quad     = quad;
     entry.draws    = !material.empty();
@@ -400,9 +426,7 @@ UI_Manager::Node UI_Manager::Box(Node parent, const UIStyle& style, const std::s
     return node;
 }
 
-UI_Manager::Node UI_Manager::Text(Node parent, const UIStyle& style, const std::string& utf8,
-                                  const std::string& material, const std::string& quad, FontId font,
-                                  const FontManager* font_manager)
+UINodeIndex UI_Manager::MakeTextLeaf(const UIStyle& style, const std::string& material, const std::string& quad)
 {
     // ui.frag рисует текст от угла рамки узла и об отступе внутри неё не знает.
     UIStyle text_style = style;
@@ -410,21 +434,33 @@ UI_Manager::Node UI_Manager::Text(Node parent, const UIStyle& style, const std::
         SDL_Log("UI_Manager::Text: padding belongs to the parent box, ignored");
         text_style.padding = {};
     }
-    const Node node = MakeNode(text_style);
-    UINode& entry = nodes[node];
+    const UINodeIndex node = MakeNode(text_style);
+    UINode& entry = nodes[node.value];
     entry.material = material;
     entry.quad     = quad;
     entry.draws    = true;
-    entry.font     = font;
-    if (const FontData* font_data = font_manager ? font_manager->GetFont(font) : nullptr) {
-        entry.shape = std::make_unique<UITextShape>();
-        entry.shape->line_height = safe_sint32_f(font_data->line_height);
-        entry.shape->glyphs      = ShapeGlyphs(font_data, font_manager, utf8);
-        // Адрес shape — контекст measure-функции, поэтому shape живёт отдельной аллокацией: nodes
-        // переезжает при росте.
-        YGNodeSetContext(entry.yoga_node, entry.shape.get());
-        YGNodeSetMeasureFunc(entry.yoga_node, MeasureText);
-    }
+    return node;
+}
+
+UINodeIndex UI_Manager::Text(UINodeIndex parent, const UIStyle& style, const std::string& utf8,
+                             const std::string& material, const std::string& quad, FontId font,
+                             const FontManager* font_manager)
+{
+    const UINodeIndex node = MakeTextLeaf(style, material, quad);
+    if (std::optional<UITextData> text = MakeTextData(nodes[node.value].yoga_node, utf8, font, font_manager))
+        nodes[node.value].kind = std::move(*text);
+    AttachChild(parent, node);
+    return node;
+}
+
+UINodeIndex UI_Manager::Input(UINodeIndex parent, const UIStyle& style, const std::string& utf8,
+                              const std::string& material, const std::string& quad, FontId font,
+                              const FontManager* font_manager, const std::string& caret_material,
+                              const std::string& caret_quad)
+{
+    const UINodeIndex node = MakeTextLeaf(style, material, quad);
+    if (std::optional<UITextData> text = MakeTextData(nodes[node.value].yoga_node, utf8, font, font_manager))
+        nodes[node.value].kind = UIInputData{ std::move(*text), caret_material, caret_quad };
     AttachChild(parent, node);
     return node;
 }
@@ -432,12 +468,12 @@ UI_Manager::Node UI_Manager::Text(Node parent, const UIStyle& style, const std::
 void UI_Manager::Clear()
 {
     // Box и Text всегда вставляют узел в родителя, поэтому free корня освобождает всё дерево.
-    if (root != kInvalid && nodes[root].yoga_node) YGNodeFreeRecursive(nodes[root].yoga_node);
+    if (root && nodes[root.value].yoga_node) YGNodeFreeRecursive(nodes[root.value].yoga_node);
     nodes.clear();
-    root            = kInvalid;
-    pressed_node    = kInvalid;
-    focused_node    = kInvalid;
-    caret_node      = kInvalid;
+    root            = {};
+    pressed_node    = {};
+    focused_node    = {};
+    caret_node      = {};
     emit_needed     = true;
     recreate_needed = true;
 
@@ -473,12 +509,12 @@ void UI_Manager::DeleteCreatedEntities(EngineContext* ctx, const SceneName& scen
 }
 
 void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name,
-                          Node node, float parent_x, float parent_y, bool parent_shown, float screen_width, float screen_height,
+                          UINodeIndex node, float parent_x, float parent_y, bool parent_shown, float screen_width, float screen_height,
                           int& order, bool create_entities)
 {
     constexpr float kZStep = 0.00001f;
 
-    UINode& entry = nodes[node];
+    UINode& entry = nodes[node.value];
     const float left   = parent_x + YGNodeLayoutGetLeft(entry.yoga_node) + entry.offset_x;
     const float top    = parent_y + YGNodeLayoutGetTop(entry.yoga_node)  + entry.offset_y;
     const float width  = YGNodeLayoutGetWidth(entry.yoga_node);
@@ -503,13 +539,14 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
     entry.emitted       = true;
     entry.shown         = parent_shown && entry.style.display != UIDisplay::None && !entry.parked;
 
-    if (entry.shape) {
+    UITextData* text = entry.TextData();
+    if (text) {
         // Yoga округляет раскладку до пикселя, и ширина узла расходится с той, по которой мерил
         // MeasureText, на долю пикселя: без запаса строка, влезшая при замере, здесь перенеслась бы.
         constexpr float kWrapSlack = 1.0f;
-        entry.wrapped_glyphs.clear();
-        entry.glyph_places.clear();
-        WrapText(*entry.shape, width + kWrapSlack, &entry.wrapped_glyphs, &entry.glyph_places);
+        text->wrapped_glyphs.clear();
+        text->glyph_places.clear();
+        WrapText(*text->shape, width + kWrapSlack, &text->wrapped_glyphs, &text->glyph_places);
     }
 
     if (entry.draws && !entry.quad.empty()) {
@@ -522,12 +559,12 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
             // GeneratedComponent: узлы пересоздаёт Emit, их копия в scene.sheaf дала бы дубли при загрузке.
             // TextureStateComponent ставится всегда: тег вешается только при создании, а материал узлу
             // могут сменить на вариативный позже.
-            if (entry.shape)
+            if (text)
                 entry.entity = ctx->CreateEntity(scene_name,
                     RenderableProxy::Single(ctx->GetModelManager()->InternModel(entry.quad),
                                             { ctx->GetMaterialManager()->InternMaterial(entry.material) }, entry.shown),
                     positions, UIComponent{}, GeneratedComponent{}, TextureStateComponent{},
-                    MakeTextComponent(entry, width, height));
+                    MakeTextComponent(*text, width, height));
             else
                 entry.entity = ctx->CreateEntity(scene_name,
                     RenderableProxy::Single(ctx->GetModelManager()->InternModel(entry.quad),
@@ -536,22 +573,22 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
             entry.has_entity = true;
             created_entities.push_back(entry.entity);
             // Каретку удаляет каскад вместе с полем: в created_entities её удалили бы дважды.
-            if (IsInputNode(node))
-                entry.caret_entity = ctx->CreateEntity(scene_name,
-                    RenderableProxy::Single(ctx->GetModelManager()->InternModel(entry.caret_quad),
-                                            { ctx->GetMaterialManager()->InternMaterial(entry.caret_material) }, false),
+            if (UIInputData* input = std::get_if<UIInputData>(&entry.kind))
+                input->caret_entity = ctx->CreateEntity(scene_name,
+                    RenderableProxy::Single(ctx->GetModelManager()->InternModel(input->caret_quad),
+                                            { ctx->GetMaterialManager()->InternMaterial(input->caret_material) }, false),
                     PositionProxy16{}, ParentComponent{ entry.entity }, LocalMatrixProxy16{},
-                    UIComponent{}, GeneratedComponent{}, TextureStateComponent{}, UITextComponent{ {}, entry.font });
+                    UIComponent{}, GeneratedComponent{}, TextureStateComponent{}, UITextComponent{ {}, input->text.font });
         }
         else if (entry.has_entity && object_manager->Has<Positions>(scene, entry.entity)) {
             WritePositions(object_manager, scene, entry.entity, positions);
             ctx->HideEntity(scene_name, entry.entity, entry.shown);
-            if (entry.shape && object_manager->Has<UITextComponent>(scene, entry.entity))
-                object_manager->GetComponent<UITextComponent>(scene, entry.entity) = MakeTextComponent(entry, width, height);
+            if (text && object_manager->Has<UITextComponent>(scene, entry.entity))
+                object_manager->GetComponent<UITextComponent>(scene, entry.entity) = MakeTextComponent(*text, width, height);
         }
     }
 
-    for (Node child : entry.children)
+    for (UINodeIndex child : entry.children)
         EmitNode(ctx, object_manager, scene, scene_name, child, left, top, entry.shown, screen_width, screen_height, order,
                  create_entities);
 }
@@ -573,13 +610,13 @@ void UI_Manager::Emit(EngineContext* ctx, float screen_width, float screen_heigh
     last_screen_height = screen_height;
     emit_needed        = false;
 
-    if (root == kInvalid || screen_width <= 0.0f || screen_height <= 0.0f) {
+    if (!root || screen_width <= 0.0f || screen_height <= 0.0f) {
         DeleteCreatedEntities(ctx, scene_name);
         recreate_needed = false;
         return;
     }
 
-    YGNodeCalculateLayout(nodes[root].yoga_node, screen_width, screen_height, YGDirectionLTR);
+    YGNodeCalculateLayout(nodes[root.value].yoga_node, screen_width, screen_height, YGDirectionLTR);
 
     // Пересоздание — только на структурной правке: каждый кадр оно было бы структурной мутацией ECS под
     // обходом редактора с UI-потока.

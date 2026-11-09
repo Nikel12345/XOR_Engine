@@ -10,12 +10,14 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 #include <glm/glm.hpp>
 #include "Aliases.h"
 #include "ComponentStorage.h"
 #include "ResourceId.h"
 #include "ResourceRegistry.h"
+#include "UI_Index.h"
 #include "UI_Interaction.h"
 #include "UI_Markup.h"
 
@@ -91,52 +93,70 @@ struct UIGlyphPlace {
     float    x = 0.0f;
 };
 
-struct UISlot {
-    uint32_t node = 0xFFFFFFFFu;
-    uint32_t loop = 0xFFFFFFFFu;
-};
+using UISlot = std::variant<UINodeIndex, UILoopIndex>;
 
-struct UINode {
-    YGNode*                      yoga_node = nullptr;
-    UIStyle                      style;
-    bool                         draws = false;
-    std::string                  material;
-    std::string                  quad;
+struct UIBoxData {};
+
+struct UITextData {
     std::unique_ptr<UITextShape> shape;
+    FontId                       font;
     std::vector<uint32_t>        wrapped_glyphs;
     std::vector<UIGlyphPlace>    glyph_places;
-    FontId                       font;
-    std::string                  id;
-    std::vector<std::string>     classes;
-    uint32_t                     element = 0xFFFFFFFFu;
-    UIVarKey                     instance;
-    std::vector<uint32_t>        children;
-    std::vector<UISlot>          slots;
-    float                        offset_x = 0.0f, offset_y = 0.0f, offset_z = 0.0f;
-    glm::mat4                    local{ 1.0f };
-    float                        ndc_center_x = 0.0f, ndc_center_y = 0.0f, ndc_z = 0.5f;
-    float                        layout_width = 0.0f, layout_height = 0.0f;
-    bool                         emitted = false;
-    bool                         shown = false;
-    bool                         parked = false;
-    Entity                       entity = 0;
-    bool                         has_entity = false;
-    std::string                  caret_material;
-    std::string                  caret_quad;
-    Entity                       caret_entity = 0;
 };
 
-struct UIKeyIndex {
-    uint32_t value = 0;
-    bool     from_loop = false;
+struct UIInputData {
+    UITextData  text;
+    std::string caret_material;
+    std::string caret_quad;
+    Entity      caret_entity = 0;
 };
 
-struct UITemplatePart {
-    std::string             literal;
+using UINodeKind = std::variant<UIBoxData, UITextData, UIInputData>;
+
+struct UINode {
+    YGNode*                  yoga_node = nullptr;
+    UIStyle                  style;
+    UINodeKind               kind;
+    bool                     draws = false;
+    std::string              material;
+    std::string              quad;
+    std::string              id;
+    std::vector<std::string> classes;
+    UIElementIndex           element;
+    UIVarKey                 instance;
+    std::vector<UINodeIndex> children;
+    std::vector<UISlot>      slots;
+    float                    offset_x = 0.0f, offset_y = 0.0f, offset_z = 0.0f;
+    glm::mat4                local{ 1.0f };
+    float                    ndc_center_x = 0.0f, ndc_center_y = 0.0f, ndc_z = 0.5f;
+    float                    layout_width = 0.0f, layout_height = 0.0f;
+    bool                     emitted = false;
+    bool                     shown = false;
+    bool                     parked = false;
+    Entity                   entity = 0;
+    bool                     has_entity = false;
+
+    const UITextData* TextData() const
+    {
+        if (const UITextData* text = std::get_if<UITextData>(&kind))    return text;
+        if (const UIInputData* input = std::get_if<UIInputData>(&kind)) return &input->text;
+        return nullptr;
+    }
+    UITextData* TextData() { return const_cast<UITextData*>(std::as_const(*this).TextData()); }
+};
+
+struct UILoopIndexReference {
+    uint32_t depth = 0;
+};
+
+using UIKeyIndex = std::variant<uint32_t, UILoopIndexReference>;
+
+struct UIVarReference {
     UIVarId                 var;
     std::vector<UIKeyIndex> key;
-    int32_t                 loop = -1;
 };
+
+using UITemplatePart = std::variant<std::string, UIVarReference, UILoopIndexReference>;
 
 struct UIDeclaration {
     std::string                 property;
@@ -151,38 +171,72 @@ struct UIEdit {
     std::string value;
 };
 
-enum class UIElementKind : uint8_t { Root, Box, Text, Loop };
-
-struct UIElement {
-    UIElementKind               kind = UIElementKind::Box;
+struct UIElementStyle {
     std::string                 id;
     std::vector<std::string>    classes;
     std::vector<UIDeclaration>  declarations;
-    std::vector<UITemplatePart> text;
-    bool                        input = false;
-    std::vector<UITemplatePart> count;
-    std::vector<uint32_t>       children;
-    uint32_t                    line = 0;
-    std::optional<UIMarkupSpan> style_value;
-    uint32_t                    attributes_end = 0;
     uint32_t                    bound_properties = 0;
     std::vector<UIEdit>         edits;
+    std::optional<UIMarkupSpan> style_value;
+    uint32_t                    attributes_end = 0;
 };
 
-enum class UIBindingKind : uint8_t { Text, Style, Count };
+struct UIRootElement  { UIElementStyle style; std::vector<UIElementIndex> children; };
+struct UIBoxElement   { UIElementStyle style; std::vector<UIElementIndex> children; };
+struct UITextElement  { UIElementStyle style; std::vector<UITemplatePart> text; };
+struct UIInputElement { UIElementStyle style; std::vector<UITemplatePart> text; };
+struct UILoopElement  { std::vector<UITemplatePart> count; std::vector<UIElementIndex> children; };
+
+using UIElementKind = std::variant<UIRootElement, UIBoxElement, UITextElement, UIInputElement, UILoopElement>;
+
+struct UIElement {
+    uint32_t      line = 0;
+    UIElementKind kind;
+
+    const UIElementStyle* Style() const
+    {
+        if (const UIRootElement* root = std::get_if<UIRootElement>(&kind))    return &root->style;
+        if (const UIBoxElement* box = std::get_if<UIBoxElement>(&kind))       return &box->style;
+        if (const UITextElement* text = std::get_if<UITextElement>(&kind))    return &text->style;
+        if (const UIInputElement* input = std::get_if<UIInputElement>(&kind)) return &input->style;
+        return nullptr;
+    }
+    UIElementStyle* Style() { return const_cast<UIElementStyle*>(std::as_const(*this).Style()); }
+
+    const std::vector<UITemplatePart>* Text() const
+    {
+        if (const UITextElement* text = std::get_if<UITextElement>(&kind))    return &text->text;
+        if (const UIInputElement* input = std::get_if<UIInputElement>(&kind)) return &input->text;
+        return nullptr;
+    }
+
+    const std::vector<UIElementIndex>* Children() const
+    {
+        if (const UIRootElement* root = std::get_if<UIRootElement>(&kind)) return &root->children;
+        if (const UIBoxElement* box = std::get_if<UIBoxElement>(&kind))    return &box->children;
+        if (const UILoopElement* loop = std::get_if<UILoopElement>(&kind)) return &loop->children;
+        return nullptr;
+    }
+    std::vector<UIElementIndex>* Children() { return const_cast<std::vector<UIElementIndex>*>(std::as_const(*this).Children()); }
+};
+
+struct UITextBinding  { UINodeIndex node; };
+struct UIStyleBinding { UINodeIndex node; };
+struct UICountBinding { UILoopIndex loop; };
+
+using UIBindingTarget = std::variant<UITextBinding, UIStyleBinding, UICountBinding>;
 
 struct UIBinding {
-    UIBindingKind kind = UIBindingKind::Text;
-    uint32_t      target = 0;
-    uint32_t      element = 0;
-    UIVarKey      instance;
-    bool          queued = false;
+    UIBindingTarget target;
+    UIElementIndex  element;
+    UIVarKey        instance;
+    bool            queued = false;
 };
 
 struct UIVarElement {
-    std::string           value;
-    bool                  assigned = false;
-    std::vector<uint32_t> bindings;
+    std::string                 value;
+    bool                        assigned = false;
+    std::vector<UIBindingIndex> bindings;
 };
 
 struct UIVar {
@@ -198,8 +252,8 @@ struct UILoopInstance {
 };
 
 struct UILoop {
-    uint32_t                    element = 0;
-    uint32_t                    parent = 0;
+    UIElementIndex              element;
+    UINodeIndex                 parent;
     UIVarKey                    outer;
     uint32_t                    count = 0;
     bool                        parked = false;
@@ -211,13 +265,13 @@ public:
     UI_Manager();
     ~UI_Manager();
 
-    using Node = uint32_t;
-    static constexpr Node kInvalid = 0xFFFFFFFFu;
-
-    Node Root(const UIStyle& style);
-    Node Box (Node parent, const UIStyle& style, const std::string& material, const std::string& quad);
-    Node Text(Node parent, const UIStyle& style, const std::string& utf8,
-              const std::string& material, const std::string& quad, FontId font, const FontManager* font_manager);
+    UINodeIndex Root(const UIStyle& style);
+    UINodeIndex Box (UINodeIndex parent, const UIStyle& style, const std::string& material, const std::string& quad);
+    UINodeIndex Text(UINodeIndex parent, const UIStyle& style, const std::string& utf8,
+                     const std::string& material, const std::string& quad, FontId font, const FontManager* font_manager);
+    UINodeIndex Input(UINodeIndex parent, const UIStyle& style, const std::string& utf8,
+                      const std::string& material, const std::string& quad, FontId font, const FontManager* font_manager,
+                      const std::string& caret_material, const std::string& caret_quad);
 
     bool Load(const FontManager* font_manager, const std::string& path);
     bool Save(const FontManager* font_manager);
@@ -241,31 +295,31 @@ public:
     void ApplyDirtyBindings(EngineContext* ctx, const FontManager* font_manager, std::mutex& structure_mutex);
     void Emit(EngineContext* ctx, float screen_width, float screen_height);
 
-    Node        RootNode() const;
-    uint32_t    ChildCount(Node node) const;
-    Node        ChildAt(Node node, uint32_t index) const;
-    std::string NodeLabel(Node node) const;
-    Node        FindNode(std::string_view id, const UIVarKey& instance = {}) const;
-    bool        IsNodeShown(Node node) const;
-    bool        NodeContains(Node node, float window_x, float window_y) const;
+    UINodeIndex RootNode() const;
+    uint32_t    ChildCount(UINodeIndex node) const;
+    UINodeIndex ChildAt(UINodeIndex node, uint32_t index) const;
+    std::string NodeLabel(UINodeIndex node) const;
+    UINodeIndex FindNode(std::string_view id, const UIVarKey& instance = {}) const;
+    bool        IsNodeShown(UINodeIndex node) const;
+    bool        NodeContains(UINodeIndex node, float window_x, float window_y) const;
 
-    void NudgeNode(Node node, float delta_x, float delta_y, float delta_z);
-    bool GetNodeNdc(Node node, float& ndc_x, float& ndc_y, float& ndc_z) const;
-    void GetOffset(Node node, float& offset_x, float& offset_y, float& offset_z) const;
-    void SetNodeTransform(Node node, const float matrix[16]);
-    bool GetNodeTransform(Node node, float matrix[16]) const;
-    void SetNodeStyle(Node node, const UIStyle& style);
-    bool GetNodeStyle(Node node, UIStyle& style) const;
-    bool GetNodeLayoutSize(Node node, float& width, float& height) const;
-    bool IsTextNode(Node node) const;
-    bool IsLoopInstance(Node node) const;
-    uint32_t BoundProperties(Node node) const;
-    void SetText(Node node, const std::string& utf8, const FontManager* font_manager);
-    void SetNodeMaterial(EngineContext* ctx, Node node, const std::string& material);
-    bool GetNodeEntity(Node node, Entity& entity) const;
+    void NudgeNode(UINodeIndex node, float delta_x, float delta_y, float delta_z);
+    bool GetNodeNdc(UINodeIndex node, float& ndc_x, float& ndc_y, float& ndc_z) const;
+    void GetOffset(UINodeIndex node, float& offset_x, float& offset_y, float& offset_z) const;
+    void SetNodeTransform(UINodeIndex node, const float matrix[16]);
+    bool GetNodeTransform(UINodeIndex node, float matrix[16]) const;
+    void SetNodeStyle(UINodeIndex node, const UIStyle& style);
+    bool GetNodeStyle(UINodeIndex node, UIStyle& style) const;
+    bool GetNodeLayoutSize(UINodeIndex node, float& width, float& height) const;
+    bool IsTextNode(UINodeIndex node) const;
+    bool IsLoopInstance(UINodeIndex node) const;
+    uint32_t BoundProperties(UINodeIndex node) const;
+    void SetText(UINodeIndex node, const std::string& utf8, const FontManager* font_manager);
+    void SetNodeMaterial(EngineContext* ctx, UINodeIndex node, const std::string& material);
+    bool GetNodeEntity(UINodeIndex node, Entity& entity) const;
 
-    void EditNodeStyle(Node node, const UIStyle& style);
-    void EditNodeMaterial(EngineContext* ctx, Node node, const std::string& material);
+    void EditNodeStyle(UINodeIndex node, const UIStyle& style);
+    void EditNodeMaterial(EngineContext* ctx, UINodeIndex node, const std::string& material);
 
     void OnClick(const std::string& node_id, UIClickFunc fn);
     void PressAt(float window_x, float window_y);
@@ -281,72 +335,73 @@ public:
 
 private:
     void Clear();
-    Node MakeNode(const UIStyle& style);
-    void AttachChild(Node parent, Node child);
-    void SetNodeParked(Node node, bool parked);
-    void RebuildChildren(Node parent);
-    void AppendSlotNodes(const std::vector<UISlot>& slots, std::vector<Node>& out) const;
+    UINodeIndex MakeNode(const UIStyle& style);
+    UINodeIndex MakeTextLeaf(const UIStyle& style, const std::string& material, const std::string& quad);
+    void AttachChild(UINodeIndex parent, UINodeIndex child);
+    void SetNodeParked(UINodeIndex node, bool parked);
+    void RebuildChildren(UINodeIndex parent);
+    void AppendSlotNodes(const std::vector<UISlot>& slots, std::vector<UINodeIndex>& out) const;
 
     std::string         PartValue(const UITemplatePart& part, const UIVarKey& instance) const;
-    std::vector<UISlot> BuildItems(uint32_t element, Node parent, const UIVarKey& instance, const FontManager* font_manager);
-    Node                BuildNode(uint32_t element, Node parent, const UIVarKey& instance, const FontManager* font_manager);
-    uint32_t            BuildLoop(uint32_t element, Node parent, const UIVarKey& outer, const FontManager* font_manager);
-    void                BuildInstances(uint32_t loop, uint32_t count, const FontManager* font_manager);
-    bool                ReadLoopCount(uint32_t loop, uint32_t& count) const;
-    void                ResizeLoop(uint32_t loop, uint32_t count, const FontManager* font_manager);
-    void                UpdateParking(uint32_t loop);
+    std::vector<UISlot> BuildItems(UIElementIndex element, UINodeIndex parent, const UIVarKey& instance, const FontManager* font_manager);
+    UINodeIndex         BuildNode(UIElementIndex element, UINodeIndex parent, const UIVarKey& instance, const FontManager* font_manager);
+    UILoopIndex         BuildLoop(UIElementIndex element, UINodeIndex parent, const UIVarKey& outer, const FontManager* font_manager);
+    void                BuildInstances(UILoopIndex loop, uint32_t count, const FontManager* font_manager);
+    bool                ReadLoopCount(UILoopIndex loop, uint32_t& count) const;
+    void                ResizeLoop(UILoopIndex loop, uint32_t count, const FontManager* font_manager);
+    void                UpdateParking(UILoopIndex loop);
     void                AddBinding(UIBinding binding);
 
-    bool        LoadSource(const FontManager* font_manager, const std::string& path, const std::string& source);
-    UIElement*  EditableElement(Node node);
-    void        SetEdit(UIElement& element, UIProperty property, std::string value, const std::string& file_value);
-    std::string SourceWithEdits() const;
+    bool            LoadSource(const FontManager* font_manager, const std::string& path, const std::string& source);
+    UIElementStyle* EditableStyle(UINodeIndex node);
+    void            SetEdit(UIElementStyle& style, UIProperty property, std::string value, const std::string& file_value);
+    std::string     SourceWithEdits() const;
 
-    glm::vec2 NodePoint(Node node, float window_x, float window_y) const;
-    Node ClickableNodeAt(float window_x, float window_y) const;
+    glm::vec2 NodePoint(UINodeIndex node, float window_x, float window_y) const;
+    UINodeIndex ClickableNodeAt(float window_x, float window_y) const;
     bool IsOverUI(float window_x, float window_y) const;
-    bool IsInputNode(Node node) const;
-    bool InputVarOf(Node node, UIVarId& var, UIVarKey& key) const;
-    size_t InputPrefixLength(Node node) const;
+    bool IsInputNode(UINodeIndex node) const;
+    bool InputVarOf(UINodeIndex node, UIVarId& var, UIVarKey& key) const;
+    size_t InputPrefixLength(UINodeIndex node) const;
     size_t CaretAt(float window_x, float window_y) const;
-    void SetFocus(Node node);
-    void FindClickableNode(Node node, Node clickable_ancestor, float window_x, float window_y,
-                           float& top_z, Node& clickable) const;
+    void SetFocus(UINodeIndex node);
+    void FindClickableNode(UINodeIndex node, UINodeIndex clickable_ancestor, float window_x, float window_y,
+                           float& top_z, UINodeIndex& clickable) const;
 
     void DeleteCreatedEntities(EngineContext* ctx, const SceneName& scene_name);
     void EmitNode(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name,
-                  Node node, float parent_x, float parent_y, bool parent_shown, float screen_width, float screen_height,
+                  UINodeIndex node, float parent_x, float parent_y, bool parent_shown, float screen_width, float screen_height,
                   int& order, bool create_entities);
 
     YGConfig*           yoga_config = nullptr;
     std::vector<UINode> nodes;
     std::vector<Entity> created_entities;
-    Node                root = kInvalid;
+    UINodeIndex         root;
     float               last_screen_width = -1.0f, last_screen_height = -1.0f;
     bool                emit_needed = true;
     bool                recreate_needed = true;
 
-    UIVarRegistry          variables;
-    std::vector<UIElement> elements;
-    std::vector<UILoop>    loops;
-    std::vector<UIBinding> bindings;
-    std::vector<uint32_t>  dirty_bindings;
-    std::string            document_path;
-    std::string            document_source;
-    std::string            disk_source;
-    uint32_t               unsaved_edits = 0;
-    bool                   source_unsaved = false;
+    UIVarRegistry               variables;
+    std::vector<UIElement>      elements;
+    std::vector<UILoop>         loops;
+    std::vector<UIBinding>      bindings;
+    std::vector<UIBindingIndex> dirty_bindings;
+    std::string                 document_path;
+    std::string                 document_source;
+    std::string                 disk_source;
+    uint32_t                    unsaved_edits = 0;
+    bool                        source_unsaved = false;
 
     std::unordered_map<std::string, UIClickFunc> click_instructions;
     std::vector<UIClick>                         pending_clicks;
-    Node                                         pressed_node = kInvalid;
+    UINodeIndex                                  pressed_node;
     bool                                         press_on_ui = false;
     bool                                         mouse_enabled = true;
-    Node                                         focused_node = kInvalid;
+    UINodeIndex                                  focused_node;
     UIVarId                                      focused_var;
     UIVarKey                                     focused_key;
     size_t                                       focused_prefix = 0;
     size_t                                       caret = 0;
-    Node                                         caret_node = kInvalid;
+    UINodeIndex                                  caret_node;
     uint64_t                                     caret_blink_start = 0;
 };

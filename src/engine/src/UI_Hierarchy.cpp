@@ -141,9 +141,9 @@ namespace {
     }
 }
 
-static void DrawUITree(UI_Manager* ui_manager, UI_Manager::Node n)
+static void DrawUITree(UI_Manager* ui_manager, UINodeIndex n)
 {
-    if (n == UI_Manager::kInvalid) return;
+    if (!n) return;
     const uint32_t child_count = ui_manager->ChildCount(n);
     const std::string label = ui_manager->NodeLabel(n);
 
@@ -153,7 +153,7 @@ static void DrawUITree(UI_Manager* ui_manager, UI_Manager::Node n)
     const bool selected = (g_sel.kind == SelKind::UINode && g_sel.ui_node == n);
     if (selected) flags |= ImGuiTreeNodeFlags_Selected;
 
-    const bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(n)), flags, "%s", label.c_str());
+    const bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(n.value)), flags, "%s", label.c_str());
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
         if (selected) g_sel = Selection{};
         else { g_sel = Selection{}; g_sel.kind = SelKind::UINode; g_sel.ui_node = n; }
@@ -282,8 +282,8 @@ void UI_ImGui::DrawHierarchy(EngineContext* ctx)
         ImGui::EndDisabled();
 
         if (ui_manager) {
-            const UI_Manager::Node root = ui_manager->RootNode();
-            if (root == UI_Manager::kInvalid) ImGui::TextDisabled("(no UI tree)");
+            const UINodeIndex root = ui_manager->RootNode();
+            if (!root) ImGui::TextDisabled("(no UI tree)");
             else DrawUITree(ui_manager, root);
         }
     }

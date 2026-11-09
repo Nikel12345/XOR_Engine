@@ -183,25 +183,25 @@ struct SetTransformCmd {
 template<> struct CommandPayload<CommandId::SetTransform> { using type = SetTransformCmd; };
 
 struct UINodeNudgeCmd {
-    uint32_t node;
-    float    ddx, ddy, ddz;   // XY в пикселях раскладки (не NDC), Z — bias слоя
+    UINodeIndex node;
+    float       ddx, ddy, ddz;   // XY в пикселях раскладки (не NDC), Z — bias слоя
 };
 template<> struct CommandPayload<CommandId::NudgeUINode> { using type = UINodeNudgeCmd; };
 
 struct UINodeTransformCmd {
-    uint32_t node;
-    float    matrix[16];
+    UINodeIndex node;
+    float       matrix[16];
 };
 template<> struct CommandPayload<CommandId::SetUINodeTransform> { using type = UINodeTransformCmd; };
 
 struct UINodeStyleCmd {
-    uint32_t node;
-    UIStyle  style;
+    UINodeIndex node;
+    UIStyle     style;
 };
 template<> struct CommandPayload<CommandId::SetUINodeStyle> { using type = UINodeStyleCmd; };
 
 struct UINodeMaterialCmd {
-    uint32_t    node;
+    UINodeIndex node;
     std::string material;   // "" — снять материал
 };
 template<> struct CommandPayload<CommandId::SetUINodeMaterial> { using type = UINodeMaterialCmd; };

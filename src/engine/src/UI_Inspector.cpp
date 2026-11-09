@@ -53,9 +53,9 @@ namespace {
     // Команда доходит до sim-потока не раньше следующего кадра, а драг прибавляет приращение к тому,
     // что видит в этом кадре: со стилем, заново прочитанным из узла, шаги драга терялись бы. Поэтому
     // пока поле держат (и кадр после правки) инспектор правит свою копию.
-    void InspectUINodeStyle(EngineContext* ctx, UI_Manager* ui_manager, UI_Manager::Node n)
+    void InspectUINodeStyle(EngineContext* ctx, UI_Manager* ui_manager, UINodeIndex n)
     {
-        static UI_Manager::Node edited_node = UI_Manager::kInvalid;
+        static UINodeIndex edited_node;
         static UIStyle       edited;
         UIStyle style;
         if (edited_node == n)                 style = edited;
@@ -145,13 +145,13 @@ namespace {
 
         if (changed)
             cmd::Push<CommandId::SetUINodeStyle>(ctx->GetInputManager(), n, style);
-        edited_node = (active || changed) ? n : UI_Manager::kInvalid;
+        edited_node = (active || changed) ? n : UINodeIndex{};
         edited      = style;
     }
 
     // Текущий материал читается из Renderable энтити узла, а не из имени в узле: имя — std::string,
     // и sim-поток, переписывая его, может освободить буфер под читающим UI-потоком.
-    void InspectUINodeMaterial(EngineContext* ctx, UI_Manager* ui_manager, UI_Manager::Node n)
+    void InspectUINodeMaterial(EngineContext* ctx, UI_Manager* ui_manager, UINodeIndex n)
     {
         MaterialManager* mm = ctx->GetMaterialManager();
         ObjectManager*   om = ctx->GetObjectManager();
@@ -1336,7 +1336,7 @@ void UI_ImGui::DrawInspector(EngineContext* ctx)
     {
         UI_Manager* ui_manager = ctx->GetUIManager();
         if (!ui_manager) { ImGui::TextDisabled("no UI tree"); break; }
-        const UI_Manager::Node n = g_sel.ui_node;
+        const UINodeIndex n = g_sel.ui_node;
         ImGui::Text("UI node: %s", ui_manager->NodeLabel(n).c_str());
         float dx, dy, dz; ui_manager->GetOffset(n, dx, dy, dz);
         ImGui::Text("Offset: X=%.0f  Y=%.0f px", dx, dy);
@@ -1401,7 +1401,7 @@ void UI_ImGui::DrawGizmo(EngineContext* ctx)
     if (g_sel.kind == SelKind::UINode) {
         UI_Manager* ui_manager = ctx->GetUIManager();
         if (!ui_manager) return;
-        const UI_Manager::Node n = g_sel.ui_node;
+        const UINodeIndex n = g_sel.ui_node;
         float cx, cy, z;
         if (!ui_manager->GetNodeNdc(n, cx, cy, z)) return;
         float local[16];
