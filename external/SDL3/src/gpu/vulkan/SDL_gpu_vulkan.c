@@ -5366,7 +5366,11 @@ static void VULKAN_INTERNAL_BindGraphicsDescriptorSets(
         MAX_STORAGE_TEXTURES_PER_STAGE +
         MAX_STORAGE_BUFFERS_PER_STAGE +
         MAX_UNIFORM_BUFFERS_PER_STAGE) * 2];
-    VkDescriptorBufferInfo bufferInfos[MAX_STORAGE_BUFFERS_PER_STAGE * 2];
+    /* ENGINE-FORK: uniform buffer descriptors land here too, next to the storage buffers of
+     * both stages. Sized for storage buffers alone, the array overflows the stack on the
+     * first draw after a pipeline bind whenever a vertex + fragment pair has more than 16
+     * buffers in total, while shader creation allows up to 24. */
+    VkDescriptorBufferInfo bufferInfos[(MAX_STORAGE_BUFFERS_PER_STAGE + MAX_UNIFORM_BUFFERS_PER_STAGE) * 2];
     VkDescriptorImageInfo imageInfos[(MAX_TEXTURE_SAMPLERS_PER_STAGE + MAX_STORAGE_TEXTURES_PER_STAGE) * 2];
     Uint32 dynamicOffsets[MAX_UNIFORM_BUFFERS_PER_STAGE * 2];
     Uint32 writeCount = 0;
