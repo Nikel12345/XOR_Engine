@@ -5,6 +5,7 @@
 #include "BufferManager.h"
 #include "ObjectManager.h"
 #include "SparseRankChannel.h"
+#include "TransformRows.h"
 #include <bit>
 
 UI_DataModule::UI_DataModule() {}
@@ -20,26 +21,16 @@ void UI_DataModule::BuildStaging(ObjectManager* om)
 	rows_ = 0;
 	rank_size_ = index_size_ = text_size_ = 0;
 
-	struct ArchetypeRowBase {
-		const Renderable* column;
-		uint32_t          base;
-	};
-	std::vector<ArchetypeRowBase> row_bases;
-	om->ForEachArchetype<Positions, Renderable>(scene,
-		[&](ComponentArray<Positions, void>* posArr, ComponentArray<Renderable, void>* renderables)
-		{
-			row_bases.push_back({ &renderables->data, rows_ });
-			rows_ += safe_u32(posArr->size());
-		});
+	const TransformRows transform_rows = CollectTransformRows(om, scene);
+	rows_ = transform_rows.count;
 	if (rows_ == 0) return;
 
 	om->ForEach<Renderable, UIComponent, UITextComponent>(scene,
 		[&](SoAElement<Renderable> renderable, UIComponent&, UITextComponent& txt)
 		{
-			const auto row_base = std::find_if(row_bases.begin(), row_bases.end(),
-				[&](const ArchetypeRowBase& archetype) { return archetype.column == renderable.soa; });
-			if (row_base == row_bases.end()) return;
-			hit_rows_.push_back(row_base->base + safe_u32(renderable.index));
+			const std::optional<uint32_t> row = TransformRowOf(transform_rows, renderable);
+			if (!row) return;
+			hit_rows_.push_back(*row);
 
 			const uint32_t offset = safe_u32(text_.size());
 			const uint32_t count  = safe_u32(txt.glyphs.size());

@@ -36,6 +36,7 @@ class LightDataModule;
 class IndirectDataModule;
 class TextureStateDataModule;
 class UI_DataModule;
+class UI_ClipDataModule;
 class UI_Manager;
 class EngineContext;
 struct TransferBufferData;
@@ -184,6 +185,7 @@ private:
     IndirectDataModule* indirect_data_module = nullptr;
     TextureStateDataModule* tex_state_data_module = nullptr;
     UI_DataModule* ui_data_module = nullptr;
+    UI_ClipDataModule* ui_clip_data_module = nullptr;
     UI_Manager* ui_manager = nullptr;
     std::string ui_path;
 

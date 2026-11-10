@@ -361,4 +361,16 @@ struct UITextComponent {
 	float                 indent_lines = 0.0f;
 };
 
+struct UIClipComponent {
+	uint32_t rect_index = 0;
+};
+
+struct UIClipRectComponent {
+	uint32_t index  = 0;
+	float    left   = 0.0f;
+	float    top    = 0.0f;
+	float    right  = 0.0f;
+	float    bottom = 0.0f;
+};
+
 struct TestComponent {};

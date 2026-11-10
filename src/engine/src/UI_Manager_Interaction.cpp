@@ -170,7 +170,9 @@ void UI_Manager::UpdateCaret(EngineContext* ctx)
     if (!scene) return;
     const SceneName scene_name = object_manager->GetActiveSceneName();
 
-    if (caret_node != focused_node && caret_node && nodes[caret_node.value].has_entity)
+    // Каретку получает только поле с Renderable: у поля без модели caret_entity не задан, и под этим
+    // номером может оказаться чужая энтить.
+    if (caret_node != focused_node && caret_node && nodes[caret_node.value].has_entity && nodes[caret_node.value].HasRenderable())
         if (const UIInputData* previous = std::get_if<UIInputData>(&nodes[caret_node.value].kind))
             ctx->HideEntity(scene_name, previous->caret_entity, false);
     caret_node = focused_node;
@@ -178,7 +180,8 @@ void UI_Manager::UpdateCaret(EngineContext* ctx)
 
     const UINode& entry = nodes[focused_node.value];
     const UIInputData* input = std::get_if<UIInputData>(&entry.kind);
-    if (!input || !entry.has_entity || !object_manager->Has<LocalMatrices>(scene, input->caret_entity)) return;
+    if (!input || !entry.has_entity || !entry.HasRenderable() || !object_manager->Has<LocalMatrices>(scene, input->caret_entity))
+        return;
     if (entry.layout_width <= 0.0f || entry.layout_height <= 0.0f) return;
     ctx->HideEntity(scene_name, input->caret_entity, true);
 
@@ -248,7 +251,7 @@ void UI_Manager::FindClickableNode(UINodeIndex node, UINodeIndex clickable_ances
     if (!IsNodeShown(node)) return;
     const UINode& entry = nodes[node.value];
     const bool takes_click       = click_instructions.contains(entry.id) || std::holds_alternative<UIInputData>(entry.kind);
-    const bool visible           = entry.draws && !entry.quad.empty();
+    const bool visible           = entry.HasRenderable();
     const UINodeIndex nearest_clickable = takes_click ? node : clickable_ancestor;
 
     if ((visible || takes_click) && entry.ndc_z < top_z && NodeContains(node, window_x, window_y)) {

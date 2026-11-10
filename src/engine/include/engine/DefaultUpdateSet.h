@@ -4,6 +4,7 @@
 class ObjectManager;
 class BufferManager;
 class UI_DataModule;
+class UI_ClipDataModule;
 class FontManager;
 class CameraManager;
 class Camera;
@@ -35,4 +36,5 @@ namespace DefaultUpdateSet
 	void SetDefaultTexStateChannel(EngineContext& ctx, TextureStateDataModule* tsm);
 	void SetDefaultTexStateUpdater(EngineContext& ctx, TextureStateDataModule* tsm);
 	void SetUITextUpdaters(EngineContext& ctx, UI_DataModule* uidm, FontManager* fm, const std::string& fontName);
+	void SetUIClipUpdaters(EngineContext& ctx, UI_ClipDataModule* ucdm);
 };

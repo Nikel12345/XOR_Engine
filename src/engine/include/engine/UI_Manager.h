@@ -33,6 +33,8 @@ enum class UIDir     : uint8_t { Row, Column };
 enum class UIJustify : uint8_t { Start, Center, End, SpaceBetween };
 enum class UIAlign   : uint8_t { Start, Center, End, Stretch };
 enum class UISize    : uint8_t { Auto, Points, Percent, Grow };
+enum class UILimit   : uint8_t { None, Points, Percent };
+enum class UIOverflow : uint8_t { Visible, Hidden, Scroll, Auto };
 
 struct UIEdges {
     float top = 0.0f, right = 0.0f, bottom = 0.0f, left = 0.0f;
@@ -48,10 +50,21 @@ struct UIStyle {
     float     width       = 0.0f;
     UISize    height_mode = UISize::Auto;
     float     height      = 0.0f;
+    UILimit   min_width_mode  = UILimit::None;
+    float     min_width       = 0.0f;
+    UILimit   max_width_mode  = UILimit::None;
+    float     max_width       = 0.0f;
+    UILimit   min_height_mode = UILimit::None;
+    float     min_height      = 0.0f;
+    UILimit   max_height_mode = UILimit::None;
+    float     max_height      = 0.0f;
     float     grow        = 0.0f;
+    float     shrink      = 0.0f;
     UIEdges   padding;
     UIEdges   margin;
     float     gap         = 0.0f;
+    UIOverflow overflow_x = UIOverflow::Visible;
+    UIOverflow overflow_y = UIOverflow::Visible;
     UISize    caret_width_mode = UISize::Points;
     float     caret_width      = 2.0f;
     UISize    caret_gap_mode   = UISize::Points;
@@ -64,12 +77,16 @@ struct UIStyle {
         if (width_mode == UISize::Grow)                   return width > 0.0f ? width : 1.0f;
         return 0.0f;
     }
+
+    bool Clips() const { return overflow_x != UIOverflow::Visible || overflow_y != UIOverflow::Visible; }
 };
 
 enum class UIProperty : uint8_t {
-    Display, FlexDirection, JustifyContent, AlignItems, Width, Height, FlexGrow, Gap,
+    Display, FlexDirection, JustifyContent, AlignItems, Width, Height,
+    MinWidth, MaxWidth, MinHeight, MaxHeight, FlexGrow, FlexShrink, Gap,
     PaddingTop, PaddingRight, PaddingBottom, PaddingLeft,
     MarginTop, MarginRight, MarginBottom, MarginLeft,
+    OverflowX, OverflowY,
     Material,
     Count
 };
@@ -94,6 +111,11 @@ struct UIGlyphPlace {
 };
 
 using UISlot = std::variant<UINodeIndex, UILoopIndex>;
+
+struct UIClipArea {
+    uint32_t index = 0;
+    float    left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+};
 
 struct UIBoxData {};
 
@@ -124,11 +146,13 @@ struct UINode {
     std::vector<std::string> classes;
     UIElementIndex           element;
     UIVarKey                 instance;
+    UINodeIndex              parent;
     std::vector<UINodeIndex> children;
     std::vector<UISlot>      slots;
     float                    offset_x = 0.0f, offset_y = 0.0f, offset_z = 0.0f;
     glm::mat4                local{ 1.0f };
     float                    ndc_center_x = 0.0f, ndc_center_y = 0.0f, ndc_z = 0.5f;
+    float                    layout_left = 0.0f, layout_top = 0.0f;
     float                    layout_width = 0.0f, layout_height = 0.0f;
     bool                     emitted = false;
     bool                     shown = false;
@@ -143,6 +167,9 @@ struct UINode {
         return nullptr;
     }
     UITextData* TextData() { return const_cast<UITextData*>(std::as_const(*this).TextData()); }
+
+    bool HasRenderable() const { return draws && !quad.empty(); }
+    bool ClipsChildren() const { return std::holds_alternative<UIBoxData>(kind) && style.Clips(); }
 };
 
 struct UILoopIndexReference {
@@ -371,7 +398,7 @@ private:
     void DeleteCreatedEntities(EngineContext* ctx, const SceneName& scene_name);
     void EmitNode(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name,
                   UINodeIndex node, float parent_x, float parent_y, bool parent_shown, float screen_width, float screen_height,
-                  int& order, bool create_entities);
+                  const std::optional<UIClipArea>& clip, int& order, uint32_t& clip_count, bool create_entities);
 
     YGConfig*           yoga_config = nullptr;
     std::vector<UINode> nodes;

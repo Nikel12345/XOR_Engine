@@ -39,6 +39,9 @@ void DefaultResourceSet::CreateDefaultBuffers(BufferManager* bm)
     bm->CreateBufferData(UI_TEXT_RANK_BUFFER,     sizeof(uint32_t) * 2 * 64,  BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
     bm->CreateBufferData(UI_TEXT_INDEX_BUFFER,    sizeof(uint32_t) * 5 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
     bm->CreateBufferData(UI_TEXT_BUFFER,          sizeof(uint32_t) * 4096,    BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(UI_CLIP_RANK_BUFFER,     sizeof(uint32_t) * 2 * 64,  BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(UI_CLIP_INDEX_BUFFER,    sizeof(uint32_t) * 256,     BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
+    bm->CreateBufferData(UI_CLIP_RECT_BUFFER,     sizeof(float) * 4 * 64,     BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default);
 
     bm->CreateBufferData(UI_FONT_UVL_BUFFER, sizeof(uint32_t) * 4 * 256, BufferDataType::Dynamic, ResizeBehaviour::RESIZE_ONLY, ResourceTag::Default | ResourceTag::System);
 }

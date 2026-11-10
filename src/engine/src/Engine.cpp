@@ -26,6 +26,7 @@
 #include "LightDataModule.h"
 #include "IndirectDataModule.h"
 #include "UI_DataModule.h"
+#include "UI_ClipDataModule.h"
 #include "UI_Manager.h"
 #include "EngineContext.h"
 #include "DefaultUpdateSet.h"
@@ -309,6 +310,7 @@ Engine::Engine(const EngineConfig& cfg)
 	indirect_data_module = new IndirectDataModule();
 	tex_state_data_module = new TextureStateDataModule();
 	ui_data_module = new UI_DataModule();
+	ui_clip_data_module = new UI_ClipDataModule();
 	ui_manager = new UI_Manager();
 
 	engine_context = new EngineContext(buffer_manager, texture_manager, pass_manager, material_manager, object_manager, shader_manager, model_manager, camera_manager, pipe_manager, batch_builder, texture_loader);
@@ -363,6 +365,7 @@ void Engine::InitDefaultBufferUpdaters()
 	SetDefaultTexStateUpdater(*engine_context, tex_state_data_module);
 
 	SetUITextUpdaters(*engine_context, ui_data_module, font_manager, "default");
+	SetUIClipUpdaters(*engine_context, ui_clip_data_module);
 }
 
 void Engine::InitPasses()
@@ -484,6 +487,7 @@ Engine::~Engine()
 	delete indirect_data_module;
 	delete tex_state_data_module;
 	delete ui_data_module;
+	delete ui_clip_data_module;
 	delete ui_manager;
 
 	SDL_ReleaseWindowFromGPUDevice(dev, win);

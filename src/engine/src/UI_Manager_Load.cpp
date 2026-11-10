@@ -99,6 +99,18 @@ static bool ParseCaretLength(std::string_view value, UISize& mode, float& length
     return ParseSize(value, mode, length) && mode != UISize::Auto;
 }
 
+static constexpr std::string_view kNoMinimum = "auto";
+static constexpr std::string_view kNoMaximum = "none";
+
+static bool ParseLimit(std::string_view value, std::string_view no_limit, UILimit& mode, float& limit)
+{
+    if (value == no_limit) { mode = UILimit::None; limit = 0.0f; return true; }
+    UISize size_mode = UISize::Auto;
+    if (!ParseSize(value, size_mode, limit) || size_mode == UISize::Auto) return false;
+    mode = size_mode == UISize::Percent ? UILimit::Percent : UILimit::Points;
+    return true;
+}
+
 static bool ParseEdge(std::string_view value, float& px, bool allow_negative)
 {
     return ParseLength(value, px) && (allow_negative || px >= 0.0f);
@@ -143,6 +155,10 @@ static constexpr UIKeyword<UIAlign> kAlignNames[] = {
     { "flex-start", UIAlign::Start }, { "center", UIAlign::Center }, { "flex-end", UIAlign::End },
     { "stretch", UIAlign::Stretch }, { "start", UIAlign::Start }, { "end", UIAlign::End },
 };
+static constexpr UIKeyword<UIOverflow> kOverflowNames[] = {
+    { "visible", UIOverflow::Visible }, { "hidden", UIOverflow::Hidden }, { "scroll", UIOverflow::Scroll },
+    { "auto", UIOverflow::Auto },
+};
 
 template <class Value, size_t Count>
 static bool ParseKeyword(std::string_view text, const UIKeyword<Value> (&names)[Count], Value& value)
@@ -158,6 +174,25 @@ static std::string_view KeywordOf(const UIKeyword<Value> (&names)[Count], Value 
     for (const UIKeyword<Value>& keyword : names)
         if (keyword.value == value) return keyword.name;
     return {};
+}
+
+static bool ParseOverflow(std::string_view value, UIOverflow& overflow_x, UIOverflow& overflow_y)
+{
+    UIOverflow overflows[2] = {};
+    size_t count = 0;
+    while (true) {
+        const size_t begin = value.find_first_not_of(" \t\r\n\f");
+        if (begin == std::string_view::npos) break;
+        value.remove_prefix(begin);
+        const size_t end = std::min(value.find_first_of(" \t\r\n\f"), value.size());
+        if (count == 2 || !ParseKeyword(value.substr(0, end), kOverflowNames, overflows[count])) return false;
+        ++count;
+        value.remove_prefix(end);
+    }
+    if (count == 0) return false;
+    overflow_x = overflows[0];
+    overflow_y = overflows[count - 1];
+    return true;
 }
 
 static std::vector<std::string> SplitClasses(std::string_view value)
@@ -204,7 +239,12 @@ static UIDeclarationResult ApplyDeclaration(std::string_view property, std::stri
     else if (property == "align-items")     valid = ParseKeyword(value, kAlignNames,     style.align);
     else if (property == "width")           valid = ParseSize(value, style.width_mode, style.width);
     else if (property == "height")          valid = ParseSize(value, style.height_mode, style.height);
+    else if (property == "min-width")       valid = ParseLimit(value, kNoMinimum, style.min_width_mode,  style.min_width);
+    else if (property == "max-width")       valid = ParseLimit(value, kNoMaximum, style.max_width_mode,  style.max_width);
+    else if (property == "min-height")      valid = ParseLimit(value, kNoMinimum, style.min_height_mode, style.min_height);
+    else if (property == "max-height")      valid = ParseLimit(value, kNoMaximum, style.max_height_mode, style.max_height);
     else if (property == "flex-grow")       valid = ParseFloat(value, style.grow) && style.grow >= 0.0f;
+    else if (property == "flex-shrink")     valid = ParseFloat(value, style.shrink) && style.shrink >= 0.0f;
     else if (property == "gap")             valid = ParseEdge(value, style.gap, false);
     else if (property == "padding")         valid = ParseEdges(value, style.padding, false);
     else if (property == "padding-top")     valid = ParseEdge(value, style.padding.top,    false);
@@ -216,6 +256,9 @@ static UIDeclarationResult ApplyDeclaration(std::string_view property, std::stri
     else if (property == "margin-right")    valid = ParseEdge(value, style.margin.right,  true);
     else if (property == "margin-bottom")   valid = ParseEdge(value, style.margin.bottom, true);
     else if (property == "margin-left")     valid = ParseEdge(value, style.margin.left,   true);
+    else if (property == "overflow")        valid = ParseOverflow(value, style.overflow_x, style.overflow_y);
+    else if (property == "overflow-x")      valid = ParseKeyword(value, kOverflowNames, style.overflow_x);
+    else if (property == "overflow-y")      valid = ParseKeyword(value, kOverflowNames, style.overflow_y);
     else if (property == "material") {
         valid = ParseName(value, values.material);
         if (values.material == "none") values.material.clear();
@@ -231,9 +274,11 @@ static UIDeclarationResult ApplyDeclaration(std::string_view property, std::stri
 }
 
 static constexpr std::string_view kPropertyNames[] = {
-    "display", "flex-direction", "justify-content", "align-items", "width", "height", "flex-grow", "gap",
+    "display", "flex-direction", "justify-content", "align-items", "width", "height",
+    "min-width", "max-width", "min-height", "max-height", "flex-grow", "flex-shrink", "gap",
     "padding-top", "padding-right", "padding-bottom", "padding-left",
     "margin-top", "margin-right", "margin-bottom", "margin-left",
+    "overflow-x", "overflow-y",
     "material",
 };
 static_assert(std::size(kPropertyNames) == std::to_underlying(UIProperty::Count));
@@ -244,7 +289,7 @@ static bool Covers(std::string_view declared, UIProperty property)
 {
     const std::string_view name = PropertyName(property);
     return declared == name || (declared == "padding" && name.starts_with("padding-")) ||
-           (declared == "margin" && name.starts_with("margin-"));
+           (declared == "margin" && name.starts_with("margin-")) || (declared == "overflow" && name.starts_with("overflow-"));
 }
 
 static std::string FormatNumber(float value)
@@ -266,6 +311,15 @@ static std::string FormatSize(UISize mode, float size)
     }
 }
 
+static std::string FormatLimit(UILimit mode, float limit, std::string_view no_limit)
+{
+    switch (mode) {
+        case UILimit::Points:  return FormatLength(limit);
+        case UILimit::Percent: return FormatNumber(limit) + "%";
+        default:               return std::string(no_limit);
+    }
+}
+
 static std::string StyleValue(const UIStyle& style, UIProperty property)
 {
     switch (property) {
@@ -275,7 +329,12 @@ static std::string StyleValue(const UIStyle& style, UIProperty property)
         case UIProperty::AlignItems:     return std::string(KeywordOf(kAlignNames,     style.align));
         case UIProperty::Width:          return FormatSize(style.width_mode,  style.width);
         case UIProperty::Height:         return FormatSize(style.height_mode, style.height);
+        case UIProperty::MinWidth:       return FormatLimit(style.min_width_mode,  style.min_width,  kNoMinimum);
+        case UIProperty::MaxWidth:       return FormatLimit(style.max_width_mode,  style.max_width,  kNoMaximum);
+        case UIProperty::MinHeight:      return FormatLimit(style.min_height_mode, style.min_height, kNoMinimum);
+        case UIProperty::MaxHeight:      return FormatLimit(style.max_height_mode, style.max_height, kNoMaximum);
         case UIProperty::FlexGrow:       return FormatNumber(style.FlexGrow());
+        case UIProperty::FlexShrink:     return FormatNumber(style.shrink);
         case UIProperty::Gap:            return FormatLength(style.gap);
         case UIProperty::PaddingTop:     return FormatLength(style.padding.top);
         case UIProperty::PaddingRight:   return FormatLength(style.padding.right);
@@ -285,6 +344,8 @@ static std::string StyleValue(const UIStyle& style, UIProperty property)
         case UIProperty::MarginRight:    return FormatLength(style.margin.right);
         case UIProperty::MarginBottom:   return FormatLength(style.margin.bottom);
         case UIProperty::MarginLeft:     return FormatLength(style.margin.left);
+        case UIProperty::OverflowX:      return std::string(KeywordOf(kOverflowNames, style.overflow_x));
+        case UIProperty::OverflowY:      return std::string(KeywordOf(kOverflowNames, style.overflow_y));
         default:                         return {};
     }
 }
@@ -809,12 +870,16 @@ UINodeIndex UI_Manager::BuildNode(UIElementIndex element_index, UINodeIndex pare
     UIDeclaredValues values = RenderStyle(*style, value_of, document_path);
     UINodeIndex node;
     if (const UITextElement* text = std::get_if<UITextElement>(&element.kind)) {
-        values.style.padding = {};
+        values.style.padding    = {};
+        values.style.overflow_x = UIOverflow::Visible;
+        values.style.overflow_y = UIOverflow::Visible;
         node = Text(parent, values.style, RenderTemplate(text->text, value_of), values.material, values.quad,
                     font_manager->FontIdOf(values.font_family), font_manager);
     }
     else if (const UIInputElement* input = std::get_if<UIInputElement>(&element.kind)) {
-        values.style.padding = {};
+        values.style.padding    = {};
+        values.style.overflow_x = UIOverflow::Visible;
+        values.style.overflow_y = UIOverflow::Visible;
         node = Input(parent, values.style, RenderTemplate(input->text, value_of), values.material, values.quad,
                      font_manager->FontIdOf(values.font_family), font_manager, values.caret_material, values.caret_quad);
     }

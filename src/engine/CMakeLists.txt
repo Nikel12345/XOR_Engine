@@ -236,6 +236,8 @@ set(ENGINE_DATAMODULES_SRC
     src/TransformDataModule.cpp
     src/InstanceDataModule.cpp
     src/UI_DataModule.cpp
+    src/UI_ClipDataModule.cpp
+    src/TransformRows.cpp
 )
 set(ENGINE_DATAMODULES_HDR
     include/engine/CullingDataModule.h
@@ -246,6 +248,8 @@ set(ENGINE_DATAMODULES_HDR
     include/engine/TransformDataModule.h
     include/engine/InstanceDataModule.h
     include/engine/UI_DataModule.h
+    include/engine/UI_ClipDataModule.h
+    include/engine/TransformRows.h
 )
 set(ENGINE_PRESETS_HDR
     include/engine/TextureSamplerPresets.h

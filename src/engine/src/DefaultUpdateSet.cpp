@@ -13,6 +13,7 @@
 #include "IndirectDataModule.h"
 #include "CullingDataModule.h"
 #include "UI_DataModule.h"
+#include "UI_ClipDataModule.h"
 #include "FontManager.h"
 #include "ObjectManager.h"
 #include "BatchBuilder.h"
@@ -218,4 +219,26 @@ void DefaultUpdateSet::SetUITextUpdaters(EngineContext& ctx, UI_DataModule* uidm
     bm->CreateUpdateInstruction(UI_FONT_UVL_BUFFER,
         [fm, font](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { fm->StoreGlyphUVL(fm->GetFont(font), bm, &task); },
         [fm, font]() -> uint32_t { return fm->GlyphUvlBytes(fm->GetFont(font)); });
+}
+
+void DefaultUpdateSet::SetUIClipUpdaters(EngineContext& ctx, UI_ClipDataModule* ucdm)
+{
+    static bool inited = false;
+    if (inited) { SDL_Log("DefaultUpdateSet::SetUIClipUpdaters: already initialized"); return; }
+    inited = true;
+
+    auto* bm = ctx.GetBufferManager();
+    auto* om = ctx.GetObjectManager();
+
+    bm->CreateUpdateInstruction(UI_CLIP_RANK_BUFFER,
+        [ucdm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { ucdm->StoreRank(bm, &task); },
+        [ucdm, om]() -> uint32_t { ucdm->BuildStaging(om); return ucdm->CalcRankSize(); });
+
+    bm->CreateUpdateInstruction(UI_CLIP_INDEX_BUFFER,
+        [ucdm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { ucdm->StoreIndex(bm, &task); },
+        [ucdm]() -> uint32_t { return ucdm->CalcIndexSize(); });
+
+    bm->CreateUpdateInstruction(UI_CLIP_RECT_BUFFER,
+        [ucdm](SDL_GPUCopyPass*, BufferManager* bm, UploadTask& task) { ucdm->StoreRect(bm, &task); },
+        [ucdm]() -> uint32_t { return ucdm->CalcRectSize(); });
 }

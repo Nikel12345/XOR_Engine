@@ -81,12 +81,26 @@ namespace {
             ImGui::EndDisabled();
         };
 
+        // Колонка считается по этому списку: строка размера с подписью не из него выбьется из колонки.
+        static const char* const kSizeLabels[] = { "Width", "Height", "Min width", "Max width", "Min height", "Max height" };
+        float widest_label = 0.0f;
+        for (const char* label : kSizeLabels) widest_label = std::max(widest_label, ImGui::CalcTextSize(label).x);
+        const float box_column = ImGui::GetCursorPosX() + widest_label + ImGui::GetStyle().ItemSpacing.x;
+        auto begin_size_row = [&](const char* label) {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(label);
+            ImGui::SameLine(box_column);
+            const float box_width = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+            ImGui::SetNextItemWidth(box_width);
+            return box_width;
+        };
+
         static const char* kSizeModes[] = { "Auto", "Points", "Percent", "Grow" };
         auto size_row = [&](const char* label, UISize& mode, float& value, float layout_px, UIProperty property) {
             begin_locked(bits(property));
             ImGui::PushID(label);
+            const float box_width = begin_size_row(label);
             int index = static_cast<int>(mode);
-            ImGui::SetNextItemWidth(90.0f);
             if (ImGui::Combo("##mode", &index, kSizeModes, IM_ARRAYSIZE(kSizeModes))) {
                 mode  = static_cast<UISize>(index);
                 // Points стартует с текущего размера, чтобы узел не прыгнул.
@@ -94,15 +108,36 @@ namespace {
                 changed = true;
             }
             ImGui::SameLine();
+            ImGui::SetNextItemWidth(box_width);
             if (mode == UISize::Auto) {
                 float shown = layout_px;   // размер считает раскладка, править нечего
                 ImGui::BeginDisabled();
-                ImGui::DragFloat(label, &shown, 1.0f, 0.0f, 0.0f, "%.0f px");
+                ImGui::DragFloat("##value", &shown, 1.0f, 0.0f, 0.0f, "%.0f px");
                 ImGui::EndDisabled();
             }
             else
-                track(ImGui::DragFloat(label, &value, mode == UISize::Grow ? 0.01f : 1.0f, 0.0f, FLT_MAX,
+                track(ImGui::DragFloat("##value", &value, mode == UISize::Grow ? 0.01f : 1.0f, 0.0f, FLT_MAX,
                                        mode == UISize::Points ? "%.0f px" : mode == UISize::Percent ? "%.1f %%" : "%.2f"));
+            ImGui::PopID();
+            ImGui::EndDisabled();
+        };
+
+        static const char* kLimitModes[] = { "None", "Points", "Percent" };
+        auto limit_row = [&](const char* label, UILimit& mode, float& value, float layout_px, UIProperty property) {
+            begin_locked(bits(property));
+            ImGui::PushID(label);
+            const float box_width = begin_size_row(label);
+            int index = static_cast<int>(mode);
+            if (ImGui::Combo("##mode", &index, kLimitModes, IM_ARRAYSIZE(kLimitModes))) {
+                mode  = static_cast<UILimit>(index);
+                value = mode == UILimit::Points ? layout_px : mode == UILimit::Percent ? 100.0f : 0.0f;
+                changed = true;
+            }
+            if (mode != UILimit::None) {
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(box_width);
+                track(ImGui::DragFloat("##value", &value, 1.0f, 0.0f, FLT_MAX, mode == UILimit::Points ? "%.0f px" : "%.1f %%"));
+            }
             ImGui::PopID();
             ImGui::EndDisabled();
         };
@@ -124,8 +159,22 @@ namespace {
         ImGui::Text("Layout size: %.0f x %.0f px", layout_w, layout_h);
         size_row("Width",  style.width_mode,  style.width,  layout_w, UIProperty::Width);
         size_row("Height", style.height_mode, style.height, layout_h, UIProperty::Height);
+        const bool has_limit = style.min_width_mode  != UILimit::None || style.max_width_mode  != UILimit::None ||
+                               style.min_height_mode != UILimit::None || style.max_height_mode != UILimit::None;
+        ImGui::PushID(safe_u32t_i(n.value));
+        if (has_limit) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+        if (ImGui::TreeNodeEx("Min / max size", ImGuiTreeNodeFlags_NoTreePushOnOpen)) {
+            limit_row("Min width",  style.min_width_mode,  style.min_width,  layout_w, UIProperty::MinWidth);
+            limit_row("Max width",  style.max_width_mode,  style.max_width,  layout_w, UIProperty::MaxWidth);
+            limit_row("Min height", style.min_height_mode, style.min_height, layout_h, UIProperty::MinHeight);
+            limit_row("Max height", style.max_height_mode, style.max_height, layout_h, UIProperty::MaxHeight);
+        }
+        ImGui::PopID();
         begin_locked(bits(UIProperty::FlexGrow));
         track(ImGui::DragFloat("Grow",   &style.grow,   0.01f, 0.0f, FLT_MAX, "%.2f"));
+        ImGui::EndDisabled();
+        begin_locked(bits(UIProperty::FlexShrink));
+        track(ImGui::DragFloat("Shrink", &style.shrink, 0.01f, 0.0f, FLT_MAX, "%.2f"));
         ImGui::EndDisabled();
         edges_row("Margin T R B L", style.margin, false,
                   bits(UIProperty::MarginTop, UIProperty::MarginRight, UIProperty::MarginBottom, UIProperty::MarginLeft));
@@ -141,6 +190,9 @@ namespace {
             enum_combo("Direction", style.direction, kDirs,    IM_ARRAYSIZE(kDirs),    UIProperty::FlexDirection);
             enum_combo("Justify",   style.justify,   kJustify, IM_ARRAYSIZE(kJustify), UIProperty::JustifyContent);
             enum_combo("Align",     style.align,     kAlign,   IM_ARRAYSIZE(kAlign),   UIProperty::AlignItems);
+            static const char* kOverflow[] = { "Visible", "Hidden", "Scroll", "Auto" };
+            enum_combo("Overflow X", style.overflow_x, kOverflow, IM_ARRAYSIZE(kOverflow), UIProperty::OverflowX);
+            enum_combo("Overflow Y", style.overflow_y, kOverflow, IM_ARRAYSIZE(kOverflow), UIProperty::OverflowY);
         }
 
         if (changed)

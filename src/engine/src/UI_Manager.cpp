@@ -16,6 +16,16 @@ static void ApplyEdges(YGNodeRef yoga_node, void (*set_edge)(YGNodeRef, YGEdge, 
     set_edge(yoga_node, YGEdgeLeft,   edges.left);
 }
 
+static void ApplyLimit(YGNodeRef yoga_node, void (*set_points)(YGNodeRef, float), void (*set_percent)(YGNodeRef, float),
+                       UILimit mode, float limit)
+{
+    switch (mode) {
+        case UILimit::Points:  set_points(yoga_node, limit);       break;
+        case UILimit::Percent: set_percent(yoga_node, limit);      break;
+        default:               set_points(yoga_node, YGUndefined); break;
+    }
+}
+
 static void ApplyStyle(YGNodeRef yoga_node, const UIStyle& style, bool parked)
 {
     YGNodeStyleSetDisplay(yoga_node, style.display == UIDisplay::None || parked ? YGDisplayNone : YGDisplayFlex);
@@ -46,11 +56,21 @@ static void ApplyStyle(YGNodeRef yoga_node, const UIStyle& style, bool parked)
         case UISize::Percent: YGNodeStyleSetHeightPercent(yoga_node, style.height); break;
         default:              YGNodeStyleSetHeightAuto(yoga_node);                  break;
     }
+    ApplyLimit(yoga_node, YGNodeStyleSetMinWidth,  YGNodeStyleSetMinWidthPercent,  style.min_width_mode,  style.min_width);
+    ApplyLimit(yoga_node, YGNodeStyleSetMaxWidth,  YGNodeStyleSetMaxWidthPercent,  style.max_width_mode,  style.max_width);
+    ApplyLimit(yoga_node, YGNodeStyleSetMinHeight, YGNodeStyleSetMinHeightPercent, style.min_height_mode, style.min_height);
+    ApplyLimit(yoga_node, YGNodeStyleSetMaxHeight, YGNodeStyleSetMaxHeightPercent, style.max_height_mode, style.max_height);
 
     YGNodeStyleSetFlexGrow(yoga_node, style.FlexGrow());
+    YGNodeStyleSetFlexShrink(yoga_node, style.shrink);
     ApplyEdges(yoga_node, YGNodeStyleSetPadding, style.padding);
     ApplyEdges(yoga_node, YGNodeStyleSetMargin,  style.margin);
     YGNodeStyleSetGap(yoga_node, YGGutterAll, style.gap);
+
+    // YGOverflowHidden Yoga раскладывает как visible: текст в полосе сжался бы под её ширину и
+    // перенёсся. Детей по содержимому вдоль главной оси меряет только YGOverflowScroll.
+    const UIOverflow main_axis_overflow = style.direction == UIDir::Row ? style.overflow_x : style.overflow_y;
+    YGNodeStyleSetOverflow(yoga_node, main_axis_overflow == UIOverflow::Visible ? YGOverflowVisible : YGOverflowScroll);
 }
 
 static std::vector<UITextShape::Glyph> ShapeGlyphs(const FontData* font, const FontManager* font_manager, const std::string& utf8)
@@ -155,6 +175,39 @@ static UITextComponent MakeTextComponent(const UITextData& text, float width, fl
     return UITextComponent{ text.wrapped_glyphs, text.font, width / line_height, height / line_height };
 }
 
+static UIClipRectComponent MakeClipRect(const UIClipArea& area, float screen_width, float screen_height)
+{
+    return UIClipRectComponent{ area.index,
+                                area.left  / screen_width * 2.0f - 1.0f, 1.0f - area.top    / screen_height * 2.0f,
+                                area.right / screen_width * 2.0f - 1.0f, 1.0f - area.bottom / screen_height * 2.0f };
+}
+
+template <class... Components>
+static Entity CreateWithClipRect(EngineContext* ctx, const SceneName& scene_name,
+                                 const std::optional<UIClipRectComponent>& clip_rect, Components&&... components)
+{
+    if (clip_rect) return ctx->CreateEntity(scene_name, UIClipRectComponent{ *clip_rect }, std::forward<Components>(components)...);
+    return ctx->CreateEntity(scene_name, std::forward<Components>(components)...);
+}
+
+template <class... Components>
+static Entity CreateNodeEntity(EngineContext* ctx, const SceneName& scene_name, const std::optional<UIClipComponent>& clip,
+                               const std::optional<UIClipRectComponent>& clip_rect, Components&&... components)
+{
+    if (clip)
+        return CreateWithClipRect(ctx, scene_name, clip_rect, UIClipComponent{ *clip }, std::forward<Components>(components)...);
+    return CreateWithClipRect(ctx, scene_name, clip_rect, std::forward<Components>(components)...);
+}
+
+static void WriteClip(ObjectManager* object_manager, SceneData* scene, Entity entity, const std::optional<UIClipComponent>& clip,
+                      const std::optional<UIClipRectComponent>& clip_rect)
+{
+    if (clip && object_manager->Has<UIClipComponent>(scene, entity))
+        object_manager->GetComponent<UIClipComponent>(scene, entity) = *clip;
+    if (clip_rect && object_manager->Has<UIClipRectComponent>(scene, entity))
+        object_manager->GetComponent<UIClipRectComponent>(scene, entity) = *clip_rect;
+}
+
 static const char* KindName(const UINodeKind& kind)
 {
     if (std::holds_alternative<UIBoxData>(kind))   return "box";
@@ -239,6 +292,15 @@ bool UI_Manager::NodeContains(UINodeIndex node, float window_x, float window_y) 
     const UINode& entry = nodes[node.value];
     if (glm::determinant(glm::mat2(entry.local)) == 0.0f) return false;
 
+    for (UINodeIndex ancestor = entry.parent; ancestor; ancestor = nodes[ancestor.value].parent) {
+        const UINode& clipper = nodes[ancestor.value];
+        if (!clipper.ClipsChildren()) continue;
+        if (clipper.style.overflow_x != UIOverflow::Visible &&
+            (window_x < clipper.layout_left || window_x > clipper.layout_left + clipper.layout_width)) return false;
+        if (clipper.style.overflow_y != UIOverflow::Visible &&
+            (window_y < clipper.layout_top || window_y > clipper.layout_top + clipper.layout_height)) return false;
+    }
+
     const glm::vec2 point = NodePoint(node, window_x, window_y);
     return std::abs(point.x) <= 0.5f * entry.layout_width && std::abs(point.y) <= 0.5f * entry.layout_height;
 }
@@ -290,10 +352,18 @@ void UI_Manager::SetNodeStyle(UINodeIndex node, const UIStyle& style)
 {
     if (node.value >= nodes.size()) return;
     UINode& entry = nodes[node.value];
+    const bool clipped_children = entry.ClipsChildren();
     entry.style = style;
-    if (entry.TextData()) entry.style.padding = {};
+    if (entry.TextData()) {
+        entry.style.padding    = {};
+        entry.style.overflow_x = UIOverflow::Visible;
+        entry.style.overflow_y = UIOverflow::Visible;
+    }
     ApplyStyle(entry.yoga_node, entry.style, entry.parked);
     emit_needed = true;
+    // Рамка обрезки — компонент энтити контейнера и его потомков, а переноса энтити между
+    // архетипами нет: компонент появляется и пропадает только с пересозданием.
+    if (entry.ClipsChildren() != clipped_children) recreate_needed = true;
 }
 
 void UI_Manager::SetNodeParked(UINodeIndex node, bool parked)
@@ -404,6 +474,7 @@ void UI_Manager::AttachChild(UINodeIndex parent, UINodeIndex child)
     UINode& parent_entry = nodes[parent.value];
     YGNodeInsertChild(parent_entry.yoga_node, nodes[child.value].yoga_node, YGNodeGetChildCount(parent_entry.yoga_node));
     parent_entry.children.push_back(child);
+    nodes[child.value].parent = parent;
     emit_needed     = true;
     recreate_needed = true;
 }
@@ -433,6 +504,11 @@ UINodeIndex UI_Manager::MakeTextLeaf(const UIStyle& style, const std::string& ma
     if (text_style.padding != UIEdges{}) {
         SDL_Log("UI_Manager::Text: padding belongs to the parent box, ignored");
         text_style.padding = {};
+    }
+    if (text_style.Clips()) {
+        SDL_Log("UI_Manager::Text: overflow belongs to the parent box, ignored");
+        text_style.overflow_x = UIOverflow::Visible;
+        text_style.overflow_y = UIOverflow::Visible;
     }
     const UINodeIndex node = MakeNode(text_style);
     UINode& entry = nodes[node.value];
@@ -510,7 +586,7 @@ void UI_Manager::DeleteCreatedEntities(EngineContext* ctx, const SceneName& scen
 
 void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name,
                           UINodeIndex node, float parent_x, float parent_y, bool parent_shown, float screen_width, float screen_height,
-                          int& order, bool create_entities)
+                          const std::optional<UIClipArea>& clip, int& order, uint32_t& clip_count, bool create_entities)
 {
     constexpr float kZStep = 0.00001f;
 
@@ -534,6 +610,8 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
     entry.ndc_center_x  = ndc_x;
     entry.ndc_center_y  = ndc_y;
     entry.ndc_z         = ndc_z;
+    entry.layout_left   = left;
+    entry.layout_top    = top;
     entry.layout_width  = width;
     entry.layout_height = height;
     entry.emitted       = true;
@@ -549,48 +627,73 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
         WrapText(*text->shape, width + kWrapSlack, &text->wrapped_glyphs, &text->glyph_places);
     }
 
-    if (entry.draws && !entry.quad.empty()) {
-        PositionProxy16 positions{ transform[0][0], transform[0][1], transform[0][2], transform[3][0],
-                                   transform[1][0], transform[1][1], transform[1][2], transform[3][1],
-                                   transform[2][0], transform[2][1], transform[2][2], transform[3][2],
-                                   transform[0][3], transform[1][3], transform[2][3], transform[3][3] };
-
-        if (create_entities) {
-            // GeneratedComponent: узлы пересоздаёт Emit, их копия в scene.sheaf дала бы дубли при загрузке.
-            // TextureStateComponent ставится всегда: тег вешается только при создании, а материал узлу
-            // могут сменить на вариативный позже.
-            if (text)
-                entry.entity = ctx->CreateEntity(scene_name,
-                    RenderableProxy::Single(ctx->GetModelManager()->InternModel(entry.quad),
-                                            { ctx->GetMaterialManager()->InternMaterial(entry.material) }, entry.shown),
-                    positions, UIComponent{}, GeneratedComponent{}, TextureStateComponent{},
-                    MakeTextComponent(*text, width, height));
-            else
-                entry.entity = ctx->CreateEntity(scene_name,
-                    RenderableProxy::Single(ctx->GetModelManager()->InternModel(entry.quad),
-                                            { ctx->GetMaterialManager()->InternMaterial(entry.material) }, entry.shown),
-                    positions, UIComponent{}, GeneratedComponent{}, TextureStateComponent{});
-            entry.has_entity = true;
-            created_entities.push_back(entry.entity);
-            // Каретку удаляет каскад вместе с полем: в created_entities её удалили бы дважды.
-            if (UIInputData* input = std::get_if<UIInputData>(&entry.kind))
-                input->caret_entity = ctx->CreateEntity(scene_name,
-                    RenderableProxy::Single(ctx->GetModelManager()->InternModel(input->caret_quad),
-                                            { ctx->GetMaterialManager()->InternMaterial(input->caret_material) }, false),
-                    PositionProxy16{}, ParentComponent{ entry.entity }, LocalMatrixProxy16{},
-                    UIComponent{}, GeneratedComponent{}, TextureStateComponent{}, UITextComponent{ {}, input->text.font });
+    std::optional<UIClipArea>          children_clip = clip;
+    std::optional<UIClipRectComponent> clip_rect;
+    if (entry.ClipsChildren()) {
+        UIClipArea area = clip.value_or(UIClipArea{ 0, 0.0f, 0.0f, screen_width, screen_height });
+        area.index = clip_count++;
+        if (entry.style.overflow_x != UIOverflow::Visible) {
+            area.left  = std::max(area.left,  left);
+            area.right = std::min(area.right, left + width);
         }
-        else if (entry.has_entity && object_manager->Has<Positions>(scene, entry.entity)) {
+        if (entry.style.overflow_y != UIOverflow::Visible) {
+            area.top    = std::max(area.top,    top);
+            area.bottom = std::min(area.bottom, top + height);
+        }
+        children_clip = area;
+        clip_rect     = MakeClipRect(area, screen_width, screen_height);
+    }
+
+    const bool renders = entry.HasRenderable();
+    std::optional<UIClipComponent> drawn_clip;
+    if (renders && clip) drawn_clip = UIClipComponent{ clip->index };
+    const PositionProxy16 positions{ transform[0][0], transform[0][1], transform[0][2], transform[3][0],
+                                     transform[1][0], transform[1][1], transform[1][2], transform[3][1],
+                                     transform[2][0], transform[2][1], transform[2][2], transform[3][2],
+                                     transform[0][3], transform[1][3], transform[2][3], transform[3][3] };
+    UIInputData* input = std::get_if<UIInputData>(&entry.kind);
+
+    if (create_entities) {
+        // GeneratedComponent: узлы пересоздаёт Emit, их копия в scene.sheaf дала бы дубли при загрузке.
+        // TextureStateComponent ставится всегда: тег вешается только при создании, а материал узлу
+        // могут сменить на вариативный позже.
+        if (!renders)
+            entry.entity = CreateNodeEntity(ctx, scene_name, std::nullopt, clip_rect, UIComponent{}, GeneratedComponent{});
+        else if (text)
+            entry.entity = CreateNodeEntity(ctx, scene_name, drawn_clip, clip_rect,
+                RenderableProxy::Single(ctx->GetModelManager()->InternModel(entry.quad),
+                                        { ctx->GetMaterialManager()->InternMaterial(entry.material) }, entry.shown),
+                positions, UIComponent{}, GeneratedComponent{}, TextureStateComponent{},
+                MakeTextComponent(*text, width, height));
+        else
+            entry.entity = CreateNodeEntity(ctx, scene_name, drawn_clip, clip_rect,
+                RenderableProxy::Single(ctx->GetModelManager()->InternModel(entry.quad),
+                                        { ctx->GetMaterialManager()->InternMaterial(entry.material) }, entry.shown),
+                positions, UIComponent{}, GeneratedComponent{}, TextureStateComponent{});
+        entry.has_entity = true;
+        created_entities.push_back(entry.entity);
+        // Каретку удаляет каскад вместе с полем: в created_entities её удалили бы дважды.
+        if (renders && input)
+            input->caret_entity = CreateNodeEntity(ctx, scene_name, drawn_clip, std::nullopt,
+                RenderableProxy::Single(ctx->GetModelManager()->InternModel(input->caret_quad),
+                                        { ctx->GetMaterialManager()->InternMaterial(input->caret_material) }, false),
+                PositionProxy16{}, ParentComponent{ entry.entity }, LocalMatrixProxy16{},
+                UIComponent{}, GeneratedComponent{}, TextureStateComponent{}, UITextComponent{ {}, input->text.font });
+    }
+    else if (entry.has_entity) {
+        if (renders && object_manager->Has<Positions>(scene, entry.entity)) {
             WritePositions(object_manager, scene, entry.entity, positions);
             ctx->HideEntity(scene_name, entry.entity, entry.shown);
             if (text && object_manager->Has<UITextComponent>(scene, entry.entity))
                 object_manager->GetComponent<UITextComponent>(scene, entry.entity) = MakeTextComponent(*text, width, height);
         }
+        WriteClip(object_manager, scene, entry.entity, drawn_clip, clip_rect);
+        if (renders && input) WriteClip(object_manager, scene, input->caret_entity, drawn_clip, std::nullopt);
     }
 
     for (UINodeIndex child : entry.children)
-        EmitNode(ctx, object_manager, scene, scene_name, child, left, top, entry.shown, screen_width, screen_height, order,
-                 create_entities);
+        EmitNode(ctx, object_manager, scene, scene_name, child, left, top, entry.shown, screen_width, screen_height,
+                 children_clip, order, clip_count, create_entities);
 }
 
 void UI_Manager::Emit(EngineContext* ctx, float screen_width, float screen_height)
@@ -626,6 +729,8 @@ void UI_Manager::Emit(EngineContext* ctx, float screen_width, float screen_heigh
         for (UINode& entry : nodes) entry.has_entity = false;
         recreate_needed = false;
     }
-    int order = 0;
-    EmitNode(ctx, object_manager, scene, scene_name, root, 0.0f, 0.0f, true, screen_width, screen_height, order, create_entities);
+    int      order      = 0;
+    uint32_t clip_count = 0;
+    EmitNode(ctx, object_manager, scene, scene_name, root, 0.0f, 0.0f, true, screen_width, screen_height, std::nullopt, order,
+             clip_count, create_entities);
 }

@@ -37,6 +37,10 @@ namespace DefaultBuffersNames {
 	inline constexpr const char* UI_TEXT_INDEX_BUFFER    = "UITextIndex";
 	inline constexpr const char* UI_TEXT_BUFFER          = "UITextBuffer";
 
+	inline constexpr const char* UI_CLIP_RANK_BUFFER     = "UIClipRank";
+	inline constexpr const char* UI_CLIP_INDEX_BUFFER    = "UIClipIndex";
+	inline constexpr const char* UI_CLIP_RECT_BUFFER     = "UIClipRect";
+
 	inline constexpr const char* UI_FONT_UVL_BUFFER      = "FontUVL";
 };
 
