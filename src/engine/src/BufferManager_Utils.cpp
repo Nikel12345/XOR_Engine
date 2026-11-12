@@ -8,75 +8,34 @@ void BufferManager::EnsureBufferCapacity(SDL_GPUCopyPass* cp, BufferData* data, 
         return;
     }
 
-    const auto usage = data->usage;
-
-    switch (data->type)
-    {
-    case BufferDataType::Static:
-    {
-        if (data->Static.buffer_size >= req_buffer_size) {
-            return;
-        }
-
-        Uint32 old_size = data->Static.buffer_size;
-        SDL_GPUBuffer* old_buffer = data->Static.buffer;
-
-        SDL_Log("BM: Resizing STATIC buffer '%s' from %u to %u",
-            data->debug_name.c_str(), old_size, req_buffer_size);
-
-        SDL_GPUBuffer* new_buffer = CreateBuffer(req_buffer_size, usage);
-
-        if (data->resize_behaviour == ResizeBehaviour::RESIZE_AND_COPY) {
-            Uint32 copy_size = data->Static.used_buffer_size;
-            if (copy_size > old_size) copy_size = old_size;
-            if (cp && old_buffer && copy_size > 0) {
-                SDL_GPUBufferLocation src{ old_buffer, 0 };
-                SDL_GPUBufferLocation dst{ new_buffer, 0 };
-                SDL_CopyGPUBufferToBuffer(cp, &src, &dst, copy_size, false);
-            }
-        }
-
-        data->Static.buffer = new_buffer;
-        data->Static.buffer_size = req_buffer_size;
-
-        trash.push_back({ old_buffer });
+    const uint8_t body = data->type == BufferDataType::Static ? 0 : li;
+    if (data->buffer_size[body] >= req_buffer_size) {
         return;
     }
 
-    case BufferDataType::Dynamic:
-    {
-        if (data->Dynamic.buffer_size[li] >= req_buffer_size) {
-            return;
+    Uint32 old_size = data->buffer_size[body];
+    SDL_GPUBuffer* old_buffer = data->buffers[body];
+
+    SDL_Log("BM: Resizing %s buffer '%s' [%u] from %u to %u",
+        data->type == BufferDataType::Static ? "STATIC" : "DYNAMIC",
+        data->debug_name.c_str(), (Uint32)body, old_size, req_buffer_size);
+
+    SDL_GPUBuffer* new_buffer = CreateBuffer(req_buffer_size, data->usage);
+
+    if (data->resize_behaviour == ResizeBehaviour::RESIZE_AND_COPY) {
+        Uint32 copy_size = data->used_buffer_size[body];
+        if (copy_size > old_size) copy_size = old_size;
+        if (cp && old_buffer && copy_size > 0) {
+            SDL_GPUBufferLocation src{ old_buffer, 0 };
+            SDL_GPUBufferLocation dst{ new_buffer, 0 };
+            SDL_CopyGPUBufferToBuffer(cp, &src, &dst, copy_size, false);
         }
-        Uint32 old_size = data->Dynamic.buffer_size[li];
-        SDL_GPUBuffer* old_buffer = data->Dynamic.buffers[li];
-
-        SDL_Log("BM: Resizing DYNAMIC buffer '%s' [li=%u] from %u to %u",
-            data->debug_name.c_str(), (Uint32)li, old_size, req_buffer_size);
-
-        SDL_GPUBuffer* new_buffer = CreateBuffer(req_buffer_size, usage);
-
-        if (data->resize_behaviour == ResizeBehaviour::RESIZE_AND_COPY) {
-            Uint32 copy_size = data->Dynamic.used_buffer_size[li];
-            if (copy_size > old_size) copy_size = old_size;
-            if (cp && old_buffer && copy_size > 0) {
-                SDL_GPUBufferLocation src{ old_buffer, 0 };
-                SDL_GPUBufferLocation dst{ new_buffer, 0 };
-                SDL_CopyGPUBufferToBuffer(cp, &src, &dst, copy_size, false);
-            }
-        }
-
-        data->Dynamic.buffers[li] = new_buffer;
-        data->Dynamic.buffer_size[li] = req_buffer_size;
-
-        trash.push_back({ old_buffer });
-        return;
     }
 
-    default:
-        SDL_Log("EnsureBufferCapacity: unknown buffer type");
-        return;
-    }
+    data->buffers[body] = new_buffer;
+    data->buffer_size[body] = req_buffer_size;
+
+    trash.push_back({ old_buffer });
 }
 
 BufferData* BufferManager::GetBufferData(BufferDataName name)

@@ -3,14 +3,14 @@
 
 bool BufferManager::BindGPUIndexBuffer(SDL_GPURenderPass* rp, const BufferData* buffer_data, Uint32 offset)
 {
-    if (!buffer_data || buffer_data->type != BufferDataType::Static || !buffer_data->Static.buffer) {
+    if (!buffer_data || buffer_data->type != BufferDataType::Static || !buffer_data->buffers[0]) {
         SDL_Log("BindGPUIndexBuffer: index buffer '%s' is missing/not static/null - bind skipped",
             buffer_data ? buffer_data->debug_name.c_str() : "<null>");
         return false;
     }
 
     SDL_GPUBufferBinding ibind{};
-    ibind.buffer = buffer_data->Static.buffer;
+    ibind.buffer = buffer_data->buffers[0];
     ibind.offset = offset;
 
     SDL_BindGPUIndexBuffer(rp, &ibind, SDL_GPU_INDEXELEMENTSIZE_32BIT);
@@ -28,13 +28,13 @@ bool BufferManager::BindGPUVertexBuffers(SDL_GPURenderPass* rp, const std::vecto
     binds.reserve(buffers_data_vec.size());
     for (const BufferData* data : buffers_data_vec)
     {
-        if (!data || data->type != BufferDataType::Static || !data->Static.buffer) {
+        if (!data || data->type != BufferDataType::Static || !data->buffers[0]) {
             SDL_Log("BindGPUVertexBuffers: vertex stream '%s' is missing/not static/null - bind skipped",
                 data ? data->debug_name.c_str() : "<null>");
             return false;
         }
         SDL_GPUBufferBinding vbind{};
-        vbind.buffer = data->Static.buffer;
+        vbind.buffer = data->buffers[0];
         vbind.offset = 0;
         binds.push_back(vbind);
     }

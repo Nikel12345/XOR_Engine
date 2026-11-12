@@ -19,17 +19,10 @@ struct BufferData {
     std::string debug_name;
     ResourceTag tags = ResourceTag::None;
 
-    struct StaticBufferInfo {
-        SDL_GPUBuffer* buffer = nullptr;
-        Uint32 buffer_size = 0;
-        Uint32 used_buffer_size = 0;
-    } Static;
-
-    struct DynamicBufferInfo {
-        SDL_GPUBuffer* buffers[BUFFERING_LEVEL]{};
-        Uint32 buffer_size[BUFFERING_LEVEL]{};
-        Uint32 used_buffer_size[BUFFERING_LEVEL]{};
-    } Dynamic;
+    // Тело Static лежит в [0], остальные ячейки у него пустые: индекс слота напрямую даёт nullptr.
+    SDL_GPUBuffer* buffers[BUFFERING_LEVEL]{};
+    Uint32 buffer_size[BUFFERING_LEVEL]{};
+    Uint32 used_buffer_size[BUFFERING_LEVEL]{};
 
     SDL_GPUBufferUsageFlags usage = 0;
 };

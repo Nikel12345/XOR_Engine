@@ -17,18 +17,9 @@ BufferData* BufferManager::CreateBufferData(BufferDataName name, Uint32 size, Bu
     data->resize_behaviour = resize_behaviour;
 	data->debug_name = name;
 	data->tags = tags;
-    switch (type) {
-        case BufferDataType::Static:
-			data->Static.buffer_size = size;
-            break;
-
-        case BufferDataType::Dynamic:
-            for (int i = 0; i < BUFFERING_LEVEL; i++) {
-                data->Dynamic.buffer_size[i] = size;
-            };
-            break;
-        }
-
+    const int bodies = type == BufferDataType::Static ? 1 : BUFFERING_LEVEL;
+    for (int i = 0; i < bodies; i++)
+        data->buffer_size[i] = size;
 
     BufferData* ptr = data.get();
     buffers_data[name] = std::move(data);
@@ -44,31 +35,20 @@ void BufferManager::BakePending()
     for (BufferData* data : pending_bakes) {
         if (!data) continue;
         if (data->usage == 0) continue;
-        switch (data->type) {
-        case BufferDataType::Static:
-            if (!data->Static.buffer) {
-                data->Static.buffer = CreateBuffer(data->Static.buffer_size, data->usage);
-                if (!data->Static.buffer)
-                    SDL_Log("BufferManager::BakePending: buffer '%s' failed.", data->debug_name.c_str());
-            }
-            break;
-
-        case BufferDataType::Dynamic:
-            for (int i = 0; i < BUFFERING_LEVEL; i++) {
-                if (data->Dynamic.buffers[i]) continue;
-                data->Dynamic.buffers[i] = CreateBuffer(data->Dynamic.buffer_size[i], data->usage);
-                if (!data->Dynamic.buffers[i])
-                    SDL_Log("BufferManager::BakePending: buffer '%s' [%d] failed.", data->debug_name.c_str(), i);
-            }
-            break;
+        const int bodies = data->type == BufferDataType::Static ? 1 : BUFFERING_LEVEL;
+        for (int i = 0; i < bodies; i++) {
+            if (data->buffers[i]) continue;
+            data->buffers[i] = CreateBuffer(data->buffer_size[i], data->usage);
+            if (!data->buffers[i])
+                SDL_Log("BufferManager::BakePending: buffer '%s' [%d] failed.", data->debug_name.c_str(), i);
         }
     }
 
     std::erase_if(pending_bakes, [](BufferData* d) {
         if (!d) return true;
-        if (d->type == BufferDataType::Static) return d->Static.buffer != nullptr;
-        for (int i = 0; i < BUFFERING_LEVEL; i++)
-            if (!d->Dynamic.buffers[i]) return false;
+        const int bodies = d->type == BufferDataType::Static ? 1 : BUFFERING_LEVEL;
+        for (int i = 0; i < bodies; i++)
+            if (!d->buffers[i]) return false;
         return true;
     });
 }
@@ -91,20 +71,9 @@ BufferManager::~BufferManager()
     for (auto& [name, data] : buffers_data)
     {
         if (!data) continue;
-
-        switch (data->type)
-        {
-        case BufferDataType::Static:
-            if (data->Static.buffer)
-                SDL_ReleaseGPUBuffer(dev, data->Static.buffer);
-            break;
-
-        case BufferDataType::Dynamic:
-            for (int i = 0; i < BUFFERING_LEVEL; i++)
-                if (data->Dynamic.buffers[i])
-                    SDL_ReleaseGPUBuffer(dev, data->Dynamic.buffers[i]);
-            break;
-        }
+        for (SDL_GPUBuffer* buffer : data->buffers)
+            if (buffer)
+                SDL_ReleaseGPUBuffer(dev, buffer);
     }
 
     buffers_data.clear();

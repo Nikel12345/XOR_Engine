@@ -190,9 +190,9 @@ void* BufferManager::AcquireTransferWritePtr(UploadTask* task, Uint32 size)
         return nullptr;
     }
 
-    const Uint32 dst_capacity = (task->dst_buffer_data->type == BufferDataType::Static)
-        ? task->dst_buffer_data->Static.buffer_size
-        : task->dst_buffer_data->Dynamic.buffer_size[li];
+    BufferData* dst_data = task->dst_buffer_data;
+    const uint8_t body = dst_data->type == BufferDataType::Static ? 0 : li;
+    const Uint32 dst_capacity = dst_data->buffer_size[body];
     if (task->dst_offset + task->written_size + size > dst_capacity) {
         SDL_Log("AcquireTransferWritePtr: write at offset %u + %u exceeds destination buffer '%s' capacity %u",
             task->dst_offset + task->written_size, size, task->dst_buffer_data->debug_name.c_str(), dst_capacity);
@@ -203,17 +203,8 @@ void* BufferManager::AcquireTransferWritePtr(UploadTask* task, Uint32 size)
     task->written_size += size;
 
     const Uint32 used = task->dst_offset + task->written_size;
-    switch (task->dst_buffer_data->type) {
-    case BufferDataType::Static:
-        if (used > task->dst_buffer_data->Static.used_buffer_size)
-            task->dst_buffer_data->Static.used_buffer_size = used;
-        break;
-
-    case BufferDataType::Dynamic:
-        if (used > task->dst_buffer_data->Dynamic.used_buffer_size[li])
-            task->dst_buffer_data->Dynamic.used_buffer_size[li] = used;
-        break;
-    }
+    if (used > dst_data->used_buffer_size[body])
+        dst_data->used_buffer_size[body] = used;
 
     return dst;
 }

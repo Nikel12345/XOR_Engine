@@ -133,17 +133,7 @@ public:
 	inline SDL_GPUBuffer* _GetGPUBufferForFrame(const BufferData* data, uint8_t any_frame) const
 	{
 		if (!data) return nullptr;
-
-		switch (data->type)
-		{
-		case BufferDataType::Static:
-			return data->Static.buffer;
-
-		case BufferDataType::Dynamic:
-			return data->Dynamic.buffers[any_frame];
-		}
-
-		return nullptr;
+		return data->buffers[data->type == BufferDataType::Static ? 0 : any_frame];
 	};
 
 private:
