@@ -9,8 +9,9 @@
 #include <iterator>
 
 struct UIDeclaredValues {
-    UIStyle     style;
-    std::string material, quad, font_family, caret_material, caret_quad;
+    UIStyle          style;
+    std::string      material, quad, font_family, caret_material, caret_quad, thumb_quad;
+    UIThumbMaterials thumb_materials;
 };
 
 struct UILoadedVar {
@@ -159,6 +160,7 @@ static constexpr UIKeyword<UIOverflow> kOverflowNames[] = {
     { "visible", UIOverflow::Visible }, { "hidden", UIOverflow::Hidden }, { "scroll", UIOverflow::Scroll },
     { "auto", UIOverflow::Auto },
 };
+static constexpr UIKeyword<UIAxis> kAxisNames[] = { { "x", UIAxis::X }, { "y", UIAxis::Y } };
 
 template <class Value, size_t Count>
 static bool ParseKeyword(std::string_view text, const UIKeyword<Value> (&names)[Count], Value& value)
@@ -269,6 +271,10 @@ static UIDeclarationResult ApplyDeclaration(std::string_view property, std::stri
     else if (property == "caret-quad")      valid = ParseName(value, values.caret_quad);
     else if (property == "caret-width")     valid = ParseCaretLength(value, style.caret_width_mode, style.caret_width);
     else if (property == "caret-gap")       valid = ParseCaretLength(value, style.caret_gap_mode, style.caret_gap);
+    else if (property == "thumb-material")        valid = ParseName(value, values.thumb_materials.idle);
+    else if (property == "thumb-hover-material")  valid = ParseName(value, values.thumb_materials.hovered);
+    else if (property == "thumb-active-material") valid = ParseName(value, values.thumb_materials.grabbed);
+    else if (property == "thumb-quad")            valid = ParseName(value, values.thumb_quad);
     else return UIDeclarationResult::UnknownProperty;
     return valid ? UIDeclarationResult::Applied : UIDeclarationResult::InvalidValue;
 }
@@ -581,7 +587,9 @@ static void LoadDeclarations(UILoadState& state, const UIMarkupNode& markup, UIE
         if (!ParseTemplate(state, declaration->value, declaration->line, entry.value)) continue;
         const bool substituted = HasSubstitutions(entry.value);
         if (substituted && (entry.property == "quad" || entry.property == "font-family" ||
-                            entry.property == "caret-material" || entry.property == "caret-quad")) {
+                            entry.property == "caret-material" || entry.property == "caret-quad" ||
+                            entry.property == "thumb-material" || entry.property == "thumb-hover-material" ||
+                            entry.property == "thumb-active-material" || entry.property == "thumb-quad")) {
             state.Error(declaration->line, "'" + entry.property + "' takes no {{ }}: it is read once at load");
             continue;
         }
@@ -623,14 +631,16 @@ static void LoadElement(UILoadState& state, const UIMarkupNode& markup, UIElemen
         return;
     }
     else if (markup.tag == "br") { state.Error(markup.line, "<br/> belongs in <text> or <input>"); return; }
-    else if (markup.tag != "box" && markup.tag != "text" && markup.tag != "input") {
+    else if (markup.tag != "box" && markup.tag != "text" && markup.tag != "input" && markup.tag != "scrollbar") {
         state.Error(markup.line, "unknown tag <" + markup.tag + ">");
         return;
     }
     const bool text_leaf = markup.tag == "text" || markup.tag == "input";
+    const bool scrollbar = markup.tag == "scrollbar";
 
     for (const UIMarkupAttribute& attribute : markup.attributes) {
-        if (attribute.name != "id" && attribute.name != "class")
+        const bool scrollbar_attribute = scrollbar && (attribute.name == "for" || attribute.name == "axis");
+        if (attribute.name != "id" && attribute.name != "class" && !scrollbar_attribute)
             state.Error(attribute.line, "attribute '" + attribute.name + "' is not supported on <" + markup.tag + ">");
         else if (attribute.value.find("{{") != std::string::npos)
             state.Error(attribute.line, "attribute '" + attribute.name + "' takes no {{ }}");
@@ -665,19 +675,33 @@ static void LoadElement(UILoadState& state, const UIMarkupNode& markup, UIElemen
         if (values.material.empty()) state.Error(markup.line, "<" + markup.tag + "> needs material");
         if (values.quad.empty())     state.Error(markup.line, "<" + markup.tag + "> needs quad");
     }
-    else if (markup.tag == "box" && (!values.material.empty() || material_bound) && values.quad.empty())
-        state.Error(markup.line, "<box> with material needs quad");
+    else if ((markup.tag == "box" || scrollbar) && (!values.material.empty() || material_bound) && values.quad.empty())
+        state.Error(markup.line, "<" + markup.tag + "> with material needs quad");
+
+    std::string target;
+    UIAxis      axis = UIAxis::Y;
+    if (scrollbar) {
+        if (!markup.children.empty()) state.Error(markup.line, "<scrollbar> holds nothing");
+        if (const UIMarkupAttribute* target_attribute = markup.Attribute("for")) target = target_attribute->value;
+        if (target.empty()) state.Error(markup.line, "<scrollbar> needs for: the id of the box it scrolls");
+        const UIMarkupAttribute* axis_attribute = markup.Attribute("axis");
+        if (axis_attribute && !ParseKeyword(axis_attribute->value, kAxisNames, axis))
+            state.Error(axis_attribute->line, "axis takes x or y, not '" + axis_attribute->value + "'");
+        if (values.thumb_materials.idle.empty()) state.Error(markup.line, "<scrollbar> needs thumb-material");
+        if (values.thumb_quad.empty())           state.Error(markup.line, "<scrollbar> needs thumb-quad");
+    }
 
     UIElement element{ markup.line };
     if (!parent)                    element.kind = UIRootElement{ std::move(style) };
     else if (markup.tag == "box")   element.kind = UIBoxElement{ std::move(style) };
+    else if (scrollbar)             element.kind = UIScrollbarElement{ std::move(style), std::move(target), 0, axis };
     else if (markup.tag == "text")  element.kind = UITextElement{ std::move(style), std::move(text) };
     else                            element.kind = UIInputElement{ std::move(style), std::move(text) };
 
     const UIElementIndex index{ safe_u32(state.elements.size()) };
     if (parent) AddChildElement(state, parent, index);
     state.elements.push_back(std::move(element));
-    if (text_leaf) return;
+    if (text_leaf || scrollbar) return;
     for (const UIMarkupNode& child : markup.children) {
         if (child.IsText()) { state.Error(child.line, "text belongs in <text>"); continue; }
         LoadElement(state, child, index);
@@ -705,6 +729,75 @@ static void LoadLoop(UILoadState& state, const UIMarkupNode& markup, UIElementIn
         LoadElement(state, child, index);
     }
     state.loop_indices.pop_back();
+}
+
+struct UIElementPlace {
+    UIElementIndex              element;
+    std::vector<UIElementIndex> ancestors;
+};
+
+static void CollectPlaces(const std::vector<UIElement>& elements, UIElementIndex index, std::vector<UIElementIndex>& ancestors,
+                          std::unordered_map<std::string, UIElementPlace>& places_by_id, std::vector<UIElementPlace>& scrollbars)
+{
+    const UIElement& element = elements[index.value];
+    if (const UIElementStyle* style = element.Style(); style && !style->id.empty())
+        places_by_id.emplace(style->id, UIElementPlace{ index, ancestors });
+    if (std::holds_alternative<UIScrollbarElement>(element.kind)) scrollbars.push_back({ index, ancestors });
+    const std::vector<UIElementIndex>* children = element.Children();
+    if (!children) return;
+    ancestors.push_back(index);
+    for (UIElementIndex child : *children) CollectPlaces(elements, child, ancestors, places_by_id, scrollbars);
+    ancestors.pop_back();
+}
+
+static void LinkScrollbars(UILoadState& state)
+{
+    std::unordered_map<std::string, UIElementPlace> places_by_id;
+    std::vector<UIElementPlace> scrollbars;
+    std::vector<UIElementIndex> ancestors;
+    CollectPlaces(state.elements, UIElementIndex{ 0 }, ancestors, places_by_id, scrollbars);
+
+    const auto value_of = [&state](const UITemplatePart& part) { return state.ValueOf(part); };
+    for (const UIElementPlace& place : scrollbars) {
+        UIElement& element = state.elements[place.element.value];
+        UIScrollbarElement* scrollbar = std::get_if<UIScrollbarElement>(&element.kind);
+        assert(scrollbar && "LinkScrollbars: the place is not a scrollbar");
+        const std::string& id = scrollbar->target;
+        const auto list = places_by_id.find(id);
+        if (list == places_by_id.end()) {
+            state.Error(element.line, "<scrollbar for=\"" + id + "\">: no element has this id");
+            continue;
+        }
+        const UIElement& list_element = state.elements[list->second.element.value];
+        if (!std::holds_alternative<UIBoxElement>(list_element.kind) && !std::holds_alternative<UIRootElement>(list_element.kind)) {
+            state.Error(element.line, "<scrollbar for=\"" + id + "\">: only <box> and <ui> scroll");
+            continue;
+        }
+        if (std::ranges::find(place.ancestors, list->second.element) != place.ancestors.end()) {
+            state.Error(element.line, "<scrollbar> inside '" + id + "' would scroll away with its content");
+            continue;
+        }
+        UIElementIndex list_loop;
+        uint32_t       list_loop_depth = 0;
+        for (UIElementIndex ancestor : list->second.ancestors) {
+            if (!std::holds_alternative<UILoopElement>(state.elements[ancestor.value].kind)) continue;
+            list_loop = ancestor;
+            ++list_loop_depth;
+        }
+        if (list_loop && std::ranges::find(place.ancestors, list_loop) == place.ancestors.end()) {
+            state.Error(element.line, "'" + id + "' repeats in a <for> the scrollbar is outside of: which copy it scrolls is unclear");
+            continue;
+        }
+        const UIStyle    style = RenderValues(list_element.Style()->declarations, value_of, state.path).style;
+        const bool       vertical = scrollbar->axis == UIAxis::Y;
+        const std::string axis_name = vertical ? "y" : "x";
+        if (!(vertical ? style.ScrollsY() : style.ScrollsX())) {
+            state.Error(element.line, "'" + id + "' does not scroll along " + axis_name + ": overflow-" + axis_name +
+                                      " is neither scroll nor auto");
+            continue;
+        }
+        scrollbar->target_loop_depth = list_loop_depth;
+    }
 }
 
 static bool ReadTextFile(const std::string& path, std::string& text)
@@ -785,6 +878,7 @@ bool UI_Manager::LoadSource(const FontManager* font_manager, const std::string& 
         state.vars.push_back(std::move(var));
     }
     LoadElement(state, document->root, {});
+    if (state.errors.empty()) LinkScrollbars(state);
     if (!state.errors.empty()) {
         for (const std::string& error : state.errors) SDL_Log("UI_Manager::Load: %s", error.c_str());
         return false;
@@ -807,6 +901,7 @@ bool UI_Manager::LoadSource(const FontManager* font_manager, const std::string& 
         AddBinding({ .target = UIStyleBinding{ root_node }, .element = root_element });
     std::vector<UISlot> slots = BuildItems(root_element, root_node, no_instance, font_manager);
     nodes[root_node.value].slots = std::move(slots);
+    ResolveScrollbarTargets();
     return true;
 }
 
@@ -885,6 +980,9 @@ UINodeIndex UI_Manager::BuildNode(UIElementIndex element_index, UINodeIndex pare
     }
     else if (std::holds_alternative<UIBoxElement>(element.kind))
         node = Box(parent, values.style, values.material, values.quad);
+    else if (const UIScrollbarElement* scrollbar = std::get_if<UIScrollbarElement>(&element.kind))
+        node = Scrollbar(parent, values.style, scrollbar->axis, {}, values.material, values.quad, values.thumb_materials,
+                         values.thumb_quad);
     else {
         assert(false && "UI_Manager::BuildNode: element of unknown kind");
         return {};
@@ -943,6 +1041,7 @@ void UI_Manager::ResizeLoop(UILoopIndex loop, uint32_t count, const FontManager*
     if (count > loops[loop.value].instances.size()) {
         BuildInstances(loop, count, font_manager);
         RebuildChildren(loops[loop.value].parent);
+        ResolveScrollbarTargets();
     }
     UpdateParking(loop);
 }
@@ -1002,6 +1101,19 @@ void UI_Manager::AddBinding(UIBinding binding)
     else
         assert(false && "UI_Manager::AddBinding: the binding does not match its element");
     bindings.push_back(std::move(binding));
+}
+
+void UI_Manager::ResolveScrollbarTargets()
+{
+    for (UINode& entry : nodes) {
+        UIScrollbarData* scrollbar = std::get_if<UIScrollbarData>(&entry.kind);
+        if (!scrollbar || scrollbar->target || entry.element.value >= elements.size()) continue;
+        const UIScrollbarElement* element = std::get_if<UIScrollbarElement>(&elements[entry.element.value].kind);
+        if (!element) continue;
+        assert(element->target_loop_depth <= entry.instance.size() && "ResolveScrollbarTargets: the list sits in loops the scrollbar is outside of");
+        const UIVarKey list_instance(entry.instance.begin(), entry.instance.begin() + element->target_loop_depth);
+        scrollbar->target = FindNode(element->target, list_instance);
+    }
 }
 
 UIVarId UI_Manager::InternVar(const std::string& name)

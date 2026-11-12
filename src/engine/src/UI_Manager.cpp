@@ -175,6 +175,42 @@ static UITextComponent MakeTextComponent(const UITextData& text, float width, fl
     return UITextComponent{ text.wrapped_glyphs, text.font, width / line_height, height / line_height };
 }
 
+static constexpr float kNodeZStep = 0.00001f;
+
+static glm::mat4 NodeMatrix(const glm::mat4& local, float left, float top, float width, float height, float ndc_z,
+                            float screen_width, float screen_height)
+{
+    const glm::mat3 to_ndc(glm::vec3(2.0f / screen_width, 0.0f, 0.0f),
+                           glm::vec3(0.0f, 2.0f / screen_height, 0.0f),
+                           glm::vec3(0.0f, 0.0f, 2.0f / screen_height));
+    const glm::mat3 size(glm::vec3(width, 0.0f, 0.0f), glm::vec3(0.0f, height, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    glm::mat4 transform(to_ndc * glm::mat3(local) * size);
+    transform[3] = glm::vec4(((left + 0.5f * width) / screen_width) * 2.0f - 1.0f + local[3][0] * 2.0f / screen_width,
+                             1.0f - ((top + 0.5f * height) / screen_height) * 2.0f + local[3][1] * 2.0f / screen_height,
+                             ndc_z, 1.0f);
+    return transform;
+}
+
+static PositionProxy16 PositionsOf(const glm::mat4& transform)
+{
+    return PositionProxy16{ transform[0][0], transform[0][1], transform[0][2], transform[3][0],
+                            transform[1][0], transform[1][1], transform[1][2], transform[3][1],
+                            transform[2][0], transform[2][1], transform[2][2], transform[3][2],
+                            transform[0][3], transform[1][3], transform[2][3], transform[3][3] };
+}
+
+static UIStyle ScrollbarStyle(UIStyle style, UIAxis axis)
+{
+    constexpr float kThickness = 14.0f;
+    UISize& mode      = axis == UIAxis::Y ? style.width_mode : style.height_mode;
+    float&  thickness = axis == UIAxis::Y ? style.width : style.height;
+    if (mode == UISize::Auto) {
+        mode      = UISize::Points;
+        thickness = kThickness;
+    }
+    return style;
+}
+
 UIContentBox UINode::ContentBox() const
 {
     return UIContentBox{ layout_left + YGNodeLayoutGetPadding(yoga_node, YGEdgeLeft),
@@ -221,6 +257,7 @@ static const char* KindName(const UINodeKind& kind)
     if (std::holds_alternative<UIBoxData>(kind))   return "box";
     if (std::holds_alternative<UITextData>(kind))  return "text";
     if (std::holds_alternative<UIInputData>(kind)) return "input";
+    if (std::holds_alternative<UIScrollbarData>(kind)) return "scrollbar";
     assert(false && "KindName: node of unknown kind");
     return "?";
 }
@@ -385,6 +422,8 @@ void UI_Manager::SetNodeStyle(UINodeIndex node, const UIStyle& style)
         entry.style.overflow_x = UIOverflow::Visible;
         entry.style.overflow_y = UIOverflow::Visible;
     }
+    if (const UIScrollbarData* scrollbar = std::get_if<UIScrollbarData>(&entry.kind))
+        entry.style = ScrollbarStyle(entry.style, scrollbar->axis);
     ApplyStyle(entry.yoga_node, entry.style, entry.parked);
     emit_needed = true;
     // Рамка обрезки — компонент энтити контейнера и его потомков, а переноса энтити между
@@ -423,7 +462,7 @@ glm::vec2 UI_Manager::UpdateScrollView(UINodeIndex node)
     if (!view) view = &scroll_views.emplace_back(UIScrollView{ node });
 
     const UINode& entry = nodes[node.value];
-    // Yoga обнуляет раскладку поддерева с display: none, и запас скрытого узла стал бы нулём вместе с
+    // Yoga обнуляет раскладку поддерева с display: none, и предел скрытого узла стал бы нулём вместе с
     // позицией: после показа список стоял бы в начале.
     if (entry.shown) {
         float content_right = 0.0f, content_bottom = 0.0f;
@@ -613,6 +652,20 @@ UINodeIndex UI_Manager::Input(UINodeIndex parent, const UIStyle& style, const st
     return node;
 }
 
+UINodeIndex UI_Manager::Scrollbar(UINodeIndex parent, const UIStyle& style, UIAxis axis, UINodeIndex target,
+                                  const std::string& material, const std::string& quad,
+                                  const UIThumbMaterials& thumb_materials, const std::string& thumb_quad)
+{
+    const UINodeIndex node = MakeNode(ScrollbarStyle(style, axis));
+    UINode& entry = nodes[node.value];
+    entry.kind     = UIScrollbarData{ axis, target, thumb_materials, thumb_quad };
+    entry.material = material;
+    entry.quad     = quad;
+    entry.draws    = !material.empty();
+    AttachChild(parent, node);
+    return node;
+}
+
 void UI_Manager::Clear()
 {
     // Box и Text всегда вставляют узел в родителя, поэтому free корня освобождает всё дерево.
@@ -623,6 +676,7 @@ void UI_Manager::Clear()
     focused_node    = {};
     caret_node      = {};
     wheel_target    = {};
+    scrollbar_drag  = {};
     emit_needed     = true;
     recreate_needed = true;
     scroll_views.clear();
@@ -662,27 +716,19 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
                           UINodeIndex node, float parent_x, float parent_y, bool parent_shown, float screen_width, float screen_height,
                           const std::optional<UIClipArea>& clip, int& order, uint32_t& clip_count, bool create_entities)
 {
-    constexpr float kZStep = 0.00001f;
-
     UINode& entry = nodes[node.value];
     const float left   = parent_x + YGNodeLayoutGetLeft(entry.yoga_node) + entry.offset_x;
     const float top    = parent_y + YGNodeLayoutGetTop(entry.yoga_node)  + entry.offset_y;
     const float width  = YGNodeLayoutGetWidth(entry.yoga_node);
     const float height = YGNodeLayoutGetHeight(entry.yoga_node);
-    const float ndc_z  = 0.5f - safe_sint32_f(order++) * kZStep + entry.offset_z;
+    const float ndc_z  = 0.5f - safe_sint32_f(order++) * kNodeZStep + entry.offset_z;
+    UIScrollbarData* scrollbar = std::get_if<UIScrollbarData>(&entry.kind);
+    // Шаг z за полосой — бегунка: без пропуска он делил бы глубину со следующим узлом.
+    if (scrollbar) ++order;
 
-    const glm::mat3 to_ndc(glm::vec3(2.0f / screen_width, 0.0f, 0.0f),
-                           glm::vec3(0.0f, 2.0f / screen_height, 0.0f),
-                           glm::vec3(0.0f, 0.0f, 2.0f / screen_height));
-    const glm::mat3 size(glm::vec3(width, 0.0f, 0.0f), glm::vec3(0.0f, height, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    const glm::mat3 basis = to_ndc * glm::mat3(entry.local) * size;
-    const float ndc_x = ((left + 0.5f * width) / screen_width) * 2.0f - 1.0f + entry.local[3][0] * 2.0f / screen_width;
-    const float ndc_y = 1.0f - ((top + 0.5f * height) / screen_height) * 2.0f + entry.local[3][1] * 2.0f / screen_height;
-
-    glm::mat4 transform(basis);
-    transform[3] = glm::vec4(ndc_x, ndc_y, ndc_z, 1.0f);
-    entry.ndc_center_x  = ndc_x;
-    entry.ndc_center_y  = ndc_y;
+    const glm::mat4 transform = NodeMatrix(entry.local, left, top, width, height, ndc_z, screen_width, screen_height);
+    entry.ndc_center_x  = transform[3][0];
+    entry.ndc_center_y  = transform[3][1];
     entry.ndc_z         = ndc_z;
     entry.layout_left   = left;
     entry.layout_top    = top;
@@ -723,11 +769,11 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
     const bool renders = entry.HasRenderable();
     std::optional<UIClipComponent> drawn_clip;
     if (renders && clip) drawn_clip = UIClipComponent{ clip->index };
-    const PositionProxy16 positions{ transform[0][0], transform[0][1], transform[0][2], transform[3][0],
-                                     transform[1][0], transform[1][1], transform[1][2], transform[3][1],
-                                     transform[2][0], transform[2][1], transform[2][2], transform[3][2],
-                                     transform[0][3], transform[1][3], transform[2][3], transform[3][3] };
+    std::optional<UIClipComponent> thumb_clip;
+    if (clip) thumb_clip = UIClipComponent{ clip->index };
+    const PositionProxy16 positions = PositionsOf(transform);
     UIInputData* input = std::get_if<UIInputData>(&entry.kind);
+    const bool has_thumb = scrollbar && scrollbar->HasThumb();
 
     if (create_entities) {
         // GeneratedComponent: узлы пересоздаёт Emit, их копия в scene.sheaf дала бы дубли при загрузке.
@@ -755,6 +801,15 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
                                         { ctx->GetMaterialManager()->InternMaterial(input->caret_material) }, false),
                 PositionProxy16{}, ParentComponent{ entry.entity }, LocalMatrixProxy16{},
                 UIComponent{}, GeneratedComponent{}, TextureStateComponent{}, UITextComponent{ {}, input->text.font });
+        // Бегунок без ParentComponent: у полосы без материала нет Positions, и иерархия трансформов
+        // пропустила бы его.
+        if (has_thumb) {
+            scrollbar->thumb_entity = CreateNodeEntity(ctx, scene_name, thumb_clip, std::nullopt,
+                RenderableProxy::Single(ctx->GetModelManager()->InternModel(scrollbar->thumb_quad),
+                                        { ctx->GetMaterialManager()->InternMaterial(scrollbar->ThumbMaterial()) }, entry.shown),
+                PositionProxy16{}, UIComponent{}, GeneratedComponent{}, TextureStateComponent{});
+            created_entities.push_back(scrollbar->thumb_entity);
+        }
     }
     else if (entry.has_entity) {
         if (renders && object_manager->Has<Positions>(scene, entry.entity)) {
@@ -765,6 +820,7 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
         }
         WriteClip(object_manager, scene, entry.entity, drawn_clip, clip_rect);
         if (renders && input) WriteClip(object_manager, scene, input->caret_entity, drawn_clip, std::nullopt);
+        if (has_thumb) WriteClip(object_manager, scene, scrollbar->thumb_entity, thumb_clip, std::nullopt);
     }
 
     for (UINodeIndex child : entry.children)
@@ -809,4 +865,65 @@ void UI_Manager::Emit(EngineContext* ctx, float screen_width, float screen_heigh
     uint32_t clip_count = 0;
     EmitNode(ctx, object_manager, scene, scene_name, root, 0.0f, 0.0f, true, screen_width, screen_height, std::nullopt, order,
              clip_count, create_entities);
+    UpdateThumbs(ctx, object_manager, scene, scene_name);
+}
+
+// Список, стоящий в дереве после своей полосы, пересчитывает предел позже неё: бегунок, записанный при
+// обходе полосы, отставал бы на одну раскладку.
+void UI_Manager::UpdateThumbs(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name)
+{
+    for (const UINode& entry : nodes) {
+        const UIScrollbarData* scrollbar = std::get_if<UIScrollbarData>(&entry.kind);
+        if (!scrollbar || !scrollbar->HasThumb() || !entry.has_entity) continue;
+        if (!object_manager->Has<Positions>(scene, scrollbar->thumb_entity)) continue;
+        const bool drawn = entry.shown && entry.layout_width > 0.0f && entry.layout_height > 0.0f;
+        ctx->HideEntity(scene_name, scrollbar->thumb_entity, drawn);
+        if (!drawn) continue;
+
+        const bool vertical = scrollbar->axis == UIAxis::Y;
+        const UIContentBox track = entry.ContentBox();
+        const UIThumbPlace place = ThumbPlaceOf(entry, *scrollbar);
+        const float begin  = std::round(place.thumb_begin);
+        const float end    = std::round(place.thumb_begin + place.thumb_length);
+
+        const float left   = vertical ? track.left   : begin;
+        const float right  = vertical ? track.right  : end;
+        const float top    = vertical ? begin : track.top;
+        const float bottom = vertical ? end   : track.bottom;
+
+        glm::mat4 thumb(1.0f);
+        thumb[0][0] = (right - left) / entry.layout_width;
+        thumb[1][1] = (bottom - top) / entry.layout_height;
+        thumb[3][0] = (0.5f * (left + right) - entry.layout_left) / entry.layout_width - 0.5f;
+        thumb[3][1] = 0.5f - (0.5f * (top + bottom) - entry.layout_top) / entry.layout_height;
+        thumb[3][2] = -kNodeZStep * 0.5f * last_screen_height;
+        const glm::mat4 bar = NodeMatrix(entry.local, entry.layout_left, entry.layout_top, entry.layout_width,
+                                         entry.layout_height, entry.ndc_z, last_screen_width, last_screen_height);
+        WritePositions(object_manager, scene, scrollbar->thumb_entity, PositionsOf(bar * thumb));
+    }
+}
+
+UIThumbPlace UI_Manager::ThumbPlaceOf(const UINode& entry, const UIScrollbarData& scrollbar) const
+{
+    constexpr float kThumbMinLength = 12.0f;
+
+    const bool vertical = scrollbar.axis == UIAxis::Y;
+    const UIContentBox track = entry.ContentBox();
+    UIThumbPlace place;
+    place.axis         = scrollbar.axis;
+    place.track_begin  = vertical ? track.top : track.left;
+    place.track_length = std::max(vertical ? track.bottom - track.top : track.right - track.left, 0.0f);
+
+    float scroll = 0.0f;
+    if (const UIScrollView* view = scrollbar.target ? ScrollViewOf(scrollbar.target) : nullptr) {
+        const UIContentBox list = nodes[scrollbar.target.value].ContentBox();
+        place.page  = vertical ? list.bottom - list.top : list.right - list.left;
+        place.range = vertical ? view->range_y  : view->range_x;
+        scroll      = vertical ? view->scroll_y : view->scroll_x;
+    }
+    const float share  = place.range > 0.0f && place.page > 0.0f ? place.page / (place.page + place.range) : 1.0f;
+    place.thumb_length = std::min(std::max(place.track_length * share, kThumbMinLength), place.track_length);
+    place.thumb_begin  = place.track_begin;
+    if (place.range > 0.0f) place.thumb_begin += (place.track_length - place.thumb_length) * scroll / place.range;
+    return place;
 }

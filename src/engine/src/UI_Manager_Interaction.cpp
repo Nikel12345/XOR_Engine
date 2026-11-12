@@ -46,13 +46,33 @@ void UI_Manager::OnClick(const std::string& node_id, UIClickFunc fn)
     click_instructions[node_id] = std::move(fn);
 }
 
-void UI_Manager::PressAt(float window_x, float window_y)
+static float& AxisScroll(UIScrollView& view, UIAxis axis)
+{
+    return axis == UIAxis::Y ? view.scroll_y : view.scroll_x;
+}
+
+static float Along(glm::vec2 point, UIAxis axis)
+{
+    return axis == UIAxis::Y ? point.y : point.x;
+}
+
+static float PageDirection(const UIThumbPlace& place, float point)
+{
+    if (point < place.thumb_begin) return -1.0f;
+    if (point > place.thumb_begin + place.thumb_length) return 1.0f;
+    return 0.0f;
+}
+
+void UI_Manager::PressAt(float window_x, float window_y, bool shift)
 {
     if (!mouse_enabled) return;
-    press_on_ui  = IsOverUI(window_x, window_y);
-    pressed_node = ClickableNodeAt(window_x, window_y);
+    const UIHit hit = HitAt(window_x, window_y);
+    const bool on_scrollbar = hit.node && std::holds_alternative<UIScrollbarData>(nodes[hit.node.value].kind);
+    press_on_ui  = bool(hit.node);
+    pressed_node = on_scrollbar ? UINodeIndex{} : hit.clickable;
     SetFocus(pressed_node);
     if (focused_node) caret = CaretAt(window_x, window_y);
+    if (on_scrollbar) GrabScrollbar(hit.node, window_x, window_y, shift);
 }
 
 void UI_Manager::ReleaseAt(float window_x, float window_y)
@@ -65,8 +85,9 @@ void UI_Manager::ReleaseAt(float window_x, float window_y)
 
 void UI_Manager::CancelPress()
 {
-    press_on_ui  = false;
-    pressed_node = {};
+    press_on_ui    = false;
+    pressed_node   = {};
+    scrollbar_drag = {};
 }
 
 void UI_Manager::SetMouseEnabled(bool enabled)
@@ -173,7 +194,10 @@ void UI_Manager::TypeIntoFocused(const std::vector<UIInputEvent>& events)
 UINodeIndex UI_Manager::WheelTargetAt(const UIWheelInput& wheel) const
 {
     UINodeIndex target_x, target_y;
-    for (UINodeIndex node = HitAt(wheel.window_x, wheel.window_y).node; node; node = nodes[node.value].parent) {
+    UINodeIndex start = HitAt(wheel.window_x, wheel.window_y).node;
+    if (const UIScrollbarData* scrollbar = start ? std::get_if<UIScrollbarData>(&nodes[start.value].kind) : nullptr)
+        if (IsNodeShown(scrollbar->target)) start = scrollbar->target;
+    for (UINodeIndex node = start; node; node = nodes[node.value].parent) {
         const UIScrollView* view = ScrollViewOf(node);
         if (!view) continue;
         if (!target_x && wheel.x != 0.0f && view->range_x > 0.0f) target_x = node;
@@ -232,6 +256,120 @@ void UI_Manager::ScrollByWheel(const UIWheelInput& wheel)
     const uint64_t remaining = wheel_target_release > now ? wheel_target_release - now : 0;
     wheel_target_release = now + std::min<uint64_t>(remaining + safe_f_u32(std::round(turn * kTargetHoldMs)),
                                                     safe_f_u32(kTargetHoldMs));
+}
+
+UIScrollView* UI_Manager::DraggableView(UINodeIndex bar, UIThumbPlace& place)
+{
+    if (!IsNodeShown(bar)) return nullptr;
+    const UINode& entry = nodes[bar.value];
+    const UIScrollbarData* scrollbar = std::get_if<UIScrollbarData>(&entry.kind);
+    assert(scrollbar);
+    if (glm::determinant(glm::mat2(entry.local)) == 0.0f || !IsNodeShown(scrollbar->target)) return nullptr;
+    UIScrollView* view = ScrollViewOf(scrollbar->target);
+    place = ThumbPlaceOf(entry, *scrollbar);
+    return view && place.range > 0.0f && place.thumb_length < place.track_length ? view : nullptr;
+}
+
+glm::vec2 UI_Manager::LayoutPoint(UINodeIndex node, float window_x, float window_y) const
+{
+    const UINode& entry = nodes[node.value];
+    const glm::vec2 point = NodePoint(node, window_x, window_y);
+    return glm::vec2(entry.layout_left + 0.5f * entry.layout_width  + point.x,
+                     entry.layout_top  + 0.5f * entry.layout_height - point.y);
+}
+
+UINodeIndex UI_Manager::ThumbAt(float window_x, float window_y) const
+{
+    const UINodeIndex bar = HitAt(window_x, window_y).node;
+    const UIScrollbarData* scrollbar = bar ? std::get_if<UIScrollbarData>(&nodes[bar.value].kind) : nullptr;
+    if (!scrollbar) return {};
+    const UIThumbPlace place = ThumbPlaceOf(nodes[bar.value], *scrollbar);
+    if (place.thumb_length >= place.track_length) return {};
+
+    UIContentBox thumb = nodes[bar.value].ContentBox();
+    const float thumb_end = place.thumb_begin + place.thumb_length;
+    if (scrollbar->axis == UIAxis::Y) { thumb.top  = place.thumb_begin; thumb.bottom = thumb_end; }
+    else                              { thumb.left = place.thumb_begin; thumb.right  = thumb_end; }
+    const glm::vec2 point = LayoutPoint(bar, window_x, window_y);
+    return thumb.Contains(point.x, point.y) ? bar : UINodeIndex{};
+}
+
+void UI_Manager::GrabScrollbar(UINodeIndex bar, float window_x, float window_y, bool shift)
+{
+    constexpr uint64_t kPageRepeatDelayMs = 275;
+
+    UIThumbPlace place;
+    UIScrollView* view = DraggableView(bar, place);
+    if (!view) return;
+    const float point     = Along(LayoutPoint(bar, window_x, window_y), place.axis);
+    const float direction = PageDirection(place, point);
+    if (shift || direction == 0.0f) {
+        const float offset = shift ? 0.5f * place.thumb_length : point - place.thumb_begin;
+        scrollbar_drag = UIScrollbarDrag{ bar, UIThumbGrab{ offset } };
+        DragScrollbar(window_x, window_y);
+        return;
+    }
+    scrollbar_drag = UIScrollbarDrag{ bar, UIPageRepeat{ direction, SDL_GetTicks() + kPageRepeatDelayMs } };
+    SetScroll(*view, place, AxisScroll(*view, place.axis) + direction * place.page);
+}
+
+void UI_Manager::DragScrollbar(float window_x, float window_y)
+{
+    constexpr uint64_t kPageRepeatRateMs = 50;
+
+    if (!scrollbar_drag.bar) return;
+    UIThumbPlace place;
+    UIScrollView* view = DraggableView(scrollbar_drag.bar, place);
+    if (!view) { scrollbar_drag = {}; return; }
+    const float point = Along(LayoutPoint(scrollbar_drag.bar, window_x, window_y), place.axis);
+
+    if (const UIThumbGrab* grab = std::get_if<UIThumbGrab>(&scrollbar_drag.mode)) {
+        const float share = (point - grab->offset - place.track_begin) / (place.track_length - place.thumb_length);
+        SetScroll(*view, place, std::clamp(share, 0.0f, 1.0f) * place.range);
+    } else {
+        UIPageRepeat* repeat = std::get_if<UIPageRepeat>(&scrollbar_drag.mode);
+        assert(repeat);
+        const uint64_t now = SDL_GetTicks();
+        if (now < repeat->next_ms || PageDirection(place, point) != repeat->direction) return;
+        repeat->next_ms = now + kPageRepeatRateMs;
+        SetScroll(*view, place, AxisScroll(*view, place.axis) + repeat->direction * place.page);
+    }
+}
+
+void UI_Manager::SetScroll(UIScrollView& view, const UIThumbPlace& place, float scroll)
+{
+    float& current = AxisScroll(view, place.axis);
+    const float clamped = std::clamp(scroll, 0.0f, place.range);
+    if (clamped == current) return;
+    current     = clamped;
+    emit_needed = true;
+}
+
+const std::string& UIScrollbarData::ThumbMaterial() const
+{
+    if (thumb_state == UIThumbState::Grabbed && !thumb_materials.grabbed.empty()) return thumb_materials.grabbed;
+    if (thumb_state != UIThumbState::Idle && !thumb_materials.hovered.empty()) return thumb_materials.hovered;
+    return thumb_materials.idle;
+}
+
+void UI_Manager::UpdateScrollbars(EngineContext* ctx, float window_x, float window_y)
+{
+    DragScrollbar(window_x, window_y);
+
+    const UINodeIndex hovered = mouse_enabled ? ThumbAt(window_x, window_y) : UINodeIndex{};
+    const UINodeIndex grabbed = std::holds_alternative<UIThumbGrab>(scrollbar_drag.mode) ? scrollbar_drag.bar : UINodeIndex{};
+    for (size_t index = 0; index < nodes.size(); ++index) {
+        UIScrollbarData* scrollbar = std::get_if<UIScrollbarData>(&nodes[index].kind);
+        if (!scrollbar) continue;
+        const UINodeIndex bar{ safe_u32(index) };
+        const UIThumbState state = bar == grabbed ? UIThumbState::Grabbed
+                                 : bar == hovered ? UIThumbState::Hovered : UIThumbState::Idle;
+        if (state == scrollbar->thumb_state) continue;
+        const std::string& previous = scrollbar->ThumbMaterial();
+        scrollbar->thumb_state = state;
+        if (nodes[index].has_entity && scrollbar->HasThumb() && scrollbar->ThumbMaterial() != previous)
+            ctx->ChangeMaterial(scrollbar->thumb_entity, scrollbar->ThumbMaterial());
+    }
 }
 
 void UI_Manager::UpdateCaret(EngineContext* ctx)
@@ -324,7 +462,7 @@ void UI_Manager::FindHit(UINodeIndex node, UINodeIndex clickable_ancestor, float
     if (!IsNodeShown(node)) return;
     const UINode& entry = nodes[node.value];
     const bool takes_click = click_instructions.contains(entry.id) || std::holds_alternative<UIInputData>(entry.kind);
-    const bool visible     = entry.HasRenderable();
+    const bool visible     = entry.HasRenderable() || std::holds_alternative<UIScrollbarData>(entry.kind);
     const UINodeIndex nearest_clickable = takes_click ? node : clickable_ancestor;
 
     if (entry.ndc_z < hit.z && (((visible || takes_click) && NodeContains(node, window_x, window_y)) ||

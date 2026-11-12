@@ -80,7 +80,8 @@ void InputManager::DrainKeyEvents(std::vector<KeyEvent>& out)
 void InputManager::PushMouseButtonEvent(const SDL_MouseButtonEvent& event)
 {
     std::lock_guard<std::mutex> lock(mouse_button_mutex);
-    mouse_button_events.push_back({ event.button, event.down, event.x, event.y });
+    const bool shift = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+    mouse_button_events.push_back({ event.button, event.down, event.x, event.y, shift });
 }
 
 void InputManager::DrainMouseButtonEvents(std::vector<MouseButtonEvent>& out)

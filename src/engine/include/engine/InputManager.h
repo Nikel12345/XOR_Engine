@@ -24,6 +24,7 @@ public:
         bool    down;
         float   x;
         float   y;
+        bool    shift;
     };
 
     InputManager();

@@ -36,6 +36,7 @@ enum class UIAlign   : uint8_t { Start, Center, End, Stretch };
 enum class UISize    : uint8_t { Auto, Points, Percent, Grow };
 enum class UILimit   : uint8_t { None, Points, Percent };
 enum class UIOverflow : uint8_t { Visible, Hidden, Scroll, Auto };
+enum class UIAxis    : uint8_t { X, Y };
 
 struct UIEdges {
     float top = 0.0f, right = 0.0f, bottom = 0.0f, left = 0.0f;
@@ -133,6 +134,27 @@ struct UIScrollView {
     float       range_x = 0.0f, range_y = 0.0f;
 };
 
+struct UIThumbPlace {
+    UIAxis axis = UIAxis::Y;
+    float  track_begin = 0.0f, track_length = 0.0f;
+    float  thumb_begin = 0.0f, thumb_length = 0.0f;
+    float  page = 0.0f, range = 0.0f;
+};
+
+struct UIThumbGrab {
+    float offset = 0.0f;
+};
+
+struct UIPageRepeat {
+    float    direction = 0.0f;
+    uint64_t next_ms = 0;
+};
+
+struct UIScrollbarDrag {
+    UINodeIndex                             bar;
+    std::variant<UIThumbGrab, UIPageRepeat> mode;
+};
+
 struct UIHit {
     float       z = std::numeric_limits<float>::max();
     UINodeIndex node;
@@ -155,7 +177,27 @@ struct UIInputData {
     Entity      caret_entity = 0;
 };
 
-using UINodeKind = std::variant<UIBoxData, UITextData, UIInputData>;
+enum class UIThumbState : uint8_t { Idle, Hovered, Grabbed };
+
+struct UIThumbMaterials {
+    std::string idle;
+    std::string hovered;
+    std::string grabbed;
+};
+
+struct UIScrollbarData {
+    UIAxis           axis = UIAxis::Y;
+    UINodeIndex      target;
+    UIThumbMaterials thumb_materials;
+    std::string      thumb_quad;
+    UIThumbState     thumb_state = UIThumbState::Idle;
+    Entity           thumb_entity = 0;
+
+    bool HasThumb() const { return !thumb_materials.idle.empty() && !thumb_quad.empty(); }
+    const std::string& ThumbMaterial() const;
+};
+
+using UINodeKind = std::variant<UIBoxData, UITextData, UIInputData, UIScrollbarData>;
 
 struct UINode {
     YGNode*                  yoga_node = nullptr;
@@ -238,7 +280,14 @@ struct UITextElement  { UIElementStyle style; std::vector<UITemplatePart> text; 
 struct UIInputElement { UIElementStyle style; std::vector<UITemplatePart> text; };
 struct UILoopElement  { std::vector<UITemplatePart> count; std::vector<UIElementIndex> children; };
 
-using UIElementKind = std::variant<UIRootElement, UIBoxElement, UITextElement, UIInputElement, UILoopElement>;
+struct UIScrollbarElement {
+    UIElementStyle style;
+    std::string    target;
+    uint32_t       target_loop_depth = 0;
+    UIAxis         axis = UIAxis::Y;
+};
+
+using UIElementKind = std::variant<UIRootElement, UIBoxElement, UITextElement, UIInputElement, UILoopElement, UIScrollbarElement>;
 
 struct UIElement {
     uint32_t      line = 0;
@@ -250,6 +299,7 @@ struct UIElement {
         if (const UIBoxElement* box = std::get_if<UIBoxElement>(&kind))       return &box->style;
         if (const UITextElement* text = std::get_if<UITextElement>(&kind))    return &text->style;
         if (const UIInputElement* input = std::get_if<UIInputElement>(&kind)) return &input->style;
+        if (const UIScrollbarElement* scrollbar = std::get_if<UIScrollbarElement>(&kind)) return &scrollbar->style;
         return nullptr;
     }
     UIElementStyle* Style() { return const_cast<UIElementStyle*>(std::as_const(*this).Style()); }
@@ -323,6 +373,9 @@ public:
     UINodeIndex Input(UINodeIndex parent, const UIStyle& style, const std::string& utf8,
                       const std::string& material, const std::string& quad, FontId font, const FontManager* font_manager,
                       const std::string& caret_material, const std::string& caret_quad);
+    UINodeIndex Scrollbar(UINodeIndex parent, const UIStyle& style, UIAxis axis, UINodeIndex target,
+                          const std::string& material, const std::string& quad,
+                          const UIThumbMaterials& thumb_materials, const std::string& thumb_quad);
 
     bool Load(const FontManager* font_manager, const std::string& path);
     bool Save(const FontManager* font_manager);
@@ -373,13 +426,14 @@ public:
     void EditNodeMaterial(EngineContext* ctx, UINodeIndex node, const std::string& material);
 
     void OnClick(const std::string& node_id, UIClickFunc fn);
-    void PressAt(float window_x, float window_y);
+    void PressAt(float window_x, float window_y, bool shift);
     void ReleaseAt(float window_x, float window_y);
     void CancelPress();
     void ExecuteClicks();
     void SetMouseEnabled(bool enabled);
     bool WantCaptureMouse(float window_x, float window_y) const;
     void HandleInput(const std::vector<UIInputEvent>& events);
+    void UpdateScrollbars(EngineContext* ctx, float window_x, float window_y);
     void ClearFocus();
     bool WantCaptureKeyboard() const;
     void UpdateCaret(EngineContext* ctx);
@@ -402,6 +456,7 @@ private:
     void                ResizeLoop(UILoopIndex loop, uint32_t count, const FontManager* font_manager);
     void                UpdateParking(UILoopIndex loop);
     void                AddBinding(UIBinding binding);
+    void                ResolveScrollbarTargets();
 
     bool            LoadSource(const FontManager* font_manager, const std::string& path, const std::string& source);
     UIElementStyle* EditableStyle(UINodeIndex node);
@@ -428,13 +483,21 @@ private:
     glm::vec2           UpdateScrollView(UINodeIndex node);
     UINodeIndex         WheelTargetAt(const UIWheelInput& wheel) const;
     void                ScrollByWheel(const UIWheelInput& wheel);
+    UIThumbPlace        ThumbPlaceOf(const UINode& entry, const UIScrollbarData& scrollbar) const;
+    UIScrollView*       DraggableView(UINodeIndex bar, UIThumbPlace& place);
+    glm::vec2           LayoutPoint(UINodeIndex node, float window_x, float window_y) const;
+    UINodeIndex         ThumbAt(float window_x, float window_y) const;
+    void                GrabScrollbar(UINodeIndex bar, float window_x, float window_y, bool shift);
+    void                DragScrollbar(float window_x, float window_y);
+    void                SetScroll(UIScrollView& view, const UIThumbPlace& place, float scroll);
 
     void DeleteCreatedEntities(EngineContext* ctx, const SceneName& scene_name);
     void EmitNode(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name,
                   UINodeIndex node, float parent_x, float parent_y, bool parent_shown, float screen_width, float screen_height,
                   const std::optional<UIClipArea>& clip, int& order, uint32_t& clip_count, bool create_entities);
+    void UpdateThumbs(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name);
 
-    YGConfig*           yoga_config = nullptr;
+    YGConfig*          yoga_config = nullptr;
     std::vector<UINode> nodes;
     std::vector<Entity> created_entities;
     UINodeIndex         root;
@@ -471,4 +534,5 @@ private:
     glm::vec2                                    wheel_target_point{ 0.0f };
     uint64_t                                     wheel_target_release = 0;
     glm::vec2                                    wheel_average{ 0.0f };
+    UIScrollbarDrag                              scrollbar_drag;
 };

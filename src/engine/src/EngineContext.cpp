@@ -353,7 +353,7 @@ void EngineContext::ProcessUIClicks()
 			ui_manager->CancelPress();
 			ui_manager->ClearFocus();
 		}
-		else if (event.down) ui_manager->PressAt(event.x, event.y);
+		else if (event.down) ui_manager->PressAt(event.x, event.y, event.shift);
 		else ui_manager->ReleaseAt(event.x, event.y);
 	}
 }
@@ -365,6 +365,7 @@ void EngineContext::ProcessUIInput()
 	if (UI_ImGui::WantCaptureMouse())
 		std::erase_if(events, [](const UIInputEvent& event) { return std::holds_alternative<UIWheelInput>(event); });
 	ui_manager->HandleInput(events);
+	ui_manager->UpdateScrollbars(this, input_manager->MouseX(), input_manager->MouseY());
 	input_manager->SetTextInputWanted(ui_manager->WantCaptureKeyboard());
 }
 
