@@ -5,6 +5,15 @@ namespace {
     inline uint32_t MouseBit(uint8_t button) {
         return button ? (1u << (button - 1)) : 0u;
     }
+
+    UIWheelInput MakeWheelInput(const SDL_MouseWheelEvent& wheel, float direction) {
+        UIWheelInput input{ direction * wheel.x, direction * wheel.y, wheel.mouse_x, wheel.mouse_y };
+#if !defined(SDL_PLATFORM_APPLE)
+        // macOS сам переводит Shift+колесо в горизонтальное: второй обмен вернул бы его в вертикаль.
+        if (SDL_GetModState() & SDL_KMOD_SHIFT) input = UIWheelInput{ -input.y, 0.0f, input.window_x, input.window_y };
+#endif
+        return input;
+    }
 }
 
 InputManager::InputManager() = default;
@@ -22,7 +31,7 @@ void InputManager::HandleEvent(const SDL_Event& event)
             std::lock_guard<std::mutex> lock(key_mutex_);
             key_events_.push_back({ sc, true });
         }
-        PushUIInputEvent({ .kind = UIInputKind::Key, .scancode = sc });
+        PushUIInputEvent(UIKeyInput{ sc });
         break;
     }
     case SDL_EVENT_KEY_UP:
@@ -35,7 +44,7 @@ void InputManager::HandleEvent(const SDL_Event& event)
         break;
     }
     case SDL_EVENT_TEXT_INPUT:
-        PushUIInputEvent({ .kind = UIInputKind::Text, .text = event.text.text });
+        PushUIInputEvent(UITextInput{ event.text.text });
         break;
     case SDL_EVENT_MOUSE_MOTION:
         mouse_x_.store(event.motion.x, std::memory_order_relaxed);
@@ -53,6 +62,7 @@ void InputManager::HandleEvent(const SDL_Event& event)
     {
         float dir = (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) ? -1.0f : 1.0f;
         wheel_accum_.fetch_add(dir * event.wheel.y, std::memory_order_relaxed);
+        PushUIInputEvent(MakeWheelInput(event.wheel, dir));
         break;
     }
     default:

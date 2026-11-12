@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <variant>
 #include "Aliases.h"
 
 using UIClickFunc = std::function<void(const UIVarKey& instance)>;
@@ -12,10 +13,17 @@ struct UIClick {
     UIVarKey    instance;
 };
 
-enum class UIInputKind : uint8_t { Text, Key };
-
-struct UIInputEvent {
-    UIInputKind  kind = UIInputKind::Key;
-    SDL_Scancode scancode = SDL_SCANCODE_UNKNOWN;
-    std::string  text;
+struct UITextInput {
+    std::string text;
 };
+
+struct UIKeyInput {
+    SDL_Scancode scancode = SDL_SCANCODE_UNKNOWN;
+};
+
+struct UIWheelInput {
+    float x = 0.0f, y = 0.0f;
+    float window_x = 0.0f, window_y = 0.0f;
+};
+
+using UIInputEvent = std::variant<UITextInput, UIKeyInput, UIWheelInput>;

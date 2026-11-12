@@ -362,6 +362,8 @@ void EngineContext::ProcessUIInput()
 {
 	std::vector<UIInputEvent> events;
 	input_manager->DrainUIInputEvents(events);
+	if (UI_ImGui::WantCaptureMouse())
+		std::erase_if(events, [](const UIInputEvent& event) { return std::holds_alternative<UIWheelInput>(event); });
 	ui_manager->HandleInput(events);
 	input_manager->SetTextInputWanted(ui_manager->WantCaptureKeyboard());
 }

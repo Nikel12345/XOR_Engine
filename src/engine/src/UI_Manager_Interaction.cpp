@@ -4,7 +4,6 @@
 #include "ObjectManager.h"
 #include "BaseComponents.h"
 #include <algorithm>
-#include <limits>
 
 static bool IsContinuationByte(char byte)
 {
@@ -134,17 +133,30 @@ bool UI_Manager::WantCaptureKeyboard() const
 
 void UI_Manager::HandleInput(const std::vector<UIInputEvent>& events)
 {
+    UIWheelInput wheel;
+    for (const UIInputEvent& event : events)
+        if (const UIWheelInput* turn = std::get_if<UIWheelInput>(&event))
+            wheel = UIWheelInput{ wheel.x + turn->x, wheel.y + turn->y, turn->window_x, turn->window_y };
+    ScrollByWheel(wheel);
+    TypeIntoFocused(events);
+}
+
+void UI_Manager::TypeIntoFocused(const std::vector<UIInputEvent>& events)
+{
     if (focused_node && !IsNodeShown(focused_node)) ClearFocus();
     if (!focused_node) return;
 
     for (const UIInputEvent& event : events) {
+        const UITextInput* typed = std::get_if<UITextInput>(&event);
+        const UIKeyInput*  key   = std::get_if<UIKeyInput>(&event);
+        if (!typed && !key) continue;
         caret_blink_start = SDL_GetTicks();
         std::string value = GetVar(focused_var, focused_key);
         caret = std::min(caret, CharacterCount(value));
-        if (event.kind == UIInputKind::Text) {
-            value.insert(ByteOffset(value, caret), event.text);
-            caret += CharacterCount(event.text);
-        } else switch (event.scancode) {
+        if (typed) {
+            value.insert(ByteOffset(value, caret), typed->text);
+            caret += CharacterCount(typed->text);
+        } else switch (key->scancode) {
             case SDL_SCANCODE_RETURN:    ClearFocus(); return;
             case SDL_SCANCODE_BACKSPACE: if (caret > 0) EraseCharacter(value, --caret); break;
             case SDL_SCANCODE_DELETE:    EraseCharacter(value, caret); break;
@@ -156,6 +168,70 @@ void UI_Manager::HandleInput(const std::vector<UIInputEvent>& events)
         }
         SetVar(focused_var, focused_key, value);
     }
+}
+
+UINodeIndex UI_Manager::WheelTargetAt(const UIWheelInput& wheel) const
+{
+    UINodeIndex target_x, target_y;
+    for (UINodeIndex node = HitAt(wheel.window_x, wheel.window_y).node; node; node = nodes[node.value].parent) {
+        const UIScrollView* view = ScrollViewOf(node);
+        if (!view) continue;
+        if (!target_x && wheel.x != 0.0f && view->range_x > 0.0f) target_x = node;
+        if (!target_y && wheel.y != 0.0f && view->range_y > 0.0f) target_y = node;
+    }
+    if (!target_x || !target_y) return target_x ? target_x : target_y;
+    return wheel_average.x > wheel_average.y ? target_x : target_y;
+}
+
+void UI_Manager::ScrollByWheel(const UIWheelInput& wheel)
+{
+    constexpr float kAverageSamples     = 30.0f;
+    constexpr float kTargetHoldMs       = 700.0f;
+    constexpr float kTargetHoldDistance = 6.0f;
+    constexpr float kStepX              = 26.0f;
+    constexpr float kStepY              = 64.0f;
+    constexpr float kStepShareLimit     = 0.67f;
+
+    wheel_average += (glm::abs(glm::vec2(wheel.x, wheel.y)) - wheel_average) / kAverageSamples;
+    if (!mouse_enabled || (wheel.x == 0.0f && wheel.y == 0.0f)) return;
+
+    const uint64_t  now   = SDL_GetTicks();
+    const glm::vec2 point(wheel.window_x, wheel.window_y);
+    if (wheel_target && (now >= wheel_target_release || glm::distance(point, wheel_target_point) > kTargetHoldDistance ||
+                         !IsNodeShown(wheel_target) || !ScrollViewOf(wheel_target)))
+        wheel_target = {};
+    const UINodeIndex target = wheel_target ? wheel_target : WheelTargetAt(wheel);
+    UIScrollView* view = target ? ScrollViewOf(target) : nullptr;
+    if (!view) return;
+
+    bool scroll_x = wheel.x != 0.0f && view->range_x > 0.0f;
+    bool scroll_y = wheel.y != 0.0f && view->range_y > 0.0f;
+    if (scroll_x && scroll_y) {
+        if (wheel_average.x > wheel_average.y) scroll_y = false;
+        else                                   scroll_x = false;
+    }
+    if (!scroll_x && !scroll_y) return;
+
+    const UIContentBox content = nodes[target.value].ContentBox();
+    if (scroll_x) {
+        const float step = std::trunc(std::min(kStepX, kStepShareLimit * (content.right - content.left)));
+        view->scroll_x = std::clamp(view->scroll_x + wheel.x * step, 0.0f, view->range_x);
+    }
+    if (scroll_y) {
+        const float step = std::trunc(std::min(kStepY, kStepShareLimit * (content.bottom - content.top)));
+        view->scroll_y = std::clamp(view->scroll_y - wheel.y * step, 0.0f, view->range_y);
+    }
+    emit_needed = true;
+
+    if (target != wheel_target) {
+        wheel_target         = target;
+        wheel_target_point   = point;
+        wheel_target_release = now;
+    }
+    const float    turn      = std::min(std::abs(scroll_x ? wheel.x : wheel.y), 1.0f);
+    const uint64_t remaining = wheel_target_release > now ? wheel_target_release - now : 0;
+    wheel_target_release = now + std::min<uint64_t>(remaining + safe_f_u32(std::round(turn * kTargetHoldMs)),
+                                                    safe_f_u32(kTargetHoldMs));
 }
 
 void UI_Manager::UpdateCaret(EngineContext* ctx)
@@ -226,38 +302,34 @@ void UI_Manager::ExecuteClicks()
     }
 }
 
+UIHit UI_Manager::HitAt(float window_x, float window_y) const
+{
+    UIHit hit;
+    if (root) FindHit(root, {}, window_x, window_y, hit);
+    return hit;
+}
+
 UINodeIndex UI_Manager::ClickableNodeAt(float window_x, float window_y) const
 {
-    if (!root) return {};
-    float top_z     = std::numeric_limits<float>::max();
-    UINodeIndex clickable;
-    FindClickableNode(root, {}, window_x, window_y, top_z, clickable);
-    return clickable;
+    return HitAt(window_x, window_y).clickable;
 }
 
 bool UI_Manager::IsOverUI(float window_x, float window_y) const
 {
-    if (!root) return false;
-    constexpr float kNoHit = std::numeric_limits<float>::max();
-    float top_z     = kNoHit;
-    UINodeIndex clickable;
-    FindClickableNode(root, {}, window_x, window_y, top_z, clickable);
-    return top_z != kNoHit;
+    return bool(HitAt(window_x, window_y).node);
 }
 
-void UI_Manager::FindClickableNode(UINodeIndex node, UINodeIndex clickable_ancestor, float window_x, float window_y,
-                                   float& top_z, UINodeIndex& clickable) const
+void UI_Manager::FindHit(UINodeIndex node, UINodeIndex clickable_ancestor, float window_x, float window_y, UIHit& hit) const
 {
     if (!IsNodeShown(node)) return;
     const UINode& entry = nodes[node.value];
-    const bool takes_click       = click_instructions.contains(entry.id) || std::holds_alternative<UIInputData>(entry.kind);
-    const bool visible           = entry.HasRenderable();
+    const bool takes_click = click_instructions.contains(entry.id) || std::holds_alternative<UIInputData>(entry.kind);
+    const bool visible     = entry.HasRenderable();
     const UINodeIndex nearest_clickable = takes_click ? node : clickable_ancestor;
 
-    if ((visible || takes_click) && entry.ndc_z < top_z && NodeContains(node, window_x, window_y)) {
-        top_z     = entry.ndc_z;
-        clickable = nearest_clickable;
-    }
+    if (entry.ndc_z < hit.z && (((visible || takes_click) && NodeContains(node, window_x, window_y)) ||
+                                (entry.Scrolls() && ContentContains(node, window_x, window_y))))
+        hit = UIHit{ entry.ndc_z, node, nearest_clickable };
     for (UINodeIndex child : entry.children)
-        FindClickableNode(child, nearest_clickable, window_x, window_y, top_z, clickable);
+        FindHit(child, nearest_clickable, window_x, window_y, hit);
 }

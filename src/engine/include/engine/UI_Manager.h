@@ -2,6 +2,7 @@
 #include <charconv>
 #include <concepts>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -79,6 +80,9 @@ struct UIStyle {
     }
 
     bool Clips() const { return overflow_x != UIOverflow::Visible || overflow_y != UIOverflow::Visible; }
+    bool ScrollsX() const { return overflow_x == UIOverflow::Scroll || overflow_x == UIOverflow::Auto; }
+    bool ScrollsY() const { return overflow_y == UIOverflow::Scroll || overflow_y == UIOverflow::Auto; }
+    bool Scrolls() const { return ScrollsX() || ScrollsY(); }
 };
 
 enum class UIProperty : uint8_t {
@@ -115,6 +119,24 @@ using UISlot = std::variant<UINodeIndex, UILoopIndex>;
 struct UIClipArea {
     uint32_t index = 0;
     float    left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+};
+
+struct UIContentBox {
+    float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+
+    bool Contains(float x, float y) const { return x >= left && x <= right && y >= top && y <= bottom; }
+};
+
+struct UIScrollView {
+    UINodeIndex node;
+    float       scroll_x = 0.0f, scroll_y = 0.0f;
+    float       range_x = 0.0f, range_y = 0.0f;
+};
+
+struct UIHit {
+    float       z = std::numeric_limits<float>::max();
+    UINodeIndex node;
+    UINodeIndex clickable;
 };
 
 struct UIBoxData {};
@@ -170,6 +192,8 @@ struct UINode {
 
     bool HasRenderable() const { return draws && !quad.empty(); }
     bool ClipsChildren() const { return std::holds_alternative<UIBoxData>(kind) && style.Clips(); }
+    bool Scrolls() const { return std::holds_alternative<UIBoxData>(kind) && style.Scrolls(); }
+    UIContentBox ContentBox() const;
 };
 
 struct UILoopIndexReference {
@@ -385,6 +409,10 @@ private:
     std::string     SourceWithEdits() const;
 
     glm::vec2 NodePoint(UINodeIndex node, float window_x, float window_y) const;
+    bool InsideClippers(UINodeIndex node, float window_x, float window_y) const;
+    bool ContentContains(UINodeIndex node, float window_x, float window_y) const;
+    bool IsInSubtree(UINodeIndex node, UINodeIndex ancestor) const;
+    UIHit HitAt(float window_x, float window_y) const;
     UINodeIndex ClickableNodeAt(float window_x, float window_y) const;
     bool IsOverUI(float window_x, float window_y) const;
     bool IsInputNode(UINodeIndex node) const;
@@ -392,8 +420,14 @@ private:
     size_t InputPrefixLength(UINodeIndex node) const;
     size_t CaretAt(float window_x, float window_y) const;
     void SetFocus(UINodeIndex node);
-    void FindClickableNode(UINodeIndex node, UINodeIndex clickable_ancestor, float window_x, float window_y,
-                           float& top_z, UINodeIndex& clickable) const;
+    void FindHit(UINodeIndex node, UINodeIndex clickable_ancestor, float window_x, float window_y, UIHit& hit) const;
+    void TypeIntoFocused(const std::vector<UIInputEvent>& events);
+
+    UIScrollView*       ScrollViewOf(UINodeIndex node);
+    const UIScrollView* ScrollViewOf(UINodeIndex node) const;
+    glm::vec2           UpdateScrollView(UINodeIndex node);
+    UINodeIndex         WheelTargetAt(const UIWheelInput& wheel) const;
+    void                ScrollByWheel(const UIWheelInput& wheel);
 
     void DeleteCreatedEntities(EngineContext* ctx, const SceneName& scene_name);
     void EmitNode(EngineContext* ctx, ObjectManager* object_manager, SceneData* scene, const SceneName& scene_name,
@@ -431,4 +465,10 @@ private:
     size_t                                       caret = 0;
     UINodeIndex                                  caret_node;
     uint64_t                                     caret_blink_start = 0;
+
+    std::vector<UIScrollView>                    scroll_views;
+    UINodeIndex                                  wheel_target;
+    glm::vec2                                    wheel_target_point{ 0.0f };
+    uint64_t                                     wheel_target_release = 0;
+    glm::vec2                                    wheel_average{ 0.0f };
 };

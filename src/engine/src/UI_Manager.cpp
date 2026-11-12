@@ -175,6 +175,14 @@ static UITextComponent MakeTextComponent(const UITextData& text, float width, fl
     return UITextComponent{ text.wrapped_glyphs, text.font, width / line_height, height / line_height };
 }
 
+UIContentBox UINode::ContentBox() const
+{
+    return UIContentBox{ layout_left + YGNodeLayoutGetPadding(yoga_node, YGEdgeLeft),
+                         layout_top  + YGNodeLayoutGetPadding(yoga_node, YGEdgeTop),
+                         layout_left + layout_width  - YGNodeLayoutGetPadding(yoga_node, YGEdgeRight),
+                         layout_top  + layout_height - YGNodeLayoutGetPadding(yoga_node, YGEdgeBottom) };
+}
+
 static UIClipRectComponent MakeClipRect(const UIClipArea& area, float screen_width, float screen_height)
 {
     return UIClipRectComponent{ area.index,
@@ -286,23 +294,41 @@ glm::vec2 UI_Manager::NodePoint(UINodeIndex node, float window_x, float window_y
     return glm::inverse(glm::mat2(entry.local)) * glm::vec2(window_x - center_x, center_y - window_y);
 }
 
+bool UI_Manager::InsideClippers(UINodeIndex node, float window_x, float window_y) const
+{
+    for (UINodeIndex ancestor = nodes[node.value].parent; ancestor; ancestor = nodes[ancestor.value].parent) {
+        const UINode& clipper = nodes[ancestor.value];
+        if (!clipper.ClipsChildren()) continue;
+        const UIContentBox content = clipper.ContentBox();
+        if (clipper.style.overflow_x != UIOverflow::Visible && (window_x < content.left || window_x > content.right))
+            return false;
+        if (clipper.style.overflow_y != UIOverflow::Visible && (window_y < content.top || window_y > content.bottom))
+            return false;
+    }
+    return true;
+}
+
 bool UI_Manager::NodeContains(UINodeIndex node, float window_x, float window_y) const
 {
     if (!IsNodeShown(node)) return false;
     const UINode& entry = nodes[node.value];
     if (glm::determinant(glm::mat2(entry.local)) == 0.0f) return false;
-
-    for (UINodeIndex ancestor = entry.parent; ancestor; ancestor = nodes[ancestor.value].parent) {
-        const UINode& clipper = nodes[ancestor.value];
-        if (!clipper.ClipsChildren()) continue;
-        if (clipper.style.overflow_x != UIOverflow::Visible &&
-            (window_x < clipper.layout_left || window_x > clipper.layout_left + clipper.layout_width)) return false;
-        if (clipper.style.overflow_y != UIOverflow::Visible &&
-            (window_y < clipper.layout_top || window_y > clipper.layout_top + clipper.layout_height)) return false;
-    }
+    if (!InsideClippers(node, window_x, window_y)) return false;
 
     const glm::vec2 point = NodePoint(node, window_x, window_y);
     return std::abs(point.x) <= 0.5f * entry.layout_width && std::abs(point.y) <= 0.5f * entry.layout_height;
+}
+
+bool UI_Manager::ContentContains(UINodeIndex node, float window_x, float window_y) const
+{
+    return IsNodeShown(node) && InsideClippers(node, window_x, window_y) && nodes[node.value].ContentBox().Contains(window_x, window_y);
+}
+
+bool UI_Manager::IsInSubtree(UINodeIndex node, UINodeIndex ancestor) const
+{
+    for (; node; node = nodes[node.value].parent)
+        if (node == ancestor) return true;
+    return false;
 }
 
 void UI_Manager::NudgeNode(UINodeIndex node, float delta_x, float delta_y, float delta_z)
@@ -364,6 +390,8 @@ void UI_Manager::SetNodeStyle(UINodeIndex node, const UIStyle& style)
     // Рамка обрезки — компонент энтити контейнера и его потомков, а переноса энтити между
     // архетипами нет: компонент появляется и пропадает только с пересозданием.
     if (entry.ClipsChildren() != clipped_children) recreate_needed = true;
+    if (!entry.Scrolls())
+        std::erase_if(scroll_views, [node](const UIScrollView& view) { return view.node == node; });
 }
 
 void UI_Manager::SetNodeParked(UINodeIndex node, bool parked)
@@ -373,6 +401,50 @@ void UI_Manager::SetNodeParked(UINodeIndex node, bool parked)
     entry.parked = parked;
     ApplyStyle(entry.yoga_node, entry.style, parked);
     emit_needed = true;
+    if (parked)
+        std::erase_if(scroll_views, [this, node](const UIScrollView& view) { return IsInSubtree(view.node, node); });
+}
+
+UIScrollView* UI_Manager::ScrollViewOf(UINodeIndex node)
+{
+    return const_cast<UIScrollView*>(std::as_const(*this).ScrollViewOf(node));
+}
+
+const UIScrollView* UI_Manager::ScrollViewOf(UINodeIndex node) const
+{
+    for (const UIScrollView& view : scroll_views)
+        if (view.node == node) return &view;
+    return nullptr;
+}
+
+glm::vec2 UI_Manager::UpdateScrollView(UINodeIndex node)
+{
+    UIScrollView* view = ScrollViewOf(node);
+    if (!view) view = &scroll_views.emplace_back(UIScrollView{ node });
+
+    const UINode& entry = nodes[node.value];
+    // Yoga обнуляет раскладку поддерева с display: none, и запас скрытого узла стал бы нулём вместе с
+    // позицией: после показа список стоял бы в начале.
+    if (entry.shown) {
+        float content_right = 0.0f, content_bottom = 0.0f;
+        for (UINodeIndex child : entry.children) {
+            const YGNodeConstRef yoga_child = nodes[child.value].yoga_node;
+            if (YGNodeStyleGetDisplay(yoga_child) == YGDisplayNone) continue;
+            content_right  = std::max(content_right,  YGNodeLayoutGetLeft(yoga_child) + YGNodeLayoutGetWidth(yoga_child) +
+                                                      YGNodeLayoutGetMargin(yoga_child, YGEdgeRight));
+            content_bottom = std::max(content_bottom, YGNodeLayoutGetTop(yoga_child) + YGNodeLayoutGetHeight(yoga_child) +
+                                                      YGNodeLayoutGetMargin(yoga_child, YGEdgeBottom));
+        }
+        const float visible_right  = entry.layout_width  - YGNodeLayoutGetPadding(entry.yoga_node, YGEdgeRight);
+        const float visible_bottom = entry.layout_height - YGNodeLayoutGetPadding(entry.yoga_node, YGEdgeBottom);
+        view->range_x  = entry.style.ScrollsX() ? std::max(content_right  - visible_right,  0.0f) : 0.0f;
+        view->range_y  = entry.style.ScrollsY() ? std::max(content_bottom - visible_bottom, 0.0f) : 0.0f;
+        view->scroll_x = std::clamp(view->scroll_x, 0.0f, view->range_x);
+        view->scroll_y = std::clamp(view->scroll_y, 0.0f, view->range_y);
+    }
+    // Yoga кладёт узлы на целые пиксели, а колесо тачпада даёт дробный сдвиг: текст между пикселями
+    // размылся бы.
+    return glm::vec2(std::round(view->scroll_x), std::round(view->scroll_y));
 }
 
 void UI_Manager::RebuildChildren(UINodeIndex parent)
@@ -550,8 +622,10 @@ void UI_Manager::Clear()
     pressed_node    = {};
     focused_node    = {};
     caret_node      = {};
+    wheel_target    = {};
     emit_needed     = true;
     recreate_needed = true;
+    scroll_views.clear();
 
     elements.clear();
     unsaved_edits  = 0;
@@ -630,19 +704,21 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
     std::optional<UIClipArea>          children_clip = clip;
     std::optional<UIClipRectComponent> clip_rect;
     if (entry.ClipsChildren()) {
+        const UIContentBox content = entry.ContentBox();
         UIClipArea area = clip.value_or(UIClipArea{ 0, 0.0f, 0.0f, screen_width, screen_height });
         area.index = clip_count++;
         if (entry.style.overflow_x != UIOverflow::Visible) {
-            area.left  = std::max(area.left,  left);
-            area.right = std::min(area.right, left + width);
+            area.left  = std::max(area.left,  content.left);
+            area.right = std::min(area.right, content.right);
         }
         if (entry.style.overflow_y != UIOverflow::Visible) {
-            area.top    = std::max(area.top,    top);
-            area.bottom = std::min(area.bottom, top + height);
+            area.top    = std::max(area.top,    content.top);
+            area.bottom = std::min(area.bottom, content.bottom);
         }
         children_clip = area;
         clip_rect     = MakeClipRect(area, screen_width, screen_height);
     }
+    const glm::vec2 scroll = entry.Scrolls() ? UpdateScrollView(node) : glm::vec2(0.0f);
 
     const bool renders = entry.HasRenderable();
     std::optional<UIClipComponent> drawn_clip;
@@ -692,8 +768,8 @@ void UI_Manager::EmitNode(EngineContext* ctx, ObjectManager* object_manager, Sce
     }
 
     for (UINodeIndex child : entry.children)
-        EmitNode(ctx, object_manager, scene, scene_name, child, left, top, entry.shown, screen_width, screen_height,
-                 children_clip, order, clip_count, create_entities);
+        EmitNode(ctx, object_manager, scene, scene_name, child, left - scroll.x, top - scroll.y, entry.shown, screen_width,
+                 screen_height, children_clip, order, clip_count, create_entities);
 }
 
 void UI_Manager::Emit(EngineContext* ctx, float screen_width, float screen_height)
